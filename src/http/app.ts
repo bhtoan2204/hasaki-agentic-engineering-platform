@@ -26,12 +26,6 @@ import { artifactResponseHeaders } from "./artifactResponse.ts";
 import { config } from "../config.ts";
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
-const publicDir = join(import.meta.dirname, "..", "..", "public");
-const CLASSIC: Record<string, string> = {
-  "/classic": "index.html",
-  "/classic/": "index.html",
-  "/app.js": "app.js",
-};
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -51,7 +45,6 @@ function serveFile(res: ServerResponse, file: string, cache = "no-cache") {
 }
 
 function serveStatic(url: URL, res: ServerResponse) {
-  if (CLASSIC[url.pathname]) return (serveFile(res, join(publicDir, CLASSIC[url.pathname])), true);
   if (url.pathname.startsWith("/api/")) return false;
   const rel = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, "");
   const file = join(webDist, rel);

@@ -51,11 +51,11 @@ npm run admin:bootstrap -- --username alice --claim-legacy
 npm start                             # runs ensure-bwrap.sh, builds UI (vite build), runs migrations + seeds, then http://localhost:4545
 ```
 
-The login screens at `/` and `/classic` show CLI setup instructions when no active admin exists.
+The login screen at `/` shows CLI setup instructions when no active admin exists.
 Bootstrap leaves an existing account’s password and role unchanged. Creation and legacy claiming commit together.
 
 There is no public signup and no bootstrap HTTP route. `--claim-legacy` assigns existing ownerless private rows
-(work items, runs, inbox, legacy tasks) to that admin in one transaction. Seeded skills, rules and workflow
+(work items, runs, inbox) to that admin in one transaction. Seeded skills, rules and workflow
 templates stay shared (`owner_id` NULL). Unassigned private rows stay invisible until they are claimed.
 
 ## Access
@@ -110,13 +110,11 @@ The React UI supports Vietnamese (`vi`, default) and English (`en`). The selecto
 on the run (`vi` or `en`). It defaults to the UI language and can be overridden in the start form. Omitted API
 values default to `vi`; any other value is rejected. Retries, resume, repair and verification read that column.
 Runs created before the column existed have `output_locale` NULL: the UI shows “not recorded” and does not
-rewrite saved text; new generation for those runs falls back to Vietnamese. `/classic` uses the same
-dictionary. Historical translation of stored agent output is not in this version.
+rewrite saved text; new generation for those runs falls back to Vietnamese. Historical translation of stored agent output is not in this version.
 
 ## Agents (Claude Code, Cursor, OpenAI Codex, Google Antigravity, and GitHub Copilot)
 
-A run stores default `agent_provider`: `claude` (default), `cursor`, `codex`, `antigravity` or `copilot`. It is chosen on the start form in the React app and
-`/classic`, and on `POST /api/runs` as `agent_provider`. Omitted means the platform default (`agent.defaultProvider`, or `claude`). Retries,
+A run stores default `agent_provider`: `claude` (default), `cursor`, `codex`, `antigravity` or `copilot`. It is chosen on the start form in the React app and on `POST /api/runs` as `agent_provider`. Omitted means the platform default (`agent.defaultProvider`, or `claude`). Retries,
 resume, repair, and auxiliary AI calls (repository ranking, test-failure explanation, report reasoning) default to that provider.
 Claude model ids are never sent to Cursor, Codex, Antigravity or Copilot.
 
@@ -284,8 +282,6 @@ Platform tools reach Copilot through a per-attempt stdio MCP bridge. PreToolUse 
 | **Insights & Quality**                 | Execution metrics, health, usage, quality benchmark comparison (P1/P2 evaluation suites), autonomy insights, and continuous learning review.                                                                                                                                                                                                                                                                                                 |
 | **Interactive Chat**                   | Real-time multi-turn conversational agent with SSE streaming, tool execution, operations verification, and task continuation.                                                                                                                                                                                                                                                                                                                |
 
-The previous vanilla UI is still served at `/classic`.
-
 Node ≥ 22.18 (runs `.ts` directly), the selected agent CLI logged in, Git, and personal Bitbucket, GitHub, or GitLab credentials saved in Integrations.
 
 ## Telegram notifications and interactive workflows (optional)
@@ -375,7 +371,7 @@ results. See [docs/integrations/production-investigation.md](docs/integrations/p
 | `GET/POST /api/chat/conversations`, `GET /api/chat/conversations/:id/stream`, `POST /api/chat/conversations/:id/messages` | Real-time interactive agent chat & streaming SSE                                        |
 | `POST /api/code-intelligence/search`                                                                                      | Symbol search, definitions, references, and dependencies                                |
 | `GET /api/runs/:id/changes`, `POST /api/runs/:id/pr/sync`                                                                 | Workspace diffs, PR preview and PR state synchronization                                |
-| `/api/tasks*`, `/api/work/*`                                                                                              | Legacy endpoints, kept compatible (`POST /api/tasks?workflow=<key>` imports and starts) |
+| `/api/work/*`                                                                                                             | Hasaki Work login, inbox, task pick                                                     |
 
 ### Connect Hasaki Work using Google Chrome (local worker)
 

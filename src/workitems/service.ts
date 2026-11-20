@@ -26,10 +26,7 @@ export const workItems = {
       listRuns({ workItemId: id }),
       workItemRepository.pullRequests(id),
     ]);
-    const legacy = wi.legacy_task_code
-      ? await workItemRepository.legacyHistory(wi.legacy_task_code)
-      : null;
-    return { ...wi, runs, pull_requests: prs, legacy };
+    return { ...wi, runs, pull_requests: prs };
   },
 
   /** Manual engineering request. Code REQ-<id> doubles as the branch name. */

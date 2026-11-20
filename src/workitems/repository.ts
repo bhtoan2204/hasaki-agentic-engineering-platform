@@ -1,10 +1,9 @@
-import { questions } from "../db.ts";
 import { pool, q, one, json, type Db } from "../db/pool.ts";
 
 export interface WorkItemRow {
   id: number;
   code: string;
-  source: "manual" | "hasaki_work" | "jira" | "legacy";
+  source: "manual" | "hasaki_work" | "jira";
   external_key: string | null;
   external_id: string | null;
   title: string;
@@ -17,7 +16,6 @@ export interface WorkItemRow {
     workflow: string;
     inputs?: Record<string, unknown>;
   } | null;
-  legacy_task_code: string | null;
   owner_id: number | null;
 }
 
@@ -92,25 +90,6 @@ export const workItemRepository = {
       "SELECT * FROM pull_requests WHERE work_item_id = $1 ORDER BY id",
       [id],
     );
-  },
-
-  legacyPullRequests(id: number, db: Db = pool) {
-    return q<Record<string, unknown>>(
-      db,
-      "SELECT * FROM pull_requests WHERE work_item_id = $1 AND run_id IS NOT NULL",
-      [id],
-    );
-  },
-
-  async legacyHistory(code: string) {
-    return {
-      questions: await questions.list(code),
-      events: await q<Record<string, unknown>>(
-        pool,
-        "SELECT * FROM events WHERE task_code = $1 ORDER BY id DESC LIMIT 200",
-        [code],
-      ),
-    };
   },
 
   async nextId(db: Db) {

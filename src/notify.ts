@@ -3,7 +3,7 @@ import { config } from "./config.ts";
 import { sendTelegramStepWaiting, type StepWaiting } from "./telegram.ts";
 
 /** Fire-and-forget chat notification. Body {text} works for Google Chat and Slack incoming webhooks. */
-/** `target` is a UI route ("/runs/12") or, for legacy callers, a task code. */
+/** `target` is a UI route ("/runs/12"). */
 export async function notify(message: string, target?: string) {
   if (!config.notifyWebhook) return;
   const runId = /^\/runs\/(\d+)$/.exec(target ?? "")?.[1];

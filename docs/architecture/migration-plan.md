@@ -2,6 +2,7 @@
 
 > [!NOTE] Historical Roadmap
 > This document records the original v1-to-v2 migration roadmap and backfill strategy for the platform baseline.
+> Migration `083_remove_legacy_schema.sql` later dropped the legacy tables `tasks`, `events`, `questions` and `prs`, the `/api/tasks*` endpoints and the `/classic` UI; see [legacy-schema-removal.md](legacy-schema-removal.md).
 > Items that were marked as "not implemented" in this initial milestone (such as the GitHub provider in Phase 7) have since been fully implemented, along with GitLab support and additional agent providers.
 
 ## Principles

@@ -56,24 +56,15 @@ import { resolveOutputLocale } from "../agent/language.ts";
 import { resolveAgentProvider } from "../agent/provider.ts";
 import { agentProviderStatus } from "../agent/providerStatus.ts";
 import {
-  cancelableRunsForLegacyTask,
   findArtifact,
   handoffMetrics,
-  latestRunForWorkItem,
-  legacyRunQuestions,
   runAssignment,
   setRunBudget,
 } from "../workflow/runRepository.ts";
 import { workItemRepository } from "../workitems/repository.ts";
 import { knowledgeUsage } from "../knowledge/usageRepository.ts";
 import { listEvalResults } from "../eval/resultsRepository.ts";
-import {
-  events as legacyEvents,
-  inbox,
-  prs as legacyPrs,
-  questions as legacyQuestions,
-  tasks as legacyTasks,
-} from "../db.ts";
+import { inbox } from "../db.ts";
 import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasakiAuth.ts";
 import { myTimesheet } from "../timesheet.ts";
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
@@ -342,10 +333,6 @@ async function workItemWithAttachments(id: number) {
           .map((f) => ({ name: f.split("/").pop()!, url: `${base}/${f.replace(/^\//, "")}` }))
       : [];
   return { ...w, attachments };
-}
-
-async function workItemByCode(code: string, actor: Actor) {
-  return must(await workItems.byCode(code, actor.id), "task");
 }
 
 async function readableWorkflow(c: Ctx, key: string) {
@@ -2499,99 +2486,6 @@ export const routes: Route[] = [
     ({ body }) => setKafkaCookie(String(body.cookie ?? "")),
   ],
   ["POST", /^\/api\/integrations\/kafka\/logout$/, () => clearKafkaCookie()],
-
-  // ------------------------------------------------------------ legacy /api/tasks (backwards compatible)
-  [
-    "POST",
-    /^\/api\/tasks$/,
-    async ({ body, url, actor }) => {
-      const { item, created } = await importHasakiTask(body, null, actor.id);
-      const wf = url.searchParams.get("workflow");
-      const run = wf
-        ? await startRun({ definitionKey: wf, workItemId: item.id, ownerId: actor.id })
-        : null;
-      return {
-        code: item.code,
-        work_item_id: item.id,
-        created,
-        started: !!run,
-        run_id: run?.id ?? null,
-      };
-    },
-  ],
-  [
-    "GET",
-    /^\/api\/tasks$/,
-    async (c) =>
-      (await workItems.list(mine(c))).map((w) => ({
-        code: w.code,
-        name: w.title,
-        project: w.project,
-        status: w.last_run_status ?? w.status,
-        work_item_id: w.id,
-        created_at: w.created_at,
-        updated_at: w.updated_at,
-      })),
-  ],
-  [
-    "GET",
-    /^\/api\/tasks\/([^/]+)$/,
-    async ({ p, url, actor }) => {
-      const wi = await workItemByCode(p[0], actor);
-      const legacy = wi.legacy_task_code ? await legacyTasks.get(wi.legacy_task_code) : null;
-      const run = await latestRunForWorkItem(wi.id);
-      const wq = run ? await legacyRunQuestions(run.id) : [];
-      return {
-        code: wi.code,
-        name: wi.title,
-        project: wi.project,
-        payload: wi.payload,
-        status: run?.status ?? legacy?.status ?? wi.status,
-        work_item_id: wi.id,
-        run_id: run?.id ?? null,
-        running: run?.status === "RUNNING",
-        questions: [...(legacy ? await legacyQuestions.list(legacy.code) : []), ...wq],
-        prs: [
-          ...(legacy ? await legacyPrs.list(legacy.code) : []),
-          ...(await workItemRepository.legacyPullRequests(wi.id)),
-        ],
-        events: legacy
-          ? await legacyEvents.list(legacy.code, Number(url.searchParams.get("after") ?? 0))
-          : run
-            ? await runEvents.list(run.id)
-            : [],
-      };
-    },
-  ],
-  [
-    "POST",
-    /^\/api\/tasks\/([^/]+)\/answers$/,
-    async ({ p, body, actor }) => (
-      await workItemByCode(p[0], actor),
-      await assertQuestionsAccessible(actor, false, body.answers ?? {}),
-      answerQuestions(body.answers ?? {}, actor.username)
-    ),
-  ],
-  [
-    "POST",
-    /^\/api\/tasks\/([^/]+)\/messages$/,
-    async ({ p, body, actor }) => {
-      const wi = await workItemByCode(p[0], actor);
-      const run = must(await latestRunForWorkItem(wi.id), "run for this task");
-      await sendFeedback(run.id, String(body.message ?? "").trim() || fail("empty message"));
-      return { ok: true, run_id: run.id };
-    },
-  ],
-  [
-    "POST",
-    /^\/api\/tasks\/([^/]+)\/cancel$/,
-    async ({ p, actor }) => {
-      const wi = await workItemByCode(p[0], actor);
-      const active = await cancelableRunsForLegacyTask(wi.id);
-      for (const r of active) await cancelRun(r.id);
-      return { ok: true, canceled: active.map((r) => r.id) };
-    },
-  ],
 
   ["GET", /^\/api\/users$/, ({ actor }) => (requireAdmin(actor), listUsers())],
   [

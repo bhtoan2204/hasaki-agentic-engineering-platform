@@ -211,19 +211,9 @@ try {
   await heading("My account").waitFor();
   await screenshot("10-member-account");
   await bounds();
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(base + "/classic");
-  await page.locator("#classic-account summary").click();
-  const classicMenu = await page.locator("#classic-account nav").boundingBox();
-  assert.ok(classicMenu && classicMenu.x >= 0 && classicMenu.x + classicMenu.width <= 390);
-  await screenshot("11-classic-account-mobile");
-  await page.getByRole("link", { name: "My account", exact: true }).waitFor();
-  assert.equal(await page.locator("#classic-account").getByText("User management").count(), 0);
-  await page.getByRole("link", { name: "My account", exact: true }).click();
-  await heading("My account").waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: bootstrap, login/refresh, admin/member navigation, account menu keyboard, create/reset/deactivate, password change, logout, classic links, mobile, collapse, VI/EN, light/dark. Screenshots: " +
+    "PASS: bootstrap, login/refresh, admin/member navigation, account menu keyboard, create/reset/deactivate, password change, logout, mobile, collapse, VI/EN, light/dark. Screenshots: " +
       out,
   );
 } catch (e) {

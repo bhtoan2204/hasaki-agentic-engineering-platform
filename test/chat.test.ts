@@ -107,7 +107,6 @@ describe("chat context", () => {
         run_id: null,
         summary: "",
         summary_through: 0,
-        budget: {},
         usage: {},
         archived: false,
         created_at: "",

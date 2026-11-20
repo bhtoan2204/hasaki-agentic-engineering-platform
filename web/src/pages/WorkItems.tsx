@@ -124,10 +124,6 @@ interface WorkItemDetailView {
     source_branch: string;
     target_branch: string;
   }>;
-  legacy?: {
-    questions: Array<{ id: number; question: string; answer?: string | null }>;
-    events: Array<{ id: number; created_at: string; kind: string; content: string }>;
-  } | null;
   automation_policy?: { workflow: string } | null;
 }
 
@@ -559,7 +555,7 @@ export function WorkItemsPage({ query }: { query: string }) {
                 onChange={setSource}
                 options={[
                   ["", t("wi.allSources")],
-                  ...["manual", "hasaki_work", "jira", "legacy"].map(
+                  ...["manual", "hasaki_work", "jira"].map(
                     (s) => [s, sourceLabel(t, s)] as [string, string],
                   ),
                 ]}
@@ -1261,28 +1257,6 @@ export function WorkItemDetail({ id }: { id: number }) {
                 ))}
               </div>
             </section>
-          )}
-
-          {w.legacy && (w.legacy.questions.length > 0 || w.legacy.events.length > 0) && (
-            <details className="card flat wi-legacy">
-              <summary>
-                {t("wi.legacy", {
-                  questions: w.legacy.questions.length,
-                  events: w.legacy.events.length,
-                })}
-              </summary>
-              {w.legacy.questions.map((q) => (
-                <div key={q.id} className="q">
-                  <b>{q.question}</b>
-                  <div className="muted">→ {q.answer ?? t("wi.unanswered")}</div>
-                </div>
-              ))}
-              {w.legacy.events.map((e) => (
-                <div key={e.id} className="small">
-                  <span className="muted">{time(e.created_at)}</span> <b>{e.kind}</b> {e.content}
-                </div>
-              ))}
-            </details>
           )}
         </div>
 

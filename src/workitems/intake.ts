@@ -377,7 +377,6 @@ interface ItemRow {
   environment: string | null;
   workflow: string | null;
   repo_candidate: string | null;
-  priority: number;
   occurrences: number;
   last_seen: Date;
   enqueued_at: Date | null;

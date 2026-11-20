@@ -53,7 +53,7 @@ test("bootstrap script migrates an empty database, preserves existing admin, and
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   try {
     assert.equal((await (await fetch(base + "/api/auth/status")).json()).bootstrapRequired, false);
-    for (const path of ["/", "/classic"]) assert.equal((await fetch(base + path)).status, 200);
+    assert.equal((await fetch(base + "/")).status, 200);
     const login = await fetch(base + "/api/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json" },

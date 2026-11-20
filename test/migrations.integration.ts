@@ -5,7 +5,7 @@ import { loadMigrations, migrate } from "../src/db/migrate.ts";
 
 after(() => pool.end());
 
-test("legacy data survives the upgrade and is backfilled into work items / pull requests", async () => {
+test("legacy data is backfilled into work items / pull requests, then 083 drops the legacy schema", async () => {
   const all = loadMigrations();
   // An existing install: only the legacy schema, with real rows.
   await migrate(pool, all.slice(0, 1));
@@ -32,8 +32,8 @@ test("legacy data survives the upgrade and is backfilled into work items / pull 
   assert.equal(wi[0].source, "hasaki_work");
   assert.equal(wi[0].external_id, "42");
   assert.equal(wi[0].description, "WMS timeout");
-  assert.equal(wi[0].legacy_task_code, "TASK-1");
-  assert.equal(wi[1].source, "legacy");
+  assert.equal(wi[0].legacy_task_code, undefined);
+  assert.equal(wi[1].source, "manual");
 
   const pr = (await pool.query("SELECT * FROM pull_requests")).rows;
   assert.equal(pr.length, 1);
@@ -42,12 +42,13 @@ test("legacy data survives the upgrade and is backfilled into work items / pull 
   assert.equal(pr[0].created, true);
   assert.deepEqual(pr[0].decisions, [{ title: "a", detail: "b" }]);
 
-  // Legacy tables are untouched.
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM questions")).rows[0].n, 1);
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM events")).rows[0].n, 1);
-  assert.equal(
-    (await pool.query("SELECT status FROM tasks WHERE code = 'TASK-1'")).rows[0].status,
-    "review",
+  const { rows: gone } = await pool.query(
+    "SELECT to_regclass(t)::text AS t FROM unnest(ARRAY['tasks', 'events', 'questions', 'prs']) AS t",
+  );
+  assert.deepEqual(gone.map((r) => r.t), [null, null, null, null]);
+  await assert.rejects(
+    pool.query(`INSERT INTO work_items (code, source, title) VALUES ('X-2', 'legacy', 't')`),
+    /check constraint/,
   );
 });
 

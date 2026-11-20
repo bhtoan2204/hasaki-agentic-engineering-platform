@@ -292,13 +292,6 @@ export function App() {
     !!me,
   );
 
-  useEffect(() => {
-    if (!me || hash.startsWith("/")) return;
-    api<{ work_item_id: number }>(`/api/tasks/${encodeURIComponent(hash)}`)
-      .then((t) => (location.hash = `/work-items/${t.work_item_id}`))
-      .catch(() => (location.hash = "/overview"));
-  }, [hash, me]);
-
   let page;
   let full = false;
   const section = parts[0] ?? "overview";

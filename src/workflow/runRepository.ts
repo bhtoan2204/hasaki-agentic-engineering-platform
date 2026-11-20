@@ -55,41 +55,11 @@ export function findRun(runId: number, db: Db = pool) {
   return one<RunRow>(db, "SELECT * FROM workflow_runs WHERE id = $1", [runId]);
 }
 
-export function latestRunForWorkItem(workItemId: number, db: Db = pool) {
-  return one<Pick<RunRow, "id" | "status">>(
-    db,
-    "SELECT id, status FROM workflow_runs WHERE work_item_id = $1 ORDER BY id DESC LIMIT 1",
-    [workItemId],
-  );
-}
-
 export function activeRunForWorkItem(workItemId: number, db: Db = pool) {
   return one<Pick<RunRow, "id">>(
     db,
     "SELECT id FROM workflow_runs WHERE work_item_id = $1 AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELED') LIMIT 1",
     [workItemId],
-  );
-}
-
-export function cancelableRunsForLegacyTask(workItemId: number, db: Db = pool) {
-  return q<Pick<RunRow, "id">>(
-    db,
-    "SELECT id FROM workflow_runs WHERE work_item_id = $1 AND status NOT IN ('COMPLETED', 'CANCELED')",
-    [workItemId],
-  );
-}
-
-export function legacyRunQuestions(runId: number, db: Db = pool) {
-  return q<{
-    id: number;
-    question: string;
-    context: string;
-    options: string[];
-    answer: string | null;
-  }>(
-    db,
-    "SELECT id, question, context, options, answer FROM workflow_questions WHERE run_id = $1 AND status <> 'dismissed' ORDER BY id",
-    [runId],
   );
 }
 

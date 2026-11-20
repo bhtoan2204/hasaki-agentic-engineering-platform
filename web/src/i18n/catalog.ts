@@ -983,7 +983,6 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.src.manual": "Thủ công",
     "wi.src.hasaki_work": "Hasaki Work",
     "wi.src.jira": "Jira",
-    "wi.src.legacy": "Cũ",
     "wi.importedRun": "Đã import — chưa chạy gì, chọn workflow để chạy",
     "wi.loggedIn": "đã đăng nhập",
     "wi.loggedOut": "chưa đăng nhập",
@@ -1079,8 +1078,6 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.raw": "payload gốc",
     "wi.attachments": "File đính kèm",
     "wi.history": "Lịch sử thực thi",
-    "wi.legacy": "Lịch sử cũ (trước workflow) — {questions} câu hỏi, {events} sự kiện",
-    "wi.unanswered": "(chưa trả lời)",
     "wi.settings": "Thiết lập",
     "wi.policy": "Chính sách tự động",
     "wi.policyHint":
@@ -4169,7 +4166,6 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.src.manual": "Manual",
     "wi.src.hasaki_work": "Hasaki Work",
     "wi.src.jira": "Jira",
-    "wi.src.legacy": "Legacy",
     "wi.importedRun": "Imported — nothing has run yet; pick a workflow to start",
     "wi.loggedIn": "signed in",
     "wi.loggedOut": "not signed in",
@@ -4266,8 +4262,6 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.raw": "raw payload",
     "wi.attachments": "Attachments",
     "wi.history": "Run history",
-    "wi.legacy": "Older history (before workflows) — {questions} questions, {events} events",
-    "wi.unanswered": "(not answered)",
     "wi.settings": "Settings",
     "wi.policy": "Automation policy",
     "wi.policyHint":

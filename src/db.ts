@@ -1,60 +1,7 @@
 import { pool } from "./db/pool.ts";
 
-/**
- * Legacy (pre-workflow) tables: tasks, events, questions, prs, inbox, settings.
- * They are kept read-mostly for history and the backwards-compatible /api/tasks endpoints;
- * new execution state lives in the workflow_* tables (see src/workflow).
- */
 const q = async <T = unknown>(sql: string, params: unknown[] = []) =>
   (await pool.query(sql, params)).rows as T[];
-
-export type TaskStatus = "queued" | "running" | "waiting_answer" | "review" | "idle" | "failed";
-
-export interface TaskRow {
-  code: string;
-  work_id: number | null;
-  name: string;
-  project: string;
-  payload: unknown;
-  status: TaskStatus;
-  session_id: string | null;
-  error: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export const tasks = {
-  async get(code: string) {
-    return (await q<TaskRow>("SELECT * FROM tasks WHERE code = $1", [code]))[0];
-  },
-};
-
-export const events = {
-  list(code: string, afterId = 0) {
-    return q("SELECT * FROM events WHERE task_code = $1 AND id > $2 ORDER BY id", [code, afterId]);
-  },
-};
-
-export interface QuestionRow {
-  id: string;
-  task_code: string;
-  question: string;
-  context: string;
-  options: string[];
-  answer: string | null;
-}
-
-export const questions = {
-  list(code: string) {
-    return q<QuestionRow>("SELECT * FROM questions WHERE task_code = $1 ORDER BY id", [code]);
-  },
-};
-
-export const prs = {
-  list(code: string) {
-    return q("SELECT * FROM prs WHERE task_code = $1 ORDER BY id", [code]);
-  },
-};
 
 export const inbox = {
   async upsert(t: {

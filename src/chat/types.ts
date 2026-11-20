@@ -58,7 +58,6 @@ export interface ConversationRow {
   run_id: number | null;
   summary: string;
   summary_through: number;
-  budget: Record<string, unknown>;
   usage: Record<string, unknown>;
   continuation?: Continuation | null;
   archived: boolean;

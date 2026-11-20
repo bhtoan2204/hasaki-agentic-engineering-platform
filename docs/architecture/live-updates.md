@@ -34,7 +34,6 @@ Known limit: event ids are assigned just before COMMIT, so an event can in theor
 | Overview 30-day metrics | 60 s, visible tab | Aggregates; a minute-old figure is fine. |
 | Production errors while a scan runs | 1.5 s, visible tab | Scan progress is in-memory server state. |
 | Hasaki Work login window | 1.5 s while the window is open | External browser state. |
-| `/classic` UI | 3 s, visible tab | Legacy page; not worth wiring to SSE. |
 | Local clocks (`useNow`, queue banner, command log) | 1–5 s | Re-render only, no request. |
 
 ## Measuring

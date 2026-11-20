@@ -8,14 +8,13 @@ import { join, relative } from "node:path";
 import { describe, it } from "node:test";
 
 const ROOT = join(import.meta.dirname, "..");
-const SCAN = [join(ROOT, "web/src"), join(ROOT, "public")];
+const SCAN = [join(ROOT, "web/src")];
 
 /** Allowlisted files that define the replacement API (method names only, never call natives). */
 const ALLOW = new Set([
   "web/src/dialog/service.ts",
   "web/src/dialog/types.ts",
   "web/src/dialog/index.ts",
-  "public/app-dialog.js",
 ]);
 
 const BANNED =

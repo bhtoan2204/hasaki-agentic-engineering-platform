@@ -31,7 +31,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["web/src/**/*.{ts,tsx}", "public/**/*.{js,mjs}"],
+    files: ["web/src/**/*.{ts,tsx}"],
     ignores: [
       "web/src/dialog/service.ts",
       "web/src/dialog/types.ts",

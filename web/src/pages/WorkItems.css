@@ -583,10 +583,6 @@
   overflow-wrap: anywhere;
 }
 
-.wi-legacy {
-  padding: var(--sp-3) var(--sp-4);
-}
-
 .wi-launch {
   position: relative;
   overflow: hidden;
