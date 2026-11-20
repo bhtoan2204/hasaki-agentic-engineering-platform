@@ -1,5 +1,6 @@
 import { acceptWebhook } from "../telegram/transport.ts";
 import { SharedAbort } from "./sharedAbort.ts";
+import { handleInternal } from "../prodErrors/gateway.ts";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
@@ -95,6 +96,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
   const method = req.method ?? "GET";
   const key = `${method} ${url.pathname}`;
   try {
+    // platform-go's internal gateway (bearer token, loopback only); never reached through a browser session.
+    if (url.pathname.startsWith("/internal/") && (await handleInternal(req, res, url))) return;
     if (key === "POST /api/telegram/webhook") {
       // Verify BEFORE reading a body or bypassing session/CSRF for this single authenticated transport route.
       const { validWebhookSecret } = await import("../telegram/client.ts");

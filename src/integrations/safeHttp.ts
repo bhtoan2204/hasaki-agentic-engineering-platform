@@ -23,7 +23,12 @@ export class HttpError extends Error {
   }
 }
 
-const METADATA_HOSTS = new Set(["metadata.google.internal", "metadata", "instance-data", "metadata.azure.internal"]);
+const METADATA_HOSTS = new Set([
+  "metadata.google.internal",
+  "metadata",
+  "instance-data",
+  "metadata.azure.internal",
+]);
 const metadata = new BlockList();
 metadata.addAddress("169.254.169.254");
 metadata.addAddress("169.254.170.2");
@@ -65,7 +70,11 @@ export function classifyAddress(address: string): "public" | "internal" | "metad
   return internal.check(address, type) ? "internal" : "public";
 }
 
-const normalizeHost = (host: string) => host.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+const normalizeHost = (host: string) =>
+  host
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
 
 /** A base URL a user may store: https (http only for an approved internal host), no credentials, no query or fragment. */
 export function validateBaseUrl(raw: string, approvedInternalHosts: string[]): URL {
@@ -78,15 +87,23 @@ export function validateBaseUrl(raw: string, approvedInternalHosts: string[]): U
   const host = normalizeHost(url.hostname);
   const approved = approvedInternalHosts.map(normalizeHost).includes(host);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && approved))
-    throw new BlockedDestinationError("only https URLs are allowed (http only for an approved internal host)");
-  if (url.username || url.password) throw new BlockedDestinationError("credentials in the URL are not allowed");
-  if (url.search || url.hash) throw new BlockedDestinationError("query strings and fragments are not allowed");
-  if (METADATA_HOSTS.has(host)) throw new BlockedDestinationError("cloud metadata endpoints are blocked");
+    throw new BlockedDestinationError(
+      "only https URLs are allowed (http only for an approved internal host)",
+    );
+  if (url.username || url.password)
+    throw new BlockedDestinationError("credentials in the URL are not allowed");
+  if (url.search || url.hash)
+    throw new BlockedDestinationError("query strings and fragments are not allowed");
+  if (METADATA_HOSTS.has(host))
+    throw new BlockedDestinationError("cloud metadata endpoints are blocked");
   if (isIP(host)) {
     const kind = classifyAddress(host);
-    if (kind === "metadata") throw new BlockedDestinationError("cloud metadata endpoints are blocked");
+    if (kind === "metadata")
+      throw new BlockedDestinationError("cloud metadata endpoints are blocked");
     if (kind === "internal" && !approved)
-      throw new BlockedDestinationError(`${host} is an internal address; an administrator must approve it`);
+      throw new BlockedDestinationError(
+        `${host} is an internal address; an administrator must approve it`,
+      );
   }
   url.pathname = url.pathname.replace(/\/+$/, "");
   return url;
@@ -96,7 +113,11 @@ function guardedLookup(host: string, approved: boolean) {
   return (
     hostname: string,
     options: LookupOptions,
-    callback: (err: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void,
+    callback: (
+      err: NodeJS.ErrnoException | null,
+      address: string | LookupAddress[],
+      family?: number,
+    ) => void,
   ) => {
     dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
       if (err) return callback(err, []);
@@ -127,7 +148,16 @@ export interface SafeRequest {
   signal?: AbortSignal;
 }
 
-function once(req: SafeRequest): Promise<{ status: number; text: string }> {
+/** Retry-After (seconds or HTTP date) in milliseconds, or undefined. */
+export function retryAfterMs(value: string | string[] | null | undefined, now = Date.now()) {
+  const v = Array.isArray(value) ? value[0] : value;
+  if (!v) return undefined;
+  if (/^\d+$/.test(v.trim())) return Number(v.trim()) * 1000;
+  const at = Date.parse(v);
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
+}
+
+function once(req: SafeRequest): Promise<{ status: number; text: string; retryAfterMs?: number }> {
   const host = normalizeHost(req.url.hostname);
   const approved = req.approvedInternalHosts.map(normalizeHost).includes(host);
   const transport = req.url.protocol === "https:" ? https : http;
@@ -136,7 +166,10 @@ function once(req: SafeRequest): Promise<{ status: number; text: string }> {
       req.url,
       {
         method: req.method,
-        headers: { ...req.headers, ...(req.body ? { "content-length": Buffer.byteLength(req.body) } : {}) },
+        headers: {
+          ...req.headers,
+          ...(req.body ? { "content-length": Buffer.byteLength(req.body) } : {}),
+        },
         lookup: guardedLookup(host, approved),
         timeout: req.timeoutMs,
         signal: req.signal,
@@ -158,7 +191,13 @@ function once(req: SafeRequest): Promise<{ status: number; text: string }> {
             reject(new Error(`response exceeded ${req.maxBytes} bytes; narrow the query`));
           } else chunks.push(c);
         });
-        res.on("end", () => resolve({ status, text: Buffer.concat(chunks).toString("utf8") }));
+        res.on("end", () =>
+          resolve({
+            status,
+            text: Buffer.concat(chunks).toString("utf8"),
+            retryAfterMs: retryAfterMs(res.headers["retry-after"]),
+          }),
+        );
         res.on("error", reject);
       },
     );
@@ -174,22 +213,36 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener("abort", () => (clearTimeout(t), fail(signal.reason)), { once: true });
   });
 
-/** One request with bounded retries on network errors, 429 and 5xx. Never retries a blocked destination or abort. */
+/** Capped exponential backoff with full jitter: uniform in [0, min(cap, base·2^attempt)). */
+export const backoffMs = (attempt: number, baseMs = 200, capMs = 10_000) =>
+  Math.random() * Math.min(capMs, baseMs * 2 ** attempt);
+
+/** Longest Retry-After honoured inline; a longer one is returned to the caller instead of blocking it. */
+const MAX_INLINE_RETRY_AFTER_MS = 30_000;
+
+/**
+ * One request with bounded retries on network errors, 429 and 5xx (capped exponential backoff, full jitter; a
+ * provider's Retry-After is honoured when it is short enough). Never retries a blocked destination or an abort.
+ */
 export async function safeRequest(req: SafeRequest, maxRetries: number) {
   validateBaseUrl(req.url.origin, req.approvedInternalHosts);
   for (let attempt = 0; ; attempt++) {
     try {
       const res = await once(req);
-      if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
-        await sleep(200 * 2 ** attempt + Math.random() * 100, req.signal);
+      const retryable = res.status === 429 || res.status >= 500;
+      const wait = res.retryAfterMs;
+      if (retryable && attempt < maxRetries && (wait ?? 0) <= MAX_INLINE_RETRY_AFTER_MS) {
+        await sleep(wait ?? backoffMs(attempt), req.signal);
         continue;
       }
       return res;
     } catch (e) {
       const retryable =
-        !(e instanceof BlockedDestinationError) && !(e instanceof HttpError) && !req.signal?.aborted;
+        !(e instanceof BlockedDestinationError) &&
+        !(e instanceof HttpError) &&
+        !req.signal?.aborted;
       if (!retryable || attempt >= maxRetries) throw e;
-      await sleep(200 * 2 ** attempt + Math.random() * 100, req.signal);
+      await sleep(backoffMs(attempt), req.signal);
     }
   }
 }

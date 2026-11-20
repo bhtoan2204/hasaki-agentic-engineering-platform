@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-11-20T14:04:14.173Z",
+  "engine": "go",
+  "db_latency_ms_each_way": 20,
+  "provider_latency_ms": 50,
+  "splunk_rows": 300,
+  "single": {
+    "scans": 5,
+    "groups": 317,
+    "latency_p50_ms": 2316.7,
+    "latency_max_ms": 2345.6,
+    "node_db_statements_per_scan": 25,
+    "go_db_statements_per_scan": 10,
+    "splunk_requests_per_scan": 5,
+    "signoz_requests_per_scan": 8,
+    "node_cpu_ms_per_scan": 201.5,
+    "go_cpu_ms_per_scan": 36,
+    "event_loop_p99_ms": 12.1,
+    "event_loop_max_ms": 23.1,
+    "node_rss_mb": 164.8,
+    "go_rss_hwm_mb": 26.4
+  },
+  "concurrent": {
+    "scans_run": 1,
+    "splunk_searches": 1,
+    "db_statements": 35,
+    "wall_ms": 2285.9
+  },
+  "idle": {
+    "seconds": 65,
+    "node_db_statements_per_minute": 1.8,
+    "go_db_statements_per_minute": 1.8,
+    "node_cpu_ms_per_minute": 24.3,
+    "go_cpu_ms_per_minute": 0
+  }
+}

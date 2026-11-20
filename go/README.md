@@ -4,8 +4,9 @@ Go backend of the platform. Modules: semantic retrieval over `knowledge_items` w
 (ADR `docs/architecture/adr/0001-go-backend-semantic-retrieval.md`, contract `contracts/retrieval-v1.schema.json`,
 examples in `contracts/examples/`), code intelligence indexing (ADR
 `docs/architecture/adr/0002-go-code-intelligence-indexing.md`, contract `contracts/code-intelligence-v1.schema.json`)
-and read-only engineering analytics dashboards (ADR `docs/architecture/adr/0003-go-analytics.md`, contract
-`contracts/analytics-v1.schema.json`).
+read-only engineering analytics dashboards (ADR `docs/architecture/adr/0003-go-analytics.md`, contract
+`contracts/analytics-v1.schema.json`) and durable background jobs, starting with production error scans (ADR
+`docs/architecture/adr/0004-go-background-workers.md`, contract `contracts/prod-errors-v1.schema.json`).
 
 ```
 cmd/platform-go/          wiring, signals, graceful shutdown
@@ -16,6 +17,9 @@ internal/codeintelligence/ index.go (job) → git.go, extract.go (tree-sitter), 
                           grammar/sql (vendored generated parser); testdata/parity (TypeScript golden)
 internal/analytics/       http.go → service.go (read-only pool, slots, node-postgres value mapping);
                           execution.go (usage, performance, workflows), health*.go, options.go
+internal/worker/          durable job runner: bounded pool, wake/poll, lease keeper, backoff, retry budget, rate limits
+internal/proderrors/      production error scan job: store.go (claim, fence, publish), gateway.go (TypeScript provider
+                          gateway client), merge.go (grouping, TypeScript golden in testdata/), scan.go
 internal/testutil/        deterministic embedding provider emulator for tests and benchmarks
 ```
 
@@ -129,6 +133,10 @@ service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`).
 | `CODE_INDEX_JOBS` | `1` | indexing jobs at a time (callers beyond it wait: backpressure) |
 | `ANALYTICS_MAX_CONCURRENT` | `2` | 1–8: connections of the separate read-only analytics pool = statements at once |
 | `ANALYTICS_TIMEOUT_MS` | `15000` | analytics request deadline (slot wait included) and the pool's `statement_timeout` |
+| `PROD_ERRORS_ENGINE` | `typescript` | `go`: claim and run production error scans (requires `PLATFORM_INTERNAL_URL`) |
+| `PLATFORM_INTERNAL_URL` | | loopback URL of the supervising platform server (its provider gateway); set by the supervisor |
+| `PROD_SCAN_WORKERS` | `1` | 1–4 scans at once |
+| `PROD_SCAN_POLL_MS` | `60000` | fallback claim poll; TypeScript wakes the runner when it queues a scan |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | | enables OTLP/HTTP traces and metrics (standard `OTEL_*` variables apply) |
 
 The model id stored with every embedding is `<provider>/<model>@<dims>`. Changing any part re-queues every eligible

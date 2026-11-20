@@ -39,7 +39,9 @@ export async function startPlatformGo(env: Record<string, string> = {}) {
       s.close(() => done(port));
     });
   });
-  const token = randomBytes(32).toString("hex");
+  // Every instance shares the platform's token, as under the supervisor (the gateway accepts exactly one).
+  const existing = process.env.RETRIEVAL_INTERNAL_TOKEN ?? "";
+  const token = existing.length >= 32 ? existing : randomBytes(32).toString("hex");
   const child = spawn(bin, [], {
     env: {
       ...process.env,

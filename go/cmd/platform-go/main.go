@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,8 +18,10 @@ import (
 	"claude-task-platform/go/internal/analytics"
 	"claude-task-platform/go/internal/codeintelligence"
 	"claude-task-platform/go/internal/platform"
+	"claude-task-platform/go/internal/proderrors"
 	"claude-task-platform/go/internal/retrieval"
 	"claude-task-platform/go/internal/retrieval/embed"
+	"claude-task-platform/go/internal/worker"
 )
 
 func main() {
@@ -91,6 +94,25 @@ func run(log *slog.Logger) error {
 	dashboards := http.NewServeMux()
 	analytics.Routes(dashboards, analytics.NewService(analyticsDB, cfg.AnalyticsMaxConcurrent), cfg.AnalyticsTimeout, log)
 	mux.Handle("/internal/v1/analytics/", platform.RequireBearer(cfg.Token, dashboards))
+	// Background jobs (ADR 0004). They use the shared pool (a claim, a heartbeat every 10 s and one publication
+	// transaction per scan) and no LISTEN connection: TypeScript wakes the runner over HTTP, a slow poll covers the rest.
+	var scans *worker.Runner
+	store := &proderrors.Store{DB: db, Owner: fmt.Sprintf("go:%s:%d", hostname(), os.Getpid())}
+	if cfg.ProdErrorsEngine == "go" {
+		if err := store.SchemaReady(ctx); err != nil {
+			return err
+		}
+		scans = &worker.Runner{
+			Queue: &proderrors.Queue{Store: store, Config: proderrors.DefaultConfig(), Log: log, Gateway: &proderrors.Gateway{
+				URL: cfg.InternalURL, Token: cfg.Token, Client: &http.Client{Timeout: 40 * time.Minute},
+				Limiter: worker.NewLimiter(5, 5),
+			}},
+			Size: cfg.ProdScanWorkers, PollInterval: cfg.ProdScanPoll, Log: log,
+		}
+		jobs := http.NewServeMux()
+		proderrors.Routes(jobs, scans.Wake)
+		mux.Handle("/internal/v1/jobs/", platform.RequireBearer(cfg.Token, jobs))
+	}
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           platform.Observe(log, mux),
@@ -105,6 +127,10 @@ func run(log *slog.Logger) error {
 	if cfg.WorkerEnabled {
 		w := retrieval.NewWorker(svc, cfg.EmbedBatch, cfg.EmbedConcurrency)
 		wg.Go(func() { w.Run(workerCtx) })
+	}
+
+	if scans != nil {
+		wg.Go(func() { scans.Run(workerCtx) })
 	}
 
 	serveErr := make(chan error, 1)
@@ -134,4 +160,12 @@ func run(log *slog.Logger) error {
 		err = nil
 	}
 	return err
+}
+
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return h
 }

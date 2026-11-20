@@ -61,7 +61,8 @@ export function startGoService() {
   const needed =
     config.retrieval.semantic.enabled ||
     config.codeIntelligence.engine === "go" ||
-    config.analytics.engine === "go";
+    config.analytics.engine === "go" ||
+    config.prodErrors.engine === "go";
   if (needed && local) {
     let bin = "";
     let delay = 1000;
@@ -73,6 +74,9 @@ export function startGoService() {
           ...process.env,
           PLATFORM_GO_ADDR: `${url.hostname}:${url.port || 80}`,
           DATABASE_POOL_MAX: "4",
+          // Production error scans (ADR 0004) reach the providers through this server's internal gateway.
+          PROD_ERRORS_ENGINE: config.prodErrors.engine,
+          PLATFORM_INTERNAL_URL: `http://127.0.0.1:${config.port}`,
           PLATFORM_GO_EXIT_ON_STDIN_EOF: "true",
         },
         // The open stdin pipe is the liveness link: platform-go exits when this process dies.

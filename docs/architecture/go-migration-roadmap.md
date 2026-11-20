@@ -21,7 +21,7 @@ module that has not moved. Phase 1 is semantic retrieval ([ADR 0001](adr/0001-go
 | Semantic retrieval | **1 (this change)** | New capability, CPU/IO-bound, no workflow state | pgvector, embedding model |
 | Code intelligence indexing (`src/codeIntelligence/indexer.ts`) | **2 (done, flag `CODE_INTELLIGENCE_ENGINE=go`)** | Long CPU-bound parsing on the event loop; already queue-driven and owns its schema. [ADR 0002](adr/0002-go-code-intelligence-indexing.md) | Parity: 6,554 files / 27 repositories identical |
 | Observability/analytics aggregation (`src/api/analytics`) | **2 (done, flag `ANALYTICS_ENGINE=go`)** | Read-heavy SQL, no write coupling; the cost was PostgreSQL, so the move is the SQL fixed and consolidated, off the Node pool. [ADR 0003](adr/0003-go-analytics.md) | Parity suite on identical data (`test/analytics-go.integration.ts`) |
-| Background workers without run coupling (prod-error scans, PR lifecycle sync, intake polling) | 3 | Periodic IO; each must keep its own outbox/lease semantics | Per-worker ownership of its tables; idempotency tests |
+| Background workers without run coupling (prod-error scans, PR lifecycle sync, intake polling) | **3: prod-error scans done (flag `PROD_ERRORS_ENGINE=go`)**; PR lifecycle and intake stay | Scans: durable jobs with leases and fencing, providers through the TypeScript gateway. [ADR 0004](adr/0004-go-background-workers.md). PR lifecycle and intake are coupled to authorization and workflow decisions | Per-worker ownership of its tables; idempotency tests |
 | Process supervision and resource limits (bubblewrap, process trees) | 3 | Go is a better fit for process control | Isolation regression suite; the TypeScript harness still spawns agents |
 | Workflow scheduling (`src/workflow/scheduler.ts`) | later | Tightly coupled to fencing, leases and the engine's transactions | Engine contract for claim/complete |
 | Workflow execution, checkpoints, replay, agent harness, provider adapters | **stay in TypeScript** | Core state machine with the most behaviour and test coverage; moving it buys little | Re-evaluate only after phases 2–3 |
@@ -74,3 +74,20 @@ Checks: `go test ./internal/analytics/` (validation, DST, value mapping, contrac
 `test/analytics-go.integration.ts` (parity of every dashboard on identical data, fallback, timeout, cancellation,
 audit, rollback) in CI; both fail without Go. Remaining before the exit criteria: two weeks of daily use with the
 flag on, then removing the TypeScript SQL (or porting the fixes to it if Go is rolled back).
+
+## Phase 3 status: background workers, production error scans
+
+Implemented ([ADR 0004](adr/0004-go-background-workers.md)). Scans are durable jobs on both engines (one active scan
+across instances, leases, fencing, crash recovery, idempotent schedule slots, batch publication); with
+`PROD_ERRORS_ENGINE=go` platform-go owns the job and reads providers through the TypeScript gateway.
+
+| Measure (`npm run bench:prod-scan`, 20 ms database latency) | legacy → TypeScript / Go |
+|---|---|
+| scan latency | 28.5 s → 2.0 s / 2.3 s |
+| database statements per scan | 648 → 27 / 35 |
+| two instances starting a scan | 2 scans → 1 |
+| idle statements per minute | 1.8 → 1.8 / 3.6 |
+
+The gain is the queue and batching (both engines). The Go engine is slightly slower than the TypeScript engine and
+stays opt-in; it is the runtime the next workers will use. PR lifecycle sync and intake stay in TypeScript (coupled
+to authorization and workflow decisions); their isolated provider polling is the next candidate.

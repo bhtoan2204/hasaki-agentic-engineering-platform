@@ -2,7 +2,13 @@ import { config } from "../config.ts";
 import { currentUserId } from "../auth/execution.ts";
 import { one, pool } from "../db/pool.ts";
 import { PersonalSession, personalSettings } from "./personal.ts";
-import { BlockedDestinationError, HttpError, rateLimit, safeRequest, validateBaseUrl } from "./safeHttp.ts";
+import {
+  BlockedDestinationError,
+  HttpError,
+  rateLimit,
+  safeRequest,
+  validateBaseUrl,
+} from "./safeHttp.ts";
 import { storeExternalSearch, type SearchScope } from "./splunk.ts";
 
 /**
@@ -39,13 +45,17 @@ export type SignozErrorKind =
   | "invalid_query"
   | "server_error"
   | "connection_failed"
+  | "rate_limited"
   | "budget_exhausted";
 
 export class SignozError extends Error {
   readonly kind: SignozErrorKind;
-  constructor(kind: SignozErrorKind, message: string) {
+  /** For `rate_limited`: the provider's Retry-After, when it sent one. */
+  readonly retryAfterMs?: number;
+  constructor(kind: SignozErrorKind, message: string, retryAfterMs?: number) {
     super(message);
     this.kind = kind;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -93,7 +103,9 @@ async function persist(next: SignozConfig | null) {
 function errorMessage(text: string) {
   try {
     const e = JSON.parse(text)?.error;
-    const detail = Array.isArray(e?.errors) ? e.errors.map((x: { message?: string } | null) => x?.message).filter(Boolean) : [];
+    const detail = Array.isArray(e?.errors)
+      ? e.errors.map((x: { message?: string } | null) => x?.message).filter(Boolean)
+      : [];
     return [e?.message, ...detail].filter(Boolean).join("; ").slice(0, 600) || null;
   } catch {
     return null;
@@ -135,9 +147,13 @@ async function send(
     );
   } catch (e) {
     if (signal?.aborted) throw e;
-    if (e instanceof BlockedDestinationError) throw new SignozError("blocked_destination", e.message);
+    if (e instanceof BlockedDestinationError)
+      throw new SignozError("blocked_destination", e.message);
     if (e instanceof HttpError)
-      throw new SignozError("connection_failed", `SigNoz answered ${e.status} (redirect refused): check the base URL`);
+      throw new SignozError(
+        "connection_failed",
+        `SigNoz answered ${e.status} (redirect refused): check the base URL`,
+      );
     throw new SignozError("connection_failed", `cannot reach SigNoz: ${(e as Error).message}`);
   }
 }
@@ -166,13 +182,19 @@ async function rotateSession(cfg: SignozConfig, signal?: AbortSignal) {
       } catch {
         data = undefined;
       }
-      if (res.status < 200 || res.status >= 300 || typeof data?.accessToken !== "string" || !data.accessToken)
+      if (
+        res.status < 200 ||
+        res.status >= 300 ||
+        typeof data?.accessToken !== "string" ||
+        !data.accessToken
+      )
         throw new SignozError(
           "auth_failed",
           `the SigNoz session expired and could not be renewed (${res.status}): sign in to SigNoz and save a new access and refresh token`,
         );
       cfg.accessToken = data.accessToken;
-      if (typeof data.refreshToken === "string" && data.refreshToken) cfg.refreshToken = data.refreshToken;
+      if (typeof data.refreshToken === "string" && data.refreshToken)
+        cfg.refreshToken = data.refreshToken;
       if (session.current === cfg) await persist(cfg);
     })().finally(() => rotations.delete(refreshToken));
     rotations.set(refreshToken, pending);
@@ -180,7 +202,13 @@ async function rotateSession(cfg: SignozConfig, signal?: AbortSignal) {
   await pending;
 }
 
-async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal) {
+async function call(
+  cfg: SignozConfig,
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+) {
   const sessionAuth = authOf(cfg) === "session";
   let res = await send(cfg, method, path, authHeaders(cfg), body, signal);
   if (res.status === 401 && sessionAuth) {
@@ -191,7 +219,9 @@ async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, bod
   if (res.status === 401)
     throw new SignozError(
       "auth_failed",
-      sessionAuth ? "the SigNoz session was rejected (401) after renewing it" : "the API key was rejected (401)",
+      sessionAuth
+        ? "the SigNoz session was rejected (401) after renewing it"
+        : "the API key was rejected (401)",
     );
   if (res.status === 403 || /authz_forbidden/.test(res.text))
     throw new SignozError(
@@ -201,10 +231,20 @@ async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, bod
         : `the API key's service account lacks permission (403)${detail ? `: ${detail}` : ""}; grant a read role such as signoz-viewer`,
     );
   if (res.status === 404 || res.status === 405)
-    throw new SignozError("unsupported_api", `${path} is not available on this SigNoz (${res.status}): v5 query_range is required`);
+    throw new SignozError(
+      "unsupported_api",
+      `${path} is not available on this SigNoz (${res.status}): v5 query_range is required`,
+    );
   if (res.status === 400 || res.status === 422)
     throw new SignozError("invalid_query", detail ?? `SigNoz rejected the query (${res.status})`);
-  if (res.status >= 500) throw new SignozError("server_error", detail ?? `SigNoz error ${res.status}`);
+  if (res.status === 429)
+    throw new SignozError(
+      "rate_limited",
+      "SigNoz is rate limiting requests (429)",
+      res.retryAfterMs,
+    );
+  if (res.status >= 500)
+    throw new SignozError("server_error", detail ?? `SigNoz error ${res.status}`);
   if (res.status < 200 || res.status >= 300)
     throw new SignozError("connection_failed", `unexpected SigNoz status ${res.status}`);
   try {
@@ -217,8 +257,12 @@ async function call(cfg: SignozConfig, method: "GET" | "POST", path: string, bod
 function current(): SignozConfig {
   const c = session.current;
   if (!c || !hasCredentials(c))
-    throw new SignozError("not_configured", "SigNoz is not configured: add your domain and credentials in Integrations");
-  if (!c.enabled) throw new SignozError("not_configured", "SigNoz is disabled in your Integrations settings");
+    throw new SignozError(
+      "not_configured",
+      "SigNoz is not configured: add your domain and credentials in Integrations",
+    );
+  if (!c.enabled)
+    throw new SignozError("not_configured", "SigNoz is disabled in your Integrations settings");
   return c;
 }
 
@@ -230,10 +274,17 @@ async function probe(cfg: SignozConfig, signal?: AbortSignal) {
       await call(cfg, "GET", "/api/v1/service_accounts/me", undefined, signal);
     } catch (e) {
       // Versions without the service-account endpoint still answer query_range; only auth failures stop here.
-      if (!(e instanceof SignozError) || !["unsupported_api", "server_error"].includes(e.kind)) throw e;
+      if (!(e instanceof SignozError) || !["unsupported_api", "server_error"].includes(e.kind))
+        throw e;
     }
   const end = Date.now();
-  await call(cfg, "POST", "/api/v5/query_range", logsAggregate({ start: end - 60_000, end }, {}, [], "count()", 1), signal);
+  await call(
+    cfg,
+    "POST",
+    "/api/v5/query_range",
+    logsAggregate({ start: end - 60_000, end }, {}, [], "count()", 1),
+    signal,
+  );
   return { latency_ms: Date.now() - began };
 }
 
@@ -255,7 +306,8 @@ export async function testSignoz(signal?: AbortSignal) {
 const secretInput = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
 function checkSecret(value: string, what: string, max: number) {
-  if (/\s/.test(value) || value.length > max) throw new SignozError("auth_failed", `the ${what} format is invalid`);
+  if (/\s/.test(value) || value.length > max)
+    throw new SignozError("auth_failed", `the ${what} format is invalid`);
 }
 
 /**
@@ -273,9 +325,13 @@ export async function saveSignoz(input: {
   const prior = session.current;
   let url: URL;
   try {
-    url = validateBaseUrl(String(input.baseUrl ?? prior?.baseUrl ?? ""), config.signoz.allowedInternalHosts);
+    url = validateBaseUrl(
+      String(input.baseUrl ?? prior?.baseUrl ?? ""),
+      config.signoz.allowedInternalHosts,
+    );
   } catch (e) {
-    if (e instanceof BlockedDestinationError) throw new SignozError("blocked_destination", e.message);
+    if (e instanceof BlockedDestinationError)
+      throw new SignozError("blocked_destination", e.message);
     throw e;
   }
   const auth: SignozAuth =
@@ -349,28 +405,39 @@ const quote = (v: string | number) => `'${String(v).replace(/\\/g, "\\\\").repla
 /** A free filter expression: bounded, single statement, balanced quotes. SigNoz parses and validates it further. */
 export function checkExpression(expr: string) {
   const e = expr.trim();
-  if (e.length > 1000) throw new SignozError("invalid_query", "filter expression is longer than 1000 characters");
-  if (/[;`]/.test(e)) throw new SignozError("invalid_query", "filter expression may not contain ; or backticks");
+  if (e.length > 1000)
+    throw new SignozError("invalid_query", "filter expression is longer than 1000 characters");
+  if (/[;`]/.test(e))
+    throw new SignozError("invalid_query", "filter expression may not contain ; or backticks");
   const quotes = (e.replace(/\\./g, "").match(/'/g) ?? []).length;
   if (quotes % 2) throw new SignozError("invalid_query", "filter expression has unbalanced quotes");
   return e;
 }
 
-export function filterExpression(signal: "logs" | "traces" | "metrics", f: Filters, requestIdKeys: string[] = []) {
+export function filterExpression(
+  signal: "logs" | "traces" | "metrics",
+  f: Filters,
+  requestIdKeys: string[] = [],
+) {
   const parts: string[] = [];
   if (f.service) parts.push(`service.name = ${quote(f.service)}`);
   if (f.environment) parts.push(`deployment.environment = ${quote(f.environment)}`);
-  if (f.severity && signal === "logs") parts.push(`severity_text = ${quote(f.severity.toUpperCase())}`);
+  if (f.severity && signal === "logs")
+    parts.push(`severity_text = ${quote(f.severity.toUpperCase())}`);
   if (f.operation && signal === "traces") parts.push(`name = ${quote(f.operation)}`);
   if (f.trace_id) parts.push(`trace_id = ${quote(f.trace_id)}`);
   if (f.span_id) parts.push(`span_id = ${quote(f.span_id)}`);
   if (f.request_id) {
     if (!requestIdKeys.length)
-      throw new SignozError("invalid_query", "no request id attribute is recorded on spans in this SigNoz");
+      throw new SignozError(
+        "invalid_query",
+        "no request id attribute is recorded on spans in this SigNoz",
+      );
     parts.push(`(${requestIdKeys.map((k) => `${k} = ${quote(f.request_id!)}`).join(" OR ")})`);
   }
   if (f.has_error !== undefined && signal === "traces") parts.push(`has_error = ${f.has_error}`);
-  if (f.status_code !== undefined && signal === "traces") parts.push(`response_status_code = ${quote(f.status_code)}`);
+  if (f.status_code !== undefined && signal === "traces")
+    parts.push(`response_status_code = ${quote(f.status_code)}`);
   if (f.expression?.trim()) parts.push(`(${checkExpression(f.expression)})`);
   return parts.join(" AND ");
 }
@@ -383,11 +450,14 @@ export function resolveWindow(
 ): Window {
   const parse = (s: string, name: string) => {
     const t = Date.parse(s);
-    if (!Number.isFinite(t)) throw new SignozError("invalid_query", `${name} must be an ISO-8601 time with offset`);
+    if (!Number.isFinite(t))
+      throw new SignozError("invalid_query", `${name} must be an ISO-8601 time with offset`);
     return t;
   };
   const end = input.latest ? parse(input.latest, "latest") : now;
-  let start = input.earliest ? parse(input.earliest, "earliest") : end - (input.since_minutes ?? defaultMinutes) * 60_000;
+  let start = input.earliest
+    ? parse(input.earliest, "earliest")
+    : end - (input.since_minutes ?? defaultMinutes) * 60_000;
   if (start >= end) throw new SignozError("invalid_query", "earliest must be before latest");
   start = Math.max(start, end - config.signoz.maxMinutes * 60_000);
   return { start, end };
@@ -396,14 +466,26 @@ export function resolveWindow(
 export const clampLimit = (n?: number) =>
   Math.max(1, Math.min(config.signoz.maxLimit, Math.floor(n ?? config.signoz.defaultLimit)));
 
-const groupKey = (name: string) => (name === "service.name" ? { name, fieldContext: "resource" } : { name });
+const groupKey = (name: string) =>
+  name === "service.name" ? { name, fieldContext: "resource" } : { name };
 
-function envelope(w: Window, requestType: "raw" | "scalar" | "time_series", spec: Record<string, unknown>) {
+function envelope(
+  w: Window,
+  requestType: "raw" | "scalar" | "time_series",
+  spec: Record<string, unknown>,
+) {
   return {
     start: w.start,
     end: w.end,
     requestType,
-    compositeQuery: { queries: [{ type: "builder_query", spec: { name: "A", disabled: false, ...spec } as Record<string, unknown> }] },
+    compositeQuery: {
+      queries: [
+        {
+          type: "builder_query",
+          spec: { name: "A", disabled: false, ...spec } as Record<string, unknown>,
+        },
+      ],
+    },
   };
 }
 
@@ -430,7 +512,10 @@ export function logsAggregate(
   timeSeries = false,
 ) {
   if (!/^[a-z_0-9]+\([\w.]*\)$/i.test(aggregation))
-    throw new SignozError("invalid_query", "aggregation must look like count(), count_distinct(field), avg(field), p95(field)");
+    throw new SignozError(
+      "invalid_query",
+      "aggregation must look like count(), count_distinct(field), avg(field), p95(field)",
+    );
   return envelope(w, timeSeries ? "time_series" : "scalar", {
     signal: "logs",
     stepInterval: stepFor(w),
@@ -454,7 +539,14 @@ export const TRACE_FIELDS = [
   "status_message",
 ];
 
-export function tracesSearch(w: Window, f: Filters, limit?: number, offset = 0, ascending = false, requestIdKeys: string[] = []) {
+export function tracesSearch(
+  w: Window,
+  f: Filters,
+  limit?: number,
+  offset = 0,
+  ascending = false,
+  requestIdKeys: string[] = [],
+) {
   return envelope(w, "raw", {
     signal: "traces",
     selectFields: [...TRACE_FIELDS, ...requestIdKeys].map((name) => ({ name })),
@@ -470,10 +562,17 @@ export const traceById = (w: Window, traceId: string, requestIdKeys: string[] = 
 
 export function metricsQuery(
   w: Window,
-  m: { metric: string; time_aggregation?: string; space_aggregation?: string; group_by?: string[]; step_seconds?: number },
+  m: {
+    metric: string;
+    time_aggregation?: string;
+    space_aggregation?: string;
+    group_by?: string[];
+    step_seconds?: number;
+  },
   f: Filters,
 ) {
-  if (!/^[\w.:-]{1,200}$/.test(m.metric)) throw new SignozError("invalid_query", "invalid metric name");
+  if (!/^[\w.:-]{1,200}$/.test(m.metric))
+    throw new SignozError("invalid_query", "invalid metric name");
   return envelope(w, "time_series", {
     signal: "metrics",
     stepInterval: Math.max(60, m.step_seconds ?? stepFor(w)),
@@ -513,7 +612,8 @@ type SignozResult = {
   columns?: Array<{ name?: string }>;
   data?: unknown[][];
 };
-type SignozResponse = { data?: { data?: { results?: SignozResult[] }; results?: SignozResult[] } } | null | undefined;
+type SignozResponse =
+  { data?: { data?: { results?: SignozResult[] }; results?: SignozResult[] } } | null | undefined;
 
 const resultsOf = (json: unknown): SignozResult[] => {
   const d = (json as SignozResponse)?.data;
@@ -558,7 +658,9 @@ export function parseTimeSeries(json: unknown, maxSeries = 50, maxPoints = 120) 
         total++;
         if (series.length >= maxSeries) continue;
         const labels: Record<string, string> = {};
-        for (const l of s?.labels ?? []) labels[String((typeof l?.key === "object" ? l.key?.name : undefined) ?? l?.key ?? "")] = String(l?.value ?? "");
+        for (const l of s?.labels ?? [])
+          labels[String((typeof l?.key === "object" ? l.key?.name : undefined) ?? l?.key ?? "")] =
+            String(l?.value ?? "");
         const values = (s?.values ?? [])
           .map((v) => [Number(v?.timestamp), Number(v?.value)] as [number, number])
           .filter(([t, v]: [number, number]) => Number.isFinite(t) && Number.isFinite(v));
@@ -583,10 +685,16 @@ export function parseScalar(json: unknown, maxRows = 200) {
   const r: SignozResult = resultsOf(json)[0] ?? {};
   const columns: string[] = (r.columns ?? []).map((c) => String(c?.name ?? ""));
   const data: unknown[][] = r.data ?? [];
-  return { columns, rows: data.slice(0, maxRows), total_rows: data.length, truncated: data.length > maxRows };
+  return {
+    columns,
+    rows: data.slice(0, maxRows),
+    total_rows: data.length,
+    truncated: data.length > maxRows,
+  };
 }
 
-const EMPTY = "no telemetry returned for this query and window — absence of data is not evidence that the service is healthy";
+const EMPTY =
+  "no telemetry returned for this query and window — absence of data is not evidence that the service is healthy";
 
 // ---------------------------------------------------------------- budgeted, recorded calls (one row per call)
 
@@ -600,13 +708,22 @@ async function checkBudget(scope: SearchScope) {
     [scope.runId, scope.stepKey ?? null],
   );
   if ((used?.run ?? 0) >= config.splunk.queryBudget)
-    throw new SignozError("budget_exhausted", `query budget exhausted: this run already ran ${used!.run} log/telemetry queries (limit ${config.splunk.queryBudget})`);
+    throw new SignozError(
+      "budget_exhausted",
+      `query budget exhausted: this run already ran ${used!.run} log/telemetry queries (limit ${config.splunk.queryBudget})`,
+    );
   if ((used?.step ?? 0) >= config.signoz.maxCallsPerStep)
-    throw new SignozError("budget_exhausted", `this step already made ${used!.step} SigNoz calls (limit ${config.signoz.maxCallsPerStep}); narrow with the evidence collected`);
+    throw new SignozError(
+      "budget_exhausted",
+      `this step already made ${used!.step} SigNoz calls (limit ${config.signoz.maxCallsPerStep}); narrow with the evidence collected`,
+    );
 }
 
 const describe = (body: ReturnType<typeof envelope>) =>
-  `signoz ${body.requestType} ${JSON.stringify(body.compositeQuery.queries[0].spec)}`.slice(0, 4000);
+  `signoz ${body.requestType} ${JSON.stringify(body.compositeQuery.queries[0].spec)}`.slice(
+    0,
+    4000,
+  );
 
 async function run(body: ReturnType<typeof envelope>, scope: SearchScope, signal?: AbortSignal) {
   const cfg = current();
@@ -614,13 +731,21 @@ async function run(body: ReturnType<typeof envelope>, scope: SearchScope, signal
   return call(cfg, "POST", "/api/v5/query_range", body, signal);
 }
 
-const record = (body: ReturnType<typeof envelope>, rows: Array<Record<string, unknown>>, scope: SearchScope, note?: string) =>
+const record = (
+  body: ReturnType<typeof envelope>,
+  rows: Array<Record<string, unknown>>,
+  scope: SearchScope,
+  note?: string,
+) =>
   storeExternalSearch(
     { source: "signoz", query: describe(body), earliest: body.start, latest: body.end, rows, note },
     scope,
   );
 
-function toEvent(row: { timestamp: string; data: Record<string, unknown> }, signal: "logs" | "traces") {
+function toEvent(
+  row: { timestamp: string; data: Record<string, unknown> },
+  signal: "logs" | "traces",
+) {
   const d = row.data;
   const durationMs = d.duration_nano != null ? Math.round(Number(d.duration_nano) / 1e6) : null;
   const message =
@@ -647,7 +772,11 @@ async function requestIdKeys(): Promise<string[]> {
   if (hit && Date.now() - hit.at < 3_600_000) return hit.keys;
   let keys: string[] = [];
   try {
-    const json = (await call(cfg, "GET", "/api/v1/fields/keys?signal=traces&searchText=request&limit=50")) as {
+    const json = (await call(
+      cfg,
+      "GET",
+      "/api/v1/fields/keys?signal=traces&searchText=request&limit=50",
+    )) as {
       data?: { keys?: Record<string, unknown> };
     };
     keys = Object.keys(json.data?.keys ?? {})
@@ -672,7 +801,12 @@ const epochMs = (iso: string) => {
  * Time inside a span during which none of its child spans ran: uninstrumented work (an untraced call, a lock or
  * sleep, CPU). Only gaps of at least max(minMs, minShare of the parent) count; largest first.
  */
-export function traceGaps(rows: Array<{ timestamp: string; data: Record<string, unknown> }>, refs: string[], minMs = 50, minShare = 0.1) {
+export function traceGaps(
+  rows: Array<{ timestamp: string; data: Record<string, unknown> }>,
+  refs: string[],
+  minMs = 50,
+  minShare = 0.1,
+) {
   const spans: Span[] = rows.map((r, i) => {
     const start = epochMs(r.timestamp);
     return {
@@ -685,8 +819,16 @@ export function traceGaps(rows: Array<{ timestamp: string; data: Record<string, 
   });
   const t0 = Math.min(...spans.map((x) => x.start));
   const children = new Map<string, Span[]>();
-  for (const x of spans) if (x.parent) children.set(x.parent, [...(children.get(x.parent) ?? []), x]);
-  const gaps: Array<{ in: string; after: string | null; before: string | null; gap_ms: number; at_ms: number; share: number }> = [];
+  for (const x of spans)
+    if (x.parent) children.set(x.parent, [...(children.get(x.parent) ?? []), x]);
+  const gaps: Array<{
+    in: string;
+    after: string | null;
+    before: string | null;
+    gap_ms: number;
+    at_ms: number;
+    share: number;
+  }> = [];
   for (const p of spans) {
     const kids = (children.get(p.id) ?? []).sort((a, b) => a.start - b.start);
     if (!kids.length) continue;
@@ -721,13 +863,23 @@ async function rawQuery(
   signal: "logs" | "traces",
   scope: SearchScope,
   abort?: AbortSignal,
-  analyze?: (rows: Array<{ timestamp: string; data: Record<string, unknown> }>, refs: string[]) => Record<string, unknown>,
+  analyze?: (
+    rows: Array<{ timestamp: string; data: Record<string, unknown> }>,
+    refs: string[],
+  ) => Record<string, unknown>,
 ) {
   const json = await run(body, scope, abort);
   const { rows, nextCursor } = parseRaw(json);
   const spec = body.compositeQuery.queries[0].spec as { limit: number; offset: number };
-  const stored = await record(body, rows.map((r) => toEvent(r, signal)), scope, rows.length ? undefined : EMPTY);
-  const refs = ((stored as { events?: Array<{ event_ref: string }> }).events ?? []).map((e) => e.event_ref);
+  const stored = await record(
+    body,
+    rows.map((r) => toEvent(r, signal)),
+    scope,
+    rows.length ? undefined : EMPTY,
+  );
+  const refs = ((stored as { events?: Array<{ event_ref: string }> }).events ?? []).map(
+    (e) => e.event_ref,
+  );
   return {
     provider: "signoz",
     signal,
@@ -738,18 +890,41 @@ async function rawQuery(
 }
 
 export const searchLogs = (
-  a: Filters & { since_minutes?: number; earliest?: string; latest?: string; limit?: number; offset?: number },
+  a: Filters & {
+    since_minutes?: number;
+    earliest?: string;
+    latest?: string;
+    limit?: number;
+    offset?: number;
+  },
   scope: SearchScope,
 ) => rawQuery(logsSearch(resolveWindow(a), a, a.limit, a.offset ?? 0), "logs", scope);
 
 export const searchTraces = async (
-  a: Filters & { since_minutes?: number; earliest?: string; latest?: string; limit?: number; offset?: number },
+  a: Filters & {
+    since_minutes?: number;
+    earliest?: string;
+    latest?: string;
+    limit?: number;
+    offset?: number;
+  },
   scope: SearchScope,
-) => rawQuery(tracesSearch(resolveWindow(a), a, a.limit, a.offset ?? 0, false, await requestIdKeys()), "traces", scope);
+) =>
+  rawQuery(
+    tracesSearch(resolveWindow(a), a, a.limit, a.offset ?? 0, false, await requestIdKeys()),
+    "traces",
+    scope,
+  );
 
 /** Every span of one trace (by trace_id, or the trace a request_id belongs to) with its untraced gaps. */
 export async function getTrace(
-  a: { trace_id?: string; request_id?: string; since_minutes?: number; earliest?: string; latest?: string },
+  a: {
+    trace_id?: string;
+    request_id?: string;
+    since_minutes?: number;
+    earliest?: string;
+    latest?: string;
+  },
   scope: SearchScope,
 ) {
   const w = resolveWindow(a, 24 * 60);
@@ -758,21 +933,42 @@ export async function getTrace(
   let others: string[] = [];
   if (!traceId) {
     if (!a.request_id) throw new SignozError("invalid_query", "pass trace_id or request_id");
-    const found = parseRaw(await run(tracesSearch(w, { request_id: a.request_id }, 20, 0, false, keys), scope)).rows;
+    const found = parseRaw(
+      await run(tracesSearch(w, { request_id: a.request_id }, 20, 0, false, keys), scope),
+    ).rows;
     const ids = [...new Set(found.map((r) => String(r.data.trace_id ?? "")).filter(Boolean))];
-    if (!ids.length) throw new SignozError("invalid_query", `no span carries request id ${a.request_id} in this window`);
+    if (!ids.length)
+      throw new SignozError(
+        "invalid_query",
+        `no span carries request id ${a.request_id} in this window`,
+      );
     [traceId, ...others] = ids;
   }
-  const result = await rawQuery(traceById(w, traceId, keys), "traces", scope, undefined, (rows, refs) => ({
-    gaps: traceGaps(rows, refs),
-  }));
+  const result = await rawQuery(
+    traceById(w, traceId, keys),
+    "traces",
+    scope,
+    undefined,
+    (rows, refs) => ({
+      gaps: traceGaps(rows, refs),
+    }),
+  );
   return { ...result, trace_id: traceId, ...(others.length ? { other_trace_ids: others } : {}) };
 }
 
-async function inline(body: ReturnType<typeof envelope>, scope: SearchScope, parse: (json: unknown) => { empty: boolean } & Record<string, unknown>) {
+async function inline(
+  body: ReturnType<typeof envelope>,
+  scope: SearchScope,
+  parse: (json: unknown) => { empty: boolean } & Record<string, unknown>,
+) {
   const json = await run(body, scope);
   const parsed = parse(json);
-  const stored = await record(body, [], scope, parsed.empty ? EMPTY : "aggregate result returned inline");
+  const stored = await record(
+    body,
+    [],
+    scope,
+    parsed.empty ? EMPTY : "aggregate result returned inline",
+  );
   return {
     provider: "signoz",
     search_id: stored.search_id,
@@ -784,20 +980,41 @@ async function inline(body: ReturnType<typeof envelope>, scope: SearchScope, par
 }
 
 export const aggregateLogs = (
-  a: Filters & { since_minutes?: number; earliest?: string; latest?: string; group_by?: string[]; aggregation?: string; limit?: number; time_series?: boolean },
+  a: Filters & {
+    since_minutes?: number;
+    earliest?: string;
+    latest?: string;
+    group_by?: string[];
+    aggregation?: string;
+    limit?: number;
+    time_series?: boolean;
+  },
   scope: SearchScope,
 ) =>
-  inline(logsAggregate(resolveWindow(a), a, a.group_by, a.aggregation, a.limit, a.time_series), scope, (json) => {
-    if (a.time_series) {
-      const t = parseTimeSeries(json);
-      return { ...t, empty: !t.series.length };
-    }
-    const s = parseScalar(json);
-    return { ...s, empty: !s.rows.length };
-  });
+  inline(
+    logsAggregate(resolveWindow(a), a, a.group_by, a.aggregation, a.limit, a.time_series),
+    scope,
+    (json) => {
+      if (a.time_series) {
+        const t = parseTimeSeries(json);
+        return { ...t, empty: !t.series.length };
+      }
+      const s = parseScalar(json);
+      return { ...s, empty: !s.rows.length };
+    },
+  );
 
 export const queryMetrics = (
-  a: Filters & { metric: string; time_aggregation?: string; space_aggregation?: string; group_by?: string[]; step_seconds?: number; since_minutes?: number; earliest?: string; latest?: string },
+  a: Filters & {
+    metric: string;
+    time_aggregation?: string;
+    space_aggregation?: string;
+    group_by?: string[];
+    step_seconds?: number;
+    since_minutes?: number;
+    earliest?: string;
+    latest?: string;
+  },
   scope: SearchScope,
 ) =>
   inline(metricsQuery(resolveWindow(a), a, a), scope, (json) => {
@@ -805,7 +1022,10 @@ export const queryMetrics = (
     return { ...t, empty: !t.series.length };
   });
 
-export const listServices = (a: { since_minutes?: number; earliest?: string; latest?: string }, scope: SearchScope) =>
+export const listServices = (
+  a: { since_minutes?: number; earliest?: string; latest?: string },
+  scope: SearchScope,
+) =>
   inline(listServicesQuery(resolveWindow(a, 60)), scope, (json) => {
     const s = parseScalar(json);
     return {
@@ -817,10 +1037,16 @@ export const listServices = (a: { since_minutes?: number; earliest?: string; lat
 
 // ---------------------------------------------------------------- production error scan (platform-run, no agent budget)
 
-const anyOf = (key: string, values: string[]) => `(${values.map((v) => `${key} = ${quote(v)}`).join(" OR ")})`;
+const anyOf = (key: string, values: string[]) =>
+  `(${values.map((v) => `${key} = ${quote(v)}`).join(" OR ")})`;
 
 /** Span fields an error group is keyed by; the namespace field is `config.signoz.namespaceKey` (default below). */
-export const SPAN_GROUP_KEYS = ["service.name", "name", "status_message", "response_status_code"] as const;
+export const SPAN_GROUP_KEYS = [
+  "service.name",
+  "name",
+  "status_message",
+  "response_status_code",
+] as const;
 const SPAN_GROUP_LIMIT = 300;
 
 export interface SpanErrorGroup {
@@ -838,7 +1064,9 @@ const spanFilter = (namespaces: string[]) => {
   const nsKey = config.signoz.namespaceKey || "deployment.environment";
   return {
     nsKey,
-    expression: ["has_error = true", ...(namespaces.length ? [anyOf(nsKey, namespaces)] : [])].join(" AND "),
+    expression: ["has_error = true", ...(namespaces.length ? [anyOf(nsKey, namespaces)] : [])].join(
+      " AND ",
+    ),
   };
 };
 
@@ -871,18 +1099,22 @@ export async function signozErrorSpanGroups(
     query(envelope(w, "scalar", spec)),
     query(envelope(w, "time_series", { ...spec, stepInterval: 3600 })),
     query(envelope(baseline, "scalar", spec)),
-    query(envelope(baseline, "scalar", {
-      signal: "traces",
-      aggregations: [{ expression: "count()", alias: "value" }],
-      ...(scope ? { filter: { expression: scope } } : {}),
-      limit: 1,
-    })),
-    query(envelope(w, "raw", {
-      signal: "traces",
-      filter: { expression },
-      order: [{ key: { name: "timestamp" }, direction: "desc" }],
-      limit: Math.min(200, config.signoz.maxLimit),
-    })),
+    query(
+      envelope(baseline, "scalar", {
+        signal: "traces",
+        aggregations: [{ expression: "count()", alias: "value" }],
+        ...(scope ? { filter: { expression: scope } } : {}),
+        limit: 1,
+      }),
+    ),
+    query(
+      envelope(w, "raw", {
+        signal: "traces",
+        filter: { expression },
+        order: [{ key: { name: "timestamp" }, direction: "desc" }],
+        limit: Math.min(200, config.signoz.maxLimit),
+      }),
+    ),
   ]);
   const label = (get: (k: string) => unknown) => ({
     ns: String(get(nsKey) ?? ""),
@@ -891,18 +1123,25 @@ export async function signozErrorSpanGroups(
     status: String(get("status_message") ?? ""),
     code: String(get("response_status_code") ?? ""),
   });
-  const id = (g: ReturnType<typeof label>) => [g.ns, g.service, g.name, g.status, g.code].join("\u0000");
+  const id = (g: ReturnType<typeof label>) =>
+    [g.ns, g.service, g.name, g.status, g.code].join("\u0000");
   const hourly = new Map<string, Array<[number, number]>>();
   for (const s of parseTimeSeries(series, SPAN_GROUP_LIMIT, 10_000).series)
     hourly.set(
       id(label((k) => s.labels[k])),
-      s.points.filter(([, n]) => n > 0).map(([t, n]): [number, number] => [Math.floor(t / 1000 / 3600) * 3600, n]),
+      s.points
+        .filter(([, n]) => n > 0)
+        .map(([t, n]): [number, number] => [Math.floor(t / 1000 / 3600) * 3600, n]),
     );
   const groups = (json: unknown, withHourly: boolean): SpanErrorGroup[] => {
     const sc = parseScalar(json, SPAN_GROUP_LIMIT);
     return sc.rows.map((r) => {
       const g = label((k) => r[sc.columns.indexOf(k)]);
-      return { ...g, count: Number(r.at(-1)) || 0, hourly: withHourly ? (hourly.get(id(g)) ?? []) : [] };
+      return {
+        ...g,
+        count: Number(r.at(-1)) || 0,
+        hourly: withHourly ? (hourly.get(id(g)) ?? []) : [],
+      };
     });
   };
   const today = groups(counts, true);
@@ -940,13 +1179,19 @@ export async function signozSlowRequestGroups(
 ) {
   const cfg = current();
   const nsKey = config.signoz.namespaceKey || "deployment.environment";
-  const roots = ["parent_span_id = ''", ...(namespaces.length ? [anyOf(nsKey, namespaces)] : [])].join(" AND ");
+  const roots = [
+    "parent_span_id = ''",
+    ...(namespaces.length ? [anyOf(nsKey, namespaces)] : []),
+  ].join(" AND ");
   const nanos = Math.round(thresholdMs * 1e6);
   const spec = {
     signal: "traces",
-    aggregations: [`countIf(duration_nano > ${nanos})`, "count()", "p50(duration_nano)", "p95(duration_nano)"].map(
-      (expression, i) => ({ expression, alias: `a${i}` }),
-    ),
+    aggregations: [
+      `countIf(duration_nano > ${nanos})`,
+      "count()",
+      "p50(duration_nano)",
+      "p95(duration_nano)",
+    ].map((expression, i) => ({ expression, alias: `a${i}` })),
     filter: { expression: roots },
     groupBy: [nsKey, "service.name", "name"].map(groupKey),
     order: [{ key: { name: "a0" }, direction: "desc" }],
@@ -994,7 +1239,11 @@ export async function signozSlowRequestGroups(
 /** Untraced gaps of one trace, labelled "service span" (platform scan: no agent budget, nothing stored). */
 export async function signozTraceGaps(w: Window, traceId: string, signal?: AbortSignal) {
   const cfg = current();
-  const rows = parseRaw(await call(cfg, "POST", "/api/v5/query_range", traceById(w, traceId), signal)).rows;
-  const labels = rows.map((r) => `${String(r.data["service.name"] ?? "")} ${String(r.data.name ?? "")}`.trim());
+  const rows = parseRaw(
+    await call(cfg, "POST", "/api/v5/query_range", traceById(w, traceId), signal),
+  ).rows;
+  const labels = rows.map((r) =>
+    `${String(r.data["service.name"] ?? "")} ${String(r.data.name ?? "")}`.trim(),
+  );
   return traceGaps(rows, labels);
 }

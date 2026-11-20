@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { retryAfterMs } from "./safeHttp.ts";
 import { config } from "../config.ts";
 import { pool, q, one, json } from "../db/pool.ts";
 import { currentUserId } from "../auth/execution.ts";
@@ -175,7 +176,7 @@ async function call(
           ? `Splunk 403: tài khoản Splunk không có quyền cho thao tác này (${msg})`
           : `Splunk ${res.status}: ${msg}`,
       ),
-      { status: res.status },
+      { status: res.status, retryAfterMs: retryAfterMs(res.headers.get("retry-after")) },
     );
     throw err;
   }
@@ -922,7 +923,9 @@ function view(row: SearchRow, extra: Record<string, unknown> = {}, pageSize = 50
     duration_ms: row.duration_ms,
     ...(row.error ? { error: row.error } : {}),
     ...(row.messages?.length ? { messages: row.messages } : {}),
-    ...(row.mode === "argocd" || row.mode === "signoz" ? {} : { splunk_url: buildSearchUrl(row.query, e, l) }),
+    ...(row.mode === "argocd" || row.mode === "signoz"
+      ? {}
+      : { splunk_url: buildSearchUrl(row.query, e, l) }),
     events,
     ...((row.events?.length ?? 0) > pageSize || row.truncated
       ? {
@@ -1263,7 +1266,10 @@ export async function searchStatus(searchId: number, scope: SearchScope = {}) {
   } catch (e) {
     return {
       ...base,
-      job: (e as { status?: number }).status === 404 ? "expired" : `unavailable: ${(e as Error).message}`,
+      job:
+        (e as { status?: number }).status === 404
+          ? "expired"
+          : `unavailable: ${(e as Error).message}`,
     };
   }
 }

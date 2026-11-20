@@ -528,6 +528,11 @@ export interface Config {
     timeoutSeconds: number;
     /** A request (root span) slower than this is counted in a SigNoz latency group; 0 disables latency groups. */
     slowThresholdMs: number;
+    /**
+     * Which engine runs queued scans (ADR 0004): "typescript" (this process) or "go" (platform-go claims them and
+     * reaches Splunk/SigNoz through this process's internal gateway). Set by PROD_ERRORS_ENGINE.
+     */
+    engine: "typescript" | "go";
   };
   jira: {
     /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
@@ -754,6 +759,7 @@ const defaults: Config = {
     schedule: ["09:00", "14:00", "17:00"],
     timeoutSeconds: 1800,
     slowThresholdMs: 1000,
+    engine: "typescript",
   },
   learning: {
     detectChanges: true,
@@ -897,6 +903,10 @@ function load(): Config {
     "analytics.maxFallbackConcurrency",
     cfg.analytics.maxFallbackConcurrency,
   );
+  if (process.env.PROD_ERRORS_ENGINE)
+    cfg.prodErrors.engine = process.env.PROD_ERRORS_ENGINE as Config["prodErrors"]["engine"];
+  if (!["typescript", "go"].includes(cfg.prodErrors.engine))
+    throw new Error("PROD_ERRORS_ENGINE must be typescript or go");
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)

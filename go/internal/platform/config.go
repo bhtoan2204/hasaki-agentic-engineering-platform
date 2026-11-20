@@ -28,9 +28,15 @@ type Config struct {
 	// Analytics statements running at once: the size of the separate read-only analytics pool.
 	AnalyticsMaxConcurrent int
 	AnalyticsTimeout       time.Duration
-	OTLPEndpointIsSet      bool
-	remoteAuthorized       bool
-	allowNonLoopback       bool
+	// Production error scans (ADR 0004): run here when ProdErrorsEngine is "go". InternalURL is the supervising
+	// platform server, whose gateway performs every provider read.
+	ProdErrorsEngine  string
+	InternalURL       string
+	ProdScanWorkers   int
+	ProdScanPoll      time.Duration
+	OTLPEndpointIsSet bool
+	remoteAuthorized  bool
+	allowNonLoopback  bool
 }
 
 // ModelID identifies an embedding space: vectors are only comparable within one model id.
@@ -89,9 +95,22 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		IndexJobs:              num("CODE_INDEX_JOBS", 1, 1, 8),
 		AnalyticsMaxConcurrent: num("ANALYTICS_MAX_CONCURRENT", 2, 1, 8),
 		AnalyticsTimeout:       time.Duration(num("ANALYTICS_TIMEOUT_MS", 15000, 100, 120000)) * time.Millisecond,
+		ProdErrorsEngine:       str("PROD_ERRORS_ENGINE", "typescript"),
+		InternalURL:            getenv("PLATFORM_INTERNAL_URL"),
+		ProdScanWorkers:        num("PROD_SCAN_WORKERS", 1, 1, 4),
+		ProdScanPoll:           time.Duration(num("PROD_SCAN_POLL_MS", 60000, 1000, 600000)) * time.Millisecond,
 		OTLPEndpointIsSet:      getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "",
 		remoteAuthorized:       getenv("EMBEDDING_REMOTE_AUTHORIZED") == "true",
 		allowNonLoopback:       flag("PLATFORM_GO_ALLOW_NONLOOPBACK", false),
+	}
+	switch c.ProdErrorsEngine {
+	case "typescript":
+	case "go":
+		if u, err := url.Parse(c.InternalURL); err != nil || u.Scheme != "http" || !isLoopback(u.Hostname()) {
+			errs = append(errs, errors.New("PROD_ERRORS_ENGINE=go needs PLATFORM_INTERNAL_URL, a loopback http URL of the platform server"))
+		}
+	default:
+		errs = append(errs, errors.New("PROD_ERRORS_ENGINE must be typescript or go"))
 	}
 	defaultURL := "http://127.0.0.1:11434"
 	if c.EmbeddingProvider == "openai" {

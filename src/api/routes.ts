@@ -108,6 +108,7 @@ import {
   startScan,
   type ScanPreset,
 } from "../prodErrors/scan.ts";
+import { cancelScan } from "../prodErrors/jobs.ts";
 import {
   adoptEnv,
   bitbucketStatus,
@@ -2407,6 +2408,15 @@ export const routes: Route[] = [
         to: body.to ? String(body.to) : undefined,
       })
     ),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/scans\/(\d+)\/cancel$/,
+    async ({ p, actor }) => {
+      requireAdmin(actor);
+      await audit(actor.id, "prod_errors.scan.cancel", "prod_error_scan", p[0]);
+      return cancelScan(Number(p[0]));
+    },
   ],
   [
     "GET",

@@ -2,7 +2,22 @@ import { createHash } from "node:crypto";
 import { execution } from "../auth/execution.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { config } from "../config.ts";
-import { pool, q, one, json, withTx } from "../db/pool.ts";
+import { pool, q, one, withTx, type Db } from "../db/pool.ts";
+import { currentUserId } from "../auth/execution.ts";
+import {
+  activeScan,
+  claimScan,
+  enqueueScan,
+  finishScan,
+  firstToday,
+  heartbeat,
+  initialProgress,
+  LEASE_SECONDS,
+  recoverScans,
+  windowOf,
+  type ScanJob,
+  type ScanTrigger,
+} from "./jobs.ts";
 import { settings } from "../db.ts";
 import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
 import {
@@ -71,133 +86,30 @@ export interface GroupRow {
   first_seen_at: string;
 }
 
-// ---------------------------------------------------------------- time window
+// ---------------------------------------------------------------- time window (src/prodErrors/window.ts)
 
-/** Local calendar day and seconds since local midnight of `d` in time zone `tz`. */
-export function zoned(d: Date, tz: string) {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: tz,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    })
-      .formatToParts(d)
-      .map((x) => [x.type, x.value]),
-  );
-  return {
-    date: `${p.year}-${p.month}-${p.day}`,
-    hm: `${p.hour}:${p.minute}`,
-    seconds: Number(p.hour) * 3600 + Number(p.minute) * 60 + Number(p.second),
-  };
-}
-
-/** Time presets offered by the page; "custom" takes explicit from/to. */
-export const SCAN_PRESETS = ["1h", "4h", "12h", "24h", "today", "yesterday", "custom"] as const;
-export type ScanPreset = (typeof SCAN_PRESETS)[number];
-export interface ScanOptions {
-  /** Subset of config.prodErrors.namespaces; empty/omitted = all. */
-  namespaces?: string[];
-  preset?: ScanPreset;
-  /** ISO timestamps, for preset "custom". */
-  from?: string;
-  to?: string;
-}
-/** Longest custom window: the window plus its baseline must stay inside Splunk's search limit. */
-export const MAX_CUSTOM_HOURS = 72;
-
-/**
- * Scan window and the baseline it is compared with, as epoch seconds. Windows up to 24h are compared with the same
- * window 24h earlier (time-of-day effects cancel out); longer ones with the period just before them.
- */
-export function scanWindow(
-  opts: Pick<ScanOptions, "preset" | "from" | "to"> = {},
-  now = new Date(),
-  tz = config.prodErrors.timezone,
-) {
-  const preset: ScanPreset = opts.preset ?? "today";
-  if (!SCAN_PRESETS.includes(preset))
-    throw Object.assign(new Error(`khung thời gian không hợp lệ: ${preset}`), { status: 400 });
-  const nowEpoch = Math.floor(now.getTime() / 1000);
-  const midnight = nowEpoch - zoned(now, tz).seconds;
-  let start: number, end: number;
-  if (preset === "today") {
-    start = midnight;
-    end = nowEpoch;
-  } else if (preset === "yesterday") {
-    start = midnight - 86400;
-    end = midnight;
-  } else if (preset === "custom") {
-    start = Math.floor(Date.parse(opts.from ?? "") / 1000);
-    end = Math.min(nowEpoch, Math.floor(Date.parse(opts.to ?? "") / 1000));
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
-      throw Object.assign(new Error("khung tuỳ chọn cần 'từ' trước 'đến' (và không ở tương lai)"), {
-        status: 400,
-      });
-    if (end - start > MAX_CUSTOM_HOURS * 3600)
-      throw Object.assign(new Error(`khung tuỳ chọn tối đa ${MAX_CUSTOM_HOURS} giờ`), {
-        status: 400,
-      });
-  } else {
-    start = nowEpoch - Number(preset.replace("h", "")) * 3600;
-    end = nowEpoch;
-  }
-  const shift = end - start <= 86400 ? 86400 : end - start;
-  const baseStart = start - shift;
-  if ((nowEpoch - baseStart) / 60 > config.splunk.maxMinutes)
-    throw Object.assign(
-      new Error(
-        "khung quá xa trong quá khứ: Splunk chỉ cho tìm trong 7 ngày gần nhất (gồm cả kỳ so sánh)",
-      ),
-      { status: 400 },
-    );
-  const ze = zoned(new Date((end - 1) * 1000), tz); // the last second inside the window (yesterday ends at midnight)
-  return {
-    preset,
-    compare: shift === 86400 ? ("yesterday" as const) : ("previous" as const),
-    day: ze.date,
-    hm: zoned(now, tz).hm,
-    start,
-    end,
-    now: nowEpoch,
-    baseStart,
-    baseEnd: end - shift,
-    /** Splunk search bounds (relative minutes) covering window + baseline. */
-    minutes: Math.ceil((nowEpoch - baseStart) / 60) + 1,
-    untilMinutes: Math.max(0, Math.floor((nowEpoch - end) / 60) - 1),
-  };
-}
-export type ScanWindow = ReturnType<typeof scanWindow>;
-
-/** Today (local) from midnight to now, and yesterday over the same time-of-day window, as epoch seconds. */
-export function dayWindow(now: Date, tz = config.prodErrors.timezone) {
-  const w = scanWindow({ preset: "today" }, now, tz);
-  return { ...w, yesterdayStart: w.baseStart, yesterdayEnd: w.baseEnd };
-}
-
-/** Splunk index holding a namespace's logs. */
-export function indexOf(namespace: string) {
-  return (
-    config.prodErrors.namespaces.find((n) => n.namespace === namespace)?.index ??
-    config.prodErrors.index
-  );
-}
-
-/** Configured namespaces, restricted to `wanted` when given (unknown names are rejected, not ignored). */
-export function scanNamespaces(wanted?: string[]) {
-  const all = config.prodErrors.namespaces;
-  if (!wanted?.length) return all;
-  const unknown = wanted.filter((n) => !all.some((x) => x.namespace === n));
-  if (unknown.length)
-    throw Object.assign(new Error(`namespace không có trong cấu hình: ${unknown.join(", ")}`), {
-      status: 400,
-    });
-  return all.filter((x) => wanted.includes(x.namespace));
-}
+export {
+  dayWindow,
+  indexOf,
+  MAX_CUSTOM_HOURS,
+  SCAN_PRESETS,
+  scanNamespaces,
+  scanWindow,
+  zoned,
+  type ScanOptions,
+  type ScanPreset,
+  type ScanWindow,
+} from "./window.ts";
+import {
+  dayWindow,
+  indexOf,
+  MAX_CUSTOM_HOURS,
+  SCAN_PRESETS,
+  scanNamespaces,
+  zoned,
+  type ScanOptions,
+  type ScanWindow,
+} from "./window.ts";
 
 // ---------------------------------------------------------------- search
 
@@ -420,14 +332,25 @@ export function signozRows(
   type G = SourceRow & { today: number; yesterday: number; hourly: Map<number, number> };
   const groups = new Map<string, G>();
   const keyOf = (g: SpanErrorGroup) => {
-    const sig = redactPii(signatureOf(`${g.name}${g.code ? ` [${g.code}]` : ""}`, g.status || undefined));
+    const sig = redactPii(
+      signatureOf(`${g.name}${g.code ? ` [${g.code}]` : ""}`, g.status || undefined),
+    );
     return { key: [g.ns, g.service, "ERROR", sig].join("\u0000"), sig };
   };
   const at = (g: SpanErrorGroup) => {
     const { key, sig } = keyOf(g);
     let row = groups.get(key);
     if (!row) {
-      row = { ns: g.ns, svc: g.service, lv: "ERROR", sig, today: 0, yesterday: 0, hourly: new Map(), sources: ["signoz"] };
+      row = {
+        ns: g.ns,
+        svc: g.service,
+        lv: "ERROR",
+        sig,
+        today: 0,
+        yesterday: 0,
+        hourly: new Map(),
+        sources: ["signoz"],
+      };
       if (!hasBaseline) row.no_baseline = true;
       groups.set(key, row);
     }
@@ -454,7 +377,12 @@ export function signozRows(
     const d = s.data;
     const time = Math.floor(Date.parse(s.timestamp) / 1000);
     for (const row of groups.values()) {
-      if (row.trace_id || row.svc !== text(d["service.name"]) || row.caller !== masked(text(d.name))) continue;
+      if (
+        row.trace_id ||
+        row.svc !== text(d["service.name"]) ||
+        row.caller !== masked(text(d.name))
+      )
+        continue;
       row.trace_id = text(d.trace_id);
       if (Number.isFinite(time)) row.last = Math.max(Number(row.last ?? 0), time);
       break;
@@ -574,10 +502,10 @@ export function mergeSourceRows(...sources: Array<{ source: ScanSource; rows: So
 
 // ---------------------------------------------------------------- scan
 
-let running: Promise<unknown> | null = null;
-export const scanning = () => !!running;
+/** Whether a scan is queued or running on any instance. */
+export const scanning = async () => !!(await activeScan());
 
-/** What the running scan is doing, for the page's progress bar. */
+/** What the running scan is doing, for the page's progress bar (stored on the scan row: every instance sees it). */
 export interface ScanProgress {
   phase: "connect" | "search" | "group" | "save" | "notify";
   /** 0–100 over the whole scan */
@@ -589,19 +517,75 @@ export interface ScanProgress {
   matched: number;
   startedAt: string;
 }
-let progress: ScanProgress | null = null;
-const setPhase = (phase: ScanProgress["phase"], pct: number) =>
-  progress && Object.assign(progress, { phase, pct: Math.max(progress.pct, pct) });
 
-/** Start a scan in the background (one at a time). Options are validated before anything starts. */
-export function startScan(trigger: "manual" | "schedule", opts: ScanOptions = {}) {
-  if (running) return { started: false, running: true };
-  scanWindow(opts);
-  scanNamespaces(opts.namespaces);
-  running = runScan(trigger, new Date(), opts)
-    .catch((e) => console.error("prod error scan:", (e as Error).message))
-    .finally(() => (running = null));
-  return { started: true, running: true };
+/** This instance's identity in scan leases. */
+const leaseOwner = () => `${config.instanceId}:${process.pid}`;
+
+/**
+ * Queue a scan (one at a time across all instances). Options are validated before anything is stored. The
+ * TypeScript engine runs it in this process; with PROD_ERRORS_ENGINE=go platform-go claims it.
+ */
+export async function startScan(
+  trigger: ScanTrigger,
+  opts: ScanOptions = {},
+  input: { requestedBy?: number | null; dedupeKey?: string } = {},
+) {
+  const requestedBy = input.requestedBy ?? currentUserId() ?? null;
+  const r = await enqueueScan(trigger, opts, { requestedBy, dedupeKey: input.dedupeKey });
+  if (r.started && r.job?.engine === "typescript") void runQueuedScans();
+  return { started: r.started, running: r.running, ...(r.job ? { scan_id: r.job.id } : {}) };
+}
+
+let draining: Promise<void> | null = null;
+/** Run every due TypeScript job this instance can claim (one at a time; the queue holds at most one anyway). */
+export function runQueuedScans() {
+  draining ??= (async () => {
+    try {
+      for (;;) {
+        const job = await claimScan(leaseOwner());
+        if (!job) return;
+        await executeClaimed(job).catch((e) =>
+          console.error("prod error scan:", (e as Error).message),
+        );
+      }
+    } finally {
+      draining = null;
+    }
+  })();
+  return draining;
+}
+
+/** Run a claimed job as the user who requested it, with that user's own integrations. */
+async function executeClaimed(job: ScanJob) {
+  const userId = job.requested_by;
+  if (!userId) return executeScan(job);
+  return execution.run({ userId, kind: "user" }, async () => {
+    const user = await one(pool, "SELECT active FROM users WHERE id = $1", [userId]);
+    if (!user?.active) {
+      await finishScan(job, {
+        status: "failed",
+        error: "the requesting user is missing or inactive",
+      });
+      return;
+    }
+    await loadPersonalIntegrations();
+    return executeScan(job);
+  });
+}
+
+/**
+ * Scan now in this process and wait for the result (tests, CLI): queued and claimed in one statement, so it still
+ * takes the global one-scan slot and the same fenced publication as a queued scan.
+ */
+export async function runScan(trigger: ScanTrigger, now = new Date(), opts: ScanOptions = {}) {
+  const r = await enqueueScan(trigger, opts, {
+    requestedBy: currentUserId() ?? null,
+    now,
+    engine: "typescript",
+    claimBy: leaseOwner(),
+  });
+  if (!r.job) throw Object.assign(new Error("một lượt quét khác đang chạy"), { status: 409 });
+  return executeScan(r.job);
 }
 
 /** Latency groups for the scan; the slowest few get their untraced gaps. Failures only add a note. */
@@ -618,17 +602,16 @@ async function slowRows(w: ScanWindow, ns: string[], hasBaseline: boolean, notes
     );
     const rows = signozSlowRows(slow.today, slow.yesterday, slow.samples, threshold);
     if (!hasBaseline) for (const r of rows) r.no_baseline = true;
-    for (const r of rows.sort((a, b) => Number(b.today) - Number(a.today)).slice(0, 5))
-      if (r.trace_id && r.slow)
-        r.slow.gaps = (await signozTraceGaps(win, r.trace_id).catch(() => []))
-          .slice(0, 3)
-          .map((g) => ({
-            in: masked(g.in) ?? "",
-            after: g.after && (masked(g.after) ?? null),
-            before: g.before && (masked(g.before) ?? null),
-            gap_ms: g.gap_ms,
-            share: g.share,
-          }));
+    // The five largest groups' gap analyses are independent trace reads: fetched concurrently.
+    const top = rows
+      .sort((a, b) => Number(b.today) - Number(a.today))
+      .slice(0, 5)
+      .filter((r) => r.trace_id && r.slow);
+    await Promise.all(
+      top.map(async (r) => {
+        r.slow!.gaps = maskGaps(await signozTraceGaps(win, r.trace_id!).catch(() => []));
+      }),
+    );
     return rows;
   } catch (e) {
     notes.push(`SigNoz (request chậm): ${(e as Error).message}`);
@@ -636,35 +619,87 @@ async function slowRows(w: ScanWindow, ns: string[], hasBaseline: boolean, notes
   }
 }
 
-export async function runScan(
-  trigger: "manual" | "schedule",
-  now = new Date(),
-  opts: ScanOptions = {},
-) {
-  const w = scanWindow(opts, now);
-  const namespaces = scanNamespaces(opts.namespaces);
-  const ts = (e: number) => new Date(e * 1000).toISOString();
-  const scan = (await one<{ id: number }>(
-    pool,
-    `INSERT INTO prod_error_scans (trigger, preset, namespaces, window_start, window_end, baseline_start, baseline_end)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-    [
-      trigger,
-      w.preset,
-      namespaces.map((n) => n.namespace),
-      ts(w.start),
-      ts(w.end),
-      ts(w.baseStart),
-      ts(w.baseEnd),
-    ],
-  ))!;
-  progress = {
-    phase: "connect",
-    pct: 2,
-    searchPct: 0,
-    scanned: 0,
-    matched: 0,
-    startedAt: new Date().toISOString(),
+/** The three largest untraced gaps of a trace, span names masked (shared with the gateway). */
+export const maskGaps = (gaps: Awaited<ReturnType<typeof signozTraceGaps>>) =>
+  gaps.slice(0, 3).map((g) => ({
+    in: masked(g.in) ?? "",
+    after: g.after && (masked(g.after) ?? null),
+    before: g.before && (masked(g.before) ?? null),
+    gap_ms: g.gap_ms,
+    share: g.share,
+  }));
+
+/** Groups of one scan, upserted only over groups no newer scan has written (a stale worker never wins). */
+export async function publishGroups(c: Db, scanId: number, groups: ReturnType<typeof toGroups>) {
+  if (!groups.length) return;
+  const rows = JSON.stringify(
+    groups.map((g) => ({ ...g, detail: g.detail, reasons: g.reasons, hourly: g.hourly })),
+  );
+  await q(
+    c,
+    `INSERT INTO prod_error_groups (fingerprint, namespace, service, level, caller, signature, sample, detail, day,
+       today_count, yesterday_count, first_at, last_at, severity, score, reasons, last_scan_id)
+     SELECT g.fingerprint, g.namespace, g.service, g.level, g.caller, g.signature, g.sample, g.detail, g.day,
+       g.today_count, g.yesterday_count, g.first_at, g.last_at, g.severity, g.score, g.reasons, $2
+     FROM jsonb_to_recordset($1::jsonb) AS g(fingerprint text, namespace text, service text, level text, caller text,
+       signature text, sample text, detail jsonb, day date, today_count int, yesterday_count int, first_at timestamptz,
+       last_at timestamptz, severity text, score int, reasons jsonb)
+     ON CONFLICT (fingerprint) DO UPDATE SET last_scan_id = excluded.last_scan_id, caller = excluded.caller,
+       sample = excluded.sample, detail = excluded.detail, day = excluded.day, today_count = excluded.today_count,
+       yesterday_count = excluded.yesterday_count, first_at = excluded.first_at, last_at = excluded.last_at,
+       severity = excluded.severity, score = excluded.score, reasons = excluded.reasons, updated_at = now()
+     WHERE prod_error_groups.last_scan_id IS NULL OR prod_error_groups.last_scan_id <= excluded.last_scan_id`,
+    [rows, scanId],
+  );
+  await q(
+    c,
+    `INSERT INTO prod_error_observations(scan_id,fingerprint,event_count,baseline_count,first_at,last_at,severity,hourly)
+     SELECT $2, g.fingerprint, g.today_count, g.yesterday_count, g.first_at, g.last_at, g.severity, g.hourly
+     FROM jsonb_to_recordset($1::jsonb) AS g(fingerprint text, today_count int, yesterday_count int,
+       first_at timestamptz, last_at timestamptz, severity text, hourly jsonb)
+     ON CONFLICT(scan_id,fingerprint) DO NOTHING`,
+    [rows, scanId],
+  );
+}
+
+class LeaseLost extends Error {}
+
+/**
+ * The TypeScript engine: collect from Splunk and SigNoz with the requesting user's integrations, group, publish
+ * under the fence, notify. A heartbeat keeps the lease and the shared progress; a lost lease stops the scan
+ * before anything is written, and a cancellation request ends it as canceled.
+ */
+export async function executeScan(job: ScanJob) {
+  const w = windowOf(job.request);
+  const trigger = job.trigger;
+  const namespaces = scanNamespaces(job.request.namespaces);
+  const progress = (job.progress as unknown as ScanProgress) ?? (initialProgress() as ScanProgress);
+  const setPhase = (phase: ScanProgress["phase"], pct: number) => {
+    Object.assign(progress, { phase, pct: Math.max(progress.pct, pct) });
+    lastWrite = 0;
+    publishProgress();
+  };
+  let lost = false;
+  let canceled = false;
+  const abort = new AbortController();
+  const beat = async () => {
+    const r = await heartbeat(job, progress).catch(() => undefined);
+    if (r === null) lost = true;
+    if (r?.cancel) canceled = true;
+    if (lost || canceled) abort.abort();
+  };
+  const timer = setInterval(() => void beat(), (LEASE_SECONDS * 1000) / 3);
+  timer.unref();
+  // Progress is shared through the row: written when it changes, at most every 200 ms (the page polls).
+  let lastWrite = 0;
+  const publishProgress = () => {
+    if (Date.now() - lastWrite < 200) return;
+    lastWrite = Date.now();
+    void beat();
+  };
+  const checkpoint = () => {
+    if (lost) throw new LeaseLost("scan lease lost");
+    if (canceled) throw new Error("canceled");
   };
   try {
     const useSplunk = splunkConnected();
@@ -683,26 +718,11 @@ export async function runScan(
           : "Splunk: chưa kết nối, chỉ quét SigNoz",
       );
     const signoz = useSignoz
-      ? (async () => {
-          const ns = namespaces.map((n) => n.namespace);
-          const spans = await signozErrorSpanGroups(
-            { start: w.start * 1000, end: w.end * 1000 },
-            { start: w.baseStart * 1000, end: w.baseEnd * 1000 },
-            ns,
-          );
-          if (spans.truncated)
-            notes.push(
-              "SigNoz: quá nhiều nhóm trace lỗi, chỉ lấy các nhóm nhiều nhất; các nhóm nhỏ có thể bị bỏ sót",
-            );
-          if (!spans.hasBaseline)
-            notes.push(
-              "SigNoz: chưa có trace của kỳ so sánh (hôm qua cùng khung giờ), các nhóm chỉ từ SigNoz không được đánh giá mới/tăng",
-            );
-          return {
-            errors: signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline),
-            slow: await slowRows(w, ns, spans.hasBaseline, notes),
-          };
-        })().catch((e) => {
+      ? collectSignoz(
+          w,
+          namespaces.map((n) => n.namespace),
+          notes,
+        ).catch((e) => {
           notes.push(`SigNoz: ${(e as Error).message}`);
           return null;
         })
@@ -717,7 +737,6 @@ export async function runScan(
             timeout_seconds: config.prodErrors.timeoutSeconds,
           },
           (p) => {
-            if (!progress) return;
             // the Splunk search is most of the wall time: 5% → 90%
             Object.assign(progress, {
               phase: "search",
@@ -727,6 +746,7 @@ export async function runScan(
               matched: p.matched,
               pct: Math.max(progress.pct, 5 + Math.round(p.pct * 0.85)),
             });
+            publishProgress();
           },
         ).catch((e) => {
           if (!useSignoz) throw e;
@@ -736,6 +756,7 @@ export async function runScan(
       : Promise.resolve(null);
     if (!useSplunk) setPhase("search", 30);
     const [r, signozResult] = await Promise.all([splunk, signoz]);
+    checkpoint();
     if (!r && !signozResult) throw new Error(notes.join("; ") || "không quét được nguồn log nào");
     setPhase("group", 92);
     const groups = toGroups(
@@ -752,75 +773,74 @@ export async function runScan(
     );
     setPhase("save", 95);
     await withTx(async (c) => {
-      for (const g of groups) {
-        await q(
-          c,
-          `INSERT INTO prod_error_groups (fingerprint, namespace, service, level, caller, signature, sample, detail, day, today_count, yesterday_count, first_at, last_at, severity, score, reasons, last_scan_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-           ON CONFLICT (fingerprint) DO UPDATE SET last_scan_id = excluded.last_scan_id, caller = excluded.caller, sample = excluded.sample, detail = excluded.detail, day = excluded.day,
-             today_count = excluded.today_count, yesterday_count = excluded.yesterday_count, first_at = excluded.first_at, last_at = excluded.last_at,
-             severity = excluded.severity, score = excluded.score, reasons = excluded.reasons, updated_at = now()`,
-          [
-            g.fingerprint,
-            g.namespace,
-            g.service,
-            g.level,
-            g.caller,
-            g.signature,
-            g.sample,
-            json(g.detail),
-            g.day,
-            g.today_count,
-            g.yesterday_count,
-            g.first_at,
-            g.last_at,
-            g.severity,
-            g.score,
-            json(g.reasons),
-            scan.id,
-          ],
-        );
-        await q(
-          c,
-          `INSERT INTO prod_error_observations(scan_id,fingerprint,event_count,baseline_count,first_at,last_at,severity,hourly)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(scan_id,fingerprint) DO NOTHING`,
-          [
-            scan.id,
-            g.fingerprint,
-            g.today_count,
-            g.yesterday_count,
-            g.first_at,
-            g.last_at,
-            g.severity,
-            json(g.hourly),
-          ],
-        );
-      }
+      // Fence: only the current lease holder publishes; the row lock orders it against recovery.
+      const owner = await one(
+        c,
+        "SELECT 1 FROM prod_error_scans WHERE id=$1 AND fencing_token=$2 AND status='running' FOR UPDATE",
+        [job.id, job.fencing_token],
+      );
+      if (!owner) throw new LeaseLost("scan lease lost before publishing");
+      await publishGroups(c, job.id, groups);
+      await q(c, "UPDATE prod_error_scans SET stage='published' WHERE id=$1", [job.id]);
     });
     const warnings =
       [...(r?.messages ?? []).filter((m: string) => !/^INFO/.test(m)), ...notes].join("; ") || null;
     setPhase("notify", 98);
-    const notified = trigger === "schedule" ? await notifyNew(w.day, w.hm) : 0;
-    // Policy-controlled intake (no-op without a policy): one envelope per group, never per log row.
-    await ingestProdErrorGroups().catch((e) => console.error("intake:", (e as Error).message));
-    await q(
-      pool,
-      "UPDATE prod_error_scans SET finished_at = now(), ok = true, groups = $2, events = $3, error = $4, notified = $5 WHERE id = $1",
-      [scan.id, groups.length, groups.reduce((a, g) => a + g.today_count, 0), warnings, notified],
-    );
+    const notified = await finalizeScan(job.id, trigger, w);
+    await finishScan(job, {
+      status: "succeeded",
+      error: warnings,
+      groups: groups.length,
+      events: groups.reduce((a, g) => a + g.today_count, 0),
+      notified,
+    });
     return { ok: true, groups: groups.length };
   } catch (e) {
-    const msg = (e as Error).message;
-    await q(
-      pool,
-      "UPDATE prod_error_scans SET finished_at = now(), ok = false, error = $2 WHERE id = $1",
-      [scan.id, msg],
-    );
-    if (trigger === "schedule") await notifyFailure(w.day, w.hm, msg);
+    if (e instanceof LeaseLost || lost) throw e; // the new owner decides; this worker writes nothing
+    const msg = canceled ? "canceled" : (e as Error).message;
+    if (await finishScan(job, { status: canceled ? "canceled" : "failed", error: msg }))
+      if (trigger === "schedule" && !canceled) await notifyFailure(w.day, w.hm, msg);
     throw e;
   } finally {
-    progress = null;
+    clearInterval(timer);
   }
+}
+
+/** SigNoz error traces, then latency groups (the slow query reuses the error query's baseline check). */
+async function collectSignoz(w: ScanWindow, ns: string[], notes: string[]) {
+  const spans = await signozErrorSpanGroups(
+    { start: w.start * 1000, end: w.end * 1000 },
+    { start: w.baseStart * 1000, end: w.baseEnd * 1000 },
+    ns,
+  );
+  if (spans.truncated) notes.push(SIGNOZ_TRUNCATED);
+  if (!spans.hasBaseline) notes.push(SIGNOZ_NO_BASELINE);
+  return {
+    errors: signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline),
+    slow: await slowRows(w, ns, spans.hasBaseline, notes),
+  };
+}
+
+export const SIGNOZ_TRUNCATED =
+  "SigNoz: quá nhiều nhóm trace lỗi, chỉ lấy các nhóm nhiều nhất; các nhóm nhỏ có thể bị bỏ sót";
+export const SIGNOZ_NO_BASELINE =
+  "SigNoz: chưa có trace của kỳ so sánh (hôm qua cùng khung giờ), các nhóm chỉ từ SigNoz không được đánh giá mới/tăng";
+
+/**
+ * After publication (both engines): Telegram for scheduled scans, then policy intake. Idempotent per group: a group
+ * is announced once per day (notified_day) and ingested once (intake keys), so a finalize retried after a crash
+ * does not repeat either.
+ */
+export async function finalizeScan(
+  scanId: number,
+  trigger: ScanTrigger,
+  w: Pick<ScanWindow, "day" | "hm">,
+) {
+  void scanId;
+  const notified = trigger === "schedule" ? await notifyNew(w.day, w.hm) : 0;
+  // Policy-controlled intake (no-op without a policy): one envelope per group, never per log row.
+  await ingestProdErrorGroups().catch((e) => console.error("intake:", (e as Error).message));
+  return notified;
 }
 
 // ---------------------------------------------------------------- notifications (scheduled scans only)
@@ -917,10 +937,10 @@ async function notifyNew(day: string, hm: string) {
   return ok ? rows.length : 0;
 }
 
-let failureNoticeDay = "";
-async function notifyFailure(day: string, hm: string, msg: string) {
-  if (failureNoticeDay === day || !(await getSettings()).notify) return;
-  failureNoticeDay = day;
+/** One failure notice per local day across all instances (the day is claimed atomically in settings). */
+export async function notifyFailure(day: string, hm: string, msg: string) {
+  if (!(await getSettings()).notify || !(await firstToday("prod_errors_failure_notice_day", day)))
+    return;
   const m = buildFailureMessage(hm, msg);
   await sendTelegramHtml(m.text, m.replyMarkup);
 }
@@ -932,14 +952,18 @@ export interface ProdErrorSettings {
   notify: boolean;
 }
 
-export async function getSettings(): Promise<ProdErrorSettings> {
+function parseSettings(raw: string | null): ProdErrorSettings {
   try {
-    const s = JSON.parse((await settings.get("prod_errors")) ?? "null");
+    const s = JSON.parse(raw ?? "null");
     if (s) return { schedule: s.schedule ?? config.prodErrors.schedule, notify: s.notify ?? true };
   } catch {
     /* ignore: unreadable settings fall back to defaults */
   }
   return { schedule: config.prodErrors.schedule, notify: true };
+}
+
+export async function getSettings(): Promise<ProdErrorSettings> {
+  return parseSettings(await settings.get("prod_errors"));
 }
 
 export async function saveSettings(input: { schedule?: unknown; notify?: unknown }) {
@@ -958,40 +982,47 @@ export async function saveSettings(input: { schedule?: unknown; notify?: unknown
 }
 
 let timer: NodeJS.Timeout | null = null;
-/** Checks every 30 s whether a configured time (local) has come; a restart within the same minute does not rescan. */
+/**
+ * Every 30 s: queue the scan of a configured time (local) that has come. The slot is the job's dedupe key, so of
+ * all instances (and restarts within the minute) exactly one scan per slot is queued. Expired scan leases are
+ * recovered on the same tick.
+ */
 export function startProdErrorSchedule() {
   if (timer) return;
-  const userId = config.prodErrors.userId;
-  if (!userId) {
+  if (!config.prodErrors.userId)
     console.warn(
       "Scheduled production scans need an explicit local prodErrors.userId with its own Splunk login; manual scans remain available.",
     );
-    return;
-  }
-  let lastSlot = "";
-  timer = setInterval(async () => {
-    try {
-      const z = zoned(new Date(), config.prodErrors.timezone);
-      const slot = `${z.date} ${z.hm}`;
-      if (slot === lastSlot || !(await getSettings()).schedule.includes(z.hm)) return;
-      lastSlot = slot;
-      const recent = await one(
-        pool,
-        "SELECT 1 FROM prod_error_scans WHERE trigger = 'schedule' AND started_at > now() - interval '5 minutes'",
-      );
-      if (!recent)
-        await execution.run({ userId, kind: "user" }, async () => {
-          const user = await one(pool, "SELECT active FROM users WHERE id = $1", [userId]);
-          if (!user?.active)
-            throw new Error("Configured production scan user is missing or inactive");
-          await loadPersonalIntegrations();
-          startScan("schedule");
-        });
-    } catch (e) {
-      console.error("prod error schedule:", (e as Error).message);
-    }
-  }, 30_000);
+  timer = setInterval(() => void scheduleTick(), 30_000);
   timer.unref();
+}
+
+export async function scheduleTick(now = new Date()) {
+  try {
+    // One statement when idle (the common case): the schedule, and whether any scan is queued or running.
+    const tick = (await one<{ settings: string | null; active: boolean }>(
+      pool,
+      `SELECT (SELECT value FROM settings WHERE key='prod_errors') AS settings,
+         EXISTS(SELECT 1 FROM prod_error_scans WHERE status IN ('queued','running')) AS active`,
+    ))!;
+    if (tick.active) {
+      await recoverScans();
+      await runQueuedScans(); // claims TypeScript jobs only (queued here, recovered, or handed over from Go)
+    }
+    const userId = config.prodErrors.userId;
+    if (!userId) return;
+    const z = zoned(now, config.prodErrors.timezone);
+    if (!parseSettings(tick.settings).schedule.includes(z.hm)) return;
+    const user = await one(pool, "SELECT active FROM users WHERE id = $1", [userId]);
+    if (!user?.active) throw new Error("Configured production scan user is missing or inactive");
+    await startScan(
+      "schedule",
+      {},
+      { requestedBy: userId, dedupeKey: `schedule:${z.date} ${z.hm}` },
+    );
+  } catch (e) {
+    console.error("prod error schedule:", (e as Error).message);
+  }
 }
 
 // ---------------------------------------------------------------- page API
@@ -1000,13 +1031,14 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
   const today = dayWindow(new Date()).day;
   // Independent queries run concurrently: against a remote database each one is a full network round trip.
   const wanted = opts.day && /^\d{4}-\d{2}-\d{2}$/.test(opts.day) ? opts.day : null;
-  const [latestRow, lastScan, lastOk, settingsNow] = await Promise.all([
+  const [latestRow, lastScan, lastOk, settingsNow, active] = await Promise.all([
     wanted
       ? Promise.resolve(undefined)
       : one<{ day: string }>(pool, "SELECT max(day)::text AS day FROM prod_error_groups"),
     one(pool, "SELECT * FROM prod_error_scans ORDER BY id DESC LIMIT 1"),
     one(pool, "SELECT * FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1"),
     getSettings(),
+    activeScan(),
   ]);
   const day = wanted ?? latestRow?.day ?? today;
   // Show the groups of the latest successful scan (it may cover some projects and any time window). Scans from before
@@ -1038,8 +1070,9 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
   return {
     day,
     today,
-    scanning: scanning(),
-    progress,
+    scanning: !!active,
+    progress: active?.status === "running" ? (active.progress as unknown as ScanProgress) : null,
+    active: active ? { id: active.id, status: active.status, engine: active.engine } : null,
     lastScan,
     lastOk,
     ignored,
@@ -1241,7 +1274,9 @@ export function describeGroup(g: GroupRow) {
     `- Hôm nay: ${g.today_count} lần (lần đầu ${t(g.first_at)}, gần nhất ${t(g.last_at)}); hôm qua cùng khung giờ: ${d.no_baseline ? "chưa có dữ liệu" : `${g.yesterday_count} lần`}`,
     `- Đánh giá: **${g.severity}**${g.reasons.length ? ` — ${g.reasons.join("; ")}` : ""}`,
     "",
-    traceOnly ? "Span lỗi mẫu (tên span [mã trạng thái]: status message, đã che PII):" : "Log mẫu (đã che PII):",
+    traceOnly
+      ? "Span lỗi mẫu (tên span [mã trạng thái]: status message, đã che PII):"
+      : "Log mẫu (đã che PII):",
     fence(g.sample),
     d.err ? `Error: \`${d.err.replace(/`/g, "'")}\`` : "",
     d.stack ? `\nStacktrace:\n${fence(d.stack)}` : "",

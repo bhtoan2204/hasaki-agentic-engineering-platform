@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prod-errors-v1",
+  "title": "Internal production error scan API v1 (platform-go ↔ TypeScript platform)",
+  "description": "platform-go owns prod_error_scans jobs with engine = 'go' (claim, lease, fencing token, retries, grouping, publication). Provider reads go the other way: POST {PLATFORM_INTERNAL_URL}/internal/v1/prod-errors/scans/{id}/{op} on the TypeScript server, bearer RETRIEVAL_INTERNAL_TOKEN, loopback only. Every call carries the job's fence; TypeScript checks it and the requesting user's permission before any provider read, and performs that read with the user's own integrations. TypeScript wakes platform-go with POST /internal/v1/jobs/wake.",
+  "$defs": {
+    "Request": {
+      "type": "object",
+      "required": ["fence"],
+      "properties": {
+        "fence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "the fencing token of the caller's lease"
+        },
+        "has_baseline": {
+          "type": "boolean",
+          "description": "signoz-slow: whether the error query found baseline data"
+        },
+        "trace_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$",
+          "description": "signoz-trace-gaps"
+        },
+        "outcome": { "enum": ["succeeded", "failed"], "description": "finalize" },
+        "error": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "finalize with outcome failed"
+        }
+      }
+    },
+    "SourcesResponse": {
+      "type": "object",
+      "required": ["splunk", "signoz", "slow_threshold_ms"],
+      "properties": {
+        "splunk": {
+          "type": "object",
+          "required": ["connected", "expired"],
+          "properties": { "connected": { "type": "boolean" }, "expired": { "type": "boolean" } }
+        },
+        "signoz": {
+          "type": "object",
+          "required": ["enabled"],
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "slow_threshold_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SourceRow": {
+      "description": "One group as an SPL stats row (src/prodErrors/scan.ts SourceRow); PII already masked by TypeScript.",
+      "type": "object",
+      "properties": {
+        "ns": {},
+        "svc": {},
+        "lv": {},
+        "sig": {},
+        "today": {},
+        "yesterday": {},
+        "first": {},
+        "last": {},
+        "analytics_hourly": {},
+        "sources": { "type": "array" },
+        "no_baseline": { "type": "boolean" },
+        "slow": { "type": "object" }
+      }
+    },
+    "SplunkResponse": {
+      "type": "object",
+      "required": ["results", "messages"],
+      "properties": {
+        "results": { "type": "array", "items": { "$ref": "#/$defs/SourceRow" }, "maxItems": 300 },
+        "messages": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "SignozErrorsResponse": {
+      "type": "object",
+      "required": ["rows", "has_baseline", "notes"],
+      "properties": {
+        "rows": { "type": "array", "items": { "$ref": "#/$defs/SourceRow" } },
+        "has_baseline": { "type": "boolean" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "SignozSlowResponse": {
+      "type": "object",
+      "required": ["rows"],
+      "properties": { "rows": { "type": "array", "items": { "$ref": "#/$defs/SourceRow" } } }
+    },
+    "TraceGapsResponse": {
+      "type": "object",
+      "required": ["gaps"],
+      "properties": { "gaps": { "type": "array", "maxItems": 3 } }
+    },
+    "FinalizeResponse": {
+      "type": "object",
+      "required": ["notified"],
+      "properties": { "notified": { "type": "integer", "minimum": 0 } }
+    },
+    "Error": {
+      "description": "400 invalid_request, 401 unauthorized, 403 forbidden (not loopback) | revoked (the requesting user may no longer scan: not retried), 409 lease_lost (stop, write nothing) | not_published, 424 provider_rejected (expired login, no permission, invalid query: not retried), 429 rate_limited (retry after retry_after_ms), 502 provider_unavailable and 504 provider_timeout (retryable).",
+      "type": "object",
+      "required": ["error", "code", "retryable"],
+      "properties": {
+        "error": { "type": "string" },
+        "code": {
+          "enum": [
+            "invalid_request",
+            "unauthorized",
+            "forbidden",
+            "revoked",
+            "lease_lost",
+            "not_published",
+            "not_found",
+            "provider_rejected",
+            "rate_limited",
+            "provider_unavailable",
+            "provider_timeout"
+          ]
+        },
+        "retryable": { "type": "boolean" },
+        "retry_after_ms": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    }
+  }
+}
