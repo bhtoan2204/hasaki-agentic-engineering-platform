@@ -61,7 +61,7 @@ import {
   handoffMetrics,
   runAssignment,
   setRunBudget,
-  attemptInput,
+  attemptPayload,
 } from "../workflow/runRepository.ts";
 import { workItemRepository } from "../workitems/repository.ts";
 import { knowledgeUsage } from "../knowledge/usageRepository.ts";
@@ -1454,11 +1454,13 @@ export const routes: Route[] = [
   ],
   [
     "GET",
-    /^\/api\/attempts\/(\d+)\/input$/,
-    async (c) => (
-      await requireAttempt(c.actor, num(c.p[0]), support(c)),
-      must(await attemptInput(num(c.p[0])), "attempt").input
-    ),
+    /^\/api\/attempts\/(\d+)\/(input|output)$/,
+    async (c) => {
+      await requireAttempt(c.actor, num(c.p[0]), support(c));
+      const value = await attemptPayload(num(c.p[0]), c.p[1] === "input" ? "input" : "output");
+      if (value === undefined) throw new HttpError(404, "attempt not found");
+      return value;
+    },
   ],
   [
     "GET",

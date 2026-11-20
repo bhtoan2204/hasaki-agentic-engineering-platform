@@ -328,8 +328,9 @@ interface AttemptRow {
     pending?: { reexecute?: ReexecuteRequest };
     previous_attempt?: { number: number };
   } | null;
-  /** True when `input` is only the summary above; the full input is at /api/attempts/:id/input. */
+  /** True when `input`/`output` are summaries; the full payload is at /api/attempts/:id/input|output. */
   input_partial?: boolean;
+  output_partial?: boolean;
   context_snapshot_id?: number | null;
   started_at: string;
   finished_at: string | null;
@@ -357,7 +358,8 @@ interface ArtifactRow {
   name: string;
   size: number;
   created_at: string;
-  data?: (HarnessEvidence & { exit_code?: number | null } & NonNullable<ReportArtifact["data"]>) | null;
+  data?:
+    (HarnessEvidence & { exit_code?: number | null } & NonNullable<ReportArtifact["data"]>) | null;
 }
 
 interface KnowledgeItem {
@@ -379,7 +381,10 @@ interface ContextSnapshot {
     knowledge: KnowledgeItem[];
     prompt_plan?: {
       knowledge?: Array<{ key: string; disclosure: string; score: number; why: string }>;
-      upstream?: Record<string, { direct?: boolean; mode: string; tokens: number; full_tokens: number }>;
+      upstream?: Record<
+        string,
+        { direct?: boolean; mode: string; tokens: number; full_tokens: number }
+      >;
     };
     overridden?: Array<{
       key: string;
@@ -681,9 +686,13 @@ export function ApprovalPanel({
         <div className="small" style={{ margin: "6px 0" }}>
           <span className="muted">{t("au.why")}</span>{" "}
           {[...(req.autonomy.reasons ?? []), ...(req.recheck_reasons ?? [])].join("; ")}
-          {req.autonomy.shadow && req.autonomy.result === "ALLOW" && <span className="muted"> · {t("au.shadow")}</span>}
+          {req.autonomy.shadow && req.autonomy.result === "ALLOW" && (
+            <span className="muted"> · {t("au.shadow")}</span>
+          )}
           {(req.autonomy.required_evidence ?? []).length > 0 && (
-            <div className="muted">{t("au.required", { list: (req.autonomy.required_evidence ?? []).join(", ") })}</div>
+            <div className="muted">
+              {t("au.required", { list: (req.autonomy.required_evidence ?? []).join(", ") })}
+            </div>
           )}
         </div>
       )}
@@ -1345,22 +1354,29 @@ export function StepInspector({
           ))}
         {tab === "input" &&
           (attempt ? (
-            <AttemptInput
+            <AttemptPayload
               key={attempt.id}
               attempt={attempt}
-              title={t("si.resolvedInput", { n: attempt.number })}
+              field="input"
+              render={(v) => (
+                <JsonBlock value={v} title={t("si.resolvedInput", { n: attempt.number })} />
+              )}
             />
           ) : (
             <Empty>{t("si.inputLater")}</Empty>
           ))}
         {tab === "output" && (
           <div>
-            <OutputView
-              locale={run.output_locale}
-              value={
-                attempt && attempt.id !== step.current_attempt_id ? attempt.output : step.output
-              }
-            />
+            {attempt && attempt.id !== step.current_attempt_id ? (
+              <AttemptPayload
+                key={attempt.id}
+                attempt={attempt}
+                field="output"
+                render={(v) => <OutputView locale={run.output_locale} value={v} />}
+              />
+            ) : (
+              <OutputView locale={run.output_locale} value={step.output} />
+            )}
             {attempt?.error && <JsonBlock value={attempt.error} title={t("si.attemptError")} />}
           </div>
         )}
@@ -1462,7 +1478,9 @@ export function StepInspector({
                           <div className="muted small">{t("si.invalidated")}</div>
                         )}
                         {a.reused_from_attempt_id && (
-                          <div className="muted small">{t("si.replaySource", { id: a.reused_from_attempt_id })}</div>
+                          <div className="muted small">
+                            {t("si.replaySource", { id: a.reused_from_attempt_id })}
+                          </div>
                         )}
                         {a.input?.pending?.reexecute && (
                           <div className="small" style={{ marginTop: 2 }}>
@@ -2030,11 +2048,13 @@ function CommandLog({
     last.current = 0;
   }, [attemptId]);
   useEffect(() => {
-    api<TranscriptEvent[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
-      if (!rows.length) return;
-      last.current = rows[rows.length - 1].id;
-      setEvents((p) => [...p, ...rows]);
-    });
+    api<TranscriptEvent[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then(
+      (rows) => {
+        if (!rows.length) return;
+        last.current = rows[rows.length - 1].id;
+        setEvents((p) => [...p, ...rows]);
+      },
+    );
   }, [attemptId, tick]);
   useEffect(() => {
     if (!live) return;
@@ -2205,9 +2225,7 @@ function AttemptMetrics({ m }: { m: AttemptMetricsData }) {
             .join(", ") || "—"}
         </span>
         <span>{t("si.subagents")}</span>
-        <span className="small">
-          {(m.subagents ?? []).map((s) => s.type).join(", ") || "—"}
-        </span>
+        <span className="small">{(m.subagents ?? []).map((s) => s.type).join(", ") || "—"}</span>
         {!!m.denied?.length && (
           <>
             <span>{t("si.blocked")}</span>
@@ -2283,11 +2301,16 @@ function ReexecuteDialog({
   const [skills, setSkills] = useState<string[]>([]);
   const [persist, setPersist] = useState(true);
   const [busy, setBusy] = useState(false);
-  const { data: catalog } = useApi<SkillCatalogEntry[]>(open ? "/api/knowledge?category=agent_skill" : null, [
-    open,
-  ]);
+  const { data: catalog } = useApi<SkillCatalogEntry[]>(
+    open ? "/api/knowledge?category=agent_skill" : null,
+    [open],
+  );
   const [force, setForce] = useState(false);
-  const { data: preview, error: previewError, reload: reloadPreview } = useApi<{
+  const {
+    data: preview,
+    error: previewError,
+    reload: reloadPreview,
+  } = useApi<{
     can_reexecute: boolean;
     continuation: { action: DecisionAction; reason: string } | null;
     steps: ReplayPreviewStep[];
@@ -2295,11 +2318,16 @@ function ReexecuteDialog({
       actions: Record<string, number>;
       estimated_avoided: { invocations: number | null; tokens: number | null };
     };
-  }>(open ? `/api/runs/${run.id}/steps/${step.key}/replay-preview${force ? "?force=1" : ""}` : null, [open, force]);
+  }>(
+    open ? `/api/runs/${run.id}/steps/${step.key}/replay-preview${force ? "?force=1" : ""}` : null,
+    [open, force],
+  );
   // The run's DAG shows the planned decision of every node while this preview is open.
   useEffect(() => {
     if (!onPreview) return;
-    onPreview(open && preview ? Object.fromEntries(preview.steps.map((s) => [s.key, s.action])) : null);
+    onPreview(
+      open && preview ? Object.fromEntries(preview.steps.map((s) => [s.key, s.action])) : null,
+    );
   }, [open, preview]);
   useEffect(() => () => onPreview?.(null), []);
   if (!open)
@@ -2414,7 +2442,8 @@ function ReexecuteDialog({
           <>
             {preview.continuation && (
               <p className="small">
-                <DecisionBadge action={preview.continuation.action} /> · {preview.continuation.reason}
+                <DecisionBadge action={preview.continuation.action} /> ·{" "}
+                {preview.continuation.reason}
               </p>
             )}
             {preview.summary && (
@@ -2475,15 +2504,24 @@ function ReexecuteDialog({
   );
 }
 
-/** Step detail carries the full input of the newest attempt only; older attempts load theirs when opened. */
-function AttemptInput({ attempt, title }: { attempt: AttemptRow; title: string }) {
-  const { data, error } = useApi<unknown>(
-    attempt.input_partial ? `/api/attempts/${attempt.id}/input` : null,
-    [attempt.id],
-  );
-  if (!attempt.input_partial) return <JsonBlock value={attempt.input} title={title} />;
+/** Step detail carries a summary of each attempt's input/output; the raw payload loads when its tab opens. */
+function AttemptPayload({
+  attempt,
+  field,
+  render,
+}: {
+  attempt: AttemptRow;
+  field: "input" | "output";
+  render: (value: unknown) => ReactNode;
+}) {
+  const partial = field === "input" ? attempt.input_partial : attempt.output_partial;
+  const { data, error } = useApi<unknown>(partial ? `/api/attempts/${attempt.id}/${field}` : null, [
+    attempt.id,
+    field,
+  ]);
+  if (!partial) return render(attempt[field]);
   if (error) return <ErrorBox error={error} />;
-  return data === null ? <SkeletonRows rows={4} /> : <JsonBlock value={data} title={title} />;
+  return data === null ? <SkeletonRows rows={4} /> : render(data);
 }
 
 function KnowledgeApplied({ snapshotId }: { snapshotId: number | null }) {

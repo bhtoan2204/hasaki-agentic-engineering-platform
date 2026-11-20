@@ -141,12 +141,23 @@ export async function loadRunDetail(runId: number) {
         }
       >(
         pool,
-        `SELECT r.*, v.version AS definition_version, w.id AS wi_id, w.code AS wi_code, w.title AS wi_title, w.source AS wi_source, w.project AS wi_project
+        // The run summary has its own route (/api/runs/:id/summary); the page never reads it from here.
+        `SELECT (jsonb_populate_record(r, '{"summary": null}')).*, v.version AS definition_version, w.id AS wi_id, w.code AS wi_code, w.title AS wi_title, w.source AS wi_source, w.project AS wi_project
          FROM workflow_runs r LEFT JOIN workflow_definition_versions v ON v.id = r.definition_version_id LEFT JOIN work_items w ON w.id = r.work_item_id
         WHERE r.id = $1`,
         [runId],
       ),
-      stepsOf(pool, runId),
+      // Step rows with their execution contract and approval evidence dropped (the step inspector shows those).
+      q<StepRow>(
+        pool,
+        `SELECT (jsonb_populate_record(s, jsonb_build_object(
+                  'output', CASE WHEN jsonb_typeof(s.output) = 'object' THEN s.output - 'execution_contract' ELSE s.output END,
+                  'approval', CASE WHEN jsonb_typeof(s.approval->'request') = 'object'
+                    THEN s.approval || jsonb_build_object('request', (s.approval->'request') - 'evidence' - 'outputs')
+                    ELSE s.approval END))).*
+           FROM workflow_steps s WHERE s.run_id = $1 ORDER BY s.position`,
+        [runId],
+      ),
       q<Record<string, unknown>>(
         pool,
         `SELECT a.id, a.step_id, a.run_id, a.number, a.generation, a.status,
@@ -193,11 +204,14 @@ export async function loadRunDetail(runId: number) {
   return { run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints };
 }
 
-/** The full resolved input of one attempt (step detail ships it only for the newest attempt). */
-export function attemptInput(id: number) {
-  return one<{ input: unknown }>(pool, "SELECT input FROM workflow_step_attempts WHERE id = $1", [
-    id,
-  ]);
+/** The full input or output of one attempt (step detail ships a summary of both). */
+export async function attemptPayload(id: number, field: "input" | "output") {
+  const row = await one<{ v: unknown }>(
+    pool,
+    `SELECT ${field === "input" ? "input" : "output"} AS v FROM workflow_step_attempts WHERE id = $1`,
+    [id],
+  );
+  return row && row.v;
 }
 
 /** Everything the step inspector shows for one step. */
@@ -210,18 +224,30 @@ export async function loadStepDetail(runId: number, stepKey: string) {
       one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", args),
       q<Record<string, unknown>>(
         pool,
-        // Only the newest attempt carries its full resolved input; older ones keep what the attempt list shows
-        // and load the rest on demand (GET /api/attempts/:id/input).
-        `SELECT id, step_id, run_id, number, generation, status, job_id, fencing_token, worker, output,
+        // Inputs, execution contracts and slop findings are the bulk of an attempt and are only shown as raw JSON:
+        // the list carries what the inspector renders and the full payload loads on demand
+        // (GET /api/attempts/:id/input|output).
+        `SELECT id, step_id, run_id, number, generation, status, job_id, fencing_token, worker,
                 context_snapshot_id, agent_session_id, error, invalidated_at, resolved_at, started_at, finished_at,
-                metrics, telemetry_queue_duration_ms, telemetry_wait_started_at, telemetry_wait_ended_at,
+                telemetry_queue_duration_ms, telemetry_wait_started_at, telemetry_wait_ended_at,
                 agent_provider, agent_model, effective_agent, executor_stopped_at, execution_fingerprint,
                 reused_from_attempt_id,
-                CASE WHEN latest THEN input ELSE jsonb_strip_nulls(jsonb_build_object(
+                jsonb_strip_nulls(jsonb_build_object(
                   'pending', jsonb_strip_nulls(jsonb_build_object('reexecute', input->'pending'->'reexecute')),
-                  'previous_attempt', input->'previous_attempt')) END AS input,
-                NOT latest AS input_partial
-           FROM (SELECT *, number = max(number) OVER () AS latest FROM workflow_step_attempts WHERE step_id = ${sid}) a
+                  'previous_attempt', jsonb_strip_nulls(jsonb_build_object('number', input->'previous_attempt'->'number'))
+                )) AS input,
+                input IS NOT NULL AS input_partial,
+                CASE WHEN jsonb_typeof(output) = 'object'
+                     THEN (output - 'execution_contract') || CASE WHEN output ? 'verification'
+                       THEN jsonb_build_object('verification', ${VERIFICATION_SUMMARY.replaceAll("$v", "output->'verification'")})
+                       ELSE '{}' END
+                     ELSE output END AS output,
+                COALESCE(output ? 'execution_contract' OR jsonb_typeof(output->'verification'->'last') = 'array', false)
+                  AS output_partial,
+                CASE WHEN metrics ? 'verification'
+                     THEN metrics || jsonb_build_object('verification', ${VERIFICATION_SUMMARY.replaceAll("$v", "metrics->'verification'")})
+                     ELSE metrics END AS metrics
+           FROM workflow_step_attempts WHERE step_id = ${sid}
           ORDER BY number`,
         args,
       ),

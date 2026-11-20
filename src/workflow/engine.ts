@@ -2520,7 +2520,11 @@ export async function stepDetail(runId: number, stepKey: string) {
   const detail = await loadStepDetail(runId, stepKey);
   if (!detail.step) throw new EngineError(`step "${stepKey}" not found`, 404);
   const step = detail.step;
-  const decisions = await decisionsOf(runId, step.id);
+  // An integrity failure of the wait checkpoint is shown as "no recovery action", never as a read error.
+  const [decisions, continuation] = await Promise.all([
+    decisionsOf(runId, step.id),
+    planContinuation(pool, step).catch(() => null),
+  ]);
   const views = detail.checkpoints.map((row) =>
     checkpointView(row as unknown as CheckpointRowInput, {
       stepGeneration: step.generation,
@@ -2529,8 +2533,6 @@ export async function stepDetail(runId: number, stepKey: string) {
       reconciledAt: decisions.filter((d) => d.kind === "reconcile" && d.outcome === "applied"),
     }),
   );
-  // An integrity failure of the wait checkpoint is shown as "no recovery action", never as a read error.
-  const continuation = await planContinuation(pool, step).catch(() => null);
   return {
     ...detail,
     step,
