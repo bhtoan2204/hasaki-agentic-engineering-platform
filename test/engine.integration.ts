@@ -1416,7 +1416,10 @@ test("server shutdown kills detached command process groups (no orphaned go test
   await startRun({ definitionKey: key });
   const worker = runOnce("w-orphan", { leaseSeconds: 30, heartbeatSeconds: 5 });
   const alive = () =>
-    execSync(`ps -eo args | grep -c "[s]leep 30; echo ${marker}" || true`).toString().trim();
+    // The bash running the command (a Go launcher in front of it carries the same text in its arguments).
+    execSync(`ps -eo args | grep -c "^bash .*[s]leep 30; echo ${marker}" || true`)
+      .toString()
+      .trim();
   for (let i = 0; i < 25 && alive() === "0"; i++) await new Promise((r) => setTimeout(r, 200));
   assert.equal(alive(), "1", "command is running");
   childGroups.killAll(); // what the SIGINT/SIGTERM handler and process exit do

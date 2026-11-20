@@ -17,6 +17,8 @@ internal/codeintelligence/ index.go (job) → git.go, extract.go (tree-sitter), 
                           grammar/sql (vendored generated parser); testdata/parity (TypeScript golden)
 internal/analytics/       http.go → service.go (read-only pool, slots, node-postgres value mapping);
                           execution.go (usage, performance, workflows), health*.go, options.go
+cmd/platform-supervise/   per-process launcher (ADR 0005): `platform-supervise [flags] -- command args`
+internal/supervise/       cgroup leaf + limits, process-tree fallback (subreaper, pidfds), admission, report, OTel
 internal/worker/          durable job runner: bounded pool, wake/poll, lease keeper, backoff, retry budget, rate limits
 internal/proderrors/      production error scan job: store.go (claim, fence, publish), gateway.go (TypeScript provider
                           gateway client), merge.go (grouping, TypeScript golden in testdata/), scan.go

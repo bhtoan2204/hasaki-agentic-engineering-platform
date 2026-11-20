@@ -22,7 +22,7 @@ module that has not moved. Phase 1 is semantic retrieval ([ADR 0001](adr/0001-go
 | Code intelligence indexing (`src/codeIntelligence/indexer.ts`) | **2 (done, flag `CODE_INTELLIGENCE_ENGINE=go`)** | Long CPU-bound parsing on the event loop; already queue-driven and owns its schema. [ADR 0002](adr/0002-go-code-intelligence-indexing.md) | Parity: 6,554 files / 27 repositories identical |
 | Observability/analytics aggregation (`src/api/analytics`) | **2 (done, flag `ANALYTICS_ENGINE=go`)** | Read-heavy SQL, no write coupling; the cost was PostgreSQL, so the move is the SQL fixed and consolidated, off the Node pool. [ADR 0003](adr/0003-go-analytics.md) | Parity suite on identical data (`test/analytics-go.integration.ts`) |
 | Background workers without run coupling (prod-error scans, PR lifecycle sync, intake polling) | **3: prod-error scans done (flag `PROD_ERRORS_ENGINE=go`)**; PR lifecycle and intake stay | Scans: durable jobs with leases and fencing, providers through the TypeScript gateway. [ADR 0004](adr/0004-go-background-workers.md). PR lifecycle and intake are coupled to authorization and workflow decisions | Per-worker ownership of its tables; idempotency tests |
-| Process supervision and resource limits (bubblewrap, process trees) | 3 | Go is a better fit for process control | Isolation regression suite; the TypeScript harness still spawns agents |
+| Process supervision and resource limits (bubblewrap, process trees) | **3 (done, flag `PROCESS_SUPERVISION_ENGINE=go`)** | Per-process launcher: delegated cgroup leaf, `cgroup.kill`, limits, host-wide admission; providers keep their protocols. [ADR 0005](adr/0005-go-process-supervision.md) | Isolation regression suite (`go test ./internal/supervise`, `test/process-supervision.integration.ts`) |
 | Workflow scheduling (`src/workflow/scheduler.ts`) | later | Tightly coupled to fencing, leases and the engine's transactions | Engine contract for claim/complete |
 | Workflow execution, checkpoints, replay, agent harness, provider adapters | **stay in TypeScript** | Core state machine with the most behaviour and test coverage; moving it buys little | Re-evaluate only after phases 2–3 |
 
@@ -91,3 +91,20 @@ across instances, leases, fencing, crash recovery, idempotent schedule slots, ba
 The gain is the queue and batching (both engines). The Go engine is slightly slower than the TypeScript engine and
 stays opt-in; it is the runtime the next workers will use. PR lifecycle sync and intake stay in TypeScript (coupled
 to authorization and workflow decisions); their isolated provider polling is the next candidate.
+
+## Phase 3 status: process supervision
+
+Implemented ([ADR 0005](adr/0005-go-process-supervision.md)). One TypeScript adapter now starts and stops provider CLIs
+(Codex, Cursor, Copilot, Antigravity) and verification commands; with `PROCESS_SUPERVISION_ENGINE=go` each runs under
+`platform-supervise` in its own delegated cgroup leaf. The Claude Agent SDK path is unchanged (its sandbox already
+runs in a systemd scope and a PID namespace).
+
+| Measure (`npm run bench:process`) | legacy → TypeScript / Go |
+|---|---|
+| stopping a tree with double-forked daemons | 50 survivors, never closes → 50, never closes / **0, closed in 22.5 ms** |
+| process start (first output) | 46 ms → 29 ms / 78 ms |
+| streaming, flooding, CPU-bound work, Node event loop | unchanged within noise |
+
+The gain is correctness (no surviving descendants, no PID confusion, limits, host-wide admission), not speed; the Go
+engine costs a systemd scope per process. Default stays `typescript` until daily use; enforced isolation should use
+`go`.

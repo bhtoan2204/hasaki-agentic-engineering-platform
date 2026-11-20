@@ -1,14 +1,14 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
 import { isModelBlocked } from "../modelPolicy.ts";
 import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { redactSecrets } from "../../integrations/redact.ts";
 import { copilotConfig } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
-import { childGroups } from "../../workflow/local.ts";
+import { superviseSpawn, supervisionNote, type Supervised } from "../process/supervisor.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { newMetrics, type AgentMetrics } from "../metrics.ts";
@@ -144,33 +144,6 @@ async function writeCopilotStdinPrompt(child: ChildProcess, prompt: string, sign
   });
 }
 
-function killCopilot(child: ChildProcess) {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      /* ignore */
-    }
-  }
-  const force = setTimeout(() => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    try {
-      process.kill(-child.pid!, "SIGKILL");
-    } catch {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-    }
-  }, 5000);
-  force.unref();
-  child.once("close", () => clearTimeout(force));
-}
-
 let activeRuns = 0;
 const waitingQueue: Array<() => void> = [];
 
@@ -265,6 +238,7 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
   let submitted: Record<string, unknown> | undefined;
 
   let child: ChildProcess | null = null;
+  let proc: Supervised | null = null;
 
   try {
     let assistantTurns = 0;
@@ -379,19 +353,25 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
       return { isError: true, text: "canceled", assistantTurns: 0, failure: "CANCELED" };
     }
 
-    child = spawn(cfg.bin, args, {
+    // SIGTERM, then SIGKILL after 5 s, as before.
+    proc = superviseSpawn({
+      command: cfg.bin,
+      args,
       cwd: input.cwd,
       env,
-      detached: true,
-      stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
+      stdin: useStdin ? "pipe" : "ignore",
+      class: "agent",
+      graceMs: 5000,
+      timeoutMs: limits.timeoutMs + 60_000,
+      runId: input.ctx.run.id,
+      attemptId: input.ctx.attempt.id,
     });
-
-    if (child.pid) childGroups.add(child.pid);
+    child = proc.child;
     const watch = superviseTurn({
       signal: input.ctx.signal,
       ...limits,
       stop: () => {
-        if (child) killCopilot(child);
+        proc?.stop();
       },
     });
     activity.touch = () => watch.touch();
@@ -422,7 +402,7 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
     const handleEvent = async (ev: CopilotEvent) => {
       if (ev.model && isModelBlocked(ev.model)) {
         blockedModel ||= `Copilot runs model "${ev.model}", which is blocked by platform policy (agent.blockedModels); the run was stopped.`;
-        if (child) killCopilot(child);
+        proc?.stop();
         return;
       }
       if (ev.model) await recordModel(ev.model);
@@ -477,7 +457,7 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
         violation =
           "Copilot started a platform tool without running the platform's pre-execution hook; the run was stopped";
         input.metrics?.denied.push({ tool: ev.tool, reason: violation });
-        if (child) killCopilot(child);
+        proc?.stop();
       }
 
       if (ev.tool) {
@@ -573,7 +553,7 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
     const writePromise = useStdin
       ? writeCopilotStdinPrompt(child, input.prompt, input.ctx.signal).catch((error) => {
           inputError = error as Error;
-          if (!watch.reason && child) killCopilot(child);
+          if (!watch.reason) proc?.stop();
         })
       : Promise.resolve();
     const exitCode = await exitPromise;
@@ -582,7 +562,10 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
     await pendingLogs;
 
     watch.dispose();
-    if (child?.pid) childGroups.remove(child.pid);
+    const supervision = await proc.done;
+    const supervisionLine = supervisionNote(supervision);
+    if (supervisionLine)
+      await input.ctx.log("system", supervisionLine, { provider: "copilot", supervision });
 
     const tail = parser.flush();
     for (const ev of tail.events) await handleEvent(ev);
@@ -733,13 +716,18 @@ export async function copilotComplete(
   });
 
   const env = copilotEnv(process.env);
-  const child = spawn(cfg.bin, args, {
+  const proc = superviseSpawn({
+    command: cfg.bin,
+    args,
+    cwd: process.cwd(),
     env,
-    stdio: [useStdin ? "pipe" : "ignore", "pipe", "pipe"],
+    stdin: useStdin ? "pipe" : "ignore",
+    class: "agent",
+    graceMs: 5000,
   });
-  if (child.pid) childGroups.add(child.pid);
+  const child = proc.child;
 
-  const onAbort = () => killCopilot(child);
+  const onAbort = () => proc.stop();
   opts?.signal?.addEventListener("abort", onAbort, { once: true });
   const timeoutMs = opts?.timeoutMs ?? cfg.timeoutMs;
   let timedOut = false;
@@ -804,7 +792,7 @@ export async function copilotComplete(
   clearTimeout(timer);
 
   opts?.signal?.removeEventListener("abort", onAbort);
-  if (child.pid) childGroups.remove(child.pid);
+  await proc.done;
 
   const tail = parser.flush();
   for (const ev of tail.events) {

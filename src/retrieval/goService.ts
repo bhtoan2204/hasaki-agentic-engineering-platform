@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { config } from "../config.ts";
 
 const goDir = resolve(import.meta.dirname, "../../go");
@@ -36,12 +36,27 @@ async function binary(): Promise<string | null> {
   return (await build(bin)) ? bin : null;
 }
 
+/** The process launcher (PROCESS_SUPERVISION_ENGINE=go) is built with platform-go, even when no service runs. */
+async function ensureSupervisor() {
+  const bin = join(config.dataDir, "bin", "platform-go");
+  mkdirSync(join(config.dataDir, "bin"), { recursive: true });
+  const sup = join(config.dataDir, "bin", "platform-supervise");
+  if (existsSync(sup) && statSync(sup).mtimeMs >= newestGoSource()) return;
+  if (!(await build(bin)))
+    console.error("platform-supervise was not built: supervised commands will fail to start");
+}
+
 function build(bin: string) {
   return new Promise<boolean>((done) => {
-    const p = spawn("go", ["build", "-o", bin, "./cmd/platform-go"], {
-      cwd: goDir,
-      stdio: "inherit",
-    });
+    // Both binaries land in one directory: platform-go and the process launcher (ADR 0005).
+    const p = spawn(
+      "go",
+      ["build", "-o", dirname(bin) + "/", "./cmd/platform-go", "./cmd/platform-supervise"],
+      {
+        cwd: goDir,
+        stdio: "inherit",
+      },
+    );
     p.on("error", (e) => (console.error("platform-go build:", e.message), done(false)));
     p.on("exit", (code) => done(code === 0));
   });
@@ -58,6 +73,8 @@ export function startGoService() {
   let stopping = false;
   const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
   // Semantic retrieval, Go indexing and Go analytics are all served by platform-go; each flag needs it on its own.
+  if (config.supervision.engine === "go" && !process.env.PLATFORM_SUPERVISE_BIN)
+    void ensureSupervisor();
   const needed =
     config.retrieval.semantic.enabled ||
     config.codeIntelligence.engine === "go" ||

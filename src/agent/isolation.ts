@@ -15,6 +15,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { config } from "../config.ts";
+import { scopeEnvironment, systemdLiteral } from "./process/scope.ts";
 
 const exec = promisify(execFile);
 
@@ -295,17 +296,9 @@ export const SANDBOX_HOME = "/tmp/.home";
 export const SANDBOX_EGRESS = "/tmp/.egress";
 const FORWARDER = fileURLToPath(new URL("./sandboxForwarder.mjs", import.meta.url));
 
-/** The full invocation: cgroup scope → rlimits → bubblewrap → (egress forwarder) → command. */
-/** What systemd-run itself needs from the worker environment (bus addresses only); bwrap unsets both. */
-export function scopeEnvironment(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const uid = userInfo().uid;
-  const runtimeDir = base.XDG_RUNTIME_DIR || `/run/user/${uid}`;
-  return {
-    XDG_RUNTIME_DIR: runtimeDir,
-    DBUS_SESSION_BUS_ADDRESS: base.DBUS_SESSION_BUS_ADDRESS || `unix:path=${runtimeDir}/bus`,
-  };
-}
+export { scopeEnvironment } from "./process/scope.ts";
 
+/** The full invocation: cgroup scope → rlimits → bubblewrap → (egress forwarder) → command. */
 export function sandboxInvocation(
   runtime: IsolationRuntime,
   spec: SandboxSpec,
@@ -383,8 +376,8 @@ export function sandboxInvocation(
       "MemorySwapMax=0",
       "-p",
       `TasksMax=${limits.pids}`,
-      "prlimit",
-      ...rl,
+      // systemd-run would expand `$` in the sandboxed command line: pass it literally.
+      ...systemdLiteral(["prlimit", ...rl]),
     ],
     env: scopeEnvironment(),
   };
@@ -669,6 +662,9 @@ export async function prepareAgentSandbox(i: {
 export async function isolationDiagnostics(force = false) {
   const { guaranteeCheck } = await import("./providerCapabilities.ts");
   const { AGENT_PROVIDERS } = await import("./provider.ts");
+  const { supervisionRuntime, supervisionStats, delegatedScopeAvailable } =
+    await import("./process/supervisor.ts");
+  if (force) delegatedScopeAvailable(true);
   const runtime = await probeIsolation(force);
   const enforce = config.isolation.mode === "enforce";
   const iso = { enforce, runtimeAvailable: runtime.available };
@@ -679,6 +675,8 @@ export async function isolationDiagnostics(force = false) {
     runtime,
     limits: config.isolation.limits,
     egress: config.isolation.egress,
+    // Process supervision (ADR 0005): engine, launcher, delegated cgroup, PSI and counters since start.
+    supervision: { ...supervisionRuntime(), stats: supervisionStats },
     providers: AGENT_PROVIDERS.map((p) => ({
       provider: p,
       coding: guaranteeCheck(p, "coding", null, iso),

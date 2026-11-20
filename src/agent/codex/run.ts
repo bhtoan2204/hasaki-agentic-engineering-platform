@@ -1,13 +1,13 @@
 import { agentEnvironment } from "../environment.ts";
 import { nativeCompactionThreshold } from "../../context/compaction.ts";
 import { execution } from "../../auth/execution.ts";
-import { execFile, spawn, type ChildProcess, type ExecFileException } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { execFile, type ExecFileException } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { codexConfig } from "../../config.ts";
-import { childGroups } from "../../workflow/local.ts";
+import { superviseSpawn, supervisionNote } from "../process/supervisor.ts";
 import { npmCacheDir } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { addUsage, newMetrics, noteToolUse, type AgentMetrics } from "../metrics.ts";
@@ -393,50 +393,6 @@ export function codexArgs(inv: CodexInvocation): string[] {
     : ["exec", ...flags, "-C", inv.cwd, "-"];
 }
 
-/** Kill the process group and every descendant that left it (Codex helpers may start their own groups). */
-export function killTree(child: ChildProcess) {
-  const pid = child.pid;
-  if (!pid) return;
-  const descendants = new Set<number>();
-  try {
-    const parent = new Map<number, number>();
-    for (const d of readdirSync("/proc")) {
-      if (!/^\d+$/.test(d)) continue;
-      try {
-        const stat = readFileSync(`/proc/${d}/stat`, "utf8");
-        const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-        parent.set(Number(d), ppid);
-      } catch {
-        /* ignore: process exited while scanning */
-      }
-    }
-    let grew = true;
-    descendants.add(pid);
-    while (grew) {
-      grew = false;
-      for (const [p, pp] of parent)
-        if (descendants.has(pp) && !descendants.has(p)) {
-          descendants.add(p);
-          grew = true;
-        }
-    }
-  } catch {
-    /* no /proc: the group kill below still applies */
-  }
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch {
-    /* ignore: group already gone */
-  }
-  for (const p of descendants) {
-    try {
-      process.kill(p, "SIGKILL");
-    } catch {
-      /* ignore: process already gone */
-    }
-  }
-}
-
 export interface CodexTurnInput {
   ctx: ExecutionContext;
   mode: ToolMode;
@@ -550,24 +506,29 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
     effort: input.effort,
     resumeId: input.resumeId,
   });
-  const child = spawn(cap.bin, args, {
+  const limits = turnLimits(input.ctx.attempt.effective_agent, codexConfig().timeoutMs);
+  // Codex is stopped at once (no grace), as before; its MCP bridge and hook helpers go with it.
+  const proc = superviseSpawn({
+    command: cap.bin,
+    args,
     cwd: input.cwd,
     env: codexEnv(process.env, {
       PLATFORM_BROKER_SOCKET: broker.socketPath,
       PLATFORM_BROKER_TOKEN: broker.token,
     }),
-    detached: true,
-    shell: false,
-    stdio: ["pipe", "pipe", "pipe"],
+    class: "agent",
+    graceMs: 0,
+    timeoutMs: limits.timeoutMs + 60_000,
+    runId: ctx.run.id,
+    attemptId: ctx.attempt.id,
   });
-  if (child.pid) childGroups.add(child.pid);
+  const child = proc.child;
   let stopReason: "" | StopReason | "policy" = "";
   let violation = "";
   const stop = (why: StopReason | "policy") => {
     if (!stopReason) stopReason = why;
-    killTree(child);
+    proc.stop();
   };
-  const limits = turnLimits(input.ctx.attempt.effective_agent, codexConfig().timeoutMs);
   const watch = superviseTurn({ signal: ctx.signal, ...limits, stop });
   activity.touch = () => watch.touch();
   child.stdin?.on("error", () => {});
@@ -791,8 +752,9 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
     child.on("close", (code) => resolve(code));
   });
   watch.dispose();
-  killTree(child); // helpers (MCP bridge, hooks) that outlived Codex
-  if (child.pid) childGroups.remove(child.pid);
+  const supervision = await proc.done; // helpers (MCP bridge, hooks) that outlived Codex are gone too
+  const supervisionLine = supervisionNote(supervision);
+  if (supervisionLine) await ctx.log("system", supervisionLine, { provider: "codex", supervision });
   const tail = parser.flush();
   await pending;
   for (const b of tail.errors)
@@ -889,7 +851,10 @@ export async function codexComplete(
   } = {},
 ): Promise<{ text: string; tokens: AgentMetrics["tokens"]; model: string }> {
   const cfg = codexConfig();
-  const cap = await codexCapabilities(false, { model: opts.model ?? cfg.model, effort: opts.effort ?? cfg.reasoningEffort });
+  const cap = await codexCapabilities(false, {
+    model: opts.model ?? cfg.model,
+    effort: opts.effort ?? cfg.reasoningEffort,
+  });
   if (!cap.ok) throw new Error(cap.error);
   opts.signal?.throwIfAborted();
   const dir = mkdtempSync(join(tmpdir(), "ctp-codex-complete-"));
@@ -914,15 +879,16 @@ export async function codexComplete(
   ] as Array<[string, unknown]>)
     args.push("-c", `${k}=${toml(v)}`);
   args.push("-C", dir, "-");
-  const child = spawn(cap.bin, args, {
+  const proc = superviseSpawn({
+    command: cap.bin,
+    args,
     cwd: dir,
     env: codexEnv(process.env),
-    detached: true,
-    shell: false,
-    stdio: ["pipe", "pipe", "pipe"],
+    class: "agent",
+    graceMs: 0,
   });
-  if (child.pid) childGroups.add(child.pid);
-  const kill = () => killTree(child);
+  const child = proc.child;
+  const kill = () => proc.stop();
   opts.signal?.addEventListener("abort", kill, { once: true });
   const timer = setTimeout(kill, Math.min(opts.timeoutMs ?? cfg.timeoutMs, 10 * 60_000));
   child.stdin?.on("error", () => {});
@@ -947,8 +913,7 @@ export async function codexComplete(
   });
   clearTimeout(timer);
   opts.signal?.removeEventListener("abort", kill);
-  kill();
-  if (child.pid) childGroups.remove(child.pid);
+  await proc.done;
   events.push(...parser.flush().events);
   rmSync(dir, { recursive: true, force: true });
   if (opts.signal?.aborted) throw new Error("canceled");

@@ -32,6 +32,7 @@ import { startGoService } from "./retrieval/goService.ts";
 import { stopChatStream } from "./chat/events.ts";
 import { recoverInstanceTurns } from "./chat/runtime.ts";
 import { childGroups } from "./workflow/local.ts";
+import { stopSupervised } from "./agent/process/supervisor.ts";
 
 // The Claude Agent SDK (and detect-libc) call process.report.getReport() to tell glibc from musl. By default a report
 // resolves every open socket's peer with a SYNCHRONOUS reverse-DNS lookup on the main thread; over VPN each lookup
@@ -129,6 +130,7 @@ async function shutdown(reason: string, code: number) {
   void stopEventStream(); // open SSE responses would otherwise keep server.close() waiting
   void stopChatStream();
   childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
+  void stopSupervised(); // Go launchers clean up their cgroup (they also do by themselves when this process dies)
   // Releasing needs a few database round trips per step (slow over VPN): allow time, but never hang forever.
   setTimeout(() => process.exit(code), 30_000).unref();
   try {

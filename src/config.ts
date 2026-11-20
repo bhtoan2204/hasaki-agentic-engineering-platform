@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { execution } from "./auth/execution.ts";
 import { isOwned } from "./platform/operatorState.ts";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
@@ -34,6 +35,15 @@ export interface CodeIntelligenceConfig {
     text: number;
     cap: number;
   };
+}
+
+export interface SupervisionLimits {
+  memoryMb: number;
+  pids: number;
+  cpuPercent: number;
+  cpuSeconds: number;
+  fileSizeMb: number;
+  openFiles: number;
 }
 
 export interface AnalyticsConfig {
@@ -500,6 +510,24 @@ export interface Config {
       openFiles: number;
     };
   };
+  /**
+   * Process supervision (ADR 0005, src/agent/process/supervisor.ts). "typescript": the platform spawns provider CLIs
+   * and verification commands itself; "go": each runs under go/cmd/platform-supervise (delegated cgroup leaf,
+   * cgroup.kill cleanup, host-wide admission). Set by PROCESS_SUPERVISION_ENGINE.
+   */
+  supervision: {
+    engine: "typescript" | "go";
+    /** Per-class limits applied by the Go engine (cgroup memory/pids/cpu, rlimits). 0 or absent = unlimited. */
+    limits: Record<"agent" | "verification", Partial<SupervisionLimits>>;
+    /** Host-wide concurrent processes per class (all instances of this account); 0 = no admission. */
+    slots: Record<"agent" | "verification", number>;
+    /** Defer a start while /proc/pressure/memory "some" avg10 exceeds this percentage (0 = never). */
+    psiMemory: number;
+    /** Defer a start while /proc/pressure/cpu "some" avg10 exceeds this percentage (0 = never). */
+    psiCpu: number;
+    /** Longest admission wait before the command is refused. */
+    admissionTimeoutMs: number;
+  };
   signoz: {
     defaultMinutes: number;
     maxMinutes: number;
@@ -730,6 +758,23 @@ const defaults: Config = {
     extraMasks: [],
     limits: { memoryMb: 4096, pids: 512, cpuSeconds: 3600, fileSizeMb: 1024, openFiles: 4096 },
   },
+  supervision: {
+    engine: "typescript",
+    // Conservative: large enough for real builds and agents, small enough that one runaway process cannot take
+    // the whole WSL VM (its default is half the host's memory).
+    limits: {
+      agent: { memoryMb: 8192, pids: 4096 },
+      verification: { memoryMb: 8192, pids: 8192, fileSizeMb: 4096 },
+    },
+    // Verification matches the in-process VERIFY_MAX_CONCURRENT default; host-wide, it also bounds other instances.
+    slots: {
+      agent: Math.max(2, Math.floor(availableParallelism() / 2)),
+      verification: Math.max(1, Math.floor(availableParallelism() / 4)),
+    },
+    psiMemory: 40,
+    psiCpu: 0,
+    admissionTimeoutMs: 10 * 60_000,
+  },
   signoz: {
     defaultMinutes: 15,
     maxMinutes: 7 * 24 * 60,
@@ -800,6 +845,12 @@ function load(): Config {
     },
     evaluation: { ...defaults.evaluation, ...(fromFile.evaluation ?? {}) },
     analytics: { ...defaults.analytics, ...(fromFile.analytics ?? {}) },
+    supervision: {
+      ...defaults.supervision,
+      ...(fromFile.supervision ?? {}),
+      limits: { ...defaults.supervision.limits, ...(fromFile.supervision?.limits ?? {}) },
+      slots: { ...defaults.supervision.slots, ...(fromFile.supervision?.slots ?? {}) },
+    },
     codeIntelligence: {
       ...defaults.codeIntelligence,
       ...(fromFile.codeIntelligence ?? {}),
@@ -892,6 +943,11 @@ function load(): Config {
       .CODE_INTELLIGENCE_ENGINE as CodeIntelligenceConfig["engine"];
   if (!["typescript", "go"].includes(cfg.codeIntelligence.engine))
     throw new Error("CODE_INTELLIGENCE_ENGINE must be typescript or go");
+  if (process.env.PROCESS_SUPERVISION_ENGINE)
+    cfg.supervision.engine = process.env
+      .PROCESS_SUPERVISION_ENGINE as Config["supervision"]["engine"];
+  if (!["typescript", "go"].includes(cfg.supervision.engine))
+    throw new Error("PROCESS_SUPERVISION_ENGINE must be typescript or go");
   if (process.env.ANALYTICS_ENGINE)
     cfg.analytics.engine = process.env.ANALYTICS_ENGINE as AnalyticsConfig["engine"];
   if (!["typescript", "go"].includes(cfg.analytics.engine))

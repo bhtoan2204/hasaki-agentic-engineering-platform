@@ -17,7 +17,7 @@ import {
 import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
 import { newMetrics } from "../metrics.ts";
 import type { AgentMetrics } from "../metrics.ts";
-import { spawn, execFile, type ExecFileException } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { config } from "../../config.ts";
 import { pool, one } from "../../db/pool.ts";
-import { childGroups } from "../../workflow/local.ts";
+import { superviseSpawn, supervisionNote } from "../process/supervisor.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
@@ -219,25 +219,25 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       `Follow the task in ${promptFile}. Do not print or copy .cursor/mcp.json. Use the platform MCP tools for questions, progress, knowledge, and submit_result.`,
     );
 
-    const child = spawn(cap.bin, args, {
-      cwd: input.cwd,
-      env: scrubEnv(process.env),
-      detached: true,
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    if (child.pid) childGroups.add(child.pid);
-    const kill = () => {
-      try {
-        if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {
-        /* ignore: group already gone */
-      }
-    };
     const limits = turnLimits(
       input.ctx.attempt.effective_agent,
       Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000),
     );
+    // Cursor is stopped at once (no grace), as before.
+    const proc = superviseSpawn({
+      command: cap.bin,
+      args,
+      cwd: input.cwd,
+      env: scrubEnv(process.env),
+      stdin: "ignore",
+      class: "agent",
+      graceMs: 0,
+      timeoutMs: limits.timeoutMs + 60_000,
+      runId: input.ctx.run.id,
+      attemptId: input.ctx.attempt.id,
+    });
+    const child = proc.child;
+    const kill = () => proc.stop();
     const watch = superviseTurn({ signal: input.ctx.signal, ...limits, stop: kill });
     activity.touch = () => watch.touch();
 
@@ -417,7 +417,10 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       });
     });
     watch.dispose();
-    if (child.pid) childGroups.remove(child.pid);
+    const supervision = await proc.done;
+    const supervisionLine = supervisionNote(supervision);
+    if (supervisionLine)
+      await input.ctx.log("system", supervisionLine, { provider: "cursor", supervision });
     const tail = parser.flush();
     for (const ev of tail.events) await handle(ev);
     for (const err of tail.errors)
@@ -544,21 +547,17 @@ export async function cursorComplete(
     if (!cap.supportsModel) throw new Error("Cursor CLI does not support model selection");
     args.push("--model", options.model);
   }
-  const child = spawn(cap.bin, args, {
+  const proc = superviseSpawn({
+    command: cap.bin,
+    args,
     cwd: dir,
     env: scrubEnv(process.env),
-    detached: true,
-    shell: false,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdin: "ignore",
+    class: "agent",
+    graceMs: 0,
   });
-  if (child.pid) childGroups.add(child.pid);
-  const kill = () => {
-    try {
-      if (child.pid) process.kill(-child.pid, "SIGKILL");
-    } catch {
-      /* ignore: group already gone */
-    }
-  };
+  const child = proc.child;
+  const kill = () => proc.stop();
   signal?.addEventListener("abort", kill, { once: true });
   let stdout = "";
   let stderr = "";
@@ -567,7 +566,8 @@ export async function cursorComplete(
   let answer = "";
   const code = await new Promise<number | null>((resolve) => {
     child.stdout?.on("data", (b: Buffer) => {
-      stdout += b.toString("utf8");
+      // The answer is the last line: a flooding CLI cannot grow this beyond the last megabyte.
+      stdout = (stdout + b.toString("utf8")).slice(-1_048_576);
       if (!parser) return;
       for (const ev of parser.push(b.toString("utf8")).events) {
         if (ev.type === "system") stream({ type: "started" });
@@ -582,11 +582,12 @@ export async function cursorComplete(
           });
       }
     });
-    child.stderr?.on("data", (b: Buffer) => (stderr += b.toString("utf8")));
+    child.stderr?.on("data", (b: Buffer) => (stderr = (stderr + b.toString("utf8")).slice(-8000)));
     child.on("error", () => resolve(null));
     child.on("close", (c) => resolve(c));
   });
-  if (child.pid) childGroups.remove(child.pid);
+  signal?.removeEventListener("abort", kill);
+  await proc.done;
   rmSync(dir, { recursive: true, force: true });
   if (signal?.aborted) throw new Error("canceled");
   if (code !== 0)

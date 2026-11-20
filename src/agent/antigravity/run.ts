@@ -1,14 +1,14 @@
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
 import { isModelBlocked } from "../modelPolicy.ts";
 import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { redactSecrets } from "../../integrations/redact.ts";
 import { antigravityConfig } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
-import { childGroups } from "../../workflow/local.ts";
+import { superviseSpawn, supervisionNote, type Supervised } from "../process/supervisor.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { newMetrics, type AgentMetrics } from "../metrics.ts";
@@ -149,33 +149,6 @@ async function writeAntigravityPrompt(child: ChildProcess, prompt: string, signa
   });
 }
 
-function killAntigravity(child: ChildProcess) {
-  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      /* ignore: process already gone */
-    }
-  }
-  const force = setTimeout(() => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    try {
-      process.kill(-child.pid!, "SIGKILL");
-    } catch {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore: process already gone */
-      }
-    }
-  }, 5000);
-  force.unref();
-  child.once("close", () => clearTimeout(force));
-}
-
 let activeRuns = 0;
 const waitingQueue: Array<() => void> = [];
 
@@ -258,13 +231,17 @@ export async function antigravityAgentTurn(
   }
 
   const cfg = antigravityConfig();
-  const release = await acquireSlot(input.ctx.attempt.effective_agent?.options?.max_concurrent ?? cfg.maxConcurrent, input.ctx.signal);
+  const release = await acquireSlot(
+    input.ctx.attempt.effective_agent?.options?.max_concurrent ?? cfg.maxConcurrent,
+    input.ctx.signal,
+  );
 
   let broker: Broker | null = null;
   const scratchDir = mkdtempSync(join(tmpdir(), "ctp-agy-scratch-"));
   let submitted: Record<string, unknown> | undefined;
 
   let child: ChildProcess | null = null;
+  let proc: Supervised | null = null;
 
   try {
     let assistantTurns = 0;
@@ -352,7 +329,10 @@ export async function antigravityAgentTurn(
       model: input.model || undefined,
       effort: input.effort || undefined,
       // Write steps always run sandboxed (fail-closed guarantee); preflight refuses sandbox:false for them.
-      sandbox: liveRuntime.getStore() || input.mode === "coding" ? true : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
+      sandbox:
+        liveRuntime.getStore() || input.mode === "coding"
+          ? true
+          : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
       timeoutSeconds: timeoutSec,
       conversationId: input.resumeId || undefined,
       additionalDirs,
@@ -376,19 +356,24 @@ export async function antigravityAgentTurn(
       return { isError: true, text: "canceled", assistantTurns: 0, failure: "CANCELED" };
     }
 
-    child = spawn(cfg.bin, args, {
+    // SIGTERM, then SIGKILL after 5 s, as before.
+    proc = superviseSpawn({
+      command: cfg.bin,
+      args,
       cwd: input.cwd,
       env,
-      detached: true,
-      stdio: ["pipe", "pipe", "pipe"],
+      class: "agent",
+      graceMs: 5000,
+      timeoutMs: limits.timeoutMs + 60_000,
+      runId: input.ctx.run.id,
+      attemptId: input.ctx.attempt.id,
     });
-
-    if (child.pid) childGroups.add(child.pid);
+    child = proc.child;
     const watch = superviseTurn({
       signal: input.ctx.signal,
       ...limits,
       stop: () => {
-        if (child) killAntigravity(child);
+        proc?.stop();
       },
     });
     activity.touch = () => watch.touch();
@@ -419,7 +404,7 @@ export async function antigravityAgentTurn(
     const handleEvent = async (ev: AntigravityEvent) => {
       if (ev.model && isModelBlocked(ev.model)) {
         blockedModel ||= `Antigravity runs model "${ev.model}", which is blocked by platform policy (agent.blockedModels); the run was stopped.`;
-        if (child) killAntigravity(child);
+        proc?.stop();
         return;
       }
       if (ev.model) await recordModel(ev.model);
@@ -459,7 +444,7 @@ export async function antigravityAgentTurn(
         violation =
           "Antigravity started a tool without running the platform's pre-execution hook; the run was stopped";
         input.metrics?.denied.push({ tool: ev.tool, reason: violation });
-        if (child) killAntigravity(child);
+        proc?.stop();
       }
 
       if (ev.tool) {
@@ -555,7 +540,7 @@ export async function antigravityAgentTurn(
     const writePromise = writeAntigravityPrompt(child, input.prompt, input.ctx.signal).catch(
       (error) => {
         inputError = error as Error;
-        if (!watch.reason && child) killAntigravity(child);
+        if (!watch.reason) proc?.stop();
       },
     );
     const exitCode = await exitPromise;
@@ -564,7 +549,10 @@ export async function antigravityAgentTurn(
     await pendingLogs;
 
     watch.dispose();
-    if (child?.pid) childGroups.remove(child.pid);
+    const supervision = await proc.done;
+    const supervisionLine = supervisionNote(supervision);
+    if (supervisionLine)
+      await input.ctx.log("system", supervisionLine, { provider: "antigravity", supervision });
 
     const tail = parser.flush();
     for (const ev of tail.events) await handleEvent(ev);
@@ -680,7 +668,13 @@ export async function antigravityAgentTurn(
 /** One-shot headless auxiliary completion (Phase 10). */
 export async function antigravityComplete(
   prompt: string,
-  opts?: { signal?: AbortSignal; model?: string; effort?: string; timeoutMs?: number; onStream?: CompletionStreamListener },
+  opts?: {
+    signal?: AbortSignal;
+    model?: string;
+    effort?: string;
+    timeoutMs?: number;
+    onStream?: CompletionStreamListener;
+  },
 ): Promise<{
   text: string;
   model?: string;
@@ -688,7 +682,10 @@ export async function antigravityComplete(
 }> {
   const cfg = antigravityConfig();
   if (opts?.signal?.aborted) throw new Error("Antigravity auxiliary completion canceled");
-  const cap = await antigravityCapabilities(false, { model: opts?.model ?? cfg.model, effort: opts?.effort ?? cfg.effort });
+  const cap = await antigravityCapabilities(false, {
+    model: opts?.model ?? cfg.model,
+    effort: opts?.effort ?? cfg.effort,
+  });
   if (!cap.ok) {
     throw new Error(cap.error || "Antigravity CLI is not available on this worker");
   }
@@ -701,10 +698,17 @@ export async function antigravityComplete(
   });
 
   const env = antigravityEnv(process.env);
-  const child = spawn(cfg.bin, args, { env, stdio: ["pipe", "pipe", "pipe"] });
-  if (child.pid) childGroups.add(child.pid);
+  const proc = superviseSpawn({
+    command: cfg.bin,
+    args,
+    cwd: process.cwd(),
+    env,
+    class: "agent",
+    graceMs: 5000,
+  });
+  const child = proc.child;
 
-  const onAbort = () => killAntigravity(child);
+  const onAbort = () => proc.stop();
   opts?.signal?.addEventListener("abort", onAbort, { once: true });
   const timeoutMs = opts?.timeoutMs ?? cfg.timeoutMs;
   let timedOut = false;
@@ -765,7 +769,7 @@ export async function antigravityComplete(
   clearTimeout(timer);
 
   opts?.signal?.removeEventListener("abort", onAbort);
-  if (child.pid) childGroups.remove(child.pid);
+  await proc.done;
 
   const tail = parser.flush();
   for (const ev of tail.events) {

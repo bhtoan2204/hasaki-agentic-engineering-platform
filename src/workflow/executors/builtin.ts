@@ -64,7 +64,7 @@ import {
   parseGoTest,
   type BaselineComparison,
 } from "./baseline.ts";
-import { childGroups } from "../local.ts";
+import { superviseSpawn, supervisionNote } from "../../agent/process/supervisor.ts";
 import { acquireVerificationSlot, verificationSlotsInUse } from "./verificationSlots.ts";
 import {
   askAboutFailure,
@@ -380,10 +380,10 @@ export async function runCommand(
   // The sandboxed helper only validates; the worker installs and signs dependencies before any command that calls it.
   if (command.includes("PLATFORM_NODE_DEPENDENCIES") && existsSync(join(cwd, "package.json")))
     await installNodeDependencies(cwd).catch(() => false);
-  const proc = await commandProcessEnv(cwd, env, verification);
-  const useBwrap = proc.isolation?.mode === "bwrap";
+  const proc0 = await commandProcessEnv(cwd, env, verification);
+  const useBwrap = proc0.isolation?.mode === "bwrap";
   // commandProcessEnv owns the complete environment; never reintroduce scrubbed worker values.
-  const childEnv = { ...proc.env };
+  const childEnv = { ...proc0.env };
   // Verification is a new test invocation, not a recursive child of the worker test harness.
   delete childEnv.NODE_TEST_CONTEXT;
   if (useBwrap) {
@@ -427,28 +427,22 @@ node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DE
   const script = `${restorePath}\n${helperScope}\n${pg[TEST_POSTGRES_BIN_ENV] ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n` : ""}${command}`;
   const git = useBwrap ? await gitMounts([cwd]) : [];
   const r = await new Promise<CommandResult>((resolve) => {
-    const child = spawn(
-      useBwrap ? "bwrap" : "bash",
-      useBwrap
-        ? [...bwrapArguments(cwd, proc.isolation?.liveRoot ?? null, git), "bash", "-lc", script]
+    // The whole tree (bash + go test + test binaries, and anything they detach) goes on abort or timeout, at once.
+    const proc = superviseSpawn({
+      command: useBwrap ? "bwrap" : "bash",
+      args: useBwrap
+        ? [...bwrapArguments(cwd, proc0.isolation?.liveRoot ?? null, git), "bash", "-lc", script]
         : ["-lc", script],
-      {
-        cwd,
-        env: childEnv,
-        signal,
-        detached: true,
-      },
-    );
-    // Kill the whole process group (bash + go test + test binaries) on abort/timeout, not only bash.
-    const killTree = () => {
-      try {
-        if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // ignore errors when child process group is already terminated
-      }
-    };
-    signal.addEventListener("abort", killTree, { once: true });
-    if (child.pid) childGroups.add(child.pid);
+      cwd,
+      env: childEnv,
+      class: "verification",
+      graceMs: 0,
+      timeoutMs: timeoutMs + 30_000,
+    });
+    const child = proc.child;
+    const stop = () => proc.stop();
+    signal.addEventListener("abort", stop, { once: true });
+    if (signal.aborted) stop();
     let output = "";
     const cap = 512 * 1024;
     let pending = "";
@@ -459,7 +453,7 @@ node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DE
     const ticker = setInterval(flush, 1500);
     const add = (b: Buffer) => {
       const s = b.toString("utf8");
-      if (output.length < cap) output += s;
+      if (output.length < cap) output += s.slice(0, cap - output.length);
       if (pending.length < 64 * 1024) pending += s;
     };
     child.stdout.on("data", add);
@@ -467,18 +461,18 @@ node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DE
     let timedOut = false;
     const t = setTimeout(() => {
       timedOut = true;
-      killTree();
+      stop();
     }, timeoutMs);
-    child.on("error", (e) => {
-      output += `\n[spawn error] ${e.message}`;
-    });
-    child.on("close", (code) => {
-      if (child.pid) childGroups.remove(child.pid);
+    void proc.done.then((report) => {
+      signal.removeEventListener("abort", stop);
       clearTimeout(t);
       clearInterval(ticker);
       flush();
+      const note = supervisionNote(report);
+      if (report.error && !report.exit_code) output += `\n[spawn error] ${report.error}`;
+      if (note) output += `\n[${note}]`;
       resolve({
-        code,
+        code: report.exit_code,
         output: output.length >= cap ? output + "\n[output truncated]" : output,
         timedOut,
       });
@@ -513,8 +507,7 @@ export const commandExecutor: StepExecutor = {
       ? [{ repo: "(cwd)", path: String(cfg.cwd), branch: ctx.run.branch }]
       : (await workspacesOf(ctx.run.id)).filter(
           (w) =>
-            !ctx.run.selected_repositories.length ||
-            ctx.run.selected_repositories.includes(w.repo),
+            !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
         );
     if (!targets.length) {
       // Nothing was changed (e.g. the coding step concluded the fix already exists): nothing to test.
