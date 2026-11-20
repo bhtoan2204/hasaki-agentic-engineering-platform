@@ -40,6 +40,7 @@ import {
 } from "../../git/provider.ts";
 import { publishReviewComment, reviewCommentBody } from "../../git/reviewComment.ts";
 import { mergeBranchInto, removeWorktree, worktreePorcelain } from "../../git.ts";
+import { mergeIntoBranch } from "./branchMerge.ts";
 import { bwrapArguments, commandProcessEnv } from "../../platform/selfDevelopment.ts";
 import {
   postgresUnavailableResult,
@@ -1194,6 +1195,8 @@ export const integrationExecutor: StepExecutor = {
         return publishReport(ctx);
       case "cleanup_workspaces":
         return cleanupWorkspaces(ctx);
+      case "merge_into_branch":
+        return mergeIntoBranch(ctx, runCommand);
       case "investigation_parse":
         return investigationParse(ctx);
       case "investigation_correlate":

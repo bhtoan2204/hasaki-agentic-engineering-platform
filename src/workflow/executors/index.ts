@@ -10,6 +10,7 @@ import {
   setAiRepositoryRanker,
 } from "./builtin.ts";
 import { registerExecutor } from "./registry.ts";
+import { setMergeModel } from "./branchMerge.ts";
 import { registerBuiltinTools } from "../../agent/toolRegistry.ts";
 import {
   claudeReportReasoner,
@@ -42,4 +43,5 @@ export function registerDefaultExecutors() {
   setSkillDrafter(modelSkillDrafter);
   // Feedback routing: one classification call through the run's provider (engine falls back to cues without it).
   setFeedbackModel(async (run, prompt) => (await completeForRun(run, prompt)).text);
+  setMergeModel(async (run, prompt, signal) => (await completeForRun(run, prompt, signal)).text);
 }

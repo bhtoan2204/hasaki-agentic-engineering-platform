@@ -26,6 +26,7 @@ const CHAIN = [
   "regression_test",
   "quality_gate",
   "pr",
+  "qc_merge",
   "cleanup",
 ] as const;
 
@@ -78,6 +79,7 @@ test("intelligent feature engineering is a valid executable template", async () 
       "test",
       "review",
       "pr",
+      "qc_merge",
       "cleanup",
     ],
   );

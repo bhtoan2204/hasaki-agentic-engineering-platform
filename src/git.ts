@@ -16,7 +16,7 @@ import { config } from "./config.ts";
 
 const exec = promisify(execFile);
 
-async function git(cwd: string, ...args: string[]) {
+export async function git(cwd: string, ...args: string[]) {
   if (["fetch", "push"].includes(args[0])) {
     const raw = (
       await exec("git", ["-C", cwd, "config", "--no-includes", "--get", "remote.origin.url"])

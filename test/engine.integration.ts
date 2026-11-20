@@ -1932,7 +1932,7 @@ test("profiles: manual override and high-risk fallback; FAST keeps the Task Resu
     start: false,
   });
   assert.equal(std.profile, "STANDARD");
-  assert.equal(std.steps.length, 11);
+  assert.equal(std.steps.length, 12);
   const pay = (
     await importHasakiTask({
       data: {

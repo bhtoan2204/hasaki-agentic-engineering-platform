@@ -99,7 +99,15 @@ test("FAST DAG: analysis folded into the coding step, plan approval and AI revie
   const spec = tpl("feature-implementation");
   const { spec: fast, changes } = applyProfile(spec, "FAST");
   const keys = fast.steps.map((s) => s.key);
-  assert.deepEqual(keys, ["discover", "confirm_repos", "implement", "test", "pr", "cleanup"]);
+  assert.deepEqual(keys, [
+    "discover",
+    "confirm_repos",
+    "implement",
+    "test",
+    "pr",
+    "qc_merge",
+    "cleanup",
+  ]);
   assert.equal(new Set(keys).size, keys.length, "no duplicated steps");
   const impl = fast.steps.find((s) => s.key === "implement")!;
   assert.deepEqual(impl.config.merged_from, ["analyze", "plan"]);
@@ -136,7 +144,7 @@ test("FAST DAG: analysis folded into the coding step, plan approval and AI revie
   ]);
   assert.deepEqual(
     bug.steps.map((s) => s.key),
-    ["discover", "confirm_repos", "implement", "regression_test", "pr", "cleanup"],
+    ["discover", "confirm_repos", "implement", "regression_test", "pr", "qc_merge", "cleanup"],
   );
 });
 

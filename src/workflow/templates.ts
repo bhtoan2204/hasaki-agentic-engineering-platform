@@ -757,6 +757,20 @@ export const cleanup = (...after: string[]) => ({
   config: { action: "cleanup_workspaces" },
 });
 
+/** Merge the branches the PR step published into release/qc; conflicts are resolved and built + tested before the push. */
+export const qcMerge = (after: string) => ({
+  key: "qc_merge",
+  type: "integration",
+  name: "Merge into release/qc",
+  depends_on: [after],
+  config: {
+    action: "merge_into_branch",
+    target: "release/qc",
+    pr_from: after,
+    command: TEST_COMMAND,
+  },
+});
+
 export const isCleanupStep = (s: { type?: string; config?: Record<string, unknown> | null }) =>
   s.type === "integration" && s.config?.action === "cleanup_workspaces";
 
@@ -879,7 +893,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["review"],
           config: { mode: "approval", content_from: "implement" },
         },
-        cleanup("pr"),
+        qcMerge("pr"),
+        cleanup("qc_merge"),
       ],
     },
   },
@@ -966,7 +981,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["review"],
           config: { mode: "approval", content_from: "implement" },
         },
-        cleanup("pr"),
+        qcMerge("pr"),
+        cleanup("qc_merge"),
       ],
     },
   },
@@ -1083,7 +1099,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           run_if: { step: "fix", status: "COMPLETED" },
           config: { mode: "approval", content_from: "fix" },
         },
-        cleanup("fix_pr"),
+        qcMerge("fix_pr"),
+        cleanup("qc_merge"),
       ],
     },
   },
@@ -1162,7 +1179,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["regression_test"],
           config: { mode: "approval", content_from: "refactor" },
         },
-        cleanup("pr"),
+        qcMerge("pr"),
+        cleanup("qc_merge"),
       ],
     },
   },
@@ -1270,7 +1288,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["regression_test"],
           config: { mode: "approval", content_from: "implement" },
         },
-        cleanup("pr"),
+        qcMerge("pr"),
+        cleanup("qc_merge"),
       ],
     },
   },
@@ -1437,7 +1456,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["quality_gate"],
           config: { mode: "approval", content_from: "implement" },
         },
-        cleanup("pr"),
+        qcMerge("pr"),
+        cleanup("qc_merge"),
       ],
     },
   },
@@ -1509,7 +1529,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["approve_diff"],
           config: { mode: "approval", content_from: "implement" },
         },
-        cleanup("pr"),
+        qcMerge("pr"),
+        cleanup("qc_merge"),
       ],
     },
   },
