@@ -1,3 +1,4 @@
+import type { Untyped } from "../untyped.ts";
 import { insertSnapshot } from "../context/repository.ts";
 import {
   buildExecutionContract,
@@ -50,15 +51,15 @@ export interface StepInput {
     description: string;
     project: string;
     source: string;
-    payload: any;
+    payload: Untyped;
   } | null;
   /** Outputs of every ancestor step, keyed by step key, with the attempt that produced them. */
-  upstream: Record<string, { status: string; attempt_id: number | null; output: any }>;
+  upstream: Record<string, { status: string; attempt_id: number | null; output: Untyped }>;
   /** All answered questions of this step (every attempt), oldest first. */
   answers: Array<{ question: string; answer: string; attempt_id: number | null }>;
   /** Answers/feedback/overrides queued for this attempt (resume info, reviewer feedback...). */
-  pending: any;
-  approval: any;
+  pending: Untyped;
+  approval: Untyped;
   /** When re-executed with instructions: the latest earlier attempt of this step (what to revise). */
   previous_attempt?: {
     number: number;

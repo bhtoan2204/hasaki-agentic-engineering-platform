@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -36,7 +37,7 @@ export function parseGoTest(output: string): GoTestReport {
   let pendingTests: string[] = [];
   let buildPkg: string | null = null;
   for (const raw of output.split("\n")) {
-    const line = raw.replace(/\x1b\[[0-9;]*m/g, "");
+    const line = stripVTControlCharacters(raw);
     const header = line.match(/^# (\S+)(?: \[\S+\])?\s*$/);
     if (header) {
       buildPkg = header[1];

@@ -37,24 +37,25 @@ describe("redactContextValue", () => {
       age: 30,
     };
 
-    const redacted = redactContextValue(sensitiveObj);
-    assert.equal(redacted.password, "[redacted]");
-    assert.equal(redacted.Passwd, "[redacted]");
-    assert.equal(redacted.SECRET, "[redacted]");
-    assert.equal(redacted.api_key, "[redacted]");
-    assert.equal(redacted.apiKey, "[redacted]");
-    assert.equal(redacted["api-key"], "[redacted]");
-    assert.equal(redacted.access_token, "[redacted]");
-    assert.equal(redacted.accessToken, "[redacted]");
-    assert.equal(redacted.refresh_token, "[redacted]");
-    assert.equal(redacted.refreshToken, "[redacted]");
-    assert.equal(redacted.auth_token, "[redacted]");
-    assert.equal(redacted.session_token, "[redacted]");
-    assert.equal(redacted.sessionToken, "[redacted]");
-    assert.equal(redacted.client_secret, "[redacted]");
-    assert.equal(redacted.clientSecret, "[redacted]");
-    assert.equal(redacted.username, "alice");
-    assert.equal(redacted.age, 30);
+    assert.deepEqual(redactContextValue(sensitiveObj), {
+      password: "[redacted]",
+      Passwd: "[redacted]",
+      SECRET: "[redacted]",
+      api_key: "[redacted]",
+      apiKey: "[redacted]",
+      "api-key": "[redacted]",
+      access_token: "[redacted]",
+      accessToken: "[redacted]",
+      refresh_token: "[redacted]",
+      refreshToken: "[redacted]",
+      auth_token: "[redacted]",
+      session_token: "[redacted]",
+      sessionToken: "[redacted]",
+      client_secret: "[redacted]",
+      clientSecret: "[redacted]",
+      username: "alice",
+      age: 30,
+    });
   });
 
   test("recursively redacts arrays and nested objects", () => {
@@ -68,12 +69,11 @@ describe("redactContextValue", () => {
         },
       },
     };
-    const result = redactContextValue(nested);
-    assert.equal(result.user, "bob");
-    assert.equal(result.tokens[0].secret, "[redacted]");
-    assert.equal(result.tokens[0].type, "session");
-    assert.equal(result.meta.config.apiKey, "[redacted]");
-    assert.equal(result.meta.config.active, true);
+    assert.deepEqual(redactContextValue(nested), {
+      user: "bob",
+      tokens: [{ type: "session", secret: "[redacted]" }],
+      meta: { config: { apiKey: "[redacted]", active: true } },
+    });
   });
 
   test("handles empty objects and empty arrays", () => {
@@ -86,12 +86,11 @@ describe("redactContextValue", () => {
     for (let i = 0; i < 35; i++) {
       deep = { child: deep };
     }
-    const result = redactContextValue(deep);
-    let cur = result;
-    for (let i = 0; i < 30; i++) {
-      cur = cur.child;
+    let expected: unknown = "[bounded nested content]";
+    for (let i = 0; i < 31; i++) {
+      expected = { child: expected };
     }
-    assert.equal(cur.child, "[bounded nested content]");
+    assert.deepEqual(redactContextValue(deep), expected);
   });
 });
 

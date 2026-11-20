@@ -1,12 +1,19 @@
 /** Broker client for the helper processes Codex spawns (hook.ts, bridge.ts). No platform imports: starts fast. */
 import { connect } from "node:net";
 
+export interface BrokerReply {
+  ok?: boolean;
+  error?: unknown;
+  text?: string;
+  decision?: { allow?: unknown; reason?: unknown };
+}
+
 /** Client side used by hook.ts and bridge.ts: one request, one reply. */
 export function brokerRequest(
   socketPath: string,
   body: Record<string, unknown>,
   timeoutMs = 120_000,
-): Promise<any> {
+): Promise<BrokerReply> {
   return new Promise((resolve, reject) => {
     const sock = connect(socketPath);
     let buf = "";

@@ -1,3 +1,4 @@
+import type { Untyped } from "../untyped.ts";
 import { z } from "zod";
 import {
   StepAgentConfig,
@@ -210,7 +211,7 @@ export interface StepRow {
   name: string;
   position: number;
   depends_on: string[];
-  config: Record<string, any>;
+  config: Record<string, Untyped>;
   run_if: {
     step: string;
     path?: string;
@@ -230,9 +231,9 @@ export interface StepRow {
   parent_step_key?: string | null;
   subtask_id?: string | null;
   graph_revision?: number | null;
-  output: any;
-  pending_input: any;
-  approval: any;
+  output: Untyped;
+  pending_input: Untyped;
+  approval: Untyped;
   error: string | null;
 }
 
@@ -260,15 +261,15 @@ export interface AttemptRow {
     | "STALE";
   job_id: number | null;
   fencing_token: number | null;
-  input: any;
-  output: any;
+  input: Untyped;
+  output: Untyped;
   agent_provider?: "claude" | "codex" | "cursor" | "antigravity" | "copilot" | null;
   agent_model?: string | null;
   effective_agent?: EffectiveAgent | null;
   executor_stopped_at?: string | null;
   context_snapshot_id: number | null;
   agent_session_id: string | null;
-  error: any;
+  error: Untyped;
   started_at: string;
   finished_at: string | null;
 }

@@ -88,7 +88,7 @@ export const repositories = {
       if (
         typeof patch.category !== "string" ||
         patch.category.trim().length > 80 ||
-        /[\x00-\x1f]/.test(patch.category)
+        /\p{Cc}/u.test(patch.category)
       )
         throw new Error("Invalid repository category");
       patch.category = patch.category.trim();

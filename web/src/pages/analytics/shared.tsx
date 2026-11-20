@@ -3,6 +3,7 @@ import { Activity, Info } from "lucide-react";
 import { EmptyState, Skeleton, SkeletonRows, StatCard, time } from "../../ui.tsx";
 import { uiLocale, useI18n } from "../../i18n/index.tsx";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- analytics API rows are untyped JSON read by many dashboards
 export type Row = Record<string, any>;
 export const number = (v: unknown) =>
   v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);

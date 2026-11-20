@@ -1,3 +1,4 @@
+import type { Untyped } from "../untyped.ts";
 import { loadKnowledgeAudit } from "../knowledge/auditLoader.ts";
 import {
   getReport,
@@ -297,7 +298,7 @@ import type { FeedbackMode } from "../workflow/replan.ts";
 
 export { HttpError };
 
-export type Ctx = { p: string[]; body: any; url: URL; actor: Actor };
+export type Ctx = { p: string[]; body: Untyped; url: URL; actor: Actor };
 export type Route = [method: string, pattern: RegExp, handler: (c: Ctx) => unknown];
 
 const support = (c: Ctx) => wantsSupport(c.actor, c.url.searchParams.get("scope"));

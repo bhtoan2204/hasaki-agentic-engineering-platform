@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
 export function validateInstanceId(id: string): string {
-  if (!id || id.length > 200 || /[:\s\x00-\x1f]/.test(id))
+  if (!id || id.length > 200 || /[:\s\p{Cc}]/u.test(id))
     throw new Error(
       "Instance identity must be 1–200 characters without whitespace or colons; set PLATFORM_INSTANCE explicitly.",
     );

@@ -47,6 +47,16 @@ test("knowledgeTier never promotes unverified memory to a rule", () => {
   assert.equal(knowledgeTier({ category: "agent_skill" }), "approved_knowledge");
 });
 
+type RankedHits = {
+  hits: Array<{
+    file_path: string;
+    evidence: string[];
+    rank_confidence: number;
+    snippet?: string;
+    confidence?: number;
+  }>;
+};
+
 test("rankRetrievedCode dedupes hits, expands one dependency step and labels confidence and evidence", () => {
   const rawHit = (path: string, confidence: number) => ({
     repository: "svc",
@@ -64,12 +74,12 @@ test("rankRetrievedCode dedupes hits, expands one dependency step and labels con
         candidate_definitions: [{ repository: "svc", file_path: "dep.ts" }],
       },
     ],
-  );
+  ) as RankedHits;
   const paths = out.hits.map((h: { file_path: string }) => h.file_path);
   assert.deepEqual(paths, ["a.ts", "dep.ts", "b.ts"]);
   assert.equal(paths.filter((p: string) => p === "a.ts").length, 1);
   const dep = out.hits.find((h: { file_path: string }) => h.file_path === "dep.ts");
-  assert.match(dep.evidence[0], /dependency of svc:a.ts/);
+  assert.match(String(dep?.evidence[0]), /dependency of svc:a.ts/);
   assert.ok(
     out.hits.every(
       (h: { rank_confidence: number }) => h.rank_confidence > 0 && h.rank_confidence <= 1,
@@ -113,7 +123,7 @@ test("dedupe keeps the strongest duplicate's metadata, regardless of input order
         })),
       },
       [],
-    );
+    ) as RankedHits;
     assert.equal(out.hits.length, 1);
     assert.equal(out.hits[0].snippet, "snippet-0.9");
     assert.equal(out.hits[0].confidence, 0.9);

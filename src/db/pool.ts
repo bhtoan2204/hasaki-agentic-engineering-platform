@@ -1,3 +1,4 @@
+import type { Untyped } from "../untyped.ts";
 import pg from "pg";
 import { config } from "../config.ts";
 
@@ -125,11 +126,11 @@ async function run(db: Db, sql: string, params: unknown[]) {
   return r;
 }
 
-export async function q<T = any>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> {
+export async function q<T = Untyped>(db: Db, sql: string, params: unknown[] = []): Promise<T[]> {
   return (await run(db, sql, params)).rows as T[];
 }
 
-export async function one<T = any>(
+export async function one<T = Untyped>(
   db: Db,
   sql: string,
   params: unknown[] = [],

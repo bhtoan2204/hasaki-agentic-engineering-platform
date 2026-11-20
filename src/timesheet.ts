@@ -174,10 +174,19 @@ export async function myTimesheet(userId: number, year: number, month: number, n
   const mm = String(month).padStart(2, "0");
   const fromDate = `${year}-${mm}-01`;
   const toDate = `${year}-${mm}-${String(lastDay).padStart(2, "0")}`;
-  const profile = await workApi(userId, "GET", "setting/user/profile", { employee: 1 });
+  const profile = await workApi<{
+    data?: {
+      staff_info?: {
+        code?: unknown;
+        staff_name?: string;
+        staff_loc_id?: unknown;
+        staff_dept_id?: unknown;
+      };
+    };
+  }>(userId, "GET", "setting/user/profile", { employee: 1 });
   const staff = profile?.data?.staff_info;
   if (!staff?.code) throw new HttpError(502, "Hasaki HR profile has no staff code");
-  const sheet = await workApi(userId, "GET", "v2/timesheet", {
+  const sheet = await workApi<{ data?: { rows?: unknown } }>(userId, "GET", "v2/timesheet", {
     location_id: String(staff.staff_loc_id ?? ""),
     department_id: String(staff.staff_dept_id ?? ""),
     staff_code: String(staff.code),

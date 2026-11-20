@@ -10,7 +10,7 @@ export function redactContextText(text: string): string {
     }
   return redactSecrets(text).replace(/\b(?:sk|rt|sess)-[A-Za-z0-9_-]{8,}/g, "[redacted]");
 }
-export function redactContextValue(value: unknown, depth = 0): any {
+export function redactContextValue(value: unknown, depth = 0): unknown {
   if (depth > 30) return "[bounded nested content]";
   if (typeof value === "string") return redactContextText(value);
   if (Array.isArray(value)) return value.map((v) => redactContextValue(v, depth + 1));

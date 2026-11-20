@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { verificationReplay } from "../workflow/replay.ts";
 import { fileURLToPath } from "node:url";
 import { normalizeScopePath } from "./scopeGuard.ts";
@@ -335,7 +336,7 @@ export interface VerificationRound {
 
 /** Lines that explain a failure (test failures, compile errors, panics, assertion output), bounded. */
 export function failureExcerpt(output: string, maxLines = 60, maxChars = 4000): string {
-  const lines = output.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  const lines = stripVTControlCharacters(output).split("\n");
   const keep = new Set<number>();
   lines.forEach((l, i) => {
     if (

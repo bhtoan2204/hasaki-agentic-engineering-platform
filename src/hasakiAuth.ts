@@ -96,13 +96,13 @@ export async function closeLoginWindow(userId: number) {
 }
 
 /** Call the wshr API the way the web app does. */
-export async function workApi(
+export async function workApi<T = unknown>(
   userId: number,
   method: string,
   path: string,
   params?: Record<string, string | number>,
   body?: unknown,
-) {
+): Promise<T> {
   const url = new URL(config.hasakiWork.apiUrl + "/" + path.replace(/^\//, ""));
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, String(v));
   // FormData is sent as multipart/form-data (fetch sets the boundary header itself); anything else as JSON.
@@ -122,12 +122,12 @@ export async function workApi(
     await deleteUserSecret(userId, "hasaki_token");
     throw new Error("Hasaki Work token expired for this account. Paste a new one.");
   }
-  const json: any = await res.json().catch(() => null);
+  const json: unknown = await res.json().catch(() => null);
   if (res.status === 404)
     throw new Error(
       `Hasaki Work ${method} ${url.pathname}: HTTP 404 — endpoint không tồn tại. Mở work.hasaki.vn/tasks, DevTools > Network, ` +
         `tìm request lấy danh sách task tới ${config.hasakiWork.apiUrl} rồi sửa hasakiWork.listPath / detailPath / listQuery trong config.json.`,
     );
   if (!res.ok || !json) throw new Error(`Hasaki Work ${method} ${path}: HTTP ${res.status}`);
-  return json;
+  return json as T;
 }

@@ -37,7 +37,7 @@ function gitlabRemote(value: string): CanonicalRemote | null {
 }
 
 export function repositoryRemote(value: unknown): CanonicalRemote {
-  if (typeof value !== "string" || value !== value.trim() || /[\s\\%?#\x00-\x1f]/.test(value))
+  if (typeof value !== "string" || value !== value.trim() || /[\s\\%?#\p{Cc}]/u.test(value))
     throw new Error("Use an HTTPS Git repository URL without credentials, query or fragment");
   const bitbucket =
     /^https:\/\/bitbucket\.org\/([a-z0-9][a-z0-9_-]*)\/([a-z0-9][a-z0-9._-]*?)(?:\.git)?\/?$/i.exec(
@@ -81,7 +81,7 @@ export function repositoryBranch(value: unknown): string {
     typeof value !== "string" ||
     !value ||
     value.startsWith("-") ||
-    /[\s~^:?*[\\\x00-\x1f]/.test(value) ||
+    /[\s~^:?*[\\\p{Cc}]/u.test(value) ||
     value.includes("..") ||
     value.includes("@{") ||
     value.split("/").some((p) => !p || p.startsWith(".") || p.endsWith(".") || p.endsWith(".lock"))

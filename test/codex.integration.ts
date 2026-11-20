@@ -342,7 +342,7 @@ test("broker: tools are refused until hooks ran; after ask_user, edits and mutat
       name: "post_update",
       args: {},
     });
-    assert.match(early.text, /hooks are not active/);
+    assert.match(String(early.text), /hooks are not active/);
     await brokerRequest(broker.socketPath, {
       token: broker.token,
       kind: "hook",
@@ -368,14 +368,14 @@ test("broker: tools are refused until hooks ran; after ask_user, edits and mutat
         tool_input: { command: "*** Begin Patch\n*** Add File: oms-api/x.go\n+x\n*** End Patch" },
       },
     });
-    assert.equal(edit.decision.allow, false);
+    assert.equal(edit.decision?.allow, false);
     const prep = await brokerRequest(broker.socketPath, {
       token: broker.token,
       kind: "tool",
       name: "prepare_branch",
       args: { repo: "oms-api" },
     });
-    assert.match(prep.text, /only available in coding steps/);
+    assert.match(String(prep.text), /only available in coding steps/);
     const bad = await brokerRequest(broker.socketPath, {
       token: "x",
       kind: "tool",

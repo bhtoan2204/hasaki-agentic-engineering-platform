@@ -352,7 +352,8 @@ async function handleUpdate(update: TelegramUpdate, retry = false) {
     callback = update.callback_query;
   let result = "Saved / Đã lưu",
     actorId: number | null = null,
-    actionId = "";
+    actionId = "",
+    ackLost = false;
   // Group/channel chatter (e.g. the legacy shared chat) is stored for chat discovery only: no audit, no reply.
   if (!identity && !callback) return;
   try {
@@ -472,10 +473,11 @@ async function handleUpdate(update: TelegramUpdate, retry = false) {
           text: "Temporarily unavailable; retry / Tạm thời lỗi; hãy thử lại",
           show_alert: true,
         }).catch(() => {});
-        throw new HttpError(503, "Telegram response persistence unavailable");
+        ackLost = true;
       }
     }
   }
+  if (ackLost) throw new HttpError(503, "Telegram response persistence unavailable");
 }
 /** Trusted transports persist first. The HTTP route never accepts unauthenticated updates. */
 export async function ingestUpdate(update: unknown, key = botKey()) {

@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { config } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
 import { ancestors } from "../graph.ts";
@@ -60,7 +61,7 @@ export function extractLog(
   buildError: string | null,
   max = 2000,
 ): string {
-  const lines = output.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  const lines = stripVTControlCharacters(output).split("\n");
   let picked: string[] = [];
   if (test) {
     const start = lines.findIndex(
@@ -85,7 +86,7 @@ export function extractLog(
 
 /** Leaf `not ok` results of `node --test` TAP output, with the file each failing test lives in and its YAML block. */
 export function parseNodeTest(output: string): Array<{ file: string; test: string; log: string }> {
-  const lines = output.replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  const lines = stripVTControlCharacters(output).split("\n");
   const out: Array<{ file: string; test: string; log: string }> = [];
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^(\s*)not ok \d+ - (.+?)\s*$/);

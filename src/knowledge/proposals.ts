@@ -1,3 +1,4 @@
+import type { Untyped } from "../untyped.ts";
 import { createHash } from "node:crypto";
 import { HttpError } from "../http/error.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
@@ -251,7 +252,7 @@ function validateProposed(changeType: ChangeType, p: ProposedChange, needContent
 export async function createProposal(
   x: ProposalInput,
   db: Db = pool,
-): Promise<{ proposal: any | null; created: boolean; reason?: string }> {
+): Promise<{ proposal: Untyped | null; created: boolean; reason?: string }> {
   if (!CHANGE_TYPES.includes(x.changeType))
     throw new HttpError(400, `unknown change type ${x.changeType}`);
   if (!x.evidence.length) throw new HttpError(400, "a proposal needs evidence");

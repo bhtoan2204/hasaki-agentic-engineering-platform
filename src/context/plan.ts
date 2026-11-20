@@ -464,7 +464,7 @@ export function rankRetrievedCode(
   search: unknown,
   dependencies: RetrievedDependency[] | undefined,
   limit = 12,
-): any {
+): unknown {
   if (!search || typeof search !== "object" || !("hits" in search) || !Array.isArray(search.hits))
     return search;
   const raw: RetrievedHit[] = search.hits;
