@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: docker.io/library/postgres:17-alpine
+    image: docker.io/pgvector/pgvector:pg17
     container_name: claude-task-platform-db
     environment:
       POSTGRES_USER: platform
@@ -12,5 +12,52 @@ services:
       - platform-pg:/var/lib/postgresql/data
     restart: unless-stopped
 
+  ollama:
+    image: docker.io/ollama/ollama:latest
+    container_name: claude-task-platform-ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - platform-ollama:/root/.ollama
+      # The model registry is reached through a TLS-inspecting proxy: trust the host's CA bundle.
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ollama-init:
+    image: docker.io/ollama/ollama:latest
+    container_name: claude-task-platform-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "bge-m3"]
+    restart: "no"
+
+  # Opt-in: docker compose --profile go up. Needs RETRIEVAL_INTERNAL_TOKEN in .env (see go/README.md).
+  platform-go:
+    build: ./go
+    profiles: ["go"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://platform:platform@postgres:5432/platform
+      PLATFORM_GO_ADDR: 0.0.0.0:4646
+      PLATFORM_GO_ALLOW_NONLOOPBACK: "true"
+      # The compose ollama container is on this machine; its service name just is not a loopback address.
+      EMBEDDING_URL: http://ollama:11434
+      EMBEDDING_REMOTE_AUTHORIZED: "true"
+    ports:
+      - "127.0.0.1:4646:4646"
+    depends_on:
+      - postgres
+      - ollama
+    restart: unless-stopped
+
 volumes:
   platform-pg:
+  platform-ollama:

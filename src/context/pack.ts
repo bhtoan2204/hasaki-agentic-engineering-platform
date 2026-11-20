@@ -516,6 +516,12 @@ export async function ensureContextPack(
           ),
         );
       const tier = new Map(ctx.context.disclosure.map((d) => [d.key, d.disclosure]));
+      // With semantic fusion the planned lexical scores are handed out in fused order, so pack priority follows it.
+      const fusedOrder = ctx.context.disclosure
+        .filter((d) => d.fused !== undefined)
+        .sort((a, b) => b.fused! - a.fused! || a.key.localeCompare(b.key));
+      const lexicalScores = fusedOrder.map((d) => d.score).sort((a, b) => b - a);
+      const fusedScore = new Map(fusedOrder.map((d, i) => [d.key, lexicalScores[i]]));
       for (const k of ctx.context.knowledge) {
         if (replacedMaps.has(k.key)) {
           searchOmitted.push(`knowledge:${k.id ?? k.key}:v${k.version}`);
@@ -558,7 +564,7 @@ export async function ensureContextPack(
                   ? `${externalNotice(k.metadata)}\n\n${k.content}`
                   : k.content,
               },
-          mandatory ? 990 : 80 + scored.score,
+          mandatory ? 990 : 80 + (fusedScore.get(k.key) ?? scored.score),
           mandatory,
           source(
             `knowledge:${k.id ?? k.key}`,

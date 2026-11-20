@@ -9,7 +9,8 @@ import {
 } from "../codeIntelligence/search.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { repositories, rankRepositories } from "../repos/service.ts";
-import { scoreKnowledge, summarizeValue } from "../context/plan.ts";
+import { fusedSearchOrder, scoreKnowledge, summarizeValue } from "../context/plan.ts";
+import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import { memoryFreshness, type MemoryMeta } from "../knowledge/memory.ts";
 import { repoPath } from "../repos/service.ts";
 import { redactContextValue } from "../context/redact.ts";
@@ -273,16 +274,17 @@ export async function executeContextTool(
             ? k.category === "task_memory"
             : true,
       );
-      const ranked = candidates
-        .map((k) => ({
-          k,
-          ...scoreKnowledge(k, args.query ?? "", env.stepType),
-        }))
+      const scored = candidates.map((k) => ({
+        k,
+        ...scoreKnowledge(k, args.query ?? "", env.stepType),
+      }));
+      let ranked = scored
         .filter((x) => !args.query || x.score > 0)
-        .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key))
-        .slice(0, args.limit);
+        .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key));
+      const semantic = await semanticRanksByKey(env.ownerId, args.query ?? "", candidates);
+      if (semantic) ranked = fusedSearchOrder(scored, ranked, semantic);
       const hits = [];
-      for (const { k, score, why } of ranked) {
+      for (const { k, score, why } of ranked.slice(0, args.limit)) {
         let freshness: { state: string; reason: string } = {
           state: "SNAPSHOT",
           reason: "pinned applicable version",
@@ -305,6 +307,7 @@ export async function executeContextTool(
           category: k.category,
           content: visible ? k.content : null,
           score,
+          ...(semantic?.has(k.key) ? { semantic_similarity: semantic.get(k.key)!.similarity } : {}),
           freshness,
           provenance: source(
             `knowledge:${k.id ?? k.key}`,

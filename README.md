@@ -427,6 +427,12 @@ See [architecture, extraction coverage and operational limits](docs/architecture
 
 Development finalization results, real-repository measurements, startup verification, and remaining limits: [P1 validation report](docs/validation/p1-finalization.md). Re-run the authorized development check with `npm run validate:code-intelligence -- <development-database-name>`; it indexes the three registered OMS checkouts and removes its disposable worktrees.
 
+### Optional semantic retrieval
+
+Knowledge ranking is lexical by default. To re-rank it semantically with the Go retrieval service ([ADR 0001](docs/architecture/adr/0001-go-backend-semantic-retrieval.md)), set `retrieval.semantic.enabled: true` (or `RETRIEVAL_SEMANTIC_ENABLED=1`) and `retrieval.semantic.url` (or `RETRIEVAL_SEMANTIC_URL`, default `http://127.0.0.1:4646`) in the **local** `PLATFORM_CONFIG`, and put the shared `RETRIEVAL_INTERNAL_TOKEN` in `.env` (never in `config.json`). `timeoutMs` (800), `topK` (30) and `minSimilarity` (0.45) tune the call.
+
+Semantic search only re-orders items the existing resolution and authorization already selected (Reciprocal Rank Fusion with the lexical order, k = 60); mandatory, enforced and assigned items are unaffected. A disabled, unreachable, slow or failing service falls back to lexical ranking and never fails a step. Admins see fallback counters and the service status at `GET /api/admin/retrieval/status` and can queue re-indexing with `POST /api/admin/retrieval/reindex` (`{ "all": true }` or `{ "source_ids": [...] }`). `npm run eval:retrieval` reports Recall@5/10, MRR and inline tokens for lexical and hybrid ranking over the seeded knowledge.
+
 ### Optional benchmark evaluations (P2)
 
 Set `evaluation.enabled: true` in the **local** `PLATFORM_CONFIG`; production defaults remain disabled. Migration `027_benchmark_framework` extends the existing evaluation tables and workflow scheduler. In **Insights → Quality**, an administrator publishes the immutable suite; users can launch bounded fixture runs, inspect evidence and compare paired results. Existing workflow questions, approvals, cancellation and artifacts remain the execution controls.

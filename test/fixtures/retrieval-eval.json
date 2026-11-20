@@ -1,0 +1,198 @@
+{
+  "description": "Labelled retrieval queries over the seeded knowledge (KNOWLEDGE_SEEDS + skills/external). Used by npm run eval:retrieval.",
+  "queries": [
+    {
+      "query": "how should I format the git commit message",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["commit-convention"]
+    },
+    {
+      "query": "quy tắc viết commit message",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["commit-convention"]
+    },
+    {
+      "query": "what footer goes at the end when I record my change history",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": ["commit-convention"]
+    },
+    {
+      "query": "never put API tokens or customer phone numbers in the code",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["no-secrets-in-code"]
+    },
+    {
+      "query": "không được lưu mật khẩu hay token trong mã nguồn",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["no-secrets-in-code"]
+    },
+    {
+      "query": "check the new endpoint for SQL injection and missing authorization",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["security-review", "skill.ext.differential-review"]
+    },
+    {
+      "query": "rà soát bảo mật cho thay đổi này",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["security-review", "skill.ext.differential-review"]
+    },
+    {
+      "query": "avoid adding a synchronous call to another microservice",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["latency-service-boundaries"]
+    },
+    {
+      "query": "giảm độ trễ khi gọi sang service khác",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["latency-service-boundaries"]
+    },
+    {
+      "query": "look for an existing implementation before writing new code",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["reuse-first-development"]
+    },
+    {
+      "query": "tái sử dụng code có sẵn thay vì viết mới",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["reuse-first-development"]
+    },
+    {
+      "query": "write table-driven unit tests",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["unit-test-generation", "skill.ext.test-driven-development"]
+    },
+    {
+      "query": "viết kiểm thử đơn vị cho hàm này",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["unit-test-generation", "skill.ext.test-driven-development"]
+    },
+    {
+      "query": "write the failing test first, then the implementation",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": ["skill.ext.test-driven-development"]
+    },
+    {
+      "query": "confirm the tests really pass before saying the work is done",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": ["skill.ext.verification-before-completion"]
+    },
+    {
+      "query": "kiểm tra lại kết quả trước khi báo đã hoàn thành",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["skill.ext.verification-before-completion"]
+    },
+    {
+      "query": "a test fails intermittently, find out why",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": [
+        "skill.ext.systematic-debugging",
+        "skill.ext.systematic-debugging.condition-based-waiting",
+        "skill.ext.systematic-debugging.root-cause-tracing"
+      ]
+    },
+    {
+      "query": "tìm nguyên nhân gốc của lỗi",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": [
+        "skill.ext.systematic-debugging",
+        "skill.ext.systematic-debugging.root-cause-tracing"
+      ]
+    },
+    {
+      "query": "replace arbitrary sleeps in tests with waiting for a condition",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["skill.ext.systematic-debugging.condition-based-waiting"]
+    },
+    {
+      "query": "validate data at every layer so the bug cannot come back",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": ["skill.ext.systematic-debugging.defense-in-depth"]
+    },
+    {
+      "query": "plan a multi-step implementation from a spec",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["skill.ext.writing-plans"]
+    },
+    {
+      "query": "lập kế hoạch triển khai nhiều bước",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["skill.ext.writing-plans"]
+    },
+    {
+      "query": "review the diff for security regressions and blast radius",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["skill.ext.differential-review", "security-review"]
+    },
+    {
+      "query": "make the new screen look distinctive and pick good typography",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": ["skill.ext.frontend-design"]
+    },
+    {
+      "query": "thiết kế giao diện đẹp, không nhàm chán",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["skill.ext.frontend-design"]
+    },
+    {
+      "query": "audit third-party packages for supply chain risk",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["skill.ext.supply-chain-risk-auditor"]
+    },
+    {
+      "query": "explore a few design options before choosing an architecture",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": ["skill.ext.brainstorming"]
+    },
+    {
+      "query": "xử lý góp ý code review từ người review",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["skill.ext.receiving-code-review"]
+    },
+    {
+      "query": "the smallest change that fully solves the task",
+      "lang": "en",
+      "kind": "direct",
+      "expected": ["skill.ext.ponytail"]
+    },
+    {
+      "query": "đánh giá chất lượng thay đổi: logic đúng, an toàn, đủ nhanh",
+      "lang": "vi",
+      "kind": "cross-language",
+      "expected": ["skill.ext.ponytail-review"]
+    },
+    {
+      "query": "drive a real browser to click through the page",
+      "lang": "en",
+      "kind": "paraphrase",
+      "expected": ["skill.ext.playwright-cli"]
+    }
+  ]
+}

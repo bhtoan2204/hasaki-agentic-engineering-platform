@@ -9,7 +9,13 @@ import {
   type KnowledgeCandidate,
   type ResolutionContext,
 } from "../knowledge/resolve.ts";
-import { planKnowledge, scoreKnowledge, type DisclosureEntry } from "../context/plan.ts";
+import {
+  fusedSearchOrder,
+  planKnowledge,
+  scoreKnowledge,
+  type DisclosureEntry,
+} from "../context/plan.ts";
+import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import { externalNotice, isExternal } from "../knowledge/external.ts";
 import { projectsOfRepositories } from "../repos/service.ts";
 
@@ -127,10 +133,12 @@ export async function knowledgeForTurn(scope: ChatKnowledgeScope) {
   const auto = items.filter(
     (k) => k.category !== "agent_skill" || k.reason !== "skill available on request",
   );
+  const semantic = await semanticRanksByKey(scope.ownerId, scope.text, auto);
   const relevant = auto.filter(
     (k) =>
       k.enforced ||
       k.category === "security_policy" ||
+      semantic?.has(k.key) ||
       scoreKnowledge(k, scope.text, "agent").score > 0,
   );
   const plan = planKnowledge(relevant, {
@@ -138,6 +146,7 @@ export async function knowledgeForTurn(scope: ChatKnowledgeScope) {
     stepType: "agent",
     inlineTokens: INLINE_TOKENS,
     indexSize: INDEX_SIZE,
+    semantic: semantic && new Map([...semantic].map(([key, h]) => [key, h.rank])),
   }).filter((d) => d.disclosure !== "search");
   const byKey = new Map(relevant.map((k) => [k.key, k]));
   return plan.map((d) => ({ item: byKey.get(d.key)!, disclosure: d.disclosure }));
@@ -151,19 +160,22 @@ export async function searchKnowledge(
   limit = 8,
 ) {
   const { items } = await discoverable(scope);
-  return items
+  const candidates = items
     .filter((k) => !category || k.category === category)
-    .filter((k) => !k.metadata?.parent_skill)
-    .map((k) => ({ k, ...scoreKnowledge(k, query, "agent") }))
+    .filter((k) => !k.metadata?.parent_skill);
+  const scored = candidates.map((k) => ({ k, ...scoreKnowledge(k, query, "agent") }));
+  let ranked = scored
     .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key))
-    .slice(0, limit)
-    .map(({ k, score, why }) => ({
-      ...refOf(k),
-      description: String(k.metadata?.description ?? "").slice(0, 300),
-      score,
-      why,
-    }));
+    .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key));
+  const semantic = await semanticRanksByKey(scope.ownerId, query, candidates);
+  if (semantic) ranked = fusedSearchOrder(scored, ranked, semantic);
+  return ranked.slice(0, limit).map(({ k, score, why }) => ({
+    ...refOf(k),
+    description: String(k.metadata?.description ?? "").slice(0, 300),
+    score,
+    ...(semantic?.has(k.key) ? { semantic_similarity: semantic.get(k.key)!.similarity } : {}),
+    why,
+  }));
 }
 
 /**

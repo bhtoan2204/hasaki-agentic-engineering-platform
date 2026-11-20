@@ -94,6 +94,45 @@ export interface DisclosureEntry {
   score: number;
   tokens: number;
   why: string;
+  semantic_rank?: number;
+  fused?: number;
+}
+
+/**
+ * Reciprocal Rank Fusion (k = 60) of a lexical order with 1-based semantic ranks. Each list contributes only for the
+ * keys it contains; keys ranked only semantically follow the lexical ones in the returned map.
+ */
+export function fuseRanks(
+  lexicalOrder: string[],
+  semanticRank: (key: string) => number | undefined,
+  semanticKeys: Iterable<string> = [],
+) {
+  const fused = new Map<string, number>();
+  const term = (key: string) => {
+    const s = semanticRank(key);
+    return s ? 1 / (60 + s) : 0;
+  };
+  lexicalOrder.forEach((key, i) => {
+    if (!fused.has(key)) fused.set(key, 1 / (60 + i + 1) + term(key));
+  });
+  for (const key of semanticKeys) if (!fused.has(key) && term(key)) fused.set(key, term(key));
+  return fused;
+}
+
+/** Search results in fused order: lexical matches plus semantic-only hits among `all`; ties by key. */
+export function fusedSearchOrder<T extends { k: { key: string } }>(
+  all: T[],
+  lexical: T[],
+  semantic: Map<string, { rank: number }>,
+): T[] {
+  const fused = fuseRanks(
+    lexical.map((x) => x.k.key),
+    (key) => semantic.get(key)?.rank,
+    semantic.keys(),
+  );
+  return all
+    .filter((x) => fused.has(x.k.key))
+    .sort((a, b) => fused.get(b.k.key)! - fused.get(a.k.key)! || a.k.key.localeCompare(b.k.key));
 }
 
 /** Relevance of a knowledge item to the request: word overlap with title/description/key, plus small priors. */
@@ -133,13 +172,41 @@ export function scoreKnowledge(
 
 export function planKnowledge(
   items: KnowledgeLike[],
-  opts: { requestText: string; stepType: string; inlineTokens: number; indexSize: number },
+  opts: {
+    requestText: string;
+    stepType: string;
+    inlineTokens: number;
+    indexSize: number;
+    /** Semantic rank per key (1-based); fused with the lexical order for non-mandatory items only. */
+    semantic?: Map<string, number>;
+  },
 ): DisclosureEntry[] {
   const scored = items.map((k) => ({
     k,
     ...scoreKnowledge(k, opts.requestText, opts.stepType),
     tokens: estimateTokens(k.content),
   }));
+  const fused =
+    opts.semantic &&
+    fuseRanks(
+      [...scored]
+        .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key))
+        .map((x) => x.k.key),
+      (key) => opts.semantic!.get(key),
+    );
+  const relevance = (x: (typeof scored)[number]) => (fused ? fused.get(x.k.key)! : x.score);
+  const semanticFields = (x: (typeof scored)[number]) => {
+    if (!fused) return {};
+    const rank = opts.semantic!.get(x.k.key);
+    return {
+      ...(rank ? { semantic_rank: rank } : {}),
+      fused: Math.round(fused.get(x.k.key)! * 1e6) / 1e6,
+    };
+  };
+  const semanticWhy = (x: (typeof scored)[number], why: string) =>
+    opts.semantic?.get(x.k.key)
+      ? `${why}; semantic similarity rank ${opts.semantic.get(x.k.key)}`
+      : why;
   // Unverified AI observations are never authoritative: they cannot be mandatory or inline, whatever their load flag.
   const unverified = (x: (typeof scored)[number]) => knowledgeTier(x.k) === "unverified_suggestion";
   const mandatory = (x: (typeof scored)[number]) => isMandatory(x.k);
@@ -153,7 +220,7 @@ export function planKnowledge(
     .sort(
       (a, b) =>
         Number(mandatory(b)) - Number(mandatory(a)) ||
-        b.score - a.score ||
+        (mandatory(a) ? b.score - a.score : relevance(b) - relevance(a)) ||
         a.k.key.localeCompare(b.k.key),
     );
   const demoted: typeof scored = [];
@@ -165,12 +232,13 @@ export function planKnowledge(
         disclosure: "inline",
         score: x.score,
         tokens: x.tokens,
-        why: mandatory(x) ? "mandatory (assigned/enforced)" : x.why,
+        why: mandatory(x) ? "mandatory (assigned/enforced)" : semanticWhy(x, x.why),
+        ...(mandatory(x) ? {} : semanticFields(x)),
       });
     } else demoted.push(x);
   }
   const rest = [...demoted, ...scored.filter((x) => !wantsInline(x))].sort(
-    (a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key),
+    (a, b) => relevance(b) - relevance(a) || a.k.key.localeCompare(b.k.key),
   );
   // A skill's supporting file (reference doc, script) is reached from its parent skill's footer or search_knowledge;
   // it never takes an index slot.
@@ -187,11 +255,15 @@ export function planKnowledge(
       disclosure,
       score: x.score,
       tokens: x.tokens,
-      why: companion
-        ? `supporting file of ${parentSkill}; ${x.why}`
-        : demoted.includes(x)
-          ? `over inline budget; ${x.why}`
-          : x.why,
+      why: semanticWhy(
+        x,
+        companion
+          ? `supporting file of ${parentSkill}; ${x.why}`
+          : demoted.includes(x)
+            ? `over inline budget; ${x.why}`
+            : x.why,
+      ),
+      ...semanticFields(x),
     });
   }
   return out;

@@ -1,0 +1,8 @@
+{
+  "owner_id": 7,
+  "query": "xác nhận đơn hàng trong bao lâu?",
+  "source_ids": [12, 31, 44],
+  "source_kinds": ["knowledge", "skill", "chat_memory"],
+  "top_k": 30,
+  "min_similarity": 0.35
+}

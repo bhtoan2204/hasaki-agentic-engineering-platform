@@ -79,6 +79,16 @@ export const SSH_HOST_KEY =
 
 export interface Config {
   knowledge: { ponytail: { enabled: boolean; mapChars: number } };
+  /** Semantic re-ranking by the Go retrieval service (ADR 0001); the token comes only from RETRIEVAL_INTERNAL_TOKEN. */
+  retrieval: {
+    semantic: {
+      enabled: boolean;
+      url: string;
+      timeoutMs: number;
+      topK: number;
+      minSimilarity: number;
+    };
+  };
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
   slop: SlopSettings;
@@ -509,6 +519,15 @@ export interface Config {
 
 const defaults: Config = {
   knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
+  retrieval: {
+    semantic: {
+      enabled: false,
+      url: "http://127.0.0.1:4646",
+      timeoutMs: 800,
+      topK: 30,
+      minSimilarity: 0.45,
+    },
+  },
   codeIntelligence: {
     enabled: false,
     includeGenerated: false,
@@ -746,6 +765,9 @@ function load(): Config {
     knowledge: {
       ponytail: { ...defaults.knowledge.ponytail, ...(fromFile.knowledge?.ponytail ?? {}) },
     },
+    retrieval: {
+      semantic: { ...defaults.retrieval.semantic, ...(fromFile.retrieval?.semantic ?? {}) },
+    },
     evaluation: { ...defaults.evaluation, ...(fromFile.evaluation ?? {}) },
     codeIntelligence: {
       ...defaults.codeIntelligence,
@@ -834,6 +856,21 @@ function load(): Config {
     throw new Error("slop.mode must be disabled, advisory or enforcement");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
+  const semantic = cfg.retrieval.semantic;
+  if (process.env.RETRIEVAL_SEMANTIC_ENABLED)
+    semantic.enabled = ["1", "true"].includes(process.env.RETRIEVAL_SEMANTIC_ENABLED);
+  if (process.env.RETRIEVAL_SEMANTIC_URL) semantic.url = process.env.RETRIEVAL_SEMANTIC_URL;
+  if (!/^https?:\/\//.test(semantic.url))
+    throw new Error("retrieval.semantic.url must be an http(s) URL");
+  semantic.timeoutMs = positiveInt("retrieval.semantic.timeoutMs", semantic.timeoutMs);
+  semantic.topK = positiveInt("retrieval.semantic.topK", semantic.topK);
+  if (semantic.topK > 100) throw new Error("retrieval.semantic.topK must be at most 100");
+  if (
+    !Number.isFinite(semantic.minSimilarity) ||
+    semantic.minSimilarity < -1 ||
+    semantic.minSimilarity > 1
+  )
+    throw new Error("retrieval.semantic.minSimilarity must be between -1 and 1");
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
   cfg.telegram = {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",

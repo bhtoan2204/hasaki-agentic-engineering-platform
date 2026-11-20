@@ -1,0 +1,33 @@
+{
+  "model": "ollama/bge-m3@1024",
+  "results": [
+    {
+      "source_id": 12,
+      "key": "rule.refund.window",
+      "source_kind": "knowledge",
+      "version": 3,
+      "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "similarity": 0.82,
+      "chunk": 0
+    },
+    {
+      "source_id": 12,
+      "key": "rule.refund.window",
+      "source_kind": "knowledge",
+      "version": 3,
+      "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "similarity": 0.71,
+      "chunk": 1
+    },
+    {
+      "source_id": 40,
+      "key": "memory.chat.7.preference",
+      "source_kind": "chat_memory",
+      "version": 1,
+      "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "similarity": 0.4,
+      "chunk": 0
+    }
+  ],
+  "took_ms": 12.5
+}

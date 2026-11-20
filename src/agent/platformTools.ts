@@ -35,7 +35,8 @@ import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
 import { citedArtifactIds, evidenceExcerpt } from "./independentReview.ts";
 import { prepareWorkspace, WorkspaceConflictError, workspacesOf } from "../git/provider.ts";
-import { scoreKnowledge } from "../context/plan.ts";
+import { fusedSearchOrder, scoreKnowledge } from "../context/plan.ts";
+import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import { externalNotice, isExternal } from "../knowledge/external.ts";
 import {
   callTool,
@@ -690,19 +691,19 @@ async function searchKnowledge(args: ToolArgs, env: PlatformToolEnv): Promise<st
   if (query.length < 2) return "query must be at least 2 characters";
   env.metrics?.knowledge_searches.push(query);
   const tier = new Map(env.disclosure.map((d) => [d.key, d.disclosure]));
-  const hits = env.knowledge
-    .map((k) => ({ k, ...scoreKnowledge(k, query, env.stepType) }))
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.min(20, Math.max(1, limit)))
-    .map((x) => ({
-      key: x.k.key,
-      title: x.k.title,
-      category: x.k.category,
-      description: String(x.k.metadata?.description ?? "").slice(0, 300),
-      score: x.score,
-      already_in_prompt: tier.get(x.k.key) === "inline",
-    }));
+  const scored = env.knowledge.map((k) => ({ k, ...scoreKnowledge(k, query, env.stepType) }));
+  let ranked = scored.filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
+  const semantic = await semanticRanksByKey(env.ownerId, query, env.knowledge);
+  if (semantic) ranked = fusedSearchOrder(scored, ranked, semantic);
+  const hits = ranked.slice(0, Math.min(20, Math.max(1, limit))).map((x) => ({
+    key: x.k.key,
+    title: x.k.title,
+    category: x.k.category,
+    description: String(x.k.metadata?.description ?? "").slice(0, 300),
+    score: x.score,
+    ...(semantic?.has(x.k.key) ? { semantic_similarity: semantic.get(x.k.key)!.similarity } : {}),
+    already_in_prompt: tier.get(x.k.key) === "inline",
+  }));
   await env.log(
     "system",
     `search_knowledge "${query}" → ${hits.map((h) => h.key).join(", ") || "no match"}`,

@@ -221,6 +221,7 @@ import {
 import { validateSpec } from "../workflow/graph.ts";
 import { isolationDiagnostics } from "../agent/isolation.ts";
 import { agentSessionStorageDiagnostics } from "../agent/sessionDiagnostics.ts";
+import { retrievalService, semanticFallbacks } from "../retrieval/semantic.ts";
 import { runDelivery } from "../workflow/prLifecycle.ts";
 import { observeManual } from "../learning/observations.ts";
 import { extractLessons, learningOverview } from "../learning/lessons.ts";
@@ -1281,6 +1282,53 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/admin\/agent-session-storage$/,
     async (c) => (requireAdmin(c.actor), agentSessionStorageDiagnostics()),
+  ],
+  // Semantic retrieval (ADR 0001): fallback counters and the Go service status; reindex is proxied to the service.
+  [
+    "GET",
+    /^\/api\/admin\/retrieval\/status$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const res = process.env.RETRIEVAL_INTERNAL_TOKEN
+        ? await retrievalService("/internal/v1/retrieval/status", undefined, 5000).catch(() => null)
+        : null;
+      return {
+        enabled: config.retrieval.semantic.enabled,
+        reachable: !!res?.ok,
+        fallbacks: { ...semanticFallbacks },
+        service: res?.ok ? await res.json().catch(() => null) : null,
+      };
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/admin\/retrieval\/reindex$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const ids = c.body.source_ids;
+      if (
+        ids !== undefined &&
+        (!Array.isArray(ids) ||
+          ids.length > 5000 ||
+          !ids.every((id) => Number.isInteger(id) && id > 0))
+      )
+        throw new EngineError("source_ids must be at most 5000 positive integers", 400);
+      if (!process.env.RETRIEVAL_INTERNAL_TOKEN)
+        throw new EngineError("RETRIEVAL_INTERNAL_TOKEN is not set", 409);
+      const res = await retrievalService(
+        "/internal/v1/retrieval/reindex",
+        { ...(ids ? { source_ids: ids } : {}), ...(c.body.all === true ? { all: true } : {}) },
+        5000,
+      ).catch(() => null);
+      if (!res?.ok) throw new EngineError("retrieval service unavailable", 502);
+      const out = await res.json();
+      await audit(c.actor.id, "retrieval.reindex", "retrieval", "semantic", {
+        all: c.body.all === true,
+        source_ids: ids?.length ?? 0,
+        enqueued: out?.enqueued,
+      });
+      return out;
+    },
   ],
   // Autonomy: admins manage the policies; whoever may act on a run can pause or resume its autonomy.
   [

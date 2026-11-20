@@ -1,0 +1,15 @@
+{
+  "model": "ollama/bge-m3@1024",
+  "results": [
+    {
+      "source_id": 31,
+      "key": "business.order-confirmation",
+      "source_kind": "knowledge",
+      "version": 3,
+      "content_hash": "63dedc45eb1c4ea3a5ef98ba156fe084dd084ca0ad11105e6c48ef3dc56fb6bc",
+      "similarity": 0.71,
+      "chunk": 0
+    }
+  ],
+  "took_ms": 12.4
+}

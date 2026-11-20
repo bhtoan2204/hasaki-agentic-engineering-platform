@@ -3,7 +3,8 @@ import { pool, q } from "../db/pool.ts";
 import { knowledge } from "../knowledge/service.ts";
 import { createProposal } from "../knowledge/proposals.ts";
 import { looksSecret } from "../knowledge/importer.ts";
-import { scoreKnowledge } from "../context/plan.ts";
+import { fusedSearchOrder, scoreKnowledge } from "../context/plan.ts";
+import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import { redactPii } from "../integrations/redact.ts";
 import { chatRepository } from "./repository.ts";
 import { emitChatEvent } from "./events.ts";
@@ -211,15 +212,17 @@ export async function learnProcedure(op: {
 
 export const chatMemories = (ownerId: number) =>
   q<{
+    id: number;
     key: string;
     title: string;
     enabled: boolean;
+    version: number;
     content: string;
     metadata: Record<string, unknown>;
     updated_at: string;
   }>(
     pool,
-    `SELECT i.key, i.title, i.enabled, v.content, v.metadata, i.updated_at
+    `SELECT i.id, i.key, i.title, i.enabled, v.version, v.content, v.metadata, i.updated_at
        FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
       WHERE i.owner_id = $1 AND i.category = 'task_memory' AND i.key LIKE $2
       ORDER BY i.updated_at DESC LIMIT 200`,
@@ -229,20 +232,21 @@ export const chatMemories = (ownerId: number) =>
 /** Relevant enabled memories of this owner for a message (lexical relevance; no model call). */
 export async function recallMemories(ownerId: number, message: string) {
   const rows = (await chatMemories(ownerId)).filter((r) => r.enabled);
-  return rows
-    .map((r) => ({
-      r,
-      s: scoreKnowledge({ ...r, category: "task_memory" }, message, "agent").score,
-    }))
+  const scored = rows.map((r) => ({
+    k: r,
+    s: scoreKnowledge({ ...r, category: "task_memory" }, message, "agent").score,
+  }));
+  let ranked = scored
     .filter(
       (x) =>
-        x.s > 0 || (x.r.metadata as { memory?: { kind?: string } }).memory?.kind === "preference",
+        x.s > 0 || (x.k.metadata as { memory?: { kind?: string } }).memory?.kind === "preference",
     )
-    .sort((a, b) => b.s - a.s)
-    .slice(0, MAX_RECALL)
-    .map(({ r }) => ({
-      key: r.key,
-      kind: String((r.metadata as { memory?: { kind?: string } }).memory?.kind ?? ""),
-      text: r.content,
-    }));
+    .sort((a, b) => b.s - a.s);
+  const semantic = await semanticRanksByKey(ownerId, message, rows, ["chat_memory"]);
+  if (semantic) ranked = fusedSearchOrder(scored, ranked, semantic);
+  return ranked.slice(0, MAX_RECALL).map(({ k: r }) => ({
+    key: r.key,
+    kind: String((r.metadata as { memory?: { kind?: string } }).memory?.kind ?? ""),
+    text: r.content,
+  }));
 }

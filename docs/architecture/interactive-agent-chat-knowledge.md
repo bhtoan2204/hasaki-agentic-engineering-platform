@@ -21,6 +21,15 @@ Cách sửa:
 - **Skill**: vẫn giữ quy tắc opt-in của registry khi tự áp dụng, nhưng tìm được khi user cần.
 - **Song ngữ**: `termsOf` / `requestTerms` trong `context/plan.ts` (dùng chung với workflow) map cụm từ nghiệp vụ tiếng Việt (hoàn tiền, đơn hàng, bảo hành, thanh toán, vận chuyển, tồn kho, khuyến mãi, hoá đơn, khách hàng, sản phẩm, đổi trả) sang khái niệm tiếng Anh ở cả hai phía, kèm từ đồng nghĩa tiếng Anh. Không dùng vector DB, không gọi LLM.
 
+## Semantic retrieval (tuỳ chọn)
+
+Khi bật `retrieval.semantic` ([ADR 0001](adr/0001-go-backend-semantic-retrieval.md) §7), `src/retrieval/semantic.ts` gọi Go service với đúng tập item mà pipeline trên đã cho phép (`source_ids`); hit có `version` khác item đã load bị bỏ (embedding cũ), hit ngoài tập bị bỏ. Thứ hạng ngữ nghĩa chỉ sắp xếp lại, không bao giờ thêm item:
+
+- **Luật fusion** (`fuseRanks` / `planKnowledge` trong `context/plan.ts`): Reciprocal Rank Fusion k = 60, `fused = 1/(60 + lexical_rank) + 1/(60 + semantic_rank)`; item vắng mặt trong một danh sách không nhận điểm từ danh sách đó. Chỉ áp dụng cho item không mandatory; mandatory (enforced, business rule, assigned, re-execution) giữ nguyên thứ tự và miễn budget, unverified suggestion vẫn ghim ở index. Tie-break theo key như cũ. `prompt_plan.knowledge` ghi thêm `semantic_rank` và `fused`; `why` ghi "semantic similarity rank N".
+- **Điểm dùng**: workflow `resolveContext` (cùng `rankText` với lexical), agent `search_knowledge` và `platform.search_knowledge` / `search_task_memory` / `get_business_rules` (trên snapshot đã kiểm tra, có thêm `semantic_similarity`), chat `knowledgeForTurn` / `knowledge.search` (sau `discoverable()`), chat `recallMemories` (chỉ memory.chat.* của chính owner). Trong search và chat, hit ngữ nghĩa có thể đưa item lexical score 0 vào kết quả, nhưng chỉ item đã nằm trong tập được phép.
+- **Fallback**: tắt, thiếu token, timeout (`AbortSignal.timeout` + `X-Request-Timeout-Ms`), non-2xx hoặc body sai contract → lexical, log tối đa một lần mỗi phút cho mỗi lý do, đếm trong `GET /api/admin/retrieval/status`. Nội dung retrieve vẫn là ngữ cảnh không tin cậy như trước.
+- **Đánh giá**: `npm run eval:retrieval` (fixture `test/fixtures/retrieval-eval.json`).
+
 ## Hiển thị và trích dẫn
 
 - Event `knowledge.applied` kèm danh sách {key, version, title, category, owner, reason, disclosure, sources}.

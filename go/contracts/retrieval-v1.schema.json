@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "retrieval-v1",
+  "title": "Internal retrieval API v1 (TypeScript platform ↔ platform-go)",
+  "$defs": {
+    "SourceKind": { "enum": ["knowledge", "skill", "task_memory", "lesson", "chat_memory"] },
+    "SearchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_id", "query", "top_k"],
+      "properties": {
+        "owner_id": { "type": "integer", "minimum": 1 },
+        "query": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "source_ids": {
+          "description": "Restrict to these knowledge_items ids (the set TypeScript already authorized). Omitted = every eligible source the owner may see.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "maxItems": 5000
+        },
+        "source_kinds": { "type": "array", "items": { "$ref": "#/$defs/SourceKind" } },
+        "top_k": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "min_similarity": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "SearchHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "key", "source_kind", "version", "content_hash", "similarity", "chunk"],
+      "properties": {
+        "source_id": { "type": "integer" },
+        "key": { "type": "string" },
+        "source_kind": { "$ref": "#/$defs/SourceKind" },
+        "version": { "type": "integer" },
+        "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "similarity": { "type": "number" },
+        "chunk": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SearchResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "results", "took_ms"],
+      "properties": {
+        "model": { "type": "string" },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/SearchHit" } },
+        "took_ms": { "type": "number" }
+      }
+    },
+    "ReindexRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_ids": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "maxItems": 5000 },
+        "all": { "type": "boolean" }
+      }
+    },
+    "ReindexResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enqueued"],
+      "properties": { "enqueued": { "type": "integer" } }
+    },
+    "Status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vector_extension", "model", "queue_depth", "indexed", "skipped_sensitive", "failed", "stale"],
+      "properties": {
+        "vector_extension": { "type": "boolean" },
+        "model": { "type": "string" },
+        "queue_depth": { "type": "integer" },
+        "indexed": { "type": "integer" },
+        "skipped_sensitive": { "type": "integer" },
+        "failed": { "type": "integer" },
+        "stale": { "type": "integer", "description": "eligible sources whose indexed version/hash/model is not current" }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "code"],
+      "properties": {
+        "error": { "type": "string" },
+        "code": { "enum": ["bad_request", "unauthorized", "vector_unavailable", "embedder_unavailable", "timeout", "internal"] }
+      }
+    }
+  },
+  "x-endpoints": {
+    "POST /internal/v1/retrieval/search": { "request": "SearchRequest", "response": "SearchResponse" },
+    "POST /internal/v1/retrieval/reindex": { "request": "ReindexRequest", "response": "ReindexResponse" },
+    "GET /internal/v1/retrieval/status": { "response": "Status" },
+    "GET /healthz": {},
+    "GET /readyz": {}
+  },
+  "x-headers": {
+    "Authorization": "Bearer <RETRIEVAL_INTERNAL_TOKEN>, required on /internal/*",
+    "X-Request-Timeout-Ms": "optional client deadline; the server uses min(client, server cap)",
+    "traceparent": "optional W3C trace context"
+  }
+}

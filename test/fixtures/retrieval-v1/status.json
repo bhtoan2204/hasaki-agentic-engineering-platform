@@ -1,0 +1,9 @@
+{
+  "vector_extension": true,
+  "model": "ollama/bge-m3@1024",
+  "queue_depth": 0,
+  "indexed": 42,
+  "skipped_sensitive": 1,
+  "failed": 0,
+  "stale": 0
+}

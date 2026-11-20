@@ -5,6 +5,7 @@ import {
 } from "../agent/executionContract.ts";
 import { detectNativeKnowledgeSources } from "../knowledge/nativeSources.ts";
 import { visibleKnowledge } from "../knowledge/visibility.ts";
+import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import type { ContextPack } from "../context/pack.ts";
 import { config } from "../config.ts";
 import { q, one, type Db } from "../db/pool.ts";
@@ -419,8 +420,10 @@ export async function resolveContext(
     String(cfg.instructions ?? ""),
     String(input.pending?.reexecute?.instructions ?? ""),
   ].join("\n");
+  const semantic = await semanticRanksByKey(run.owner_id, rankText, res.applied);
   const disclosure = planKnowledge(res.applied, {
     requestText: rankText,
+    semantic: semantic && new Map([...semantic].map(([key, h]) => [key, h.rank])),
     stepType: step.type,
     inlineTokens:
       run.profile === "MICRO"
