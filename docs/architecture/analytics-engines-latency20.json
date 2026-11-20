@@ -1,0 +1,433 @@
+{
+  "generated_at": "2026-11-20T12:19:54.379Z",
+  "dataset": {
+    "users": 6,
+    "runs": 20000,
+    "days": 60,
+    "groups": 1500
+  },
+  "db_latency_ms_each_way": 20,
+  "iterations": 15,
+  "concurrency": 8,
+  "postgres": "PostgreSQL 18.6",
+  "node_pool_max": 10,
+  "go_pool_max": 4,
+  "go_analytics_pool_max": 2,
+  "cold": {
+    "usage (member)": {
+      "typescript": {
+        "p50": 437.9,
+        "p95": 500.2,
+        "p99": 500.2,
+        "statements": 4,
+        "sql_ms": 1705.6,
+        "bytes": 22881,
+        "node_cpu_ms": 5.3,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 493,
+        "p95": 512,
+        "p99": 512,
+        "statements": 1,
+        "sql_ms": 480.8,
+        "bytes": 22497,
+        "node_cpu_ms": 7,
+        "go_cpu_ms": 2.7
+      }
+    },
+    "performance (member)": {
+      "typescript": {
+        "p50": 520,
+        "p95": 607.9,
+        "p99": 607.9,
+        "statements": 1,
+        "sql_ms": 526.7,
+        "bytes": 11169,
+        "node_cpu_ms": 2.2,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 479.7,
+        "p95": 512.2,
+        "p99": 512.2,
+        "statements": 1,
+        "sql_ms": 475.5,
+        "bytes": 11169,
+        "node_cpu_ms": 4.4,
+        "go_cpu_ms": 3.3
+      }
+    },
+    "workflows (member)": {
+      "typescript": {
+        "p50": 358.6,
+        "p95": 403.9,
+        "p99": 403.9,
+        "statements": 1,
+        "sql_ms": 358.7,
+        "bytes": 11087,
+        "node_cpu_ms": 2,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 338.5,
+        "p95": 393.7,
+        "p99": 393.7,
+        "statements": 1,
+        "sql_ms": 338.9,
+        "bytes": 11087,
+        "node_cpu_ms": 4,
+        "go_cpu_ms": 2
+      }
+    },
+    "health (member)": {
+      "typescript": {
+        "p50": 2460.2,
+        "p95": 2765.1,
+        "p99": 2765.1,
+        "statements": 1,
+        "sql_ms": 2482,
+        "bytes": 46992,
+        "node_cpu_ms": 6.7,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 384.6,
+        "p95": 406.3,
+        "p99": 406.3,
+        "statements": 1,
+        "sql_ms": 380.9,
+        "bytes": 46992,
+        "node_cpu_ms": 4.2,
+        "go_cpu_ms": 6
+      }
+    },
+    "options (member)": {
+      "typescript": {
+        "p50": 119,
+        "p95": 158.3,
+        "p99": 158.3,
+        "statements": 2,
+        "sql_ms": 164.1,
+        "bytes": 916,
+        "node_cpu_ms": 2.3,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 102.8,
+        "p95": 110.5,
+        "p99": 110.5,
+        "statements": 1,
+        "sql_ms": 98.5,
+        "bytes": 916,
+        "node_cpu_ms": 2.4,
+        "go_cpu_ms": 1.3
+      }
+    },
+    "health-service (member)": {
+      "typescript": {
+        "p50": 179.4,
+        "p95": 196,
+        "p99": 196,
+        "statements": 2,
+        "sql_ms": 308.3,
+        "bytes": 30905,
+        "node_cpu_ms": 5.2,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 162.8,
+        "p95": 172,
+        "p99": 172,
+        "statements": 1,
+        "sql_ms": 158.9,
+        "bytes": 30905,
+        "node_cpu_ms": 2.8,
+        "go_cpu_ms": 3.3
+      }
+    },
+    "usage by repository, codex (member)": {
+      "typescript": {
+        "p50": 392.8,
+        "p95": 527.8,
+        "p99": 527.8,
+        "statements": 4,
+        "sql_ms": 1598.3,
+        "bytes": 22994,
+        "node_cpu_ms": 4.3,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 417.9,
+        "p95": 476.4,
+        "p99": 476.4,
+        "statements": 1,
+        "sql_ms": 423.2,
+        "bytes": 22594,
+        "node_cpu_ms": 4,
+        "go_cpu_ms": 2.7
+      }
+    },
+    "health, provider filter (member)": {
+      "typescript": {
+        "p50": 329.2,
+        "p95": 394,
+        "p99": 394,
+        "statements": 4,
+        "sql_ms": 947.3,
+        "bytes": 14129,
+        "node_cpu_ms": 5.8,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 542.8,
+        "p95": 624.5,
+        "p99": 624.5,
+        "statements": 4,
+        "sql_ms": 886,
+        "bytes": 14129,
+        "node_cpu_ms": 4.8,
+        "go_cpu_ms": 4.7
+      }
+    },
+    "usage (support)": {
+      "typescript": {
+        "p50": 1630.9,
+        "p95": 1933.2,
+        "p99": 1933.2,
+        "statements": 4,
+        "sql_ms": 6464.6,
+        "bytes": 23316,
+        "node_cpu_ms": 4.9,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 1418.1,
+        "p95": 1883.5,
+        "p99": 1883.5,
+        "statements": 1,
+        "sql_ms": 1456.2,
+        "bytes": 22955,
+        "node_cpu_ms": 9.4,
+        "go_cpu_ms": 4.7
+      }
+    },
+    "performance (support)": {
+      "typescript": {
+        "p50": 1480,
+        "p95": 1511.8,
+        "p99": 1511.8,
+        "statements": 1,
+        "sql_ms": 1473.7,
+        "bytes": 11323,
+        "node_cpu_ms": 2.6,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 1323.8,
+        "p95": 1467.8,
+        "p99": 1467.8,
+        "statements": 1,
+        "sql_ms": 1336.3,
+        "bytes": 11323,
+        "node_cpu_ms": 3.7,
+        "go_cpu_ms": 2
+      }
+    },
+    "workflows (support)": {
+      "typescript": {
+        "p50": 1740,
+        "p95": 1847.9,
+        "p99": 1847.9,
+        "statements": 1,
+        "sql_ms": 1740.4,
+        "bytes": 13894,
+        "node_cpu_ms": 3.1,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 1582.7,
+        "p95": 2402,
+        "p99": 2402,
+        "statements": 1,
+        "sql_ms": 1660.6,
+        "bytes": 13889,
+        "node_cpu_ms": 4.2,
+        "go_cpu_ms": 2
+      }
+    },
+    "health (support)": {
+      "typescript": {
+        "p50": 2503.8,
+        "p95": 2799.9,
+        "p99": 2799.9,
+        "statements": 1,
+        "sql_ms": 2528.2,
+        "bytes": 47031,
+        "node_cpu_ms": 4,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 396.7,
+        "p95": 416.7,
+        "p99": 416.7,
+        "statements": 1,
+        "sql_ms": 394.7,
+        "bytes": 47031,
+        "node_cpu_ms": 3.1,
+        "go_cpu_ms": 4.7
+      }
+    },
+    "options (support)": {
+      "typescript": {
+        "p50": 91.6,
+        "p95": 105.2,
+        "p99": 105.2,
+        "statements": 2,
+        "sql_ms": 135.5,
+        "bytes": 1127,
+        "node_cpu_ms": 4.7,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 84.2,
+        "p95": 106.7,
+        "p99": 106.7,
+        "statements": 1,
+        "sql_ms": 82.7,
+        "bytes": 1127,
+        "node_cpu_ms": 2.2,
+        "go_cpu_ms": 0.7
+      }
+    },
+    "health-service (support)": {
+      "typescript": {
+        "p50": 179.1,
+        "p95": 200.8,
+        "p99": 200.8,
+        "statements": 2,
+        "sql_ms": 321.3,
+        "bytes": 30905,
+        "node_cpu_ms": 6.4,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 164.1,
+        "p95": 174.6,
+        "p99": 174.6,
+        "statements": 1,
+        "sql_ms": 160.2,
+        "bytes": 30905,
+        "node_cpu_ms": 4.2,
+        "go_cpu_ms": 3.3
+      }
+    },
+    "usage by repository, codex (support)": {
+      "typescript": {
+        "p50": 1626.3,
+        "p95": 2582.5,
+        "p99": 2582.5,
+        "statements": 4,
+        "sql_ms": 7107.1,
+        "bytes": 23290,
+        "node_cpu_ms": 5,
+        "go_cpu_ms": 0.7
+      },
+      "go": {
+        "p50": 1217.1,
+        "p95": 1543.5,
+        "p99": 1543.5,
+        "statements": 1,
+        "sql_ms": 1229.8,
+        "bytes": 22890,
+        "node_cpu_ms": 3.6,
+        "go_cpu_ms": 4
+      }
+    },
+    "health, provider filter (support)": {
+      "typescript": {
+        "p50": 1509.2,
+        "p95": 1604.5,
+        "p99": 1604.5,
+        "statements": 4,
+        "sql_ms": 3342.8,
+        "bytes": 14144,
+        "node_cpu_ms": 4.8,
+        "go_cpu_ms": 0
+      },
+      "go": {
+        "p50": 1767.1,
+        "p95": 2141.5,
+        "p99": 2141.5,
+        "statements": 4,
+        "sql_ms": 3162.1,
+        "bytes": 14144,
+        "node_cpu_ms": 4.4,
+        "go_cpu_ms": 6
+      }
+    }
+  },
+  "concurrent": {
+    "typescript": {
+      "requests": 128,
+      "errors": 0,
+      "error_messages": {},
+      "fell_back": false,
+      "throughput_rps": 2.85,
+      "p50": 2052.6,
+      "p95": 5984.8,
+      "p99": 7258.2,
+      "sql_ms_per_request": 3426.9,
+      "statements_per_request": 2.37,
+      "node_cpu_ms": 1093.3,
+      "go_cpu_ms": 50,
+      "node_rss_growth_mb": 0.4,
+      "go_rss_hwm_mb": 26.1,
+      "node_pool_probe_p95_ms": 2672.3,
+      "node_pool_probe_max_ms": 3054.4,
+      "node_pool_max_waiting": 13,
+      "go_retrieval_probe_p95_ms": 86.2,
+      "go_retrieval_probe_max_ms": 129.2,
+      "go_slot_wait_ms": 0,
+      "go_pool_acquire_wait_ms": 0
+    },
+    "go": {
+      "requests": 128,
+      "errors": 0,
+      "error_messages": {},
+      "fell_back": false,
+      "throughput_rps": 2.27,
+      "p50": 3583.9,
+      "p95": 5408.9,
+      "p99": 6410.5,
+      "sql_ms_per_request": 1013.6,
+      "statements_per_request": 1.37,
+      "node_cpu_ms": 1786.4,
+      "go_cpu_ms": 630,
+      "node_rss_growth_mb": 3.4,
+      "go_rss_hwm_mb": 28,
+      "node_pool_probe_p95_ms": 41.9,
+      "node_pool_probe_max_ms": 57.5,
+      "node_pool_max_waiting": 0,
+      "go_retrieval_probe_p95_ms": 44.2,
+      "go_retrieval_probe_max_ms": 53.7,
+      "go_slot_wait_ms": 499056.1,
+      "go_pool_acquire_wait_ms": 0.1
+    }
+  },
+  "warm_cache": {
+    "typescript": {
+      "first_ms": 396.6,
+      "hit_p50_ms": 0.201
+    },
+    "go": {
+      "first_ms": 453.8,
+      "hit_p50_ms": 0.319
+    }
+  },
+  "go_process": {
+    "cpuMs": 1590,
+    "rssMb": 28.1015625,
+    "hwmMb": 28.1015625
+  }
+}

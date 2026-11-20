@@ -52,3 +52,25 @@ Checks: `go test ./internal/codeintelligence/` (parity golden, contract, JS text
 `test/code-intelligence-go.integration.ts` runs the whole code intelligence integration suite against a real
 platform-go, plus rollback, stale-fence and cancellation cases (skipped without a Go toolchain). Remaining before
 the exit criteria: two weeks of daily use with the flag on, then removing the TypeScript extraction path.
+
+## Phase 2 status: engineering analytics
+
+Implemented behind `ANALYTICS_ENGINE=go` ([ADR 0003](adr/0003-go-analytics.md)). Profiling showed the cost was
+PostgreSQL, not Node (1–9 ms CPU per dashboard), so the phase is the SQL fixed and consolidated, running on
+platform-go's own read-only pool. TypeScript keeps routing, authorization, the support audit, the cache and the
+incident mutation; availability failures fall back to it (bounded), validation and authentication failures do not.
+
+| Measure (`npm run bench:analytics`, 20k runs, 30 days) | TypeScript → Go |
+|---|---|
+| health p95 | 2.6–2.7 s → 0.32 s (−88%) |
+| usage SQL time / statements | −76–80% / 4 → 1 |
+| health-service SQL time / statements | −57% / 2 → 1 |
+| SQL time per request under 8 concurrent clients | −74% |
+| Node pool probe p95 during that load | 1,858 ms → 1 ms |
+| performance, workflows | −0–38% p95 (PostgreSQL-bound) |
+| health with provider filter + service | +16–55% p95 (4 statements on 2 slots) |
+
+Checks: `go test ./internal/analytics/` (validation, DST, value mapping, contract) and
+`test/analytics-go.integration.ts` (parity of every dashboard on identical data, fallback, timeout, cancellation,
+audit, rollback) in CI; both fail without Go. Remaining before the exit criteria: two weeks of daily use with the
+flag on, then removing the TypeScript SQL (or porting the fixes to it if Go is rolled back).

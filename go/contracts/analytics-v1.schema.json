@@ -9,9 +9,31 @@
       "description": "src/api/analytics/filters.ts AnalyticsFilters after parsing, snake_case.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["from", "to", "timezone", "bucket", "provider", "model", "user", "workflow", "repository", "project", "service", "namespace", "severity", "incident_status", "environment", "group_by", "page", "page_size"],
+      "required": [
+        "from",
+        "to",
+        "timezone",
+        "bucket",
+        "provider",
+        "model",
+        "user",
+        "workflow",
+        "repository",
+        "project",
+        "service",
+        "namespace",
+        "severity",
+        "incident_status",
+        "environment",
+        "group_by",
+        "page",
+        "page_size"
+      ],
       "properties": {
-        "from": { "type": "string", "description": "YYYY-MM-DD (midnight in timezone) or ISO timestamp with offset" },
+        "from": {
+          "type": "string",
+          "description": "YYYY-MM-DD (midnight in timezone) or ISO timestamp with offset"
+        },
         "to": { "type": "string" },
         "timezone": { "type": "string", "minLength": 1 },
         "bucket": { "enum": ["hour", "day"] },
@@ -67,17 +89,41 @@
       "properties": {
         "data": { "type": "object" },
         "took_ms": { "type": "number", "minimum": 0 },
-        "statements": { "type": "integer", "minimum": 0, "description": "SQL statements this request executed" }
+        "statements": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "SQL statements this request executed"
+        }
       }
     },
     "UsageData": {
       "type": "object",
-      "required": ["summary", "trend", "breakdown", "details", "cost_source", "group_by", "repository_attribution"],
+      "required": [
+        "summary",
+        "trend",
+        "breakdown",
+        "details",
+        "cost_source",
+        "group_by",
+        "repository_attribution"
+      ],
       "properties": {
         "summary": { "type": "object", "required": ["invocations", "attempts", "breakdown_total"] },
-        "trend": { "type": "array", "items": { "type": "object", "required": ["bucket", "invocations"] } },
-        "breakdown": { "type": "array", "items": { "type": "object", "required": ["dimension", "total_rows"] } },
-        "details": { "type": "array", "items": { "type": "object", "required": ["run_id", "attempt_id", "token_anomaly", "total_rows"] } }
+        "trend": {
+          "type": "array",
+          "items": { "type": "object", "required": ["bucket", "invocations"] }
+        },
+        "breakdown": {
+          "type": "array",
+          "items": { "type": "object", "required": ["dimension", "total_rows"] }
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["run_id", "attempt_id", "token_anomaly", "total_rows"]
+          }
+        }
       }
     },
     "PerformanceData": {
@@ -92,22 +138,57 @@
     },
     "WorkflowsData": {
       "type": "object",
-      "required": ["workflows", "steps", "trend", "verification_trend", "verification_evidence", "evidence", "details", "hotspots"],
+      "required": [
+        "workflows",
+        "steps",
+        "trend",
+        "verification_trend",
+        "verification_evidence",
+        "evidence",
+        "details",
+        "hotspots"
+      ],
       "properties": {
         "hotspots": { "type": "object", "required": ["retries", "blocked", "approvals"] }
       }
     },
     "HealthData": {
       "type": "object",
-      "required": ["summary", "trend", "previousTrend", "serviceTrends", "severity", "services", "lifecycle", "details", "topFingerprints", "remediation", "freshness", "filters", "range", "data_window", "semantics", "source", "trend_source", "lifecycle_source"],
+      "required": [
+        "summary",
+        "trend",
+        "previousTrend",
+        "serviceTrends",
+        "severity",
+        "services",
+        "lifecycle",
+        "details",
+        "topFingerprints",
+        "remediation",
+        "freshness",
+        "filters",
+        "range",
+        "data_window",
+        "semantics",
+        "source",
+        "trend_source",
+        "lifecycle_source"
+      ],
       "properties": {
-        "summary": { "type": "object", "required": ["comparisons", "previous_coverage", "current_coverage"] },
+        "summary": {
+          "type": "object",
+          "required": ["comparisons", "previous_coverage", "current_coverage"]
+        },
         "freshness": {
           "type": "object",
           "required": ["status", "latest_scan", "window_coverage_ms"],
           "properties": {
-            "status": { "enum": ["never", "scanning", "latest_scan_failed", "stale", "partial", "current"] },
-            "latest_scan": { "description": "error is unredacted here; TypeScript applies safeDiagnostics before responding." }
+            "status": {
+              "enum": ["never", "scanning", "latest_scan_failed", "stale", "partial", "current"]
+            },
+            "latest_scan": {
+              "description": "error is unredacted here; TypeScript applies safeDiagnostics before responding."
+            }
           }
         }
       }
@@ -118,12 +199,29 @@
     },
     "OptionsData": {
       "type": "object",
-      "required": ["workflows", "repositories", "projects", "namespaces", "services", "environments", "users"]
+      "required": [
+        "workflows",
+        "repositories",
+        "projects",
+        "namespaces",
+        "services",
+        "environments",
+        "users"
+      ]
     },
     "Stats": {
       "description": "GET /internal/v1/analytics/stats: counters since start and the platform-go pool state.",
       "type": "object",
-      "required": ["requests", "statements", "statement_ms", "busy", "inflight", "slot_wait_ms", "max_concurrent", "pool"]
+      "required": [
+        "requests",
+        "statements",
+        "statement_ms",
+        "busy",
+        "inflight",
+        "slot_wait_ms",
+        "max_concurrent",
+        "pool"
+      ]
     },
     "Error": {
       "description": "400 invalid_request (not retried: a validation failure is never masked by the TypeScript fallback), 401 unauthorized, 503 busy | unavailable and 504 timeout (eligible for the bounded TypeScript fallback).",

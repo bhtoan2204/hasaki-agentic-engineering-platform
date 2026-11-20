@@ -30,13 +30,13 @@ consolidated, placed in the existing `platform-go` service so the dashboards sto
 
 ### Split: TypeScript keeps the boundary, Go reads
 
-| Stays in TypeScript (`src/api/analytics`) | Moves to `go/internal/analytics` |
-|---|---|
-| routing, authentication, authorization, filter parsing (400s) | dashboard SQL and its composition (health comparisons, coverage, freshness, service shares) |
-| scope derivation (`ownerId` = actor, `all` only for an admin `scope=all`) and the support audit (every read, cache hits included) | defensive re-validation of the filters and scope it receives |
-| `CacheAside` (30 s, write invalidation, singleflight), the public envelope (`filters`, `pagination`, `semantics`, `can_manage_incidents`, `generated_at`) | bounded concurrency, request deadline, cancellation |
-| incident lifecycle mutation (`updateIncidentLifecycle`), redaction of scan errors (`safeDiagnostics`) | |
-| migrations (no schema change in this phase) | |
+| Stays in TypeScript (`src/api/analytics`)                                                                                                                 | Moves to `go/internal/analytics`                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| routing, authentication, authorization, filter parsing (400s)                                                                                             | dashboard SQL and its composition (health comparisons, coverage, freshness, service shares) |
+| scope derivation (`ownerId` = actor, `all` only for an admin `scope=all`) and the support audit (every read, cache hits included)                         | defensive re-validation of the filters and scope it receives                                |
+| `CacheAside` (30 s, write invalidation, singleflight), the public envelope (`filters`, `pagination`, `semantics`, `can_manage_incidents`, `generated_at`) | bounded concurrency, request deadline, cancellation                                         |
+| incident lifecycle mutation (`updateIncidentLifecycle`), redaction of scan errors (`safeDiagnostics`)                                                     |                                                                                             |
+| migrations (no schema change in this phase)                                                                                                               |                                                                                             |
 
 `loadDashboard` (`src/api/analytics/engine.ts`) calls `POST /internal/v1/analytics/{dashboard}` (contract
 `go/contracts/analytics-v1.schema.json`) when the flag is `go`. The scope is computed from the authenticated actor
@@ -62,11 +62,12 @@ TypeScript cache sits in front of both engines, so cache hits, invalidation and 
   pull requests by id; before, equal counts came back in plan order.
 - Options: two statements become one.
 
-No index was added: every dashboard query is bounded by `workflow_runs_owner_created` (member scope) or scans the
-date range (support scope), and the remaining time is CTE work, not lookups. No rollup or materialized view either:
-with the quadratic step gone, the most expensive dashboard is well under a second at 20,000 runs, which does not
-justify a second source of truth with its own freshness problem. Revisit only if the measured statement time grows
-past the request deadline at production volume.
+No index was added. Measured on 100,000 runs over a year: the support-scope cohort (`created_at` range over all
+owners) already runs as a bitmap scan through `workflow_runs_owner_created`; a dedicated `created_at` index read the
+same pages (5,860 vs 5,917 buffers for 30 days, 1,777 vs 1,808 for 7 days). The remaining time is CTE work, not
+lookups. No rollup or materialized view either: with the quadratic step gone the most expensive dashboard is
+~1.4 s of statement time for 30 days of a 20,000-run support scope, which does not justify a second source of truth
+with its own freshness problem. Revisit if statement time at production volume approaches the request deadline.
 
 ### Resources and the connection budget
 
@@ -119,7 +120,54 @@ node-postgres value mapping, health composition helpers, slots and the read-only
 
 ## Results
 
-RESULTS_PLACEHOLDER
+`npm run bench:analytics` (files `docs/architecture/analytics-engines.json` and `-latency20.json`): 20,000 runs /
+60,000 steps / ~72,000 attempts, 1,500 error groups with 60 days of hourly and daily scans, 30-day range, PostgreSQL
+18.6 local (Unix socket), 16 cores, N = 15 per cell, cold (no cache). "SQL" is the summed execution time of the
+dashboard's statements as measured by each engine's database client: the database workload, which exceeds latency
+when TypeScript runs statements in parallel. The latency run puts a 20 ms delay on every packet in each direction for
+both engines.
+
+| Dashboard (member · support)                | p95 TypeScript → Go                                   | SQL time / request                              | statements |
+| ------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------- | ---------- |
+| health                                      | 2,659 → 320 ms (**−88%**) · 2,627 → 322 ms (**−88%**) | 2,479 → 301 ms · 2,385 → 306 ms (**−87%**)      | 1 → 1      |
+| health-service                              | 107 → 90 ms (−16%) · 115 → 89 ms (−23%)               | 178 → 76 ms · 174 → 75 ms (**−57%**)            | 2 → 1      |
+| usage                                       | 475 → 431 ms (−9%) · 1,865 → 1,548 ms (−17%)          | 1,643 → 388 ms · 6,441 → 1,417 ms (**−76–78%**) | 4 → 1      |
+| usage by repository, one provider           | 417 → 408 ms (−2%) · 1,757 → 1,344 ms (−23%)          | 1,556 → 368 ms · 6,149 → 1,218 ms (**−76–80%**) | 4 → 1      |
+| performance                                 | 543 → 528 ms (−3%) · 1,777 → 1,377 ms (−23%)          | 435 → 434 ms · 1,481 → 1,280 ms (0 to −14%)     | 1 → 1      |
+| workflows                                   | 470 → 291 ms (−38%) · 1,761 → 1,583 ms (−10%)         | 358 → 260 ms · 1,627 → 1,409 ms (−13–27%)       | 1 → 1      |
+| options                                     | 88 → 68 ms (−22%) · 71 → 52 ms (−28%)                 | 77 → 55 ms · 51 → 38 ms                         | 2 → 1      |
+| health with a provider filter and a service | 313 → 444 ms (**+42%**) · 1,661 → 1,934 ms (**+16%**) | 730 → 654 ms · 3,208 → 3,167 ms                 | 4 → 4      |
+
+With 20 ms injected latency the picture is the same (health −85%, usage SQL −72–83%, health-service −50% SQL); the
+provider + service health regression grows to +55% / +33%.
+
+Node CPU per dashboard is 1–9 ms on either engine and platform-go adds 1–6 ms: the runtime is not where the time
+goes. Response sizes are identical except usage (−1.6%: exact cost sums print fewer digits).
+
+Concurrent load, 8 clients over all 16 cells (128 requests), cold:
+
+|                                                                               | TypeScript                       | Go                       |
+| ----------------------------------------------------------------------------- | -------------------------------- | ------------------------ |
+| SQL time per request                                                          | 3,314 ms                         | 867 ms (**−74%**)        |
+| statements per request                                                        | 2.37                             | 1.37                     |
+| Node pool probe (`SELECT 1`, what the workflow engine and API feel) p95 / max | **1,858 / 3,069 ms**, 12 waiting | **1 / 38 ms**, 0 waiting |
+| platform-go retrieval probe p95                                               | 4 ms                             | 7 ms                     |
+| dashboard p50 / p95 / p99                                                     | 2,180 / 6,042 / 7,393 ms         | 3,251 / 6,875 / 9,638 ms |
+| throughput                                                                    | 2.9 req/s                        | 2.3 req/s                |
+| platform-go RSS high-water                                                    | 26 MB                            | 29 MB                    |
+
+Under a burst, TypeScript finishes dashboards sooner by running them on up to all ten Node connections, which stalls
+everything else in the process for seconds (one earlier run with the same settings had 34 of 128 requests fail;
+its error messages were not recorded). Go does a quarter of the database work but only two dashboard statements at a time, so dashboards
+queue instead (the slot wait is the latency difference); `ANALYTICS_MAX_CONCURRENT` trades between the two. With
+20 ms latency: Node probe p95 2,672 → 42 ms, Go dashboard p95 5,985 → 5,409 ms.
+
+Warm cache (public handler, usage): a hit costs 0.2–0.5 ms on either engine: the cache sits in front of both.
+
+**Where it did not help.** performance and workflows run the same cohort SQL on both engines; the narrower
+projections save 0–27%, the rest is PostgreSQL. Health with engineering filters and a selected service still needs
+four statements (each period's incident gate depends on its own run cohort) and they queue on two analytics slots,
+which TypeScript runs in parallel: +16–55% p95 for that combination.
 
 ## Rollback
 
