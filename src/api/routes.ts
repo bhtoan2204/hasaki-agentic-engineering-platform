@@ -34,6 +34,7 @@ import {
 import { setStepAgent } from "../workflow/engine.ts";
 import { attemptContext, findSnapshot } from "../context/repository.ts";
 import { engineeringAnalytics } from "./analytics/index.ts";
+import { analyticsEngineStats } from "./analytics/engine.ts";
 import { updateIncidentLifecycle } from "./analytics/health.ts";
 import {
   publishBuiltinSuite,
@@ -299,7 +300,14 @@ import type { FeedbackMode } from "../workflow/replan.ts";
 
 export { HttpError };
 
-export type Ctx = { p: string[]; body: Untyped; url: URL; actor: Actor };
+export type Ctx = {
+  p: string[];
+  body: Untyped;
+  url: URL;
+  actor: Actor;
+  /** Aborts when every client waiting for this response has disconnected. */
+  signal?: AbortSignal;
+};
 export type Route = [method: string, pattern: RegExp, handler: (c: Ctx) => unknown];
 
 const support = (c: Ctx) => wantsSupport(c.actor, c.url.searchParams.get("scope"));
@@ -473,7 +481,7 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/analytics\/(health|health-service|usage|performance|workflows|options)$/,
-    (c) => engineeringAnalytics(c.actor, c.url, c.p[0]),
+    (c) => engineeringAnalytics(c.actor, c.url, c.p[0], c.signal),
   ],
   [
     "POST",
@@ -1298,6 +1306,27 @@ export const routes: Route[] = [
         enabled: config.retrieval.semantic.enabled,
         reachable: !!res?.ok,
         fallbacks: { ...semanticFallbacks },
+        service: res?.ok ? await res.json().catch(() => null) : null,
+      };
+    },
+  ],
+  // Analytics engine (ADR 0003): which engine served, fallbacks by reason, and platform-go's analytics pool.
+  [
+    "GET",
+    /^\/api\/admin\/analytics\/engine$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const res =
+        config.analytics.engine === "go" && process.env.RETRIEVAL_INTERNAL_TOKEN
+          ? await retrievalService("/internal/v1/analytics/stats", undefined, 5000).catch(
+              () => null,
+            )
+          : null;
+      return {
+        engine: config.analytics.engine,
+        served: { go: analyticsEngineStats.go, typescript: analyticsEngineStats.typescript },
+        fallbacks: { ...analyticsEngineStats.fallbacks },
+        rejected: analyticsEngineStats.rejected,
         service: res?.ok ? await res.json().catch(() => null) : null,
       };
     },

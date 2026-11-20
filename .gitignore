@@ -7,3 +7,9 @@ web/dist/
 .req94-baseline/
 req94-*.log
 .eval/
+
+# Go build and test artifacts (`go test -c`, `npm run build:go`, profiles).
+*.test
+go/bin/
+*.prof
+*.pprof

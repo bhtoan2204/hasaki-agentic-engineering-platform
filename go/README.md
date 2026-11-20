@@ -2,8 +2,10 @@
 
 Go backend of the platform. Modules: semantic retrieval over `knowledge_items` with pgvector
 (ADR `docs/architecture/adr/0001-go-backend-semantic-retrieval.md`, contract `contracts/retrieval-v1.schema.json`,
-examples in `contracts/examples/`) and code intelligence indexing (ADR
-`docs/architecture/adr/0002-go-code-intelligence-indexing.md`, contract `contracts/code-intelligence-v1.schema.json`).
+examples in `contracts/examples/`), code intelligence indexing (ADR
+`docs/architecture/adr/0002-go-code-intelligence-indexing.md`, contract `contracts/code-intelligence-v1.schema.json`)
+and read-only engineering analytics dashboards (ADR `docs/architecture/adr/0003-go-analytics.md`, contract
+`contracts/analytics-v1.schema.json`).
 
 ```
 cmd/platform-go/          wiring, signals, graceful shutdown
@@ -12,6 +14,8 @@ internal/retrieval/       http.go → service.go → store.go; worker.go (queue 
 internal/retrieval/embed/ Ollama and OpenAI-compatible embedding clients
 internal/codeintelligence/ index.go (job) → git.go, extract.go (tree-sitter), store.go; jstext.go (JS string rules);
                           grammar/sql (vendored generated parser); testdata/parity (TypeScript golden)
+internal/analytics/       http.go → service.go (read-only pool, slots, node-postgres value mapping);
+                          execution.go (usage, performance, workflows), health*.go, options.go
 internal/testutil/        deterministic embedding provider emulator for tests and benchmarks
 ```
 
@@ -38,6 +42,15 @@ curl -s -H "Authorization: Bearer $RETRIEVAL_INTERNAL_TOKEN" -H 'X-Request-Timeo
   localhost:4646/internal/v1/retrieval/search
 ```
 
+```sh
+curl -s -H "Authorization: Bearer $RETRIEVAL_INTERNAL_TOKEN" -H 'X-Request-Timeout-Ms: 15000' \
+  -d '{"scope":{"owner_id":1,"all":false},"prod_namespaces":[],"filters":{"from":"2026-11-01","to":"2026-11-08",
+  "timezone":"Asia/Bangkok","bucket":"day","provider":null,"model":null,"user":null,"workflow":null,"repository":null,
+  "project":null,"service":null,"namespace":null,"severity":null,"incident_status":null,"environment":null,
+  "group_by":"provider","page":1,"page_size":25}}' localhost:4646/internal/v1/analytics/usage
+curl -s -H "Authorization: Bearer $RETRIEVAL_INTERNAL_TOKEN" localhost:4646/internal/v1/analytics/stats
+```
+
 Without pgvector the worker still indexes (embeddings are stored as `real[]`) and search answers
 `503 {"code":"vector_unavailable"}`.
 
@@ -54,6 +67,19 @@ The script uses `PG_VECTOR_BIN` / `PG_PLAIN_BIN` (PostgreSQL `bin` directories, 
 store) and `GO`. Integration tests read `PLATFORM_GO_TEST_DATABASE_URL` and `PLATFORM_GO_TEST_NOVECTOR_DATABASE_URL`
 and truncate `users` and `knowledge_items`: never point them at a real database. Benchmark results:
 `docs/benchmarks/retrieval-go.md`.
+
+## Build
+
+`npm run build:go` writes `go/bin/platform-go` (CGO, `-trimpath`). Set `PLATFORM_GO_BIN` to a prebuilt binary
+(this one or the Docker image's) and `npm start` runs it as is; without it, the supervisor reuses
+`<dataDir>/bin/platform-go` and rebuilds only when a Go source is newer than the binary.
+
+## Analytics parity
+
+`test/analytics-go.integration.ts` loads every dashboard through a real platform-go and compares it with the
+TypeScript engine on the same database (fixtures and a generated dataset, owner and support scopes, time zones
+including a DST change, pagination, empty ranges), plus fallback, timeout, cancellation and contract checks.
+Engine benchmark: `npm run bench:analytics` (isolated local database; `BENCH_DB_LATENCY_MS=20` adds latency).
 
 ## Code intelligence parity
 
@@ -101,6 +127,8 @@ service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`).
 | `WORKER_ENABLED` | `true` | |
 | `CODE_INDEX_PARSE_WORKERS` | `0` | parse goroutines per indexing job; 0 = half the cores, at most 4 |
 | `CODE_INDEX_JOBS` | `1` | indexing jobs at a time (callers beyond it wait: backpressure) |
+| `ANALYTICS_MAX_CONCURRENT` | `2` | 1–8: connections of the separate read-only analytics pool = statements at once |
+| `ANALYTICS_TIMEOUT_MS` | `15000` | analytics request deadline (slot wait included) and the pool's `statement_timeout` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | | enables OTLP/HTTP traces and metrics (standard `OTEL_*` variables apply) |
 
 The model id stored with every embedding is `<provider>/<model>@<dims>`. Changing any part re-queues every eligible

@@ -42,33 +42,6 @@ services:
     entrypoint: ["ollama", "pull", "bge-m3"]
     restart: "no"
 
-  # Opt-in: docker compose --profile go up. Needs RETRIEVAL_INTERNAL_TOKEN in .env (see go/README.md).
-  platform-go:
-    build: ./go
-    profiles: ["go"]
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://platform:platform@postgres:5432/platform
-      PLATFORM_GO_ADDR: 0.0.0.0:4646
-      PLATFORM_GO_ALLOW_NONLOOPBACK: "true"
-      # The compose ollama container is on this machine; its service name just is not a loopback address.
-      EMBEDDING_URL: http://ollama:11434
-      EMBEDDING_REMOTE_AUTHORIZED: "true"
-      # Indexing (CODE_INTELLIGENCE_ENGINE=go) reads checkouts owned by the host user.
-      GIT_CONFIG_COUNT: "1"
-      GIT_CONFIG_KEY_0: safe.directory
-      GIT_CONFIG_VALUE_0: "*"
-    # The platform sends absolute paths: mount checkouts and run worktrees read-only at the same paths.
-    volumes:
-      - ${HOME}/src:${HOME}/src:ro
-      - ${HOME}/.claude-task-platform:${HOME}/.claude-task-platform:ro
-    ports:
-      - "127.0.0.1:4646:4646"
-    depends_on:
-      - postgres
-      - ollama
-    restart: unless-stopped
-
 volumes:
   platform-pg:
   platform-ollama:

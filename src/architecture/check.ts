@@ -132,7 +132,7 @@ function providerOf(file: string): string | undefined {
 const API_DB_BOUNDARIES = new Set([
   "src/api/stream.ts",
   "src/api/metrics.ts",
-  "src/api/analytics/index.ts",
+  "src/api/analytics/options.ts",
   "src/api/analytics/health.ts",
   "src/api/analytics/execution.ts",
 ]);

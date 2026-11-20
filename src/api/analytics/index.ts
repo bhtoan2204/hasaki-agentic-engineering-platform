@@ -1,11 +1,9 @@
-import { pool, q } from "../../db/pool.ts";
 import { CacheAside } from "../../cache/index.ts";
 import { audit, wantsSupport, type Actor } from "../../authz/access.ts";
-import { config } from "../../config.ts";
 import { parseAnalyticsFilters } from "./filters.ts";
-import { usageAnalytics, performanceAnalytics, workflowAnalytics } from "./execution.ts";
-import { healthAnalytics, healthServiceAnalytics } from "./health.ts";
+import { loadDashboard, type Dashboard } from "./engine.ts";
 import { HttpError } from "../../http/error.ts";
+import { SharedAbort } from "../../http/sharedAbort.ts";
 
 const cache = new CacheAside<object>(
   "engineering.analytics",
@@ -23,61 +21,47 @@ const cache = new CacheAside<object>(
   30000,
   200,
 );
-export async function engineeringAnalytics(actor: Actor, url: URL, dashboard: string) {
+const loads = new SharedAbort();
+const DASHBOARDS = new Set<string>([
+  "health",
+  "health-service",
+  "usage",
+  "performance",
+  "workflows",
+]);
+
+/**
+ * `signal` aborts when every client waiting for this response has disconnected: the Go engine then cancels its
+ * statements. A cached load shared with another request is not canceled by one of them leaving.
+ */
+export async function engineeringAnalytics(
+  actor: Actor,
+  url: URL,
+  dashboard: string,
+  signal?: AbortSignal,
+) {
   const scope = { ownerId: actor.id, all: wantsSupport(actor, url.searchParams.get("scope")) };
   const filters = parseAnalyticsFilters(url.searchParams);
   if (scope.all) await audit(actor.id, "support.list", "analytics", dashboard, { filters });
+  // Cache-aside loads are shared by key: cancel one only when all of its waiters are gone.
+  const cached = async <T extends object>(key: string, load: (s: AbortSignal) => Promise<T>) => {
+    const shared = loads.join(key, signal);
+    try {
+      return await cache.get(key, () => load(shared.signal));
+    } finally {
+      shared.leave();
+    }
+  };
   if (dashboard === "options")
-    return cache.get(JSON.stringify([scope, "options"]), async () => {
-      const [rows, prodServices] = await Promise.all([
-        q(
-          pool,
-          `SELECT r.owner_id,u.username,r.definition_key,r.selected_repositories,
-      COALESCE(NULLIF(w.project,''),NULLIF(r.inputs->>'project',''),'unknown') AS project FROM workflow_runs r
-      JOIN users u ON u.id=r.owner_id LEFT JOIN work_items w ON w.id=r.work_item_id
-      WHERE r.owner_id IS NOT NULL AND ($2::boolean OR r.owner_id=$1) GROUP BY 1,2,3,4,5 ORDER BY 3 LIMIT 1000`,
-          [scope.ownerId, scope.all],
-        ),
-        q<{ namespace: string; service: string }>(
-          pool,
-          `SELECT DISTINCT COALESCE(NULLIF(namespace,''),'unknown') AS namespace,
-        COALESCE(NULLIF(service,''),'unknown') AS service FROM prod_error_groups ORDER BY 1,2 LIMIT 500`,
-        ),
-      ]);
-      const unique = (key: string) =>
-        [...new Set(rows.flatMap((r) => (Array.isArray(r[key]) ? r[key] : [r[key]])))].sort();
-      return {
-        workflows: unique("definition_key"),
-        repositories: unique("selected_repositories"),
-        projects: [
-          ...new Set([...unique("project"), ...config.prodErrors.namespaces.map((n) => n.project)]),
-        ].sort(),
-        namespaces: [
-          ...new Set([
-            ...config.prodErrors.namespaces.map((n) => n.namespace),
-            ...prodServices.map((r) => r.namespace),
-          ]),
-        ].sort(),
-        services: prodServices,
-        environments: ["production"],
-        users: [
-          ...new Map(
-            rows.map((r) => [r.owner_id, { id: r.owner_id, username: r.username }]),
-          ).values(),
-        ],
-        can_manage_incidents: actor.role === "admin",
-      };
-    });
-  const loader = {
-    health: healthAnalytics,
-    "health-service": healthServiceAnalytics,
-    usage: usageAnalytics,
-    performance: performanceAnalytics,
-    workflows: workflowAnalytics,
-  }[dashboard];
-  if (!loader) throw new HttpError(404, "Unknown analytics dashboard");
-  const data = await cache.get(JSON.stringify([scope, dashboard, filters]), async () => ({
-    ...(await loader(filters, scope)),
+    return {
+      ...(await cached(JSON.stringify([scope, "options"]), (s) =>
+        loadDashboard("options", filters, scope, s),
+      )),
+      can_manage_incidents: actor.role === "admin",
+    };
+  if (!DASHBOARDS.has(dashboard)) throw new HttpError(404, "Unknown analytics dashboard");
+  const data = await cached(JSON.stringify([scope, dashboard, filters]), async (s) => ({
+    ...(await loadDashboard(dashboard as Dashboard, filters, scope, s)),
     generated_at: new Date().toISOString(),
   }));
   return {

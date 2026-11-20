@@ -1,10 +1,26 @@
 import { spawn, spawnSync } from "node:child_process";
+import { test } from "node:test";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { config } from "../../src/config.ts";
 
 export const goToolchain = () => spawnSync("go", ["version"]).status === 0;
+
+/**
+ * Cross-language suites are mandatory: without a Go toolchain they fail, so CI can never pass by skipping them.
+ * PLATFORM_ALLOW_MISSING_GO=1 turns the failure into an explicit, reported skip on a machine without Go.
+ */
+export function requireGoToolchain(suite: string) {
+  if (process.env.PLATFORM_ALLOW_MISSING_GO === "1" && !process.env.CI)
+    test(suite, { skip: "Go toolchain not installed (PLATFORM_ALLOW_MISSING_GO=1)" }, () => {});
+  else
+    test(suite, () => {
+      throw new Error(
+        "Go toolchain not found: install Go (go/go.mod) or set PLATFORM_ALLOW_MISSING_GO=1 to skip locally",
+      );
+    });
+}
 
 /**
  * Builds platform-go from go/ and runs it against this process's DATABASE_URL on a free loopback port; the

@@ -1,6 +1,7 @@
 /**
  * The code intelligence suite (code-intelligence.integration.ts) again, with CODE_INTELLIGENCE_ENGINE=go: indexing
- * jobs run in a real platform-go built from go/ against this file's database. Skipped without a Go toolchain.
+ * jobs run in a real platform-go built from go/ against this file's database. Fails without a Go toolchain
+ * (PLATFORM_ALLOW_MISSING_GO=1 skips it explicitly outside CI).
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -8,10 +9,10 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { config } from "../src/config.ts";
-import { goToolchain, startPlatformGo } from "./fixtures/platformGo.ts";
+import { goToolchain, requireGoToolchain, startPlatformGo } from "./fixtures/platformGo.ts";
 
 if (!goToolchain()) {
-  test("code intelligence with the Go engine", { skip: "Go toolchain not installed" }, () => {});
+  requireGoToolchain("code intelligence with the Go engine");
 } else {
   const go = await startPlatformGo();
   after(go.stop);

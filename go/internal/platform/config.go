@@ -25,9 +25,12 @@ type Config struct {
 	WorkerEnabled     bool
 	IndexParseWorkers int
 	IndexJobs         int
-	OTLPEndpointIsSet bool
-	remoteAuthorized  bool
-	allowNonLoopback  bool
+	// Analytics statements running at once: the size of the separate read-only analytics pool.
+	AnalyticsMaxConcurrent int
+	AnalyticsTimeout       time.Duration
+	OTLPEndpointIsSet      bool
+	remoteAuthorized       bool
+	allowNonLoopback       bool
 }
 
 // ModelID identifies an embedding space: vectors are only comparable within one model id.
@@ -70,23 +73,25 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 
 	c := Config{
-		Addr:              str("PLATFORM_GO_ADDR", "127.0.0.1:4646"),
-		DatabaseURL:       getenv("DATABASE_URL"),
-		PoolMax:           int32(num("DATABASE_POOL_MAX", 4, 1, 16)),
-		Token:             getenv("RETRIEVAL_INTERNAL_TOKEN"),
-		RequestTimeoutMax: time.Duration(num("REQUEST_TIMEOUT_MAX_MS", 2000, 1, 60000)) * time.Millisecond,
-		EmbeddingProvider: str("EMBEDDING_PROVIDER", "ollama"),
-		EmbeddingModel:    str("EMBEDDING_MODEL", "bge-m3"),
-		EmbeddingDims:     num("EMBEDDING_DIMS", 1024, 1, 16000),
-		EmbeddingAPIKey:   getenv("EMBEDDING_API_KEY"),
-		EmbedConcurrency:  num("EMBEDDING_CONCURRENCY", 2, 1, 32),
-		EmbedBatch:        num("EMBEDDING_BATCH", 16, 1, 256),
-		WorkerEnabled:     flag("WORKER_ENABLED", true),
-		IndexParseWorkers: num("CODE_INDEX_PARSE_WORKERS", 0, 0, 64),
-		IndexJobs:         num("CODE_INDEX_JOBS", 1, 1, 8),
-		OTLPEndpointIsSet: getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "",
-		remoteAuthorized:  getenv("EMBEDDING_REMOTE_AUTHORIZED") == "true",
-		allowNonLoopback:  flag("PLATFORM_GO_ALLOW_NONLOOPBACK", false),
+		Addr:                   str("PLATFORM_GO_ADDR", "127.0.0.1:4646"),
+		DatabaseURL:            getenv("DATABASE_URL"),
+		PoolMax:                int32(num("DATABASE_POOL_MAX", 4, 1, 16)),
+		Token:                  getenv("RETRIEVAL_INTERNAL_TOKEN"),
+		RequestTimeoutMax:      time.Duration(num("REQUEST_TIMEOUT_MAX_MS", 2000, 1, 60000)) * time.Millisecond,
+		EmbeddingProvider:      str("EMBEDDING_PROVIDER", "ollama"),
+		EmbeddingModel:         str("EMBEDDING_MODEL", "bge-m3"),
+		EmbeddingDims:          num("EMBEDDING_DIMS", 1024, 1, 16000),
+		EmbeddingAPIKey:        getenv("EMBEDDING_API_KEY"),
+		EmbedConcurrency:       num("EMBEDDING_CONCURRENCY", 2, 1, 32),
+		EmbedBatch:             num("EMBEDDING_BATCH", 16, 1, 256),
+		WorkerEnabled:          flag("WORKER_ENABLED", true),
+		IndexParseWorkers:      num("CODE_INDEX_PARSE_WORKERS", 0, 0, 64),
+		IndexJobs:              num("CODE_INDEX_JOBS", 1, 1, 8),
+		AnalyticsMaxConcurrent: num("ANALYTICS_MAX_CONCURRENT", 2, 1, 8),
+		AnalyticsTimeout:       time.Duration(num("ANALYTICS_TIMEOUT_MS", 15000, 100, 120000)) * time.Millisecond,
+		OTLPEndpointIsSet:      getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "",
+		remoteAuthorized:       getenv("EMBEDDING_REMOTE_AUTHORIZED") == "true",
+		allowNonLoopback:       flag("PLATFORM_GO_ALLOW_NONLOOPBACK", false),
 	}
 	defaultURL := "http://127.0.0.1:11434"
 	if c.EmbeddingProvider == "openai" {

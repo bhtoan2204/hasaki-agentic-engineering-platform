@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "analytics-v1",
+  "title": "Internal engineering analytics API v1 (TypeScript platform ↔ platform-go)",
+  "description": "POST /internal/v1/analytics/{dashboard} loads one read-only dashboard for a scope that TypeScript derived from the authenticated actor (support reads are audited there). X-Request-Timeout-Ms bounds the request including the wait for an analytics slot; closing the request cancels its statements. `data` is the dashboard object TypeScript returns before it adds the public envelope (filters, pagination, semantics, cache_ttl_seconds, can_manage_incidents, generated_at).",
+  "$defs": {
+    "NullableText": { "type": ["string", "null"], "minLength": 1, "maxLength": 160 },
+    "Filters": {
+      "description": "src/api/analytics/filters.ts AnalyticsFilters after parsing, snake_case.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "timezone", "bucket", "provider", "model", "user", "workflow", "repository", "project", "service", "namespace", "severity", "incident_status", "environment", "group_by", "page", "page_size"],
+      "properties": {
+        "from": { "type": "string", "description": "YYYY-MM-DD (midnight in timezone) or ISO timestamp with offset" },
+        "to": { "type": "string" },
+        "timezone": { "type": "string", "minLength": 1 },
+        "bucket": { "enum": ["hour", "day"] },
+        "provider": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+        "model": { "$ref": "#/$defs/NullableText" },
+        "user": { "type": ["integer", "null"], "minimum": 1 },
+        "workflow": { "$ref": "#/$defs/NullableText" },
+        "repository": { "$ref": "#/$defs/NullableText" },
+        "project": { "$ref": "#/$defs/NullableText" },
+        "service": { "$ref": "#/$defs/NullableText" },
+        "namespace": { "$ref": "#/$defs/NullableText" },
+        "severity": { "enum": ["critical", "high", "medium", "low", "unknown", null] },
+        "incident_status": { "enum": ["open", "acknowledged", "resolved", "recurring", null] },
+        "environment": { "enum": ["production", null] },
+        "group_by": { "enum": ["provider", "model", "user", "workflow", "repository", "project"] },
+        "page": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "filters", "prod_namespaces"],
+      "properties": {
+        "scope": {
+          "description": "Derived from the authenticated actor, never from request parameters: all=true only for an admin support read that TypeScript has audited.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner_id", "all"],
+          "properties": {
+            "owner_id": { "type": "integer", "minimum": 1 },
+            "all": { "type": "boolean" }
+          }
+        },
+        "filters": { "$ref": "#/$defs/Filters" },
+        "prod_namespaces": {
+          "description": "config.prodErrors.namespaces (namespace → project), which platform-go does not read itself.",
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["namespace", "project"],
+            "properties": { "namespace": { "type": "string" }, "project": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "Response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data", "took_ms", "statements"],
+      "properties": {
+        "data": { "type": "object" },
+        "took_ms": { "type": "number", "minimum": 0 },
+        "statements": { "type": "integer", "minimum": 0, "description": "SQL statements this request executed" }
+      }
+    },
+    "UsageData": {
+      "type": "object",
+      "required": ["summary", "trend", "breakdown", "details", "cost_source", "group_by", "repository_attribution"],
+      "properties": {
+        "summary": { "type": "object", "required": ["invocations", "attempts", "breakdown_total"] },
+        "trend": { "type": "array", "items": { "type": "object", "required": ["bucket", "invocations"] } },
+        "breakdown": { "type": "array", "items": { "type": "object", "required": ["dimension", "total_rows"] } },
+        "details": { "type": "array", "items": { "type": "object", "required": ["run_id", "attempt_id", "token_anomaly", "total_rows"] } }
+      }
+    },
+    "PerformanceData": {
+      "type": "object",
+      "required": ["summary", "comparison", "failures", "details"],
+      "properties": {
+        "summary": { "type": "object", "required": ["runs", "attempts"] },
+        "comparison": { "type": "array" },
+        "failures": { "type": "array" },
+        "details": { "type": "array" }
+      }
+    },
+    "WorkflowsData": {
+      "type": "object",
+      "required": ["workflows", "steps", "trend", "verification_trend", "verification_evidence", "evidence", "details", "hotspots"],
+      "properties": {
+        "hotspots": { "type": "object", "required": ["retries", "blocked", "approvals"] }
+      }
+    },
+    "HealthData": {
+      "type": "object",
+      "required": ["summary", "trend", "previousTrend", "serviceTrends", "severity", "services", "lifecycle", "details", "topFingerprints", "remediation", "freshness", "filters", "range", "data_window", "semantics", "source", "trend_source", "lifecycle_source"],
+      "properties": {
+        "summary": { "type": "object", "required": ["comparisons", "previous_coverage", "current_coverage"] },
+        "freshness": {
+          "type": "object",
+          "required": ["status", "latest_scan", "window_coverage_ms"],
+          "properties": {
+            "status": { "enum": ["never", "scanning", "latest_scan_failed", "stale", "partial", "current"] },
+            "latest_scan": { "description": "error is unredacted here; TypeScript applies safeDiagnostics before responding." }
+          }
+        }
+      }
+    },
+    "HealthServiceData": {
+      "allOf": [{ "$ref": "#/$defs/HealthData" }],
+      "required": ["service", "service_detail"]
+    },
+    "OptionsData": {
+      "type": "object",
+      "required": ["workflows", "repositories", "projects", "namespaces", "services", "environments", "users"]
+    },
+    "Stats": {
+      "description": "GET /internal/v1/analytics/stats: counters since start and the platform-go pool state.",
+      "type": "object",
+      "required": ["requests", "statements", "statement_ms", "busy", "inflight", "slot_wait_ms", "max_concurrent", "pool"]
+    },
+    "Error": {
+      "description": "400 invalid_request (not retried: a validation failure is never masked by the TypeScript fallback), 401 unauthorized, 503 busy | unavailable and 504 timeout (eligible for the bounded TypeScript fallback).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "code"],
+      "properties": {
+        "error": { "type": "string" },
+        "code": { "enum": ["invalid_request", "unauthorized", "busy", "unavailable", "timeout"] }
+      }
+    }
+  }
+}

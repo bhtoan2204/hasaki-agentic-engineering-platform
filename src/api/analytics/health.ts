@@ -346,14 +346,14 @@ incident_rows AS (
    FROM incidents g WHERE g.period='current' ORDER BY g.recurring DESC,g.events DESC NULLS LAST,g.fingerprint ${page}
  ) paged LEFT JOIN LATERAL (
    SELECT jsonb_agg(jsonb_build_object('id',r.id,'status',r.status,'verified',r.verified,'changes',r.summary->'changes',
-     'pull_requests',(SELECT COALESCE(jsonb_agg(jsonb_build_object('url',p.url,'repo',p.repo,'title',p.title)),'[]'::jsonb) FROM pull_requests p WHERE p.run_id=r.id))) AS runs
+     'pull_requests',(SELECT COALESCE(jsonb_agg(jsonb_build_object('url',p.url,'repo',p.repo,'title',p.title) ORDER BY p.id),'[]'::jsonb) FROM pull_requests p WHERE p.run_id=r.id))) AS runs
    FROM (SELECT * FROM runs WHERE work_item_id=paged.work_item_id ORDER BY id DESC LIMIT 5) r
  ) links ON true
 ),
 top_rows AS (
  SELECT fingerprint,namespace,COALESCE(NULLIF(service,''),'unknown') AS service,signature,observed_severity AS severity,
    events,recurring,observed_first_at AS first_at,observed_last_at AS last_at,visible_work_item_id AS work_item_id,work_item_code
- FROM incidents WHERE period='current' ORDER BY events DESC NULLS LAST LIMIT 10
+ FROM incidents WHERE period='current' ORDER BY events DESC NULLS LAST,fingerprint LIMIT 10
 ),
 remediation AS (
  SELECT count(*) FILTER(WHERE visible_work_item_id IS NOT NULL)::int AS linked_incidents,
@@ -458,7 +458,7 @@ SELECT
  } AS details,
  ${
    includeDetails
-     ? `COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.events DESC NULLS LAST) FROM top_rows x),'[]'::jsonb)`
+     ? `COALESCE((SELECT jsonb_agg(to_jsonb(x) ORDER BY x.events DESC NULLS LAST,x.fingerprint) FROM top_rows x),'[]'::jsonb)`
      : `'[]'::jsonb`
  } AS top_fingerprints,
  ${includeDetails ? "(SELECT to_jsonb(r) FROM remediation r)" : "NULL::jsonb"} AS remediation,

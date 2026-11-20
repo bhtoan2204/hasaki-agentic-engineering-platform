@@ -1,5 +1,5 @@
-// Command platform-go serves the Go modules of the platform (semantic retrieval, code intelligence indexing) on a
-// loopback address.
+// Command platform-go serves the Go modules of the platform (semantic retrieval, code intelligence indexing,
+// engineering analytics) on a loopback address.
 package main
 
 import (
@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-task-platform/go/internal/analytics"
 	"claude-task-platform/go/internal/codeintelligence"
 	"claude-task-platform/go/internal/platform"
 	"claude-task-platform/go/internal/retrieval"
@@ -79,12 +80,23 @@ func run(log *slog.Logger) error {
 	indexing := http.NewServeMux()
 	codeintelligence.Routes(indexing, codeintelligence.NewIndexer(db, cfg.IndexParseWorkers, cfg.IndexJobs), log)
 	mux.Handle("/internal/v1/code-intelligence/", platform.RequireBearer(cfg.Token, indexing))
+	// Dashboards outlast the short retrieval deadline but are bounded by their own. They run on a separate read-only
+	// pool of ANALYTICS_MAX_CONCURRENT connections, so expensive dashboards never take a connection from retrieval
+	// or indexing (the shared pool keeps DATABASE_POOL_MAX).
+	analyticsDB, err := platform.OpenReadOnlyPool(ctx, cfg.DatabaseURL, int32(cfg.AnalyticsMaxConcurrent), cfg.AnalyticsTimeout)
+	if err != nil {
+		return err
+	}
+	defer analyticsDB.Close()
+	dashboards := http.NewServeMux()
+	analytics.Routes(dashboards, analytics.NewService(analyticsDB, cfg.AnalyticsMaxConcurrent), cfg.AnalyticsTimeout, log)
+	mux.Handle("/internal/v1/analytics/", platform.RequireBearer(cfg.Token, dashboards))
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           platform.Observe(log, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      cfg.RequestTimeoutMax + 5*time.Second,
+		WriteTimeout:      max(cfg.RequestTimeoutMax, cfg.AnalyticsTimeout) + 5*time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
 

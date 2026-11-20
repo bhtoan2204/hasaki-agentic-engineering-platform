@@ -59,9 +59,12 @@ jobs:
       - if: ${{ !cancelled() && (steps.lint.outcome == 'success' || steps.lint.outcome == 'failure') }}
         run: npm run build
 
-  # platform-go: vet + unit, contract and extractor parity tests (database-backed tests run via go/scripts/test-integration.sh).
+  # platform-go: vet + unit, contract and extractor parity tests, and the production build (CGO: the tree-sitter
+  # grammars are C). Cross-language suites (test/*-go.integration.ts) run in the test job and fail without Go.
   go:
     runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
     defaults:
       run:
         working-directory: go
@@ -73,6 +76,7 @@ jobs:
           cache-dependency-path: go/go.sum
       - run: go vet ./...
       - run: go test ./...
+      - run: go build -trimpath -o bin/platform-go ./cmd/platform-go
 
   architecture:
     runs-on: ubuntu-latest
@@ -108,6 +112,8 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -126,6 +132,12 @@ jobs:
           key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
       - if: steps.modules.outputs.cache-hit != 'true'
         run: npm ci --no-audit --no-fund
+      # test/analytics-go.integration.ts and test/code-intelligence-go.integration.ts build and run platform-go
+      # against the test cluster; they fail (never skip) without a Go toolchain.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
       - id: ripgrep
         uses: actions/cache@v5
         with:

@@ -36,6 +36,14 @@ export interface CodeIntelligenceConfig {
   };
 }
 
+export interface AnalyticsConfig {
+  engine: "typescript" | "go";
+  /** Deadline of one dashboard read in platform-go (queueing for an analytics slot included). */
+  timeoutMs: number;
+  /** TypeScript fallbacks allowed at once when platform-go is unavailable; more are rejected with 503. */
+  maxFallbackConcurrency: number;
+}
+
 export type SlopSeverity = "low" | "medium" | "high";
 /** Slop detection policy (src/slop). Stored settings override these per global/repository layer. */
 export interface SlopSettings {
@@ -118,6 +126,11 @@ export interface Config {
    */
   instanceId: string;
   instance: { heartbeatSeconds: number; offlineSeconds: number };
+  /**
+   * Engineering analytics dashboards (src/api/analytics). "go" reads them through platform-go
+   * (go/internal/analytics, ADR 0003); "typescript" is the in-process implementation and the fallback.
+   */
+  analytics: AnalyticsConfig;
   /** LOCAL checkout overrides, never synchronized to PostgreSQL. */
   repositories: Record<string, string>;
   /** LOCAL: shared registry entries this machine never checks out (no startup checkout warning). */
@@ -535,6 +548,7 @@ const defaults: Config = {
       minSimilarity: 0.45,
     },
   },
+  analytics: { engine: "typescript", timeoutMs: 15000, maxFallbackConcurrency: 2 },
   codeIntelligence: {
     enabled: false,
     includeGenerated: false,
@@ -779,6 +793,7 @@ function load(): Config {
       semantic: { ...defaults.retrieval.semantic, ...(fromFile.retrieval?.semantic ?? {}) },
     },
     evaluation: { ...defaults.evaluation, ...(fromFile.evaluation ?? {}) },
+    analytics: { ...defaults.analytics, ...(fromFile.analytics ?? {}) },
     codeIntelligence: {
       ...defaults.codeIntelligence,
       ...(fromFile.codeIntelligence ?? {}),
@@ -871,6 +886,17 @@ function load(): Config {
       .CODE_INTELLIGENCE_ENGINE as CodeIntelligenceConfig["engine"];
   if (!["typescript", "go"].includes(cfg.codeIntelligence.engine))
     throw new Error("CODE_INTELLIGENCE_ENGINE must be typescript or go");
+  if (process.env.ANALYTICS_ENGINE)
+    cfg.analytics.engine = process.env.ANALYTICS_ENGINE as AnalyticsConfig["engine"];
+  if (!["typescript", "go"].includes(cfg.analytics.engine))
+    throw new Error("ANALYTICS_ENGINE must be typescript or go");
+  if (process.env.ANALYTICS_TIMEOUT_MS)
+    cfg.analytics.timeoutMs = Number(process.env.ANALYTICS_TIMEOUT_MS);
+  cfg.analytics.timeoutMs = positiveInt("analytics.timeoutMs", cfg.analytics.timeoutMs);
+  cfg.analytics.maxFallbackConcurrency = positiveInt(
+    "analytics.maxFallbackConcurrency",
+    cfg.analytics.maxFallbackConcurrency,
+  );
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)

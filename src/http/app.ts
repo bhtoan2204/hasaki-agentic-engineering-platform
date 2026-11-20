@@ -1,4 +1,5 @@
 import { acceptWebhook } from "../telegram/transport.ts";
+import { SharedAbort } from "./sharedAbort.ts";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
@@ -85,6 +86,9 @@ function send(res: ServerResponse, status: number, body: unknown, extra?: Record
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...extra });
   res.end(JSON.stringify(body));
 }
+
+/** Identical concurrent GETs share one execution, and its cancellation (src/http/sharedAbort.ts). */
+const getFlights = new SharedAbort();
 
 export async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
@@ -174,7 +178,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     if (method === "GET" && url.pathname === "/api/stream") {
       return handleStream(req, res, url, actor, wantsSupport(actor, url.searchParams.get("scope")));
     }
-    const chatStream = method === "GET" && url.pathname.match(/^\/api\/chat\/conversations\/(\d+)\/stream$/);
+    const chatStream =
+      method === "GET" && url.pathname.match(/^\/api\/chat\/conversations\/(\d+)\/stream$/);
     if (chatStream) {
       return handleChatStream(req, res, url, actor, Number(chatStream[1]));
     }
@@ -225,8 +230,21 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
           claim.body,
           claim.kind === "replay" ? { "Idempotent-Replayed": "true" } : undefined,
         );
+      // Aborts when this client disconnects before the response is written.
+      const disconnected = new AbortController();
+      res.once("close", () => {
+        if (!res.writableFinished) disconnected.abort();
+      });
+      const flightKey = `${actor.id} ${url.pathname}${url.search}`;
+      const shared = method === "GET" ? getFlights.join(flightKey, disconnected.signal) : null;
       try {
-        const ctx = { p: m.slice(1).map((s) => decodeURIComponent(s ?? "")), body, url, actor };
+        const ctx = {
+          p: m.slice(1).map((s) => decodeURIComponent(s ?? "")),
+          body,
+          url,
+          actor,
+          signal: shared?.signal ?? disconnected.signal,
+        };
         // Identical concurrent GETs of one user (every open tab refetches on the same live event) share one execution.
         const execute = () =>
           execution.run({ userId: actor.id, kind: "user" }, async () => {
@@ -234,10 +252,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
               await loadPersonalIntegrations();
             return handler(ctx);
           });
-        const out =
-          method === "GET"
-            ? await singleflight(`${actor.id} ${url.pathname}${url.search}`, execute)
-            : await execute();
+        const out = method === "GET" ? await singleflight(flightKey, execute) : await execute();
         if (claim) await claim.finish(200, out ?? null);
         return send(res, 200, out ?? null);
       } catch (e) {
@@ -249,6 +264,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
             })
             .catch(() => claim.release().catch(() => {}));
         throw e;
+      } finally {
+        shared?.leave();
       }
     }
     return send(res, 404, { error: "not found" });
