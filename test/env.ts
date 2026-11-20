@@ -49,12 +49,17 @@ if (process.env.HOME) {
 if (!homeWritable) {
   process.env.HOME = testHome;
 }
-const testGoCache = join(root, "gocache");
-mkdirSync(testGoCache, { recursive: true });
-process.env.GOCACHE = testGoCache;
-const testGoPath = join(root, "gopath");
-mkdirSync(testGoPath, { recursive: true });
-process.env.GOPATH = testGoPath;
+// Go's build and module caches are content-addressed and safe to share: with a writable home, tests use the
+// developer's (a fresh pair per test process re-downloaded and recompiled ~800 MB into the temporary root every
+// time platform-go was built, and filled tmpfs). Only an unwritable home gets private caches.
+if (!homeWritable) {
+  const testGoCache = join(root, "gocache");
+  mkdirSync(testGoCache, { recursive: true });
+  process.env.GOCACHE = testGoCache;
+  const testGoPath = join(root, "gopath");
+  mkdirSync(testGoPath, { recursive: true });
+  process.env.GOPATH = testGoPath;
+}
 
 // Mock claude, codex, and copilot CLIs in PATH so probeAgentHealth confirms readiness in test runs without remote auth.
 const testBin = join(root, "bin");

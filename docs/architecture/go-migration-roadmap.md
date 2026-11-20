@@ -20,7 +20,7 @@ module that has not moved. Phase 1 is semantic retrieval ([ADR 0001](adr/0001-go
 |---|---|---|---|
 | Semantic retrieval | **1 (this change)** | New capability, CPU/IO-bound, no workflow state | pgvector, embedding model |
 | Code intelligence indexing (`src/codeIntelligence/indexer.ts`) | **2 (done, flag `CODE_INTELLIGENCE_ENGINE=go`)** | Long CPU-bound parsing on the event loop; already queue-driven and owns its schema. [ADR 0002](adr/0002-go-code-intelligence-indexing.md) | Parity: 6,554 files / 27 repositories identical |
-| Observability/analytics aggregation (`src/api/analytics`, telemetry rollups) | 2 | Read-heavy batch SQL, no write coupling | Snapshot tests of current API responses |
+| Observability/analytics aggregation (`src/api/analytics`) | **2 (done, flag `ANALYTICS_ENGINE=go`)** | Read-heavy SQL, no write coupling; the cost was PostgreSQL, so the move is the SQL fixed and consolidated, off the Node pool. [ADR 0003](adr/0003-go-analytics.md) | Parity suite on identical data (`test/analytics-go.integration.ts`) |
 | Background workers without run coupling (prod-error scans, PR lifecycle sync, intake polling) | 3 | Periodic IO; each must keep its own outbox/lease semantics | Per-worker ownership of its tables; idempotency tests |
 | Process supervision and resource limits (bubblewrap, process trees) | 3 | Go is a better fit for process control | Isolation regression suite; the TypeScript harness still spawns agents |
 | Workflow scheduling (`src/workflow/scheduler.ts`) | later | Tightly coupled to fencing, leases and the engine's transactions | Engine contract for claim/complete |

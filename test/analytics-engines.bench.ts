@@ -133,11 +133,16 @@ const clientQuery = pg.Client.prototype.query;
 pg.Client.prototype.query = function (this: pg.Client, ...args: unknown[]) {
   nodeSql.statements++;
   const t = performance.now();
+  const done = () => (nodeSql.ms += performance.now() - t);
+  // pg.Pool calls client.query with a callback (no promise); direct callers get a promise.
+  const last = args.length - 1;
+  if (typeof args[last] === "function") {
+    const cb = args[last] as (...a: unknown[]) => void;
+    args[last] = (...a: unknown[]) => (done(), cb(...a));
+  }
   const r = (clientQuery as (...a: unknown[]) => unknown).apply(this, args);
-  if (r && typeof (r as Promise<unknown>).finally === "function")
-    void (r as Promise<unknown>)
-      .finally(() => (nodeSql.ms += performance.now() - t))
-      .catch(() => {});
+  if (r && typeof (r as Promise<unknown>).then === "function")
+    (r as Promise<unknown>).then(done, done);
   return r as never;
 } as unknown as typeof clientQuery;
 async function sqlTotals() {
@@ -233,6 +238,7 @@ async function concurrent(engine: "typescript" | "go") {
   const fallbacks0 = JSON.stringify(analyticsEngineStats.fallbacks);
   const started = performance.now();
   let errors = 0;
+  const errorMessages = new Map<string, number>();
   await Promise.all(
     Array.from({ length: CONCURRENCY }, async (_, c) => {
       for (let i = 0; i < scenarios.length; i++) {
@@ -244,8 +250,10 @@ async function concurrent(engine: "typescript" | "go") {
             parseAnalyticsFilters(new URLSearchParams(s.query)),
             scopeOf(s.all),
           );
-        } catch {
+        } catch (e) {
           errors++;
+          const m = String((e as Error).message).slice(0, 80);
+          errorMessages.set(m, (errorMessages.get(m) ?? 0) + 1);
         }
         lat.push(performance.now() - t);
       }
@@ -260,6 +268,7 @@ async function concurrent(engine: "typescript" | "go") {
   return {
     requests: lat.length,
     errors,
+    error_messages: Object.fromEntries(errorMessages),
     fell_back: JSON.stringify(analyticsEngineStats.fallbacks) !== fallbacks0,
     throughput_rps: round((lat.length * 1000) / wall, 2),
     p50: round(quantile(lat, 0.5)),
