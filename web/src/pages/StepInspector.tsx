@@ -328,6 +328,8 @@ interface AttemptRow {
     pending?: { reexecute?: ReexecuteRequest };
     previous_attempt?: { number: number };
   } | null;
+  /** True when `input` is only the summary above; the full input is at /api/attempts/:id/input. */
+  input_partial?: boolean;
   context_snapshot_id?: number | null;
   started_at: string;
   finished_at: string | null;
@@ -425,7 +427,10 @@ interface StepDetail {
   checkpoints: unknown[];
   artifacts: ArtifactRow[];
   sessions: Array<{ session_id: string; model?: string | null }>;
-  snapshots: ContextSnapshot[];
+  /** Snapshot content is loaded on demand (GET /api/snapshots/:id) by the Knowledge tab. */
+  snapshots: Array<
+    Pick<ContextSnapshot, "id" | "hash" | "created_at"> & { knowledge_count: number }
+  >;
   jobs: Array<{
     id: number;
     status: string;
@@ -978,7 +983,7 @@ export function StepInspector({
       "knowledge",
       <TabLabel
         icon={BookOpen}
-      >{`${t("si.tab.knowledge")}${snapshot ? ` (${snapshot.content.knowledge.length})` : ""}`}</TabLabel>,
+      >{`${t("si.tab.knowledge")}${snapshot ? ` (${snapshot.knowledge_count})` : ""}`}</TabLabel>,
     ],
     [
       "qa",
@@ -1340,7 +1345,11 @@ export function StepInspector({
           ))}
         {tab === "input" &&
           (attempt ? (
-            <JsonBlock value={attempt.input} title={t("si.resolvedInput", { n: attempt.number })} />
+            <AttemptInput
+              key={attempt.id}
+              attempt={attempt}
+              title={t("si.resolvedInput", { n: attempt.number })}
+            />
           ) : (
             <Empty>{t("si.inputLater")}</Empty>
           ))}
@@ -1355,7 +1364,7 @@ export function StepInspector({
             {attempt?.error && <JsonBlock value={attempt.error} title={t("si.attemptError")} />}
           </div>
         )}
-        {tab === "knowledge" && <KnowledgeApplied snapshot={snapshot} />}
+        {tab === "knowledge" && <KnowledgeApplied snapshotId={snapshot?.id ?? null} />}
         {tab === "qa" &&
           (questions.length ? (
             questions.map((q) => (
@@ -2466,8 +2475,25 @@ function ReexecuteDialog({
   );
 }
 
-function KnowledgeApplied({ snapshot }: { snapshot: ContextSnapshot | undefined }) {
+/** Step detail carries the full input of the newest attempt only; older attempts load theirs when opened. */
+function AttemptInput({ attempt, title }: { attempt: AttemptRow; title: string }) {
+  const { data, error } = useApi<unknown>(
+    attempt.input_partial ? `/api/attempts/${attempt.id}/input` : null,
+    [attempt.id],
+  );
+  if (!attempt.input_partial) return <JsonBlock value={attempt.input} title={title} />;
+  if (error) return <ErrorBox error={error} />;
+  return data === null ? <SkeletonRows rows={4} /> : <JsonBlock value={data} title={title} />;
+}
+
+function KnowledgeApplied({ snapshotId }: { snapshotId: number | null }) {
   const { t } = useI18n();
+  const { data: snapshot, error } = useApi<ContextSnapshot>(
+    snapshotId ? `/api/snapshots/${snapshotId}` : null,
+    [snapshotId],
+  );
+  if (snapshotId && snapshot?.id !== snapshotId)
+    return error ? <ErrorBox error={error} /> : <SkeletonRows rows={4} />;
   if (!snapshot) return <Empty>{t("si.noSnapshot")}</Empty>;
   const c = snapshot.content;
   const plan = new Map((c.prompt_plan?.knowledge ?? []).map((d) => [d.key, d] as const));

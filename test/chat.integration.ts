@@ -23,6 +23,13 @@ function actorOf(u: { id: number; username: string; role: string; active: boolea
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Real provider probes spawn the CLIs (seconds on a cold machine): every test starts from all-healthy.
+const healthy = async () =>
+  (["claude", "cursor", "codex", "antigravity", "copilot"] as AgentProvider[]).map((provider) => ({
+    provider,
+    connected: true,
+    quota: "unknown" as const,
+  }));
 
 async function waitForTurn(conversationId: number, ownerId: number, timeoutMs = 5000) {
   const start = Date.now();
@@ -35,6 +42,7 @@ async function waitForTurn(conversationId: number, ownerId: number, timeoutMs = 
 }
 
 before(() => {
+  setChatHealthProbe(healthy);
   const runner: CompletionRunner = async (prompt) => ({
     text: prompt.includes("chat-tool")
       ? "```chat-tool\n{\"calls\":[{\"tool\":\"repo.list\",\"arguments\":{}}]}\n```"
@@ -237,7 +245,7 @@ test("chat: AUTO skips unhealthy Claude and uses Codex; failed turns stay visibl
   const turn = detail.turns.find((t) => t.id === m.turn.id);
   assert.equal(turn?.provider, "codex");
   assert.equal(turn?.status, "completed");
-  setChatHealthProbe(undefined);
+  setChatHealthProbe(healthy);
 });
 
 test("chat: manual unhealthy provider fails visibly without inference wait", async () => {
@@ -283,7 +291,7 @@ test("chat: manual unhealthy provider fails visibly without inference wait", asy
   );
   // No assistant hallucination for platform failures.
   assert.equal(detail.messages.filter((x) => x.role === "assistant" && x.turn_id === m.turn.id).length, 0);
-  setChatHealthProbe(undefined);
+  setChatHealthProbe(healthy);
 });
 
 test("chat: cleanup leaves no orphan active turns", async () => {

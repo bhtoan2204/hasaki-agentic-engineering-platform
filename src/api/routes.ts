@@ -61,6 +61,7 @@ import {
   handoffMetrics,
   runAssignment,
   setRunBudget,
+  attemptInput,
 } from "../workflow/runRepository.ts";
 import { workItemRepository } from "../workitems/repository.ts";
 import { knowledgeUsage } from "../knowledge/usageRepository.ts";
@@ -1453,6 +1454,14 @@ export const routes: Route[] = [
   ],
   [
     "GET",
+    /^\/api\/attempts\/(\d+)\/input$/,
+    async (c) => (
+      await requireAttempt(c.actor, num(c.p[0]), support(c)),
+      must(await attemptInput(num(c.p[0])), "attempt").input
+    ),
+  ],
+  [
+    "GET",
     /^\/api\/snapshots\/(\d+)$/,
     async (c) => (
       await requireSnapshot(c.actor, num(c.p[0]), support(c)),
@@ -1525,6 +1534,7 @@ export const routes: Route[] = [
         c.actor.id,
         await knowledge.list({
           category: c.url.searchParams.get("category") ?? undefined,
+          summary: true,
           ...mine(c),
         }),
       );

@@ -221,12 +221,18 @@ export const chat = {
   async get(actor: Actor, id: number) {
     await recoverStaleTurns(id);
     const c = await requireConversation(id, actor);
-    const readable = await readableRepositories(actor.id);
-    const messages = withholdRevoked(
-      await chatRepository.listMessages(id, { limit: 200 }),
-      readable,
-    );
-    const tools = (await chatRepository.toolCallsOf(id)).map((t) => ({
+    const [readable, messageRows, toolRows, turnRows, active, delegations, operationRows] =
+      await Promise.all([
+        readableRepositories(actor.id),
+        chatRepository.listMessages(id, { limit: 200 }),
+        chatRepository.toolCallsOf(id),
+        chatRepository.listTurns(id, 50),
+        chatRepository.activeTurn(id),
+        chatRepository.delegationsOf(id),
+        operationsOf(id, actor.id),
+      ]);
+    const messages = withholdRevoked(messageRows, readable);
+    const tools = toolRows.map((t) => ({
       id: t.id,
       turn_id: t.turn_id,
       seq: t.seq,
@@ -241,10 +247,8 @@ export const chat = {
       duration_ms: t.duration_ms,
       created_at: t.created_at,
     }));
-    const turns = (await chatRepository.listTurns(id, 50)).map(publicTurn);
-    const active = await chatRepository.activeTurn(id);
-    const delegations = await chatRepository.delegationsOf(id);
-    const operations = (await operationsOf(id, actor.id)).map((o) => ({
+    const turns = turnRows.map(publicTurn);
+    const operations = operationRows.map((o) => ({
       id: o.id,
       turn_id: o.turn_id,
       tool: o.tool,

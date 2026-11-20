@@ -121,6 +121,12 @@ export function listRuns(
 }
 
 /** Independent reads are issued together on the pool. */
+/** A harness verification without the per-repo slop findings (the bulk of it), for list views; `$v` is the JSON expression. */
+export const VERIFICATION_SUMMARY = `CASE WHEN jsonb_typeof($v->'last') = 'array'
+  THEN $v || jsonb_build_object('last', (SELECT jsonb_agg(e - 'slop') FROM jsonb_array_elements($v->'last') e))
+  ELSE $v END`;
+
+/** Run page payload: per-row JSON is projected to what the page renders; step detail and artifact routes hold the rest. */
 export async function loadRunDetail(runId: number) {
   const [run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints] =
     await Promise.all([
@@ -144,11 +150,15 @@ export async function loadRunDetail(runId: number) {
       q<Record<string, unknown>>(
         pool,
         `SELECT a.id, a.step_id, a.run_id, a.number, a.generation, a.status,
-                a.agent_provider, a.agent_model, a.metrics, a.error,
+                a.agent_provider, a.agent_model, a.error,
                 a.invalidated_at, a.resolved_at, a.started_at, a.finished_at,
                 a.executor_stopped_at, a.context_snapshot_id, a.agent_session_id,
+                jsonb_strip_nulls(jsonb_build_object(
+                  'provider', a.metrics->'provider', 'model', a.metrics->'model',
+                  'normalized_failure_category', a.metrics->'normalized_failure_category',
+                  'verification', ${VERIFICATION_SUMMARY.replaceAll("$v", "a.metrics->'verification'")})) AS metrics,
                 CASE WHEN a.output ? 'verification'
-                     THEN jsonb_build_object('verification', a.output->'verification') END AS output,
+                     THEN jsonb_build_object('verification', ${VERIFICATION_SUMMARY.replaceAll("$v", "a.output->'verification'")}) END AS output,
                 s.key AS step_key
            FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id
           WHERE a.run_id = $1 ORDER BY a.id`,
@@ -161,7 +171,7 @@ export async function loadRunDetail(runId: number) {
       ),
       q<Record<string, unknown>>(
         pool,
-        "SELECT id, step_id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE run_id = $1 ORDER BY id",
+        "SELECT id, step_id, attempt_id, kind, name, length(content) AS size, created_at FROM workflow_artifacts WHERE run_id = $1 ORDER BY id",
         [runId],
       ),
       q<Record<string, unknown>>(
@@ -176,11 +186,18 @@ export async function loadRunDetail(runId: number) {
       ),
       q<Record<string, unknown>>(
         pool,
-        "SELECT id, step_id, attempt_id, reason, data, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id",
+        "SELECT id, step_id, attempt_id, reason, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id",
         [runId],
       ),
     ]);
   return { run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints };
+}
+
+/** The full resolved input of one attempt (step detail ships it only for the newest attempt). */
+export function attemptInput(id: number) {
+  return one<{ input: unknown }>(pool, "SELECT input FROM workflow_step_attempts WHERE id = $1", [
+    id,
+  ]);
 }
 
 /** Everything the step inspector shows for one step. */
@@ -193,7 +210,19 @@ export async function loadStepDetail(runId: number, stepKey: string) {
       one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", args),
       q<Record<string, unknown>>(
         pool,
-        `SELECT * FROM workflow_step_attempts WHERE step_id = ${sid} ORDER BY number`,
+        // Only the newest attempt carries its full resolved input; older ones keep what the attempt list shows
+        // and load the rest on demand (GET /api/attempts/:id/input).
+        `SELECT id, step_id, run_id, number, generation, status, job_id, fencing_token, worker, output,
+                context_snapshot_id, agent_session_id, error, invalidated_at, resolved_at, started_at, finished_at,
+                metrics, telemetry_queue_duration_ms, telemetry_wait_started_at, telemetry_wait_ended_at,
+                agent_provider, agent_model, effective_agent, executor_stopped_at, execution_fingerprint,
+                reused_from_attempt_id,
+                CASE WHEN latest THEN input ELSE jsonb_strip_nulls(jsonb_build_object(
+                  'pending', jsonb_strip_nulls(jsonb_build_object('reexecute', input->'pending'->'reexecute')),
+                  'previous_attempt', input->'previous_attempt')) END AS input,
+                NOT latest AS input_partial
+           FROM (SELECT *, number = max(number) OVER () AS latest FROM workflow_step_attempts WHERE step_id = ${sid}) a
+          ORDER BY number`,
         args,
       ),
       q<Record<string, unknown>>(
@@ -210,7 +239,10 @@ export async function loadStepDetail(runId: number, stepKey: string) {
       ),
       q<Record<string, unknown>>(
         pool,
-        `SELECT id, attempt_id, kind, name, length(content) AS size, data, created_at FROM workflow_artifacts WHERE step_id = ${sid} ORDER BY id`,
+        // An execution contract's data repeats its content (opened through /api/artifacts/:id): not shipped in the list.
+        `SELECT id, attempt_id, kind, name, length(content) AS size,
+                CASE WHEN kind = 'execution_contract' THEN NULL ELSE data END AS data, created_at
+           FROM workflow_artifacts WHERE step_id = ${sid} ORDER BY id`,
         args,
       ),
       q<Record<string, unknown>>(
@@ -220,7 +252,8 @@ export async function loadStepDetail(runId: number, stepKey: string) {
       ),
       q<Record<string, unknown>>(
         pool,
-        `SELECT id, hash, content, created_at FROM context_snapshots WHERE step_id = ${sid} ORDER BY id`,
+        `SELECT id, hash, jsonb_array_length(COALESCE(content->'knowledge', '[]')) AS knowledge_count, created_at
+           FROM context_snapshots WHERE step_id = ${sid} ORDER BY id`,
         args,
       ),
       q<Record<string, unknown>>(

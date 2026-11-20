@@ -523,28 +523,35 @@ export async function startRun(input: StartRunInput) {
         [id, decision.step_key, decision.recommendation_id, decision.policy_id, json(decision)],
       );
     const order = topoOrder(optimized.graph.steps);
-    for (const s of optimized.graph.steps) {
-      const requiresApproval =
-        s.requires_approval || (s.type === "git_pull_request" && s.config.mode === "approval");
-      await q(
-        c,
-        `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, run_if, requires_approval, max_attempts, retry_backoff_s, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PENDING')`,
-        [
-          id,
-          s.key,
-          s.type,
-          s.name ?? s.key,
-          order.indexOf(s.key),
-          s.depends_on,
-          json(s.config),
-          json(s.run_if ?? null),
-          requiresApproval,
-          s.max_attempts,
-          s.retry_backoff_seconds,
-        ],
-      );
-    }
+    // One statement for the whole graph (a round trip per step inside the transaction was the cost of starting a run).
+    await q(
+      c,
+      `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, run_if, requires_approval, max_attempts, retry_backoff_s, status)
+       SELECT $1, x.key, x.type, x.name, x.position, ARRAY(SELECT jsonb_array_elements_text(x.depends_on)), x.config,
+              COALESCE(x.run_if, 'null'), x.requires_approval, x.max_attempts, x.retry_backoff_s, 'PENDING'
+         FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS e(v, i),
+              jsonb_to_record(e.v) AS x(key text, type text, name text, position int, depends_on jsonb, config jsonb,
+                                        run_if jsonb, requires_approval bool, max_attempts int, retry_backoff_s int)
+        ORDER BY e.i`,
+      [
+        id,
+        json(
+          optimized.graph.steps.map((s) => ({
+            key: s.key,
+            type: s.type,
+            name: s.name ?? s.key,
+            position: order.indexOf(s.key),
+            depends_on: s.depends_on,
+            config: s.config,
+            run_if: s.run_if ?? null,
+            requires_approval:
+              s.requires_approval || (s.type === "git_pull_request" && s.config.mode === "approval"),
+            max_attempts: s.max_attempts,
+            retry_backoff_s: s.retry_backoff_seconds,
+          })),
+        ),
+      ],
+    );
     await runEvents.add(
       c,
       id,
@@ -2473,7 +2480,11 @@ export async function runDetail(runId: number) {
     wi_id != null
       ? { id: wi_id, code: wi_code, title: wi_title, source: wi_source, project: wi_project }
       : null;
-  const worker = await instanceHealth(row.worker_instance ?? null);
+  const [worker, decisions, recovery_episodes] = await Promise.all([
+    instanceHealth(row.worker_instance ?? null),
+    decisionsOf(runId),
+    recoveryEpisodesOf(runId),
+  ]);
   const recovery = steps.some((s) => s.status === "WAITING_INPUT" && s.pending_input?.recovery)
     ? "NEEDS_ATTENTION"
     : steps.some((s) => ["READY", "RUNNING"].includes(s.status) && s.pending_input?.recovery)
@@ -2500,8 +2511,8 @@ export async function runDetail(runId: number) {
       ...c,
       kind: isRecoverable(String(c.reason)) ? "recoverable" : "note",
     })),
-    decisions: await decisionsOf(runId),
-    recovery_episodes: await recoveryEpisodesOf(runId),
+    decisions,
+    recovery_episodes,
   };
 }
 

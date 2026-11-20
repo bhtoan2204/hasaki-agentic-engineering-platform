@@ -1,6 +1,7 @@
 import { summarizeProfiles, type ProfileSample } from "../workflow/profileMetrics.ts";
 import { usageSummary } from "../agent/telemetry.ts";
 import { pool, q, one } from "../db/pool.ts";
+import { VERIFICATION_SUMMARY } from "../workflow/runRepository.ts";
 
 /** Observability queries over workflow_step_attempts.metrics (+ timestamps for every step type). */
 
@@ -16,7 +17,8 @@ export async function runMetrics(runId: number) {
   const [attempts, toolRows, [run], telemetry] = await Promise.all([
     q(
       pool,
-      `SELECT a.id, a.agent_provider, a.agent_model, a.effective_agent, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at, a.metrics,
+      `SELECT a.id, a.agent_provider, a.agent_model, a.effective_agent, s.key AS step_key, s.type AS step_type, a.number, a.status, a.started_at, a.finished_at, a.resolved_at,
+            CASE WHEN a.metrics ? 'verification' THEN a.metrics || jsonb_build_object('verification', ${VERIFICATION_SUMMARY.replaceAll("$v", "a.metrics->'verification'")}) ELSE a.metrics END AS metrics,
             (extract(epoch FROM (COALESCE(a.finished_at, now()) - a.started_at)) * 1000)::bigint AS exec_ms,
             GREATEST(0, (extract(epoch FROM (a.started_at - GREATEST(j.available_at, j.created_at))) * 1000))::bigint AS queue_ms,
             CASE WHEN a.status IN ('WAITING_INPUT', 'WAITING_APPROVAL') OR a.resolved_at IS NOT NULL
@@ -38,9 +40,17 @@ export async function runMetrics(runId: number) {
       "SELECT created_at, started_at, finished_at, status, profile, profile_decision, agent_provider FROM workflow_runs WHERE id = $1",
       [runId],
     ),
-    q(pool, "SELECT * FROM execution_attempt_telemetry WHERE run_id = $1 ORDER BY attempt_id", [
-      runId,
-    ]),
+    q(
+      pool,
+      `SELECT attempt_id, run_id, step_id, number, provider, model, execution_profile, owner_id, worker_instance, worker,
+              start_time, end_time, queue_duration_ms, provider_execution_ms, tool_execution_ms, human_wait_ms,
+              wall_duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens,
+              reported_cost_usd, cost_source, cost_availability, tool_calls, tool_failures, retries, status,
+              terminal_status, normalized_failure_category, provenance, provider_sessions, sessions_missing_cost,
+              provider_invocations, ${VERIFICATION_SUMMARY.replaceAll("$v", "verification_result")} AS verification_result
+         FROM execution_attempt_telemetry WHERE run_id = $1 ORDER BY attempt_id`,
+      [runId],
+    ),
   ]);
   const toolMs = new Map<number, number>();
   const byTool: Record<string, { calls: number; ms: number }> = {};

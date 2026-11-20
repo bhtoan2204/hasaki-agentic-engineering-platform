@@ -36,6 +36,7 @@
     "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts",
     "bench:dependencies": "node --disable-warning=ExperimentalWarning src/cli/bench-dependencies.ts",
     "bench:cache": "node --disable-warning=ExperimentalWarning --expose-gc src/cli/benchCache.ts",
+    "bench:api": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/benchApi.ts",
     "bench:code-intelligence": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/code-intelligence.bench.ts",
     "validate:code-intelligence": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/validate-code-intelligence.ts",
     "db:diagnostics": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/storage-diagnostics.ts",

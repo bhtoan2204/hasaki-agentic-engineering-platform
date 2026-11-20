@@ -379,7 +379,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     };
     es.addEventListener("chat", onChat as EventListener);
     const poll = setInterval(() => {
-      if (detailIdRef.current === id) void loadDetail(id);
+      if (document.visibilityState === "visible" && detailIdRef.current === id) void loadDetail(id);
     }, 8000);
     return () => {
       es.removeEventListener("chat", onChat as EventListener);

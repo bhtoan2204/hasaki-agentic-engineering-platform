@@ -37,11 +37,15 @@ function check(x: Partial<KnowledgeInput>) {
 }
 
 export const knowledge = {
-  list(filter: { category?: string; ownerId?: number; all?: boolean } = {}, db: Db = pool) {
+  /** `summary`: without the version content and applicability (list views; the item route has them). */
+  list(
+    filter: { category?: string; ownerId?: number; all?: boolean; summary?: boolean } = {},
+    db: Db = pool,
+  ) {
     const scoped = filter.ownerId != null || filter.all === true;
     return q(
       db,
-      `SELECT i.*, v.content, v.applicability, v.metadata, v.effective_from, v.created_at AS version_created_at
+      `SELECT i.*, ${filter.summary ? "" : "v.content, v.applicability, "}v.metadata, v.effective_from, v.created_at AS version_created_at
          FROM knowledge_items i LEFT JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
         WHERE ($1::text IS NULL OR i.category = $1)
           AND (
