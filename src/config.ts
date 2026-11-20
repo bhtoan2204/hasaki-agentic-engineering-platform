@@ -21,6 +21,11 @@ export interface CodeIntelligenceConfig {
   excludes: string[];
   /** Both use the bundled SQL grammar; unsupported dialect syntax is skipped, never translated. */
   sqlDialect: "postgresql" | "generic";
+  /**
+   * Which implementation runs indexing jobs: "typescript" (in-process) or "go" (platform-go, same extraction and
+   * index version, so switching back needs no reindex). The queue, leases and authorization stay here either way.
+   */
+  engine: "typescript" | "go";
   weights: {
     exact: number;
     qualified: number;
@@ -544,6 +549,7 @@ const defaults: Config = {
     retentionDays: 7,
     excludes: [],
     sqlDialect: "postgresql",
+    engine: "typescript",
     weights: {
       exact: 2,
       qualified: 2,
@@ -860,6 +866,11 @@ function load(): Config {
     throw new Error("slop.mode must be disabled, advisory or enforcement");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
+  if (process.env.CODE_INTELLIGENCE_ENGINE)
+    cfg.codeIntelligence.engine = process.env
+      .CODE_INTELLIGENCE_ENGINE as CodeIntelligenceConfig["engine"];
+  if (!["typescript", "go"].includes(cfg.codeIntelligence.engine))
+    throw new Error("CODE_INTELLIGENCE_ENGINE must be typescript or go");
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)

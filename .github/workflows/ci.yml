@@ -59,6 +59,21 @@ jobs:
       - if: ${{ !cancelled() && (steps.lint.outcome == 'success' || steps.lint.outcome == 'failure') }}
         run: npm run build
 
+  # platform-go: vet + unit, contract and extractor parity tests (database-backed tests run via go/scripts/test-integration.sh).
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+
   architecture:
     runs-on: ubuntu-latest
     steps:

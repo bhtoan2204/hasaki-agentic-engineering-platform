@@ -17,15 +17,17 @@ function build(bin: string) {
 }
 
 /**
- * Builds and supervises platform-go next to the server when semantic retrieval is enabled and its URL is on this
- * machine. Any failure only logs: retrieval then stays lexical.
+ * Builds and supervises platform-go next to the server when semantic retrieval or Go indexing is enabled and its URL
+ * is on this machine. Any failure only logs: retrieval then stays lexical, and Go indexing jobs fail and retry.
  */
 export function startGoService() {
   const url = new URL(config.retrieval.semantic.url);
   let child: ChildProcess | null = null;
   let stopping = false;
   const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
-  if (config.retrieval.semantic.enabled && local) {
+  // Semantic retrieval and Go indexing are both served by platform-go.
+  const needed = config.retrieval.semantic.enabled || config.codeIntelligence.engine === "go";
+  if (needed && local) {
     const bin = join(config.dataDir, "bin", "platform-go");
     mkdirSync(join(config.dataDir, "bin"), { recursive: true });
     let delay = 1000;

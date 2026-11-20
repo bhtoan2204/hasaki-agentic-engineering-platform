@@ -54,6 +54,14 @@ services:
       # The compose ollama container is on this machine; its service name just is not a loopback address.
       EMBEDDING_URL: http://ollama:11434
       EMBEDDING_REMOTE_AUTHORIZED: "true"
+      # Indexing (CODE_INTELLIGENCE_ENGINE=go) reads checkouts owned by the host user.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
+    # The platform sends absolute paths: mount checkouts and run worktrees read-only at the same paths.
+    volumes:
+      - ${HOME}/src:${HOME}/src:ro
+      - ${HOME}/.claude-task-platform:${HOME}/.claude-task-platform:ro
     ports:
       - "127.0.0.1:4646:4646"
     depends_on:

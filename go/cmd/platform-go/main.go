@@ -1,4 +1,5 @@
-// Command platform-go serves the Go modules of the platform (semantic retrieval) on a loopback address.
+// Command platform-go serves the Go modules of the platform (semantic retrieval, code intelligence indexing) on a
+// loopback address.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"claude-task-platform/go/internal/codeintelligence"
 	"claude-task-platform/go/internal/platform"
 	"claude-task-platform/go/internal/retrieval"
 	"claude-task-platform/go/internal/retrieval/embed"
@@ -73,6 +75,10 @@ func run(log *slog.Logger) error {
 	mux.HandleFunc("GET /healthz", platform.Healthz)
 	mux.HandleFunc("GET /readyz", platform.Readyz(db))
 	mux.Handle("/internal/", platform.RequireBearer(cfg.Token, platform.WithDeadline(cfg.RequestTimeoutMax, internal)))
+	// Indexing jobs run for minutes: bounded by the caller's own job timeout instead of the short request deadline.
+	indexing := http.NewServeMux()
+	codeintelligence.Routes(indexing, codeintelligence.NewIndexer(db, cfg.IndexParseWorkers, cfg.IndexJobs), log)
+	mux.Handle("/internal/v1/code-intelligence/", platform.RequireBearer(cfg.Token, indexing))
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           platform.Observe(log, mux),

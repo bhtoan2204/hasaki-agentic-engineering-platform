@@ -23,6 +23,8 @@ type Config struct {
 	EmbedConcurrency  int
 	EmbedBatch        int
 	WorkerEnabled     bool
+	IndexParseWorkers int
+	IndexJobs         int
 	OTLPEndpointIsSet bool
 	remoteAuthorized  bool
 	allowNonLoopback  bool
@@ -80,6 +82,8 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		EmbedConcurrency:  num("EMBEDDING_CONCURRENCY", 2, 1, 32),
 		EmbedBatch:        num("EMBEDDING_BATCH", 16, 1, 256),
 		WorkerEnabled:     flag("WORKER_ENABLED", true),
+		IndexParseWorkers: num("CODE_INDEX_PARSE_WORKERS", 0, 0, 64),
+		IndexJobs:         num("CODE_INDEX_JOBS", 1, 1, 8),
 		OTLPEndpointIsSet: getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "",
 		remoteAuthorized:  getenv("EMBEDDING_REMOTE_AUTHORIZED") == "true",
 		allowNonLoopback:  flag("PLATFORM_GO_ALLOW_NONLOOPBACK", false),

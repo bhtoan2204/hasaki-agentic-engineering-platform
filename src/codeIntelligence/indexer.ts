@@ -4,11 +4,19 @@ import { repositories } from "../repos/service.ts";
 import { validateCheckout } from "../repos/paths.ts";
 import { prepareRepository, checkoutForRun } from "../repos/workspaces.ts";
 import { workspacesOf } from "../git/provider.ts";
-import { ownsInstance } from "../instances.ts";
+import { ownsInstance, instanceSession } from "../instances.ts";
+import { retrievalService } from "../retrieval/semantic.ts";
 import { pool, one, q, type Db } from "../db/pool.ts";
 import { realpath } from "node:fs/promises";
 import { git, baseCommit, treeFiles, changes, readBlobs, hash, languageOf } from "./git.ts";
-import { snapshot, filesOf, extractionBatch, publish, type FileRecord } from "./store.ts";
+import {
+  snapshot,
+  filesOf,
+  extractionBatch,
+  publish,
+  type FileRecord,
+  type Snapshot,
+} from "./store.ts";
 import { parserVersion, ParserLoadError } from "./parser.ts";
 
 export async function enqueue(repoName: string, runId?: number) {
@@ -104,6 +112,8 @@ export async function indexRepository(
     if (!row) throw new Error("Index lease lost");
   };
   const base = await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch);
+  if (config.codeIntelligence.engine === "go")
+    return indexWithGo(scope.repo.id, scope.primary, scope.root, base, runId, signal, fence);
   let baseline = await snapshot(scope.repo.id, `base:${base}`);
   const check = () => {
     signal?.throwIfAborted();
@@ -221,6 +231,66 @@ export async function indexRepository(
   ))!.indexed_files;
   metrics.index_duration = Date.now() - start;
   return { snapshot: result, metrics };
+}
+
+/** The code-intelligence-v1 IndexRequest (go/contracts/code-intelligence-v1.schema.json). */
+export function goIndexRequest(
+  repositoryId: number,
+  primary: string,
+  root: string,
+  base: string,
+  runId: number | undefined,
+  fence: { id: number; token: number } | undefined,
+) {
+  const ci = config.codeIntelligence;
+  return {
+    repository_id: repositoryId,
+    primary,
+    root,
+    base,
+    run_id: runId ?? null,
+    parser_version: parserVersion(),
+    instance_id: config.instanceId,
+    fence: fence
+      ? { ...fence, instance_id: config.instanceId, instance_session: instanceSession }
+      : null,
+    limits: {
+      max_file_bytes: ci.maxFileBytes,
+      max_symbols: ci.maxSymbols,
+      max_files: ci.maxFiles,
+      max_scan_bytes: ci.maxScanBytes,
+      timeout_ms: ci.timeoutMs,
+      excludes: ci.excludes,
+      include_generated: ci.includeGenerated,
+      include_dependencies: ci.includeDependencies,
+    },
+  };
+}
+
+/**
+ * The same job run by platform-go (go/internal/codeintelligence): identical extraction and index version, so its
+ * snapshots and extraction cache are shared with this implementation. The lease, heartbeat and authorization stay
+ * here; the fence travels with the request and is re-checked by Go when it publishes.
+ */
+async function indexWithGo(
+  repositoryId: number,
+  primary: string,
+  root: string,
+  base: string,
+  runId: number | undefined,
+  signal: AbortSignal | undefined,
+  fence: { id: number; token: number } | undefined,
+) {
+  const res = await retrievalService(
+    "/internal/v1/code-intelligence/index",
+    goIndexRequest(repositoryId, primary, root, base, runId, fence),
+    config.codeIntelligence.timeoutMs + 10_000,
+    signal,
+  );
+  const body = await res.json().catch(() => null);
+  if (!res.ok)
+    throw new Error(String(body?.error ?? `platform-go index failed (HTTP ${res.status})`));
+  return body as { snapshot: Snapshot; metrics: Record<string, number> };
 }
 
 interface IndexRunJob {

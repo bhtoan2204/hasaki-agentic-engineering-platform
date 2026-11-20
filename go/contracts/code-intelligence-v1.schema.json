@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "code-intelligence-v1",
+  "title": "Internal code intelligence indexing API v1 (TypeScript platform ↔ platform-go)",
+  "description": "POST /internal/v1/code-intelligence/index runs one indexing job that the TypeScript worker claimed and authorized. X-Request-Timeout-Ms bounds the job; closing the request cancels it.",
+  "$defs": {
+    "Limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_file_bytes", "max_symbols", "max_files", "max_scan_bytes", "timeout_ms", "excludes", "include_generated", "include_dependencies"],
+      "properties": {
+        "max_file_bytes": { "type": "integer", "minimum": 1 },
+        "max_symbols": { "type": "integer", "minimum": 1 },
+        "max_files": { "type": "integer", "minimum": 1 },
+        "max_scan_bytes": { "type": "integer", "minimum": 1 },
+        "timeout_ms": { "type": "integer", "minimum": 1 },
+        "excludes": { "type": "array", "items": { "type": "string" } },
+        "include_generated": { "type": "boolean" },
+        "include_dependencies": { "type": "boolean" }
+      }
+    },
+    "Fence": {
+      "description": "The code_intelligence.runs lease held by the caller; Go publishes only while it is current.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "token", "instance_id", "instance_session"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "token": { "type": "integer" },
+        "instance_id": { "type": "string", "minLength": 1 },
+        "instance_session": { "type": "string", "minLength": 1 }
+      }
+    },
+    "IndexRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_id", "primary", "root", "base", "run_id", "parser_version", "instance_id", "limits"],
+      "properties": {
+        "repository_id": { "type": "integer", "minimum": 1 },
+        "primary": { "type": "string", "minLength": 1, "description": "Validated primary checkout (absolute path)" },
+        "root": { "type": "string", "minLength": 1, "description": "Run worktree (absolute path); the primary checkout for base indexing" },
+        "base": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "run_id": { "type": ["integer", "null"], "minimum": 1 },
+        "parser_version": { "type": "string", "minLength": 1, "description": "parserVersion() of the TypeScript platform; refused (409) unless it starts with the Go extractor version" },
+        "instance_id": { "type": "string", "minLength": 1 },
+        "fence": { "oneOf": [{ "$ref": "#/$defs/Fence" }, { "type": "null" }] },
+        "limits": { "$ref": "#/$defs/Limits" }
+      }
+    },
+    "IndexResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot", "metrics"],
+      "properties": {
+        "snapshot": {
+          "description": "The published code_intelligence.snapshots row",
+          "type": "object",
+          "required": ["id", "repository_id", "commit_sha", "index_version", "identity"],
+          "properties": {
+            "id": { "type": "integer" },
+            "repository_id": { "type": "integer" },
+            "commit_sha": { "type": "string" },
+            "index_version": { "type": "string" },
+            "identity": { "type": "string" }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "required": ["indexed_files", "skipped_files", "parse_failures", "index_cache_hits", "db_statements", "parse_workers"],
+          "properties": {
+            "indexed_files": { "type": "integer" },
+            "skipped_files": { "type": "integer" },
+            "parse_failures": { "type": "integer" },
+            "index_cache_hits": { "type": "integer" },
+            "parsed_files": { "type": "integer" },
+            "db_statements": { "type": "integer" },
+            "parse_workers": { "type": "integer" },
+            "index_duration": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "Error": {
+      "description": "400 invalid_request, 409 version_mismatch | lease_lost, 422 index_failed (message is one of the TypeScript indexer's categories)",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "code"],
+      "properties": {
+        "error": { "type": "string" },
+        "code": { "enum": ["invalid_request", "version_mismatch", "lease_lost", "index_failed"] }
+      }
+    }
+  }
+}

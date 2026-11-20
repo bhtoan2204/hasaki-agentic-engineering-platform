@@ -1,0 +1,9 @@
+syntax = "proto3";
+package payment.v1;
+import "google/protobuf/timestamp.proto";
+service PaymentService {
+  rpc Charge(ChargeRequest) returns (ChargeResponse);
+  rpc Refund(stream RefundRequest) returns (stream RefundResponse) {}
+}
+message ChargeRequest { string id = 1; Money amount = 2; message Money { int64 units = 1; } }
+enum Status { STATUS_UNSPECIFIED = 0; PAID = 1; }

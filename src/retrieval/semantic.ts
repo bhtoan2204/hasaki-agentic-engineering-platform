@@ -47,8 +47,13 @@ function fallback(reason: string, detail?: string): null {
   return null;
 }
 
-/** Authenticated request to the Go retrieval service; throws on network errors and timeouts. */
-export function retrievalService(path: string, body?: unknown, timeoutMs?: number) {
+/** Authenticated request to the platform-go service; throws on network errors, timeouts and `signal`. */
+export function retrievalService(
+  path: string,
+  body?: unknown,
+  timeoutMs?: number,
+  signal?: AbortSignal,
+) {
   const ms = timeoutMs ?? config.retrieval.semantic.timeoutMs;
   return fetch(new URL(path, config.retrieval.semantic.url), {
     method: body === undefined ? "GET" : "POST",
@@ -58,7 +63,7 @@ export function retrievalService(path: string, body?: unknown, timeoutMs?: numbe
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(ms),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms),
   });
 }
 

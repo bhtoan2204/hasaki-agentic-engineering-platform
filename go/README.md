@@ -1,14 +1,17 @@
 # platform-go
 
-Go backend of the platform (ADR `docs/architecture/adr/0001-go-backend-semantic-retrieval.md`). First module:
-semantic retrieval over `knowledge_items` with pgvector. Internal API contract:
-`contracts/retrieval-v1.schema.json` (examples in `contracts/examples/`, shared with the TypeScript tests).
+Go backend of the platform. Modules: semantic retrieval over `knowledge_items` with pgvector
+(ADR `docs/architecture/adr/0001-go-backend-semantic-retrieval.md`, contract `contracts/retrieval-v1.schema.json`,
+examples in `contracts/examples/`) and code intelligence indexing (ADR
+`docs/architecture/adr/0002-go-code-intelligence-indexing.md`, contract `contracts/code-intelligence-v1.schema.json`).
 
 ```
 cmd/platform-go/          wiring, signals, graceful shutdown
 internal/platform/        config, pgxpool, OpenTelemetry, bearer auth, request deadline, /healthz /readyz
 internal/retrieval/       http.go → service.go → store.go; worker.go (queue consumer); chunk.go; secrets.go
 internal/retrieval/embed/ Ollama and OpenAI-compatible embedding clients
+internal/codeintelligence/ index.go (job) → git.go, extract.go (tree-sitter), store.go; jstext.go (JS string rules);
+                          grammar/sql (vendored generated parser); testdata/parity (TypeScript golden)
 internal/testutil/        deterministic embedding provider emulator for tests and benchmarks
 ```
 
@@ -17,7 +20,7 @@ runner. The binary refuses to start below schema version 84.
 
 ## Run locally
 
-Requires Go 1.26, a migrated database (`npm start` migrates on boot) and an embedding provider
+Requires Go 1.26 with a C compiler (CGO: the tree-sitter grammars), a migrated database (`npm start` migrates on boot) and an embedding provider
 (`ollama pull bge-m3`, or the `ollama` compose service).
 
 ```sh
@@ -52,13 +55,29 @@ store) and `GO`. Integration tests read `PLATFORM_GO_TEST_DATABASE_URL` and `PLA
 and truncate `users` and `knowledge_items`: never point them at a real database. Benchmark results:
 `docs/benchmarks/retrieval-go.md`.
 
+## Code intelligence parity
+
+The Go extractor must match the TypeScript one byte for byte (shared index). Compare a whole repository:
+
+```sh
+node src/cli/codeIndexParity.ts repo ~/src/oms-src/oms-api HEAD /tmp/oms-api.jsonl
+cd go && CODE_INDEX_PARITY_REPO=~/src/oms-src/oms-api CODE_INDEX_PARITY_DUMP=/tmp/oms-api.jsonl \
+  go test -run TestParityRepository ./internal/codeintelligence/
+```
+
+After an intended extraction change, update both extractors and regenerate `testdata/parity/golden.jsonl`
+(`node src/cli/codeIndexParity.ts files go/internal/codeintelligence/testdata/parity/src <golden>`).
+Engine benchmark: `npm run bench:code-index -- <checkout>...` (isolated local database).
+
 ## Docker
 
 ```sh
 docker compose --profile go up -d --build platform-go
 ```
 
-Distroless static image, non-root, `GOMEMLIMIT=128MiB`, published on `127.0.0.1:4646` only. Compose sets
+Debian bookworm-slim image (CGO binary, git for indexing), non-root, `GOMEMLIMIT=256MiB`, published on
+`127.0.0.1:4646` only. Indexing receives absolute paths: compose mounts `~/src` and `~/.claude-task-platform`
+read-only at the same paths. Compose sets
 `DATABASE_URL` to the `postgres` service (image `pgvector/pgvector:pg17`) and `EMBEDDING_URL` to the `ollama`
 service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`).
 
@@ -80,6 +99,8 @@ service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`).
 | `EMBEDDING_CONCURRENCY` | `2` | concurrent embedding requests of the worker |
 | `EMBEDDING_BATCH` | `16` | texts per embedding request; the worker claims 2× this many sources at a time |
 | `WORKER_ENABLED` | `true` | |
+| `CODE_INDEX_PARSE_WORKERS` | `0` | parse goroutines per indexing job; 0 = half the cores, at most 4 |
+| `CODE_INDEX_JOBS` | `1` | indexing jobs at a time (callers beyond it wait: backpressure) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | | enables OTLP/HTTP traces and metrics (standard `OTEL_*` variables apply) |
 
 The model id stored with every embedding is `<provider>/<model>@<dims>`. Changing any part re-queues every eligible
