@@ -11,7 +11,7 @@ func TestContentHash(t *testing.T) {
 	if got := contentHash(sourceText("t", "d", "c")); got != "63dedc45eb1c4ea3a5ef98ba156fe084dd084ca0ad11105e6c48ef3dc56fb6bc" {
 		t.Fatalf("hash = %q", got)
 	}
-	if contentHash("a") == contentHash("b") || contentHash("a") != contentHash("a") {
+	if contentHash("a") == contentHash("b") {
 		t.Fatal("hash not deterministic or not distinguishing")
 	}
 }

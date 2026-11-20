@@ -507,9 +507,14 @@ export const commandExecutor: StepExecutor = {
       decision = r.decision; // rerun: execute the tests again below, in this new attempt
     }
     const timeoutMs = Number(cfg.timeout_seconds ?? 600) * 1000;
+    // A repo dropped from the selection (e.g. "retry only X") keeps its workspace row after cleanup removed the worktree.
     const targets = cfg.cwd
       ? [{ repo: "(cwd)", path: String(cfg.cwd), branch: ctx.run.branch }]
-      : await workspacesOf(ctx.run.id);
+      : (await workspacesOf(ctx.run.id)).filter(
+          (w) =>
+            !ctx.run.selected_repositories.length ||
+            ctx.run.selected_repositories.includes(w.repo),
+        );
     if (!targets.length) {
       // Nothing was changed (e.g. the coding step concluded the fix already exists): nothing to test.
       if (cfg.require_workspace)

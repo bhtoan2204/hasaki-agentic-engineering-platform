@@ -127,7 +127,7 @@ done in TypeScript and Go only returns a semantic ranking. Nothing is duplicated
 - Integration points: workflow `resolveContext`, agent `search_knowledge` and `platform.search_*`, chat
   `knowledgeForTurn`/`searchKnowledge`, chat `recallMemories`. All agent providers receive the result through
   the same context pack and platform tools.
-- Config `retrieval.semantic` = `{ enabled: false, url, timeoutMs: 800, topK: 30, minSimilarity: 0.45 }`.
+- Config `retrieval.semantic` = `{ enabled: false, url, timeoutMs: 1500, topK: 30, minSimilarity: 0.45 }`.
   Disabled, unreachable, timed out or `vector_extension = false` → lexical only, logged once per minute,
   counted in a metric. A step never fails because of semantic retrieval.
 

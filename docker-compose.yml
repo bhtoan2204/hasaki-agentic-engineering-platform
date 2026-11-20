@@ -17,6 +17,9 @@ services:
     container_name: claude-task-platform-ollama
     ports:
       - "127.0.0.1:11434:11434"
+    environment:
+      # Keep bge-m3 loaded: reloading after the default 5-minute idle takes ~2 s, longer than a search deadline.
+      OLLAMA_KEEP_ALIVE: "-1"
     volumes:
       - platform-ollama:/root/.ollama
       # The model registry is reached through a TLS-inspecting proxy: trust the host's CA bundle.

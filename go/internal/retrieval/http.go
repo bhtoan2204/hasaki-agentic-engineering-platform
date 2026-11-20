@@ -114,6 +114,9 @@ func (h handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, errEmbedder):
 		h.log.WarnContext(r.Context(), "embedder unavailable", "error", err)
 		platform.WriteError(w, http.StatusServiceUnavailable, "embedder_unavailable", "embedding provider unavailable")
+	case errors.Is(err, context.Canceled):
+		h.log.InfoContext(r.Context(), "request canceled by client", "path", r.URL.Path)
+		platform.WriteError(w, 499, "timeout", "request canceled")
 	default:
 		h.log.ErrorContext(r.Context(), "request failed", "path", r.URL.Path, "error", err)
 		platform.WriteError(w, http.StatusInternalServerError, "internal", "internal error")

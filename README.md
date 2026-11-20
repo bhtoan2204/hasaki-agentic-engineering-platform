@@ -38,7 +38,7 @@ Run one instance per developer, or one centrally hosted backend and worker. Inst
 docker compose up -d                  # PostgreSQL 17 on 127.0.0.1:55432
 npm install
 cp .env.example .env                  # Set AUTH_SECRET (random string); configure optional secrets
-# Edit config.json (or specify PLATFORM_CONFIG): databaseUrl, dataDir, reposRoot, projects
+# Configuration comes from .env and the Settings page only (config.json is not read)
 # Optional Git shared service accounts (not personal tokens):
 export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...
 # For a permitted shared account, also set bitbucket.allowSharedCredentials=true in config.json.
@@ -429,7 +429,7 @@ Development finalization results, real-repository measurements, startup verifica
 
 ### Optional semantic retrieval
 
-Knowledge ranking is lexical by default. To re-rank it semantically with the Go retrieval service ([ADR 0001](docs/architecture/adr/0001-go-backend-semantic-retrieval.md)), set `retrieval.semantic.enabled: true` (or `RETRIEVAL_SEMANTIC_ENABLED=1`) and `retrieval.semantic.url` (or `RETRIEVAL_SEMANTIC_URL`, default `http://127.0.0.1:4646`) in the **local** `PLATFORM_CONFIG`, and put the shared `RETRIEVAL_INTERNAL_TOKEN` in `.env` (never in `config.json`). `timeoutMs` (800), `topK` (30) and `minSimilarity` (0.45) tune the call.
+Knowledge ranking is lexical by default. To re-rank it semantically with the Go retrieval service ([ADR 0001](docs/architecture/adr/0001-go-backend-semantic-retrieval.md)), set `RETRIEVAL_SEMANTIC_ENABLED=true` and `RETRIEVAL_INTERNAL_TOKEN` (≥ 32 characters) in `.env` and run `docker compose up -d ollama ollama-init` (local `bge-m3`). `npm start` then builds and supervises `platform-go` on `RETRIEVAL_SEMANTIC_URL` (default `http://127.0.0.1:4646`; needs Go on `PATH`). If it is down, ranking stays lexical.
 
 Semantic search only re-orders items the existing resolution and authorization already selected (Reciprocal Rank Fusion with the lexical order, k = 60); mandatory, enforced and assigned items are unaffected. A disabled, unreachable, slow or failing service falls back to lexical ranking and never fails a step. Admins see fallback counters and the service status at `GET /api/admin/retrieval/status` and can queue re-indexing with `POST /api/admin/retrieval/reindex` (`{ "all": true }` or `{ "source_ids": [...] }`). `npm run eval:retrieval` reports Recall@5/10, MRR and inline tokens for lexical and hybrid ranking over the seeded knowledge.
 

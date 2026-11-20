@@ -38,7 +38,7 @@ describe("PostgreSQL storage diagnostics integration", () => {
     // Verify properties for each table
     for (const t of report.tables) {
       assert.ok(typeof t.schema === "string" && t.schema.length > 0);
-      assert.ok(["public", "code_intelligence"].includes(t.schema));
+      assert.ok(["public", "code_intelligence", "retrieval"].includes(t.schema));
       assert.ok(t.totalSizeBytes >= 0);
       assert.ok(t.tableSizeBytes >= 0);
       assert.ok(t.indexSizeBytes >= 0);

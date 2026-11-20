@@ -27,6 +27,10 @@ const searchResponse = z.object({
   took_ms: z.number(),
 });
 
+// Query embedding time grows with length (bge-m3 on CPU: ~0.3 s per 1000 chars); the head of the request text
+// (title, description) carries the meaning and keeps the call inside timeoutMs.
+const MAX_QUERY_CHARS = 1200;
+
 /** Fallbacks to lexical-only ranking since process start, by reason. */
 export const semanticFallbacks: Record<string, number> = {};
 const lastLogged = new Map<string, number>();
@@ -69,7 +73,7 @@ export async function semanticRanks(req: {
   sourceKinds?: SourceKind[];
   topK?: number;
 }): Promise<Map<number, SemanticHit> | null> {
-  const query = req.query.trim().slice(0, 8000);
+  const query = req.query.trim().slice(0, MAX_QUERY_CHARS);
   if (!query || req.sourceIds?.length === 0) return null;
   const cfg = config.retrieval.semantic;
   if (!cfg.enabled) return fallback("disabled");

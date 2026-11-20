@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,6 +33,15 @@ func run(log *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if os.Getenv("PLATFORM_GO_EXIT_ON_STDIN_EOF") == "true" {
+		// The supervising platform holds our stdin open; EOF means it died (even by SIGKILL), so do not outlive it.
+		ctx, stop = context.WithCancel(ctx)
+		defer stop()
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			stop()
+		}()
+	}
 
 	shutdownTelemetry, err := platform.SetupTelemetry(ctx, cfg.OTLPEndpointIsSet)
 	if err != nil {
@@ -82,6 +92,12 @@ func run(log *slog.Logger) error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
 	log.Info("platform-go listening", "addr", cfg.Addr, "model", cfg.ModelID(), "worker", cfg.WorkerEnabled)
+	// A local model loads on first use (seconds); load it now so the first search fits the caller's deadline.
+	go func() {
+		if _, err := embedder.Embed(ctx, []string{"warm up"}); err != nil {
+			log.Warn("embedding model warm-up failed", "error", err)
+		}
+	}()
 
 	select {
 	case <-ctx.Done():

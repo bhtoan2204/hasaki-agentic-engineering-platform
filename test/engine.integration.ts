@@ -413,9 +413,11 @@ test("Scenario B: agent asks about a business rule, pauses, resumes from checkpo
   assert.equal(qs.length, 1);
   const firstAttempt = (await attemptsOf(run.id, "plan"))[0];
   assert.equal(qs[0].attempt_id, firstAttempt.id);
-  const cp = await one(pool,
+  const cp = await one(
+    pool,
     "SELECT * FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='waiting_input'",
-    [firstAttempt.id]);
+    [firstAttempt.id],
+  );
   assert.equal(cp.execution.version, 1);
   assert.equal(cp.data.session_id, "sess-1");
 
@@ -1066,7 +1068,9 @@ test("context snapshots record applied knowledge versions and are immutable", as
     run.id,
   ]);
   assert.ok(
-    s1.content.knowledge.some((k: { key: string; version: number }) => k.key === "refund-once" && k.version === 1),
+    s1.content.knowledge.some(
+      (k: { key: string; version: number }) => k.key === "refund-once" && k.version === 1,
+    ),
     "old snapshot unchanged",
   );
   await assert.rejects(
@@ -1160,7 +1164,11 @@ test("light lane: short steps are claimable while a long agent/command step hold
   const begun = (await beginAttempt(busy, "general"))!;
   assert.equal(begun.step.key, "long");
   const st = await schedulerStatus();
-  assert.ok(st.running.some((j: { run_id: number; step_key: string }) => j.run_id === r1.id && j.step_key === "long"));
+  assert.ok(
+    st.running.some(
+      (j: { run_id: number; step_key: string }) => j.run_id === r1.id && j.step_key === "long",
+    ),
+  );
   assert.ok(st.queued.some((j: { run_id: number }) => j.run_id === r2.id));
   assert.equal(
     await claimJob("light", 30, ["human_approval"]),
@@ -1223,6 +1231,39 @@ test("command output streams while running; Stop kills the whole process tree an
     .map((e) => e.content)
     .join("");
   assert.ok(!all.includes("finished") && !all.includes("child-done"));
+});
+
+test("command step runs only in workspaces of selected repositories (a deselected repo's worktree may be gone)", async () => {
+  const kept = mkdtempSync(join(process.env.TEST_ROOT!, "cmd-selected-"));
+  const key = await customWorkflow([
+    { key: "targeted_test", type: "command", config: { command: "pwd" } },
+  ]);
+  const run = await startRun({ definitionKey: key });
+  await q(
+    pool,
+    "UPDATE workflow_runs SET allowed_repositories = ARRAY['oms-api', 'oms-background'], selected_repositories = ARRAY['oms-api'] WHERE id = $1",
+    [run.id],
+  );
+  await q(
+    pool,
+    `INSERT INTO execution_workspaces (run_id, repo, branch, path) VALUES
+       ($1, 'oms-api', 'b', $2), ($1, 'oms-background', 'b', $3)`,
+    [run.id, kept, join(process.env.TEST_ROOT!, "cleaned-up-worktree")],
+  );
+  await drain();
+  const st = await stepOf(run.id, "targeted_test");
+  assert.equal(st.status, "COMPLETED", st.error ?? JSON.stringify(st.output));
+  const logs = (
+    await q(
+      pool,
+      "SELECT content FROM workflow_events WHERE run_id = $1 AND kind IN ('log', 'system')",
+      [run.id],
+    )
+  )
+    .map((e) => e.content)
+    .join("\n");
+  assert.ok(logs.includes("oms-api"));
+  assert.ok(!logs.includes("oms-background"), "a deselected repository is not tested");
 });
 
 test("regression step without a test PostgreSQL is not passed: the reason reaches the developer, no automatic retry", async () => {
@@ -2289,7 +2330,7 @@ async function tfRun(dir: string, autoFixRounds = 0) {
   ]);
   scripts.implement = async (ctx) => {
     await recordWorkspace(ctx.run.id, {
-      repo: "calc",
+      repo: "oms-api",
       branch: "TASK-TF",
       path: dir,
       created_from: "test",
@@ -2392,7 +2433,7 @@ test("test failure 2/4: new failure → accept refused; 'Sửa rồi test lại'
       "package calc\n\nfunc Add(a, b int) int { return a + b }\n",
     );
     await recordWorkspace(ctx.run.id, {
-      repo: "calc",
+      repo: "oms-api",
       branch: "TASK-TF",
       path: dir,
       created_from: "test",
@@ -2434,12 +2475,24 @@ test("test failure: a new failure goes back to the coding step automatically and
   scripts.implement = async (ctx) => {
     if (ctx.input.pending?.feedback) {
       feedback.push(ctx.input.pending.feedback);
-      writeFileSync(join(dir, "calc/calc.go"), "package calc\n\nfunc Add(a, b int) int { return a + b }\n");
+      writeFileSync(
+        join(dir, "calc/calc.go"),
+        "package calc\n\nfunc Add(a, b int) int { return a + b }\n",
+      );
     }
-    await recordWorkspace(ctx.run.id, { repo: "calc", branch: "TASK-TF", path: dir, created_from: "test" });
+    await recordWorkspace(ctx.run.id, {
+      repo: "oms-api",
+      branch: "TASK-TF",
+      path: dir,
+      created_from: "test",
+    });
     return { kind: "completed", output: { summary: "calc", pull_requests: {} } };
   };
-  const run = await startRun({ definitionKey: key, repositories: ["oms-api"], inputs: { project: "OMS" } });
+  const run = await startRun({
+    definitionKey: key,
+    repositories: ["oms-api"],
+    inputs: { project: "OMS" },
+  });
   await drain();
   const st = await stepOf(run.id, "test");
   assert.equal(st.status, "COMPLETED");
@@ -2457,10 +2510,10 @@ test("test failure 3/4: old + new failures shown separately; rerun creates a new
   assert.equal(d.counts.pre_existing, 1);
   assert.equal(d.counts.new, 1);
   assert.equal(d.all_pre_existing, false);
-  assert.deepEqual(d.failures.map((f: { test: string; category: string }) => `${f.test}:${f.category}`).sort(), [
-    "TestAdd:new",
-    "TestNeedsDB:pre_existing",
-  ]);
+  assert.deepEqual(
+    d.failures.map((f: { test: string; category: string }) => `${f.test}:${f.category}`).sort(),
+    ["TestAdd:new", "TestNeedsDB:pre_existing"],
+  );
   let [qq] = await openQ(run.id);
   await answerQuestions({ [qq.id]: OPTIONS.rerun });
   await drain();
@@ -2562,7 +2615,9 @@ test("re-execute with instructions + skill: stored before enqueue, pinned versio
     "Xem lại call sang service B. Dữ liệu đã có trong payload",
   );
   assert.deepEqual(
-    pendingNow.reexecute.skills.map((x: { key: string; version: number }) => `${x.key}@${x.version}`),
+    pendingNow.reexecute.skills.map(
+      (x: { key: string; version: number }) => `${x.key}@${x.version}`,
+    ),
     [`latency-service-boundaries@${skill.current_version}`],
   );
   // the skill changes before the job runs (e.g. worker restarted) → the pinned version is still used
@@ -2771,7 +2826,9 @@ test("independent verification: STANDARD isolates the verifier, FAIL repairs the
   assert.deepEqual((await stepOf(run.id, "review")).output.verified_heads, { svc: "sha3" });
   // count per run: drain() also executes leftover jobs of earlier tests
   assert.deepEqual(
-    (await attemptsOf(run.id, "review")).map((a: { output: { verdict?: string } | null }) => a.output?.verdict),
+    (await attemptsOf(run.id, "review")).map(
+      (a: { output: { verdict?: string } | null }) => a.output?.verdict,
+    ),
     ["FAIL", "FAIL", "PASS"],
   );
   assert.equal((await attemptsOf(run.id, "implement")).length, 3, "two repair rounds");
@@ -3014,9 +3071,7 @@ test("cross-task memory: only verified/approved AND provably FRESH memory reache
       assert.ok(!keys.includes(k), k);
     // (memory extracted by earlier tests' runs points at other clones: also UNKNOWN → excluded; only this test's keys are asserted)
     const mine = (k: string) => k.startsWith("memory.t");
-    assert.ok(
-      plan!.memory_freshness.filter((m) => !mine(m.key)).every((m) => m.state !== "FRESH"),
-    );
+    assert.ok(plan!.memory_freshness.filter((m) => !mine(m.key)).every((m) => m.state !== "FRESH"));
     assert.deepEqual([...plan!.memory_excluded].filter(mine).sort(), [
       "memory.t1.oms-api.conclusions",
       "memory.t3.oms-api.facts",
@@ -3211,7 +3266,9 @@ test("e2e: the verifier catches the defect, FAIL blocks the PR and triggers a bo
     repositories: ["oms-api"],
   });
   await drain();
-  const verdicts = (await attemptsOf(run.id, "review")).map((a: { output: { verdict?: string } | null }) => a.output?.verdict);
+  const verdicts = (await attemptsOf(run.id, "review")).map(
+    (a: { output: { verdict?: string } | null }) => a.output?.verdict,
+  );
   assert.deepEqual(verdicts, ["FAIL", "PASS"], "defect caught, then the repaired code passes");
   assert.match(
     String((await attemptsOf(run.id, "review"))[0].output.findings[0].explanation),
@@ -3316,7 +3373,9 @@ test("e2e: changing the code after a PASS invalidates it — the PR is refused u
   // 3. re-verification judges the NEW commit: it is defective → FAIL → repair → PASS → PR (re-approved) publishes it
   await reexecuteStep(run.id, "review", { by: "dev" });
   await drain();
-  const verdicts = (await attemptsOf(run.id, "review")).map((a: { output: { verdict?: string } | null }) => a.output?.verdict);
+  const verdicts = (await attemptsOf(run.id, "review")).map(
+    (a: { output: { verdict?: string } | null }) => a.output?.verdict,
+  );
   assert.deepEqual(
     verdicts.slice(-2),
     ["FAIL", "PASS"],
@@ -4437,7 +4496,10 @@ test("smart verification: an identical passing test on the same clean commit is 
       key: "test",
       type: "command",
       depends_on: ["implement"],
-      config: { command: 'echo ran >> "$TMPDIR_RUNS"; node --test replay.test.cjs', reuse_test_evidence: true },
+      config: {
+        command: 'echo ran >> "$TMPDIR_RUNS"; node --test replay.test.cjs',
+        reuse_test_evidence: true,
+      },
     },
   ]);
   const counter = join(mkdtempSync(join(process.env.TEST_ROOT!, "runs-")), "count");
@@ -4449,9 +4511,12 @@ test("smart verification: an identical passing test on the same clean commit is 
     if (!path) {
       path = scopedWorktree("oms-api", ctx.run.branch);
       commitFile(path, "a.go", "package a\n", "first");
-      commitFile(path, "replay.test.cjs",
+      commitFile(
+        path,
+        "replay.test.cjs",
         "require('node:test')('verification ran', () => require('node:assert/strict').ok(true));\n",
-        "add verification test");
+        "add verification test",
+      );
       await recordWorkspace(ctx.run.id, {
         repo: "oms-api",
         branch: ctx.run.branch,
@@ -4479,7 +4544,11 @@ test("smart verification: an identical passing test on the same clean commit is 
   process.env.TMPDIR_RUNS = changedEnvironment;
   await reexecuteStep(run.id, "implement");
   await drain();
-  assert.equal(readFileSync(changedEnvironment, "utf8"), "ran\n", "a changed process environment reruns verification");
+  assert.equal(
+    readFileSync(changedEnvironment, "utf8"),
+    "ran\n",
+    "a changed process environment reruns verification",
+  );
   assert.equal((await stepOf(run.id, "test")).output.reused_from_attempt, undefined);
   process.env.TMPDIR_RUNS = counter;
   change = true;
@@ -4612,7 +4681,10 @@ test("re-execute instructions are kept as run-level developer decisions: later s
   // Advice meant for one re-execution only is not kept.
   await reexecuteStep(run.id, "review", { feedback: "thử ngắn gọn hơn", persist: false });
   await drain();
-  assert.equal(((await getRun(run.id)).inputs.developer_decisions as DeveloperDecision[]).length, 1);
+  assert.equal(
+    ((await getRun(run.id)).inputs.developer_decisions as DeveloperDecision[]).length,
+    1,
+  );
 });
 
 // ---------------------------------------------------------------- feedback-driven replanning
@@ -4758,7 +4830,11 @@ test("feedback: explicit Re-plan keeps the repository selection; a duplicate sub
     /only .* steps can be re-executed/,
   );
   r = await getRun(run.id);
-  assert.equal((r.inputs.replans as ReplanRecord[]).length, count, "the rejected submit left no record");
+  assert.equal(
+    (r.inputs.replans as ReplanRecord[]).length,
+    count,
+    "the rejected submit left no record",
+  );
   const bogusMode: string = "bogus";
   await assert.rejects(
     sendFeedback(run.id, "x", { mode: bogusMode as FeedbackMode }),

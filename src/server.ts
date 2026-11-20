@@ -28,6 +28,7 @@ import { startCacheInvalidation } from "./cache/index.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
 import { startEventStream, stopEventStream } from "./api/stream.ts";
+import { startGoService } from "./retrieval/goService.ts";
 import { stopChatStream } from "./chat/events.ts";
 import { recoverInstanceTurns } from "./chat/runtime.ts";
 import { childGroups } from "./workflow/local.ts";
@@ -100,6 +101,7 @@ registerReconcileTask(() => dispatchIntake());
 registerReconcileTask(() => syncPullRequestLifecycles());
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
+const goService = startGoService();
 if (config.codeIntelligence.enabled)
   background("code intelligence startup", async () => {
     for (const repo of await repositories.list())
@@ -108,7 +110,9 @@ if (config.codeIntelligence.enabled)
   });
 startPolling();
 startProdErrorSchedule();
-void recoverInstanceTurns().catch((e) => console.error("chat turn recovery:", (e as Error).message));
+void recoverInstanceTurns().catch((e) =>
+  console.error("chat turn recovery:", (e as Error).message),
+);
 
 // Graceful shutdown reconciles interrupted steps without consuming retries. A second Ctrl+C exits immediately.
 let shuttingDown = false;
@@ -129,6 +133,7 @@ async function shutdown(reason: string, code: number) {
   setTimeout(() => process.exit(code), 30_000).unref();
   try {
     await telegram.stop();
+    await goService.stop();
     await scheduler.drain(reason);
     await settleBackground();
   } catch (e) {

@@ -523,7 +523,7 @@ const defaults: Config = {
     semantic: {
       enabled: false,
       url: "http://127.0.0.1:4646",
-      timeoutMs: 800,
+      timeoutMs: 1500,
       topK: 30,
       minSimilarity: 0.45,
     },
@@ -757,8 +757,9 @@ const defaults: Config = {
 export let instanceIdentityExplicit = false;
 
 function load(): Config {
-  const file = resolve(process.env.PLATFORM_CONFIG ?? "config.json");
-  const fromFile = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+  // Operators configure through .env and the Settings page; PLATFORM_CONFIG is only for test/benchmark fixtures.
+  const file = process.env.PLATFORM_CONFIG ? resolve(process.env.PLATFORM_CONFIG) : null;
+  const fromFile = file && existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
   const cfg: Config = {
     ...defaults,
     ...fromFile,
@@ -856,10 +857,16 @@ function load(): Config {
     throw new Error("slop.mode must be disabled, advisory or enforcement");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
+  if (process.env.IGNORE_REPOSITORIES)
+    cfg.ignoredRepositories = process.env.IGNORE_REPOSITORIES.split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
   const semantic = cfg.retrieval.semantic;
   if (process.env.RETRIEVAL_SEMANTIC_ENABLED)
     semantic.enabled = ["1", "true"].includes(process.env.RETRIEVAL_SEMANTIC_ENABLED);
   if (process.env.RETRIEVAL_SEMANTIC_URL) semantic.url = process.env.RETRIEVAL_SEMANTIC_URL;
+  if (process.env.RETRIEVAL_SEMANTIC_TIMEOUT_MS)
+    semantic.timeoutMs = Number(process.env.RETRIEVAL_SEMANTIC_TIMEOUT_MS);
   if (!/^https?:\/\//.test(semantic.url))
     throw new Error("retrieval.semantic.url must be an http(s) URL");
   semantic.timeoutMs = positiveInt("retrieval.semantic.timeoutMs", semantic.timeoutMs);
