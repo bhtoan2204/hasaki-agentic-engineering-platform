@@ -327,7 +327,7 @@ type RunScope = {
   owner_id?: number | null;
   allowed_repositories: string[];
   selected_repositories: string[];
-  inputs?: Record<string, any> | null;
+  inputs?: Record<string, unknown> | null;
 };
 const runProject = (run: RunScope) => String(run.inputs?.project ?? "");
 

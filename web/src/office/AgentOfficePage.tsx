@@ -30,7 +30,9 @@ function pref(key: string, fallback: boolean) {
 function savePref(key: string, v: boolean) {
   try {
     localStorage.setItem(key, v ? "1" : "0");
-  } catch {}
+  } catch {
+    /* ignore: storage unavailable */
+  }
 }
 const reducedMotion = () =>
   typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;

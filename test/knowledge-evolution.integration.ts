@@ -24,6 +24,7 @@ import {
   createProposal,
   dedupeKey,
   getProposal,
+  type DiffLine,
   lineDiff,
   rejectProposal,
   rollbackProposal,
@@ -43,6 +44,7 @@ import { importFromRepositories } from "../src/knowledge/importer.ts";
 import { repositories } from "../src/repos/service.ts";
 import { workItems } from "../src/workitems/service.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
+import type { ResolvedContext } from "../src/workflow/context.ts";
 
 /**
  * Continuous learning end to end, on the real engine + registry + resolver + prompt builder. The only fakes are the two
@@ -67,7 +69,7 @@ const seen: Array<{
   step: string;
   knowledge: Array<{ key: string; version: number; content: string }>;
   prompt: string;
-  overridden: any[];
+  overridden: ResolvedContext["overridden"];
 }> = [];
 const fakeAgent = {
   async execute(ctx: ExecutionContext): Promise<ExecResult> {
@@ -81,7 +83,7 @@ const fakeAgent = {
         version: k.version,
         content: k.content,
       })),
-      prompt: buildSystemAppend(ctx.run as any, ctx.step as any, ctx.context, "analysis"),
+      prompt: buildSystemAppend(ctx.run, ctx.step, ctx.context, "analysis"),
       overridden: ctx.context.overridden,
     });
     const s = scripts[ctx.step.key];
@@ -295,7 +297,7 @@ test("E2E refund A1 → A2: detected from the BA answer, pending until approved,
     "only the evidence-backed candidate became a proposal",
   );
   // Security policies are never offered to the analyzer as changeable rules, so a candidate naming one is unknown → dropped.
-  assert.deepEqual(learning.dropped.map((d: any) => d.reason).sort(), [
+  assert.deepEqual(learning.dropped.map((d: { reason: string }) => d.reason).sort(), [
     'DEPRECATE names an unknown rule "sec.no-pii"',
     "no evidence quote matches a human source verbatim",
   ]);
@@ -313,19 +315,20 @@ test("E2E refund A1 → A2: detected from the BA answer, pending until approved,
   assert.deepEqual(p.terms, { removed: ["line_amount"], added: ["platform_price"] });
   assert.ok(
     p.impacts.skills.some(
-      (s: any) => s.key === "skill.refund-calc" && /line_amount/.test(s.reason),
+      (s: { key: string; reason: string }) =>
+        s.key === "skill.refund-calc" && /line_amount/.test(s.reason),
     ),
     "the skill teaching the old rule is flagged",
   );
   assert.ok(p.impacts.workflows.includes(wfKey));
   assert.ok(
-    p.diff.some((d: any) => d.op === "-" && d.line === A1) &&
-      p.diff.some((d: any) => d.op === "+" && d.line === A2),
+    p.diff.some((d: DiffLine) => d.op === "-" && d.line === A1) &&
+      p.diff.some((d: DiffLine) => d.op === "+" && d.line === A2),
   );
 
   // Idempotent: the same inputs are not analysed twice.
   const again = await detectKnowledgeChanges(run1.id);
-  assert.equal((again as any).reused, true);
+  assert.equal(again.reused, true);
   assert.equal(analyzerCalls.length, 1);
 
   // Run 2 before approval: still A1 (an unapproved proposal changes nothing).
@@ -357,7 +360,7 @@ test("E2E refund A1 → A2: detected from the BA answer, pending until approved,
     "SELECT content FROM context_snapshots WHERE run_id = $1 ORDER BY id LIMIT 1",
     [run1.id],
   );
-  const k1 = snap1.content.knowledge.find((k: any) => k.key === "refund.amount-basis");
+  const k1 = snap1.content.knowledge.find((k: { key: string }) => k.key === "refund.amount-basis");
   assert.equal(k1.version, 1);
   assert.equal(k1.content, A1);
   assert.ok(snap1.content.resolved_at);
@@ -368,7 +371,7 @@ test("E2E refund A1 → A2: detected from the BA answer, pending until approved,
   const cp = (await getProposal(Number(child.id)))!;
   assert.equal(cp.target_key, "skill.refund-calc");
   assert.equal(cp.validation.passed, true);
-  assert.ok(cp.diff.some((d: any) => d.op === "+" && /platform_price/.test(d.line)));
+  assert.ok(cp.diff.some((d: DiffLine) => d.op === "+" && /platform_price/.test(d.line)));
   assert.equal(
     s3.knowledge.find((k) => k.key === "skill.refund-calc")!.content,
     SKILL,
@@ -682,7 +685,7 @@ test("skill validation: a draft that still prescribes the old field is blocked u
   const cp = (await getProposal(child.proposal_id!))!;
   assert.equal(cp.validation.passed, false);
   assert.equal(
-    cp.validation.checks.find((c: any) => c.name === "no_stale_instruction").passed,
+    cp.validation.checks.find((c: { name: string }) => c.name === "no_stale_instruction").passed,
     false,
   );
   await assert.rejects(approveProposal(cp.id, { by: "lead" }), /automatic validation failed/);
@@ -715,7 +718,7 @@ test("untrusted or malicious inputs never become knowledge", async () => {
   // A run with only agent text (no human input, no change wording in the ticket) is not analysed at all.
   const run = await runWorkflow("Payment");
   const rec = await detectKnowledgeChanges(run.id, { force: true });
-  assert.equal((rec as any).status, "skipped");
+  assert.equal(rec.status, "skipped");
   // Prompt-injection in an answer: the analyzer may be fooled, but a candidate must still quote a human source verbatim
   // and target a listed rule; a fabricated target or a quote from elsewhere is dropped.
   reply = (x) => ({

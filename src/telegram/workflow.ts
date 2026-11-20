@@ -11,7 +11,10 @@ import {
 import { botKey, textLimit, safeTelegramText } from "./client.ts";
 import { opaqueId, preferences, queue } from "./store.ts";
 
-export const contextHash = (step: Record<string, any>, question?: Record<string, any> | null) =>
+export const contextHash = (
+  step: { approval?: unknown; config?: unknown },
+  question?: { question?: unknown; options?: unknown } | null,
+) =>
   createHash("sha256")
     .update(
       JSON.stringify([
@@ -22,7 +25,21 @@ export const contextHash = (step: Record<string, any>, question?: Record<string,
     )
     .digest("hex");
 
-export type Action = Record<string, any>;
+export interface Action {
+  action_id: string;
+  user_id: number;
+  telegram_user_id: string;
+  chat_id: string;
+  run_id: number;
+  step_id: number;
+  question_id?: number | null;
+  attempt_id?: number | null;
+  step_generation: number;
+  locale: string;
+  message_id?: number | null;
+  context_hash: string;
+  requires_confirmation?: boolean;
+}
 export function navigation(runId: number, key: string, locale: string) {
   return linkFooter(stepLink(runId, key), locale === "en" ? "View run" : "Xem run");
 }
@@ -150,7 +167,7 @@ export async function sendInteractiveWaiting(w: StepWaiting, dedupeKey: string):
           ? textLimit(safeTelegramText(question.question), 800)
           : textLimit(safeTelegramText(w.detail), 300),
       });
-      const keyboard: any[][] = [];
+      const keyboard: { text: string; callback_data?: string; url?: string }[][] = [];
       // Selection/branch forms and fenced provider handoffs require their existing full UI.
       const interactive =
         pref.interactive && config.telegram.mode !== "off" && !step.pending_input?.provider_handoff;
@@ -185,8 +202,7 @@ export async function sendInteractiveWaiting(w: StepWaiting, dedupeKey: string):
       if (nav.reply_markup) keyboard.push(...nav.reply_markup.inline_keyboard);
       const ids = keyboard
         .flat()
-        .filter((b) => b.callback_data)
-        .map((b) => b.callback_data.slice(2));
+        .flatMap((b) => (b.callback_data ? [b.callback_data.slice(2)] : []));
       const text =
         base.text +
         `\n${en ? "Provider" : "Nhà cung cấp"}: ${textLimit(run.agent_provider ?? "—", 40)}\n${w.status}`;

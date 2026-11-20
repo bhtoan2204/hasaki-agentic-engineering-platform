@@ -37,8 +37,19 @@ function secretDenial(text: string): string | null {
   return null;
 }
 
+type AntigravityToolCall = { name?: unknown; args?: unknown };
+type AntigravityHookPayload = {
+  toolCall?: AntigravityToolCall;
+  tool_call?: AntigravityToolCall;
+  tool_name?: unknown;
+  name?: unknown;
+  tool_input?: unknown;
+  args?: unknown;
+  hook_event_name?: unknown;
+};
+
 export function antigravityHookDecision(
-  payload: any,
+  payload: AntigravityHookPayload | null | undefined,
   policy: PolicyContext,
   sessionCwd: string,
 ): Decision {
@@ -204,7 +215,9 @@ export function excludeFromGit(gitDir: string) {
   let cur = "";
   try {
     cur = readFileSync(exclude, "utf8");
-  } catch {}
+  } catch {
+    /* ignore: missing exclude file starts empty */
+  }
   const lines = [".agents/hooks.json", ".agents/mcp_config.json"];
   let added = false;
   for (const line of lines) {

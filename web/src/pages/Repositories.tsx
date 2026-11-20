@@ -51,6 +51,46 @@ const LISTS = [
   "dependencies",
   "allowed_actions",
 ] as const;
+type ListKey = (typeof LISTS)[number];
+type RepoAccess = {
+  level: string;
+  source?: string | null;
+  effective?: { write?: boolean };
+  bitbucket: { state: string; reason?: string; stale?: boolean };
+};
+type Repository = Record<ListKey, string[]> & {
+  name: string;
+  provider: string;
+  repository_url: string | null;
+  path?: string | null;
+  remote_slug?: string;
+  default_branch: string;
+  category: string;
+  description: string;
+  architecture: string;
+  enabled: boolean;
+  delete_source_branch?: boolean;
+  access?: RepoAccess | null;
+};
+type RepoFormState = Omit<Repository, ListKey> & Record<ListKey, string>;
+type IndexState = {
+  name: string;
+  status: string;
+  metrics?: { processed_files?: number; total_files?: number } | null;
+  commit_sha?: string | null;
+  indexed_files?: number;
+  symbol_count?: number;
+  relation_count?: number;
+  last_indexed_at?: string | null;
+  last_indexing_error?: string | null;
+  indexing_run_id?: number | null;
+};
+type RankResult = {
+  ambiguous: boolean;
+  ranked: Array<{ repo: string; score: number | string; reasons?: string[] }>;
+};
+const listFields = (value: (k: ListKey) => string) =>
+  Object.fromEntries(LISTS.map((k) => [k, value(k)])) as Record<ListKey, string>;
 const ACTION_ICON: Record<string, LucideIcon> = {
   read: Eye,
   write: PenLine,
@@ -93,7 +133,7 @@ function Actions({ items }: { items?: string[] }) {
     </span>
   );
 }
-const repoDir = (r: any) => r.repository_url || r.path || r.name;
+const repoDir = (r: Repository) => r.repository_url || r.path || r.name;
 /** Display name of a repository's Git host. */
 const HOST_LABEL: Record<string, string> = {
   bitbucket: "Bitbucket",
@@ -110,7 +150,7 @@ const URL_PLACEHOLDER: Record<string, string> = {
 };
 
 /** The caller's effective access to one repository (platform grant ∩ Bitbucket ∩ repository policy). */
-function AccessCard({ access, provider }: { access: any; provider?: string }) {
+function AccessCard({ access, provider }: { access?: RepoAccess | null; provider?: string }) {
   const { t } = useI18n();
   if (!access) return null;
   return (
@@ -155,18 +195,18 @@ export function RepositoriesPage({
   // Members only ever see "My repositories". Admins also manage the registry and grants (view=manage); managing
   // access is not reading: the workspace and index panels need the admin's own grant like anyone else's.
   const manage = isAdmin && view === "manage";
-  const { data, error, loading, reload } = useApi<any[]>(
+  const { data, error, loading, reload } = useApi<Repository[]>(
     manage ? "/api/repositories?manage=1" : "/api/repositories",
     [manage],
   );
 
   // Only for a repository the caller can read (otherwise the page shows "not found", like an unknown name).
   const readable = !!name && !manage && !!data?.some((x) => x.name === name);
-  const workspace = useApi<any>(
+  const workspace = useApi<{ status?: string; instance_id?: string }>(
     readable ? `/api/repositories/${encodeURIComponent(name!)}/workspace` : null,
     [manage, readable],
   );
-  const index = useApi<{ enabled: boolean; repositories: any[] }>(
+  const index = useApi<{ enabled: boolean; repositories: IndexState[] }>(
     readable ? "/api/repositories/index-status" : null,
     [manage, readable],
   );
@@ -187,9 +227,9 @@ export function RepositoriesPage({
       }
     />
   );
-  const [form, setForm] = useState<any>(null);
+  const [form, setForm] = useState<RepoFormState | null>(null);
   const [rank, setRank] = useState({ text: "", project: "" });
-  const [ranked, setRanked] = useState<any>(null);
+  const [ranked, setRanked] = useState<RankResult | null | undefined>(null);
   const [creating, setCreating] = useState(false);
   const [{ q, filter }, setFilters] = useState(() => ({
     q: params.get("q") || "",
@@ -224,7 +264,7 @@ export function RepositoriesPage({
       r
         ? {
             ...r,
-            ...Object.fromEntries(LISTS.map((k) => [k, r[k].join(", ")])),
+            ...listFields((k) => r[k].join(", ")),
           }
         : {
             name: "",
@@ -235,9 +275,7 @@ export function RepositoriesPage({
             description: "",
             architecture: "",
             enabled: true,
-            ...Object.fromEntries(
-              LISTS.map((k) => [k, k === "allowed_actions" ? "read, write, pull_request" : ""]),
-            ),
+            ...listFields((k) => (k === "allowed_actions" ? "read, write, pull_request" : "")),
           },
     );
   }, [data, name]);
@@ -266,6 +304,7 @@ export function RepositoriesPage({
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const save = async () => {
+    if (!form) return;
     const { path: _legacyPath, remote_slug: _legacySlug, ...metadata } = form;
     const body = {
       ...metadata,
@@ -284,8 +323,11 @@ export function RepositoriesPage({
         () => api(`/api/repositories/${encodeURIComponent(form.name)}`, body),
         t("repo.saved"),
       )
-    )
-      (reload(), setCreating(false), navigate(manageHref(form.name)));
+    ) {
+      reload();
+      setCreating(false);
+      navigate(manageHref(form.name));
+    }
   };
   const startNew = () => {
     if (name) navigate(manageHref());
@@ -305,8 +347,10 @@ export function RepositoriesPage({
         () => api(`/api/repositories/${encodeURIComponent(repo)}/delete`, {}),
         t("repo.deleted", { name: repo }),
       )
-    )
-      (reload(), navigate(manageHref()));
+    ) {
+      reload();
+      navigate(manageHref());
+    }
   };
 
   const editor = manage && form && (
@@ -477,7 +521,7 @@ export function RepositoriesPage({
                       <span className="muted small">{t("repo.ci.disabled")}</span>
                     ) : (
                       (() => {
-                        const state = index.data.repositories.find((x: any) => x.name === r.name);
+                        const state = index.data.repositories.find((x) => x.name === r.name);
                         return (
                           <>
                             <dl className="repo-kv">
@@ -871,7 +915,7 @@ export function RepositoriesPage({
               <button
                 className="sm ghost"
                 onClick={async () =>
-                  setRanked(await act(() => api("/api/repositories/rank", rank)))
+                  setRanked(await act(() => api<RankResult>("/api/repositories/rank", rank)))
                 }
               >
                 {t("repo.rank")}
@@ -887,8 +931,8 @@ export function RepositoriesPage({
                 )}
                 {!ranked.ranked.length && <div className="muted small">{t("repo.noneFit")}</div>}
                 {(() => {
-                  const max = Math.max(...ranked.ranked.map((x: any) => Number(x.score) || 0), 1);
-                  return ranked.ranked.map((x: any, i: number) => (
+                  const max = Math.max(...ranked.ranked.map((x) => Number(x.score) || 0), 1);
+                  return ranked.ranked.map((x, i) => (
                     <div key={x.repo} className="repo-ranked-row">
                       <div className="repo-ranked-top">
                         {i === 0 && !ranked.ambiguous ? (
@@ -907,7 +951,7 @@ export function RepositoriesPage({
                           }}
                         />
                       </div>
-                      {x.reasons?.length > 0 && (
+                      {!!x.reasons?.length && (
                         <div className="muted small">{x.reasons.join(" · ")}</div>
                       )}
                     </div>
@@ -936,8 +980,8 @@ function NewRepoDrawer({
   onSave,
   onClose,
 }: {
-  form: any;
-  setForm: (f: any) => void;
+  form: RepoFormState | null;
+  setForm: (f: RepoFormState) => void;
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -963,7 +1007,7 @@ const repoSlugFromUrl = (url: string) =>
  * GitLab instance (base URL) for the repository URL. Only the allowed instances (added on Integrations → GitLab) are offered: the
  * server derives the API base from the URL host and refuses any other host.
  */
-type InstanceForm = { repository_url?: string } & Record<string, unknown>;
+type InstanceForm = { repository_url?: string | null } & Record<string, unknown>;
 function GitlabInstanceField<F extends InstanceForm>({
   form,
   setForm,
@@ -1016,8 +1060,8 @@ function RepoForm({
   onSave,
   bare,
 }: {
-  form: any;
-  setForm: (f: any) => void;
+  form: RepoFormState;
+  setForm: (f: RepoFormState) => void;
   isNew: boolean;
   onSave: () => void;
   bare?: boolean;
@@ -1070,7 +1114,7 @@ function RepoForm({
         onClick={async () => {
           const result = await act(
             () =>
-              api<any>("/api/repositories/validate-url", {
+              api<{ url: string }>("/api/repositories/validate-url", {
                 repository_url: form.repository_url,
               }),
             t("repo.urlValid"),

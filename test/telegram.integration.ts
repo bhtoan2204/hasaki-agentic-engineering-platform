@@ -1,6 +1,7 @@
 import { before, after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { pool, q, one } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
@@ -29,9 +30,22 @@ import {
   startTelegramTransport,
 } from "../src/telegram/transport.ts";
 import { handle } from "../src/http/app.ts";
+import type { Action } from "../src/telegram/workflow.ts";
 let owner: PublicUser, other: PublicUser, bot: Server, http: Server, base: string;
-const calls: any[] = [],
-  pollUpdates: any[] = [];
+interface BotCall {
+  method: string;
+  body: {
+    chat_id?: string;
+    text?: string;
+    message_id?: number;
+    callback_query_id?: string;
+    allowed_updates?: string[];
+    secret_token?: string;
+    reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
+  };
+}
+const calls: BotCall[] = [],
+  pollUpdates: unknown[] = [];
 let messageId = 100,
   updateId = 1000,
   sequence = 0,
@@ -50,7 +64,7 @@ function message(user: number, text: string, replyTo?: number) {
     },
   };
 }
-function callback(a: any, user = 101, chat = user) {
+function callback(a: Pick<Action, "action_id" | "message_id">, user = 101, chat = user) {
   return {
     update_id: ++updateId,
     callback_query: {
@@ -61,7 +75,7 @@ function callback(a: any, user = 101, chat = user) {
     },
   };
 }
-async function pump(update: any) {
+async function pump(update: unknown) {
   await ingestUpdate(update);
   await processInbox();
   await settleBackground();
@@ -181,7 +195,7 @@ before(async () => {
   await new Promise<void>((r) => bot.listen(0, "127.0.0.1", r));
   Object.assign(config.telegram, {
     botToken: TOKEN,
-    apiBase: `http://127.0.0.1:${(bot.address() as any).port}`,
+    apiBase: `http://127.0.0.1:${(bot.address() as AddressInfo).port}`,
     mode: "polling",
     webhookSecret: "telegram-webhook-secret-123456789",
     webhookUrl: "https://platform.example/api/telegram/webhook",
@@ -189,7 +203,7 @@ before(async () => {
   config.publicUrl = "https://platform.example";
   http = createServer(handle);
   await new Promise<void>((r) => http.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(http.address() as any).port}`;
+  base = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
   await bind(owner, 101);
   await bind(other, 202);
 });
@@ -265,13 +279,11 @@ test("valid approval uses the existing engine once, edits its message after comm
   );
   assert.ok(sent);
   assert.equal(sent.body.chat_id, "101");
-  assert.ok(!sent.body.text.includes("do-not-send-this"));
-  for (const b of sent.body.reply_markup.inline_keyboard
-    .flat()
-    .filter((b: any) => b.callback_data)) {
-    assert.ok(Buffer.byteLength(b.callback_data) <= 64);
-    assert.match(b.callback_data, /^a:[A-Za-z0-9_-]{24}$/);
-    assert.ok(!b.callback_data.includes("gate"));
+  assert.ok(!sent.body.text!.includes("do-not-send-this"));
+  for (const b of sent.body.reply_markup!.inline_keyboard.flat().filter((b) => b.callback_data)) {
+    assert.ok(Buffer.byteLength(b.callback_data!) <= 64);
+    assert.match(b.callback_data!, /^a:[A-Za-z0-9_-]{24}$/);
+    assert.ok(!b.callback_data!.includes("gate"));
   }
   await pump(callback(a));
   assert.equal(
@@ -296,7 +308,7 @@ test("valid approval uses the existing engine once, edits its message after comm
       (c) =>
         c.method === "editMessageText" &&
         c.body.message_id === a.message_id &&
-        c.body.text.includes("Approved"),
+        c.body.text!.includes("Approved"),
     ),
   );
   assert.equal(
@@ -1145,14 +1157,14 @@ test("inbox approvals: the owner's waiting approval steps are listed; canceled r
   const { openApprovals } = await import("../src/workflow/engine.ts");
   const { run, step } = await gate();
   const mine = await openApprovals(pool, { ownerId: owner.id });
-  const row = mine.find((a: any) => a.run_id === run.id)!;
+  const row = mine.find((a) => a.run_id === run.id)!;
   assert.ok(row, "a WAITING_APPROVAL step appears in the inbox");
   assert.equal(row.step_key, "gate");
   assert.equal(row.quick, true, "a plain approval can be decided from the inbox");
   assert.equal(row.requires_risk_acknowledgement, false);
   assert.ok(!("outputs" in row), "step outputs stay in the run, not in the inbox list");
   assert.ok(
-    !(await openApprovals(pool, { ownerId: other.id })).some((a: any) => a.run_id === run.id),
+    !(await openApprovals(pool, { ownerId: other.id })).some((a) => a.run_id === run.id),
     "other owners never see it",
   );
   await q(
@@ -1161,13 +1173,13 @@ test("inbox approvals: the owner's waiting approval steps are listed; canceled r
     [step.id],
   );
   assert.equal(
-    (await openApprovals(pool, { ownerId: owner.id })).find((a: any) => a.run_id === run.id)!.quick,
+    (await openApprovals(pool, { ownerId: owner.id })).find((a) => a.run_id === run.id)!.quick,
     false,
     "repository selection needs the run UI",
   );
   await cancelRun(run.id);
   assert.ok(
-    !(await openApprovals(pool, { ownerId: owner.id })).some((a: any) => a.run_id === run.id),
+    !(await openApprovals(pool, { ownerId: owner.id })).some((a) => a.run_id === run.id),
     "canceled runs drop out",
   );
 });
@@ -1198,14 +1210,14 @@ test("an approval that needs an explicit risk acknowledgement gets no Telegram a
     true,
     "still notified",
   );
-  const after = await q<any>(
+  const after = await q<{ action_type: string }>(
     pool,
     "SELECT action_type FROM telegram_actions WHERE run_id=$1 AND status='pending'",
     [run.id],
   );
-  assert.ok(!after.some((a: any) => a.action_type === "approve"), "no approve button");
+  assert.ok(!after.some((a) => a.action_type === "approve"), "no approve button");
   assert.ok(
-    after.some((a: any) => a.action_type === "reject"),
+    after.some((a) => a.action_type === "reject"),
     "rejecting (with a reason) is still possible from Telegram",
   );
   void before;
@@ -1246,7 +1258,7 @@ test("an unreachable Telegram API is reported as a network failure with its syst
   // A port that was free a moment ago: nothing listens there (port 1 is refused by fetch itself as a "bad port").
   const probe = createServer();
   await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
-  const closedPort = (probe.address() as any).port;
+  const closedPort = (probe.address() as AddressInfo).port;
   await new Promise<void>((r) => probe.close(() => r()));
   config.telegram.apiBase = `http://127.0.0.1:${closedPort}`;
   try {

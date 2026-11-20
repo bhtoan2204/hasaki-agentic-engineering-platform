@@ -21,7 +21,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { TEST_FILE } from "../agent/scopeGuard.ts";
 import { policyKey } from "./policyVersions.ts";
-import { FAILURE_CATEGORIES, RUNGS, type FailureCategory } from "./outcomes.ts";
+import { FAILURE_CATEGORIES, RUNGS, type FailureCategory, type RunOutcome } from "./outcomes.ts";
+import type { ApprovedScope } from "../agent/evidence.ts";
 
 const exec = promisify(execFile);
 
@@ -88,7 +89,14 @@ export interface PatternOptions {
 
 async function outcomesInWindow(o: PatternOptions, db: Db = pool) {
   const days = Math.min(365, Math.max(1, Math.round(o.days ?? 30)));
-  return q<any>(
+  return q<{
+    id: number;
+    work_item_id: number | null;
+    definition_key: string;
+    outcome: RunOutcome;
+    policy_versions: Record<string, string> | null;
+    outcome_at: string;
+  }>(
     db,
     `SELECT r.id, r.work_item_id, r.definition_key, r.outcome, r.policy_versions, r.outcome_at
        FROM workflow_runs r
@@ -108,7 +116,7 @@ export async function qualityPatterns(o: PatternOptions = {}, db: Db = pool) {
   const byPolicy = new Map<
     string,
     {
-      versions: any;
+      versions: Record<string, string> | null;
       runs: number;
       review_passed: number;
       tests_passed: number;
@@ -282,13 +290,20 @@ export function sanitizeRequirement(text: string) {
  * requires human acceptance criteria (reviewRegressionCase).
  */
 export async function proposeRegressionCase(runId: number, ownerId: number | null, db: Db = pool) {
-  const run = await one<any>(
+  const run = await one<{
+    id: number;
+    status: string;
+    outcome: RunOutcome | null;
+    work_item_id: number | null;
+    title: string | null;
+    description: string | null;
+  }>(
     db,
     "SELECT r.id, r.status, r.outcome, r.work_item_id, w.title, w.description FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1",
     [runId],
   );
   if (!run?.outcome) return { created: [], refused: "the run has no recorded outcome yet" };
-  const lad = run.outcome.ladder ?? {};
+  const lad: Partial<RunOutcome["ladder"]> = run.outcome.ladder ?? {};
   if (lad.tests_passed?.state !== "proven")
     return { created: [], refused: "tests did not pass on the final commits (platform-proven)" };
   const humanAccepted =
@@ -303,7 +318,11 @@ export async function proposeRegressionCase(runId: number, ownerId: number | nul
     [run.title, run.description].filter(Boolean).join("\n\n"),
   );
   if (!requirement.trim()) return { created: [], refused: "no task requirement to benchmark" };
-  const steps = await q<any>(
+  const steps = await q<{
+    key: string;
+    output: { approved_scope?: ApprovedScope | null; results?: unknown } | null;
+    config: { command?: string } | null;
+  }>(
     db,
     "SELECT key, output, config FROM workflow_steps WHERE run_id = $1 AND status = 'COMPLETED' ORDER BY position",
     [runId],
@@ -312,7 +331,7 @@ export async function proposeRegressionCase(runId: number, ownerId: number | nul
   const testSteps = steps
     .filter((s) => Array.isArray(s.output?.results))
     .map((s) => ({ step: s.key, command: s.config?.command ?? null }));
-  const created: any[] = [];
+  const created: Array<{ repo: string; id?: number; refused?: string }> = [];
   for (const { repo, commit } of run.outcome.repositories ?? []) {
     const ws = (await workspacesOf(runId, db)).find((w) => w.repo === repo);
     let base = "",
@@ -334,7 +353,7 @@ export async function proposeRegressionCase(runId: number, ownerId: number | nul
       created.push({ repo, refused: "cannot pin the base commit (worktree no longer available)" });
       continue;
     }
-    const row = await one<any>(
+    const row = await one<{ id: number }>(
       db,
       `INSERT INTO regression_case_candidates(run_id, work_item_id, owner_id, repository, base_commit, fix_commit, requirement, acceptance, safety)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (run_id, repository) DO NOTHING RETURNING id`,
@@ -358,8 +377,8 @@ export async function proposeRegressionCase(runId: number, ownerId: number | nul
         }),
         JSON.stringify({
           allowed_files: (scope?.changes ?? [])
-            .filter((c: any) => c.repo === repo)
-            .flatMap((c: any) => c.files ?? []),
+            .filter((c) => c.repo === repo)
+            .flatMap((c) => c.files ?? []),
           prohibited_assumptions: scope?.prohibited_assumptions ?? [],
           no_network: true,
           no_external_side_effects: true,
@@ -383,7 +402,11 @@ export async function reviewRegressionCase(
   body: { acceptance_criteria?: unknown; comment?: unknown },
   db: Db = pool,
 ) {
-  const c = await one<any>(db, "SELECT * FROM regression_case_candidates WHERE id = $1", [id]);
+  const c = await one<{ status: string; acceptance: Record<string, unknown> | null }>(
+    db,
+    "SELECT * FROM regression_case_candidates WHERE id = $1",
+    [id],
+  );
   if (!c) throw new Error("regression case candidate not found");
   if (c.status !== "pending") throw new Error(`candidate is already ${c.status}`);
   const criteria = String(body.acceptance_criteria ?? "").trim();

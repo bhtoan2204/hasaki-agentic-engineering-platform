@@ -52,6 +52,20 @@ export function parseVaultToken(raw: string): string {
   return t;
 }
 
+type VaultData = {
+  display_name?: string;
+  meta?: { username?: string; email?: string };
+  policies?: string[];
+  identity_policies?: string[];
+  expire_time?: string | null;
+  renewable?: boolean;
+  ttl?: number;
+  secret?: Record<string, { type: string; options?: { version?: string } }>;
+  keys?: string[];
+  data?: Record<string, unknown>;
+  metadata?: { version?: number; created_time?: string };
+};
+
 async function call(
   path: string,
   token: string,
@@ -64,7 +78,7 @@ async function call(
     headers: { "X-Vault-Token": token, Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
-  const j: any = await res.json().catch(() => ({}));
+  const j: { errors?: string[]; data?: VaultData } = await res.json().catch(() => ({}));
   if (
     res.status === 403 &&
     /permission denied/i.test(String(j?.errors ?? "")) &&
@@ -85,7 +99,7 @@ async function call(
 
 async function lookup(token: string): Promise<TokenInfo> {
   const j = await call("auth/token/lookup-self", token);
-  const d = j?.data ?? {};
+  const d: VaultData = j?.data ?? {};
   return {
     user: String(d.display_name ?? d.meta?.username ?? d.meta?.email ?? "?"),
     policies: [...new Set([...(d.policies ?? []), ...(d.identity_policies ?? [])])] as string[],
@@ -188,7 +202,7 @@ interface Mount {
 async function mounts(): Promise<Mount[]> {
   const j = await call("sys/internal/ui/mounts", requireToken());
   const secret = j?.data?.secret ?? {};
-  return Object.entries<any>(secret)
+  return Object.entries(secret)
     .filter(([, m]) => ["kv", "generic"].includes(m.type))
     .map(([path, m]) => ({
       path: path.replace(/\/$/, ""),
@@ -255,7 +269,10 @@ export async function vaultKeys(path: string, expect?: string[]) {
     .sort()
     .map((k) => describeValue(k, data[k]));
   const out: Record<string, unknown> = { path: `${mount.path}/${rest}`, count: keys.length, keys };
-  if (meta) ((out.version = meta.version), (out.updated_at = meta.created_time));
+  if (meta) {
+    out.version = meta.version;
+    out.updated_at = meta.created_time;
+  }
   if (expect?.length) {
     const names = Object.keys(data);
     out.expected = expect.map((e) => {

@@ -113,6 +113,37 @@ describe("PostgreSQL storage diagnostics integration", () => {
     assert.equal(parsed.tables.length, report.tables.length);
   });
 
+  it("reports only the TOAST relation as toast storage", async () => {
+    await pool.query("DROP TABLE IF EXISTS storage_diag_toast, storage_diag_plain");
+    try {
+      await pool.query("CREATE TABLE storage_diag_toast (id int PRIMARY KEY, body text)");
+      await pool.query("ALTER TABLE storage_diag_toast ALTER COLUMN body SET STORAGE EXTERNAL");
+      await pool.query(
+        "INSERT INTO storage_diag_toast SELECT g, repeat(md5(g::text), 400) FROM generate_series(1, 50) g",
+      );
+      // No toastable column: its free space and visibility maps must not be reported as TOAST.
+      await pool.query("CREATE TABLE storage_diag_plain (id int)");
+      await pool.query("INSERT INTO storage_diag_plain SELECT generate_series(1, 5000)");
+      await pool.query("VACUUM storage_diag_toast");
+      await pool.query("VACUUM storage_diag_plain");
+
+      const report = await getStorageDiagnostics(pool, { schema: "public" });
+      const toasted = report.tables.find((t) => t.table === "storage_diag_toast");
+      assert.ok(toasted);
+      assert.ok(toasted.toastSizeBytes > 0);
+      assert.equal(
+        toasted.tableSizeBytes + toasted.indexSizeBytes + toasted.toastSizeBytes,
+        toasted.totalSizeBytes,
+      );
+      const plain = report.tables.find((t) => t.table === "storage_diag_plain");
+      assert.ok(plain);
+      assert.equal(plain.toastSizeBytes, 0);
+      assert.equal(plain.tableSizeBytes, plain.totalSizeBytes);
+    } finally {
+      await pool.query("DROP TABLE IF EXISTS storage_diag_toast, storage_diag_plain");
+    }
+  });
+
   it("leaves database contents unmodified (read-only verification)", async () => {
     const countBefore = (await pool.query("SELECT count(*)::int AS n FROM schema_migrations"))
       .rows[0].n;

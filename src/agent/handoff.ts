@@ -6,7 +6,7 @@ export { inspectHandoffWorkspace, classifyHandoffUntracked, isHandoffScratch } f
 import { safeDiagnostics, normalizeProviderFailure, type FailureCategory } from "./telemetry.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { summarizeValue } from "../context/plan.ts";
-import { evidenceSummary } from "./evidence.ts";
+import { evidenceSummary, type ApprovedScope } from "./evidence.ts";
 import { config } from "../config.ts";
 import { codexCapabilities } from "./codex/run.ts";
 import { cursorCapabilities } from "./cursor/run.ts";
@@ -35,12 +35,23 @@ export async function providerFailure(
 ): Promise<FailureCategory | null> {
   if (result.kind !== "failed") return null;
   const metrics = (
-    await one(pool, "SELECT metrics FROM workflow_step_attempts WHERE id=$1", [attemptId])
+    await one<{
+      metrics: {
+        provider_sessions?: Record<
+          string,
+          { start_time?: unknown; normalized_failure_category?: FailureCategory | null }
+        > | null;
+      } | null;
+    }>(pool, "SELECT metrics FROM workflow_step_attempts WHERE id=$1", [attemptId])
   )?.metrics;
   // Prefer structured executor/provider diagnostics, then the latest reported session category.
-  const detail = result.details as any;
-  const normalized = normalizeProviderFailure(detail?.provider_error ?? { message: result.error });
-  const sessions = Object.values(metrics?.provider_sessions ?? {}) as any[];
+  const detail = result.details;
+  const providerError =
+    detail && typeof detail === "object" && "provider_error" in detail
+      ? detail.provider_error
+      : undefined;
+  const normalized = normalizeProviderFailure(providerError ?? { message: result.error });
+  const sessions = Object.values(metrics?.provider_sessions ?? {});
   const reported = sessions
     .sort((a, b) => String(b.start_time).localeCompare(String(a.start_time)))
     .find(
@@ -116,7 +127,15 @@ export async function buildHandoffPackage(
     key: string;
     type: string;
     status: string;
-    output: any;
+    output: {
+      approved_scope?: ApprovedScope | null;
+      tested_heads?: Record<string, string> | null;
+      results?: unknown;
+      verification?: { passed?: boolean | null } | null;
+      passed?: boolean | null;
+      verdict?: string;
+      verified_heads?: Record<string, string> | null;
+    } | null;
     independent: boolean;
   }>(
     pool,
@@ -126,19 +145,20 @@ export async function buildHandoffPackage(
   const heads = Object.fromEntries(workspace.workspaces.map((w) => [w.repository, w.head]));
   const approvedScope =
     [...runSteps].reverse().find((x) => x.status === "COMPLETED" && x.output?.approved_scope)
-      ?.output.approved_scope ?? null;
-  const testsExecuted = runSteps
-    .filter(
-      (x) => x.output?.tested_heads && (Array.isArray(x.output?.results) || x.output?.verification),
-    )
-    .map((x) => ({
-      step: x.key,
-      passed: x.output.passed ?? x.output.verification?.passed ?? null,
-      tested_heads: x.output.tested_heads,
-      matches_current_workspace: Object.entries(heads).every(
-        ([r, h]) => x.output.tested_heads[r] === h,
-      ),
-    }));
+      ?.output?.approved_scope ?? null;
+  const testsExecuted = runSteps.flatMap((x) => {
+    const o = x.output;
+    const tested = o?.tested_heads;
+    if (!tested || !(Array.isArray(o.results) || o.verification)) return [];
+    return [
+      {
+        step: x.key,
+        passed: o.passed ?? o.verification?.passed ?? null,
+        tested_heads: tested,
+        matches_current_workspace: Object.entries(heads).every(([r, h]) => tested[r] === h),
+      },
+    ];
+  });
   const missing: string[] = [];
   if (!testsExecuted.some((t) => t.passed === true && t.matches_current_workspace))
     missing.push("no passing test run on the current workspace commits");

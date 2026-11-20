@@ -4,6 +4,9 @@ import { config } from "../config.ts";
 import { runSearches, splunkConnected } from "../integrations/splunk.ts";
 import { scoreTriggers, type WorkflowTriggers } from "./request.ts";
 import { searchSummaries } from "./steps.ts";
+import type { RunRow, StepRow } from "../workflow/types.ts";
+import type { LatencyResult, TimelineEvent } from "./correlate.ts";
+import type { Finding, InvestigationHypothesis } from "./report.ts";
 
 /** API helpers for the investigation UI. Callers authorize the run first (requireRun). */
 
@@ -14,7 +17,7 @@ import { searchSummaries } from "./steps.ts";
  */
 export async function investigationDetail(runId: number) {
   const rows = await runSearches(runId);
-  const steps = await q<{ key: string; status: string; output: any; config: any }>(
+  const steps = await q<Pick<StepRow, "key" | "status" | "output" | "config">>(
     pool,
     "SELECT key, status, output, config FROM workflow_steps WHERE run_id = $1 ORDER BY position",
     [runId],
@@ -28,7 +31,7 @@ export async function investigationDetail(runId: number) {
       )
       .find((s) => s.status === "COMPLETED")?.output ?? null;
   const summaries = searchSummaries(rows);
-  const run = await one<{ inputs: Record<string, any> | null }>(
+  const run = await one<{ inputs: Record<string, unknown> | null }>(
     pool,
     "SELECT inputs FROM workflow_runs WHERE id = $1",
     [runId],
@@ -121,11 +124,11 @@ const cap = (s: unknown, n: number) => {
  * is still active.
  */
 export async function startFixFromInvestigation(runId: number) {
-  const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [runId]);
+  const run = await one<RunRow>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [runId]);
   if (!run) throw new EngineError("run not found", 404);
   if (run.definition_key !== "production-incident-investigation")
     throw new EngineError("not a production investigation run", 400);
-  const steps = await q<{ key: string; status: string; output: any; config: any }>(
+  const steps = await q<Pick<StepRow, "key" | "status" | "output" | "config">>(
     pool,
     "SELECT key, status, output, config FROM workflow_steps WHERE run_id = $1",
     [runId],
@@ -171,13 +174,13 @@ export async function startFixFromInvestigation(runId: number) {
         }
       : null,
     business_summary: cap(report.business_summary, 2000),
-    findings: (report.findings ?? []).slice(0, 30).map((f: any) => ({
+    findings: (report.findings ?? []).slice(0, 30).map((f: Finding) => ({
       statement: cap(f.statement, 600),
       classification: f.classification,
       evidence_refs: f.evidence_refs,
       code_location: f.code_location ?? null,
     })),
-    hypotheses: (report.hypotheses ?? []).slice(0, 15).map((h: any) => ({
+    hypotheses: (report.hypotheses ?? []).slice(0, 15).map((h: InvestigationHypothesis) => ({
       hypothesis: cap(h.hypothesis, 600),
       supporting_refs: h.supporting_refs,
     })),
@@ -185,7 +188,7 @@ export async function startFixFromInvestigation(runId: number) {
       .slice(0, 15)
       .map((x: unknown) => cap(x, 400)),
     next_steps: (findingsStep.next_steps ?? []).slice(0, 15).map((x: unknown) => cap(x, 400)),
-    latencies: latencies.slice(0, 20).map((l: any) => ({
+    latencies: latencies.slice(0, 20).map((l: LatencyResult) => ({
       key: l.key,
       label: l.label,
       latency: l.latency_text,
@@ -194,7 +197,7 @@ export async function startFixFromInvestigation(runId: number) {
       to: l.to,
       notes: l.notes,
     })),
-    timeline: timeline.slice(0, 80).map((t: any) => ({
+    timeline: timeline.slice(0, 80).map((t: TimelineEvent) => ({
       timestamp: t.timestamp,
       event_type: t.event_type,
       service: t.service,

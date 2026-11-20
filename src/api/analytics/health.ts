@@ -155,17 +155,116 @@ function previousPeriod(f: AnalyticsFilters): AnalyticsFilters {
   return { ...f, from: new Date(lo - width).toISOString(), to: new Date(lo).toISOString() };
 }
 
+type HealthSummary = {
+  total_errors: number | null;
+  fingerprints: number | null;
+  new_incidents: number | null;
+  active_incidents: number | null;
+  resolved_incidents: number | null;
+  critical_high_incidents: number | null;
+  recurring_incidents: number | null;
+  affected_services: number | null;
+  acknowledge_ms: number | null;
+  resolve_ms: number | null;
+  missing_acknowledged: number | null;
+  missing_resolved: number | null;
+  snapshots_missing_hourly: number | null;
+  partial_hours: number | null;
+};
+type HealthTrendRow = { bucket: string; events: number | null; fingerprints: number };
+type HealthSeverityRow = { severity: string; fingerprints: number; events: number | null };
+type HealthServiceRow = {
+  namespace: string;
+  service: string;
+  fingerprints: number;
+  events: number | null;
+  new_incidents: number;
+  unresolved_incidents: number;
+  critical_high_incidents: number;
+  critical_high_errors: number | null;
+  recurring_incidents: number;
+  last_observed_error: string | null;
+  error_share_pct: number | null;
+};
+type HealthLifecycleRow = { status: string; incidents: number };
+type HealthIncidentRow = {
+  fingerprint: string;
+  namespace: string;
+  service: string;
+  signature: string;
+  severity: string | null;
+  lifecycle_status: string;
+  triage_status: string;
+  events: number | null;
+  recurring: boolean;
+  first_seen_at: string | null;
+  first_at: string | null;
+  last_at: string | null;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+  work_item_id: number | null;
+  work_item_code: string | null;
+  missing_hourly: number;
+  lifecycle_events: Array<{ action: string; evidence: string | null; created_at: string }>;
+  total_rows: number;
+  runs: Array<{
+    id: number;
+    status: string;
+    verified: boolean | null;
+    changes: unknown;
+    pull_requests: Array<{ url: string; repo: string; title: string }>;
+  }>;
+};
+type HealthScan = {
+  id: number;
+  ok: boolean | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error?: string | null;
+};
+type HealthRemediation = {
+  linked_incidents: number;
+  work_items_with_runs: number;
+  completed_runs: number;
+  verified_runs: number;
+  prs_created: number;
+};
+type HealthFreshness = {
+  latest_scan: HealthScan | null;
+  last_successful_scan: HealthScan | null;
+  latest_observation_at: string | null;
+  scans_in_range: number;
+  successful_scans_in_range: number;
+  failed_scans_in_range: number;
+  window_coverage_ms: number | null;
+};
 type HealthParts = {
-  summary: any;
-  trend: any[];
-  severity: any[];
-  serviceTrends: any[];
-  services: any[];
-  lifecycle: any[];
-  details: any[];
-  topFingerprints: any[];
-  remediation: any;
-  freshness: any;
+  summary: HealthSummary;
+  trend: HealthTrendRow[];
+  severity: HealthSeverityRow[];
+  serviceTrends: unknown[];
+  services: HealthServiceRow[];
+  lifecycle: HealthLifecycleRow[];
+  details: HealthIncidentRow[];
+  topFingerprints: unknown[];
+  remediation: HealthRemediation | null;
+  freshness: HealthFreshness;
+};
+type HealthRow = {
+  summary: HealthSummary;
+  trend: HealthTrendRow[];
+  severity: HealthSeverityRow[];
+  service_trends: unknown[];
+  services: HealthServiceRow[];
+  lifecycle: HealthLifecycleRow[];
+  details: HealthIncidentRow[];
+  top_fingerprints: unknown[];
+  remediation: HealthRemediation | null;
+  freshness: HealthFreshness;
+  previous_summary: HealthSummary;
+  previous_trend: HealthTrendRow[];
+  previous_services: HealthServiceRow[];
+  previous_freshness: HealthFreshness;
 };
 type HealthPair = { current: HealthParts; previous: HealthParts };
 
@@ -267,7 +366,7 @@ remediation AS (
  WHERE incidents.period='current'
 )`
     : "";
-  const row = await one(
+  const row = await one<HealthRow>(
     pool,
     `${healthFrom(f, pair)},
 scan_windows AS (
@@ -375,38 +474,39 @@ SELECT
  }`,
     params,
   );
+  if (!row) throw new Error("health analytics query returned no row");
   const current = {
-    summary: row?.summary,
-    trend: row?.trend ?? [],
-    severity: row?.severity ?? [],
-    serviceTrends: row?.service_trends ?? [],
-    services: row?.services ?? [],
-    lifecycle: row?.lifecycle ?? [],
-    details: row?.details ?? [],
-    topFingerprints: row?.top_fingerprints ?? [],
-    remediation: row?.remediation ?? null,
-    freshness: row?.freshness,
+    summary: row.summary,
+    trend: row.trend ?? [],
+    severity: row.severity ?? [],
+    serviceTrends: row.service_trends ?? [],
+    services: row.services ?? [],
+    lifecycle: row.lifecycle ?? [],
+    details: row.details ?? [],
+    topFingerprints: row.top_fingerprints ?? [],
+    remediation: row.remediation ?? null,
+    freshness: row.freshness,
   };
   if (!pair) return current;
   return {
     current,
     previous: {
-      summary: row?.previous_summary,
-      trend: row?.previous_trend ?? [],
+      summary: row.previous_summary,
+      trend: row.previous_trend ?? [],
       severity: [],
       serviceTrends: [],
-      services: row?.previous_services ?? [],
+      services: row.previous_services ?? [],
       lifecycle: [],
       details: [],
       topFingerprints: [],
       remediation: null,
-      freshness: row?.previous_freshness,
+      freshness: row.previous_freshness,
     },
   };
 }
 
-const comparable = (now: any, before: any) => {
-  const value = (x: any) => (x == null || !Number.isFinite(Number(x)) ? null : Number(x));
+const comparable = (now: unknown, before: unknown) => {
+  const value = (x: unknown) => (x == null || !Number.isFinite(Number(x)) ? null : Number(x));
   const current = value(now),
     previous = value(before);
   const delta = current == null || previous == null ? null : current - previous;
@@ -418,7 +518,7 @@ const comparable = (now: any, before: any) => {
       delta == null || previous == null || previous === 0 ? null : (delta / previous) * 100,
   };
 };
-const sameCoverage = (a: any, b: any) =>
+const sameCoverage = (a: HealthFreshness | undefined, b: HealthFreshness | undefined) =>
   Number(a?.successful_scans_in_range) === Number(b?.successful_scans_in_range) &&
   Number(a?.scans_in_range) === Number(b?.scans_in_range) &&
   Number(a?.failed_scans_in_range) === Number(b?.failed_scans_in_range) &&
@@ -448,7 +548,7 @@ export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope
     currentServices = open?.current ?? null;
     previousServices = open?.previous ?? null;
   }
-  const markEmptyPartialUnknown = (set: any, period: AnalyticsFilters) => {
+  const markEmptyPartialUnknown = (set: HealthParts, period: AnalyticsFilters) => {
     const width =
       boundaryInstant(period.to, period.timezone) - boundaryInstant(period.from, period.timezone);
     if (
@@ -464,24 +564,24 @@ export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope
         "critical_high_incidents",
         "recurring_incidents",
         "affected_services",
-      ])
+      ] as const)
         if (Number(set.summary[key] ?? 0) === 0) set.summary[key] = null;
     }
   };
   markEmptyPartialUnknown(current, f);
   markEmptyPartialUnknown(previous, prev);
   const oldServices = new Map(
-    (previousServices ?? previous).services.map((s: any) => [`${s.namespace}\0${s.service}`, s]),
+    (previousServices ?? previous).services.map((s) => [`${s.namespace}\0${s.service}`, s]),
   );
   const serviceCoverageComparable = sameCoverage(
     (currentServices ?? current).freshness,
     (previousServices ?? previous).freshness,
   );
   const services = (currentServices ?? current).services
-    .filter((s: any) => !f.service || s.service === f.service)
-    .filter((s: any) => !f.namespace || s.namespace === f.namespace)
-    .map((s: any) => {
-      const old: any = oldServices.get(`${s.namespace}\0${s.service}`);
+    .filter((s) => !f.service || s.service === f.service)
+    .filter((s) => !f.namespace || s.namespace === f.namespace)
+    .map((s) => {
+      const old = oldServices.get(`${s.namespace}\0${s.service}`);
       return {
         ...s,
         previous_events: old?.events ?? null,
@@ -531,7 +631,7 @@ export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope
     current_coverage: current.freshness,
   };
   const denom = (currentServices ?? current).summary.total_errors;
-  const lifecycleMap = new Map(current.lifecycle.map((x: any) => [x.status, x.incidents]));
+  const lifecycleMap = new Map(current.lifecycle.map((x) => [x.status, x.incidents]));
   const effectiveFrom = boundaryInstant(f.from, f.timezone),
     effectiveTo = boundaryInstant(f.to, f.timezone),
     rangeMs = effectiveTo - effectiveFrom;
@@ -554,7 +654,8 @@ export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope
           ? "never"
           : !latestScan.ok
             ? "latest_scan_failed"
-            : Date.now() - new Date(current.freshness.last_successful_scan.finished_at).getTime() >
+            : Date.now() -
+                  new Date(current.freshness.last_successful_scan.finished_at ?? 0).getTime() >
                 24 * 3600_000
               ? "stale"
               : Number(current.freshness.window_coverage_ms ?? 0) < effectiveTo - effectiveFrom
@@ -566,13 +667,13 @@ export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope
   };
   const remediation = {
     ...current.remediation,
-    fixes_verified: current.remediation.verified_runs,
+    fixes_verified: current.remediation?.verified_runs,
     merged_prs: null,
     merged_prs_available: false,
     resolution_inferred_from_agent: false,
   };
   const trend = current.trend;
-  const previousTrend = previous.trend.map((r: any) => ({
+  const previousTrend = previous.trend.map((r) => ({
     ...r,
     bucket: new Date(new Date(r.bucket).getTime() + rangeMs).toISOString(),
     period: "previous",
@@ -588,10 +689,10 @@ export async function healthAnalytics(f: AnalyticsFilters, scope: AnalyticsScope
     trend,
     previousTrend,
     serviceTrends: current.serviceTrends,
-    severity: current.severity.map((s: any) => ({ ...s, incidents: s.fingerprints })),
-    services: services.map((s: any) => ({
+    severity: current.severity.map((s) => ({ ...s, incidents: s.fingerprints })),
+    services: services.map((s) => ({
       ...s,
-      error_share_pct: denom > 0 ? (Number(s.events) * 100) / Number(denom) : null,
+      error_share_pct: denom != null && denom > 0 ? (Number(s.events) * 100) / Number(denom) : null,
     })),
     lifecycle: {
       statuses: ["open", "acknowledged", "resolved"].map((status) => ({
@@ -633,7 +734,7 @@ export async function healthServiceAnalytics(f: AnalyticsFilters, scope: Analyti
   if (!f.service || !f.namespace) throw new HttpError(400, "service and namespace are required");
   const result = await healthAnalytics(f, scope);
   const service = result.services.find(
-    (s: any) => s.service === f.service && (!f.namespace || s.namespace === f.namespace),
+    (s) => s.service === f.service && (!f.namespace || s.namespace === f.namespace),
   );
   return {
     ...result,
@@ -644,10 +745,14 @@ export async function healthServiceAnalytics(f: AnalyticsFilters, scope: Analyti
 }
 
 /** Operator evidence is an explicit supported resolution status, never an agent's completion claim. */
-export async function updateIncidentLifecycle(actor: Actor, fingerprint: string, body: any) {
+export async function updateIncidentLifecycle(
+  actor: Actor,
+  fingerprint: string,
+  body: { action?: unknown; evidence?: unknown },
+) {
   requireAdmin(actor);
   const action = body.action;
-  if (!["acknowledge", "resolve", "reopen"].includes(action))
+  if (action !== "acknowledge" && action !== "resolve" && action !== "reopen")
     throw new HttpError(400, "Invalid lifecycle action");
   const evidence = safeDiagnostics(String(body.evidence ?? "").trim());
   if (action === "resolve" && evidence.length < 8)

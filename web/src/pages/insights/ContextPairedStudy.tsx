@@ -3,12 +3,28 @@ import { api, useApi } from "../../api.ts";
 import { act, ErrorBox, Field } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
+
+type EvaluationRunOption = {
+  id: number;
+  status: string;
+  configuration: { context_variant?: string };
+};
+type PairedComparison = {
+  report: { verdict: string };
+  context_report?: {
+    status?: string;
+    distinct_paired_tasks?: number;
+    improved?: number;
+    regressed?: number;
+    paired_duration_delta_ms?: number | null;
+  } | null;
+};
 export function ContextPairedStudy() {
   const { t } = useI18n();
-  const rows = useApi<any>("/api/evaluation-runs");
+  const rows = useApi<{ runs?: EvaluationRunOption[] }>("/api/evaluation-runs");
   const [a, setA] = useState(""),
     [b, setB] = useState(""),
-    [report, setReport] = useState<any>(null);
+    [report, setReport] = useState<PairedComparison | null>(null);
   return (
     <Panel title={t("an.eval.pairedValueTitle")}>
       {rows.error && <ErrorBox error={rows.error} onRetry={rows.reload} />}
@@ -23,7 +39,7 @@ export function ContextPairedStudy() {
           <Field key={i} label={label as string}>
             <select value={value as string} onChange={(e) => (set as typeof setA)(e.target.value)}>
               <option value="">—</option>
-              {rows.data?.runs?.map((r: any) => (
+              {rows.data?.runs?.map((r) => (
                 <option key={r.id} value={r.id}>
                   #{r.id} · {r.configuration.context_variant ?? "legacy"} · {r.status}
                 </option>
@@ -37,11 +53,11 @@ export function ContextPairedStudy() {
         disabled={!a || !b || a === b}
         onClick={() =>
           act(async () => {
-            const pair: any = await api("/api/evaluation-comparisons", {
+            const pair = await api<{ id: number }>("/api/evaluation-comparisons", {
               baseline_id: Number(a),
               candidate_id: Number(b),
             });
-            setReport(await api(`/api/evaluation-comparisons/${pair.id}`));
+            setReport(await api<PairedComparison>(`/api/evaluation-comparisons/${pair.id}`));
           })
         }
       >

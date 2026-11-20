@@ -174,6 +174,13 @@ export interface StdioBridgeOptions {
   output?: NodeJS.WritableStream;
 }
 
+interface JsonRpcRequest {
+  jsonrpc?: unknown;
+  id?: unknown;
+  method?: unknown;
+  params?: { protocolVersion?: unknown; name?: unknown; arguments?: unknown };
+}
+
 export function serveStdio(opts: StdioBridgeOptions) {
   const input: NodeJS.ReadableStream = opts.input ?? process.stdin;
   const output = opts.output ?? process.stdout;
@@ -188,7 +195,7 @@ export function serveStdio(opts: StdioBridgeOptions) {
     output.write(body);
   };
 
-  const onMessage = async (msg: any, lined: boolean) => {
+  const onMessage = async (msg: JsonRpcRequest | null, lined: boolean) => {
     if (!msg || msg.jsonrpc !== "2.0" || msg.id == null) return;
     try {
       if (msg.method === "initialize") {

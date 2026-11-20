@@ -40,6 +40,59 @@ const EMPTY: OfficeSnapshot = {
   events: {},
 };
 const ACTIVE = ["RUNNING", "WAITING", "PAUSED"];
+
+type OverviewRun = {
+  id: number;
+  status: string;
+  title: string;
+  definition_key: string;
+  updated_at: string;
+  open_questions: number;
+  steps: Array<{ status: string }> | null;
+};
+type OverviewQuestion = { run_id: number; step_key: string; question: string | null };
+type MetricsSummary = {
+  evaluation?: {
+    verification?: {
+      pass_rate_pct: number | null;
+      passed: number;
+      verified: number;
+      accepted_preexisting?: number;
+      avg_repairs: number | null;
+      stopped_no_progress?: number;
+      repair_budget_exhausted?: number;
+    };
+    human_intervention: { rate_pct: number | null; answers?: number; reexecutions?: number };
+  };
+  by_profile?: Array<{ runs?: number; avg_wall_min?: number | null }>;
+  by_workflow?: Array<{ cost_usd?: number | null }>;
+};
+type AttemptVerification = {
+  status?: string;
+  outcome?: string;
+  passed?: boolean;
+  needs_review?: boolean;
+  rounds?: number;
+  repairs?: number;
+  reason?: string;
+};
+type RunAttempts = {
+  id: number;
+  attempts?: Array<{
+    step_key: string;
+    number: number;
+    started_at: string | null;
+    finished_at: string | null;
+    metrics?: { verification?: AttemptVerification } | null;
+  }>;
+};
+type VerificationRow = {
+  run: number;
+  step: string;
+  n: number;
+  at: string | null;
+  v: AttemptVerification;
+};
 const fmt = (n: number | null | undefined, d = 0) =>
   n == null || Number.isNaN(n)
     ? "—"
@@ -50,9 +103,9 @@ const fmt = (n: number | null | undefined, d = 0) =>
 /** Landing dashboard: real workflow activity, a live mini office, recent work and harness health. */
 export function OverviewPage() {
   const { t } = useI18n();
-  const { data: runs, error: runsError, reload: reloadRuns } = useApi<any[]>("/api/runs");
-  const { data: questions, error: qError, reload: reloadQ } = useApi<any[]>("/api/questions");
-  const { data: metrics, error: mError, reload: reloadM } = useApi<any>("/api/metrics/summary?days=30");
+  const { data: runs, error: runsError, reload: reloadRuns } = useApi<OverviewRun[]>("/api/runs");
+  const { data: questions, error: qError, reload: reloadQ } = useApi<OverviewQuestion[]>("/api/questions");
+  const { data: metrics, error: mError, reload: reloadM } = useApi<MetricsSummary>("/api/metrics/summary?days=30");
   useLive(null, (p) => {
     if (!p || p.kind === "status") void (reloadRuns(), reloadQ());
   });
@@ -235,10 +288,10 @@ function MiniOffice({ runId }: { runId: number | null }) {
   );
 }
 
-function ActionInbox({ questions }: { questions: any[] }) {
+function ActionInbox({ questions }: { questions: OverviewQuestion[] }) {
   const { t } = useI18n();
   const qList = Array.isArray(questions) ? questions : [];
-  const byStep = new Map<string, any[]>();
+  const byStep = new Map<string, OverviewQuestion[]>();
   for (const q of qList)
     byStep.set(`${q.run_id}/${q.step_key}`, [
       ...(byStep.get(`${q.run_id}/${q.step_key}`) ?? []),
@@ -282,16 +335,16 @@ function ActionInbox({ questions }: { questions: any[] }) {
   );
 }
 
-function HarnessHealth({ m }: { m: any }) {
+function HarnessHealth({ m }: { m: MetricsSummary | null }) {
   const { t } = useI18n();
   const e = m?.evaluation;
   const v = e?.verification;
-  const runs = (m?.by_profile ?? []) as any[];
+  const runs = m?.by_profile ?? [];
   const totalRuns = runs.reduce((s, r) => s + (r.runs ?? 0), 0);
   const avgWall = totalRuns
     ? runs.reduce((s, r) => s + Number(r.avg_wall_min ?? 0) * (r.runs ?? 0), 0) / totalRuns
     : null;
-  const cost = ((m?.by_workflow ?? []) as any[]).reduce((s, r) => s + Number(r.cost_usd ?? 0), 0);
+  const cost = (m?.by_workflow ?? []).reduce((s, r) => s + Number(r.cost_usd ?? 0), 0);
   const rows: Array<[typeof ShieldCheck, string, string, string?]> = [
     [
       ShieldCheck,
@@ -372,7 +425,7 @@ function HarnessHealth({ m }: { m: any }) {
   );
 }
 
-function RecentRuns({ runs }: { runs: any[] }) {
+function RecentRuns({ runs }: { runs: OverviewRun[] }) {
   const { t } = useI18n();
   const runList = Array.isArray(runs) ? runs : [];
   return (
@@ -440,18 +493,18 @@ function RecentRuns({ runs }: { runs: any[] }) {
 }
 
 /** Verification outcomes of the coding attempts in the latest runs (from attempt metrics; real data only). */
-function RecentVerification({ runs }: { runs: any[] }) {
+function RecentVerification({ runs }: { runs: OverviewRun[] }) {
   const { t } = useI18n();
   const runList = Array.isArray(runs) ? runs : [];
   const ids = runList.map((r) => r.id).join(",");
-  const [rows, setRows] = useState<any[] | null>(null);
+  const [rows, setRows] = useState<VerificationRow[] | null>(null);
   useEffect(() => {
     let alive = true;
     Promise.all(
-      runList.slice(0, 6).map((r) => api<any>(`/api/runs/${r.id}`).catch(() => null)),
+      runList.slice(0, 6).map((r) => api<RunAttempts>(`/api/runs/${r.id}`).catch(() => null)),
     ).then((details) => {
       if (!alive) return;
-      const out: any[] = [];
+      const out: VerificationRow[] = [];
       for (const d of details) {
         if (!d) continue;
         for (const a of d.attempts ?? []) {
@@ -469,7 +522,6 @@ function RecentVerification({ runs }: { runs: any[] }) {
       setRows(out.sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 6));
     });
     return () => void (alive = false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids]);
   return (
     <section className="card">

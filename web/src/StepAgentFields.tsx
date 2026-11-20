@@ -4,8 +4,28 @@ import {
   AgentValueFields,
   type AgentControls,
   type AgentCatalogModel,
+  type AgentValues,
 } from "./AgentValueFields.tsx";
 import { Field } from "./ui.tsx";
+
+export interface StepAgentConfig extends AgentValues {
+  provider?: string;
+  fallback?: {
+    mode?: string;
+    providers?: string[];
+    max_switches?: number;
+    auto_health?: boolean;
+    allow_unknown_cost?: boolean;
+    allow_budget_failure?: boolean;
+  };
+  execution_profile?: string;
+  context_tokens?: number;
+  idle_timeout_ms?: number;
+  max_tool_calls?: number;
+  retry?: { max_attempts?: number; backoff_seconds?: number };
+  verification?: { command?: string };
+  allowed_tools?: string[] | null;
+}
 
 /** Shared configuration form; the server validates inherited providers and CLI capabilities. */
 export function StepAgentFields({
@@ -14,8 +34,8 @@ export function StepAgentFields({
   allowVerification = true,
 }: {
   allowVerification?: boolean;
-  value?: Record<string, any>;
-  onChange: (v: Record<string, any>) => void;
+  value?: StepAgentConfig;
+  onChange: (v: StepAgentConfig) => void;
 }) {
   const { t } = useI18n();
   const { data: providers } = useApi<
@@ -26,7 +46,7 @@ export function StepAgentFields({
       discovery?: string;
     }>
   >("/api/agent-providers");
-  const set = (key: string, val: unknown) => {
+  const set = <K extends keyof StepAgentConfig>(key: K, val: StepAgentConfig[K]) => {
     const next = { ...value };
     if (val === undefined) delete next[key];
     else next[key] = val;

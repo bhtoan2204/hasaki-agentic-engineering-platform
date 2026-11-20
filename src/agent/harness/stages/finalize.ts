@@ -137,13 +137,19 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
     if (Object.keys(state.heads).length) {
       output = { ...output, commits: state.heads };
       // The harness tested exactly this state (nothing changes after the last verification round).
-      if ((output as any).verification?.passed === true)
+      const verification = output.verification;
+      if (
+        verification &&
+        typeof verification === "object" &&
+        "passed" in verification &&
+        verification.passed === true
+      )
         output = { ...output, tested_heads: state.heads };
     }
     const scope = approvedScopeIn(ctx.input.upstream);
     if (scope) {
       const revision = scopeRevision(scope.proposal_hash, state.files, state.states);
-      const check = scopeCheck(scope, state.files, (output as any).scope_deviations, revision);
+      const check = scopeCheck(scope, state.files, output.scope_deviations, revision);
       if (state.unreadable.length) {
         check.requires_reapproval = true;
         check.reasons.unshift(...state.unreadable);
@@ -183,7 +189,7 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
               ],
             },
           ],
-        } as any;
+        };
     }
   }
   if (!independent && (ctx.step.config.output_schema || ctx.step.config.output_contract)) {

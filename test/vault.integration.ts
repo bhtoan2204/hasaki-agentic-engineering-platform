@@ -1,4 +1,5 @@
 import { test, after, before } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { pool } from "../src/db/pool.ts";
@@ -73,7 +74,7 @@ before(async () => {
     json(404, { errors: [] });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  config.vault.baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
+  config.vault.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(async () => {
   await clearVaultToken();
@@ -150,10 +151,15 @@ test("token validated before saving; list/keys work on KV v1 and v2; secret valu
     ctx,
   );
   assert.equal(r.ok, true, String(r.error));
-  const k: any = r.result;
+  type VaultKeys = {
+    version: number;
+    expected: Array<{ key: string; present: boolean; value?: string; actual_name?: string }>;
+    keys: Array<{ key: string; length?: number; value?: string }>;
+  };
+  const k = r.result as VaultKeys;
   assert.equal(k.version, 7);
   assert.deepEqual(
-    k.expected.map((e: any) => [e.key, e.present, e.value]),
+    k.expected.map((e) => [e.key, e.present, e.value]),
     [
       ["PAYMENT_PROVIDER_ZALOPAY_TIME_OUT_IN_MINUTES", true, "15"],
       ["debug", true, "true"],
@@ -161,13 +167,10 @@ test("token validated before saving; list/keys work on KV v1 and v2; secret valu
     ],
   );
   assert.equal(k.expected[1].actual_name, "DEBUG");
-  assert.equal(
-    k.keys.find((x: any) => x.key === "STRIPE_SECRET_KEY").length,
-    SECRET_VALUES[0].length,
-  );
+  assert.equal(k.keys.find((x) => x.key === "STRIPE_SECRET_KEY")?.length, SECRET_VALUES[0].length);
 
-  const v1: any = await vaultKeys("legacy/payment/zalopay");
-  assert.equal(v1.keys.find((x: any) => x.key === "retry").value, "3");
+  const v1 = (await vaultKeys("legacy/payment/zalopay")) as VaultKeys;
+  assert.equal(v1.keys.find((x) => x.key === "retry")?.value, "3");
 
   const everything = JSON.stringify([k, v1]);
   for (const s of SECRET_VALUES) assert.ok(!everything.includes(s), `secret value leaked: ${s}`);

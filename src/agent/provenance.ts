@@ -75,7 +75,11 @@ export function parseRecordRef(
   return { kind: /^tool/i.test(m[1]) ? "tool_call" : "artifact", id: Number(m[2]) };
 }
 
-export async function verifyClaimProvenance(raw: any, env: ProvenanceEnv): Promise<Provenance> {
+export async function verifyClaimProvenance(
+  claim: unknown,
+  env: ProvenanceEnv,
+): Promise<Provenance> {
+  const raw = claim && typeof claim === "object" ? (claim as Record<string, unknown>) : {};
   const agentVerified = String(raw?.verification_status ?? "").toLowerCase() === "verified";
   const file = raw?.file_path;
   if (file) {
@@ -150,8 +154,9 @@ export async function verifyClaimProvenance(raw: any, env: ProvenanceEnv): Promi
 }
 
 /** Strip any agent-supplied provenance, attach the platform's, and lower `verification_status` where it cannot hold. */
-export function applyProvenance(raw: any, p: Provenance) {
-  const c = typeof raw === "string" ? { claim: raw } : { ...(raw ?? {}) };
+export function applyProvenance(raw: unknown, p: Provenance) {
+  const c: Record<string, unknown> =
+    typeof raw === "string" ? { claim: raw } : { ...(raw && typeof raw === "object" ? raw : {}) };
   delete c.provenance;
   const st = String(c.verification_status ?? "").toLowerCase();
   if (p.status === "CONTRADICTED") c.verification_status = "contradicted";

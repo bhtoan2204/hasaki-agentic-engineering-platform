@@ -108,17 +108,18 @@ test("prepareBranch: a requested existing branch is checked out (tracking origin
   mkdirSync(repo);
   sh(repo, "init", "-q", "-b", config.baseBranch);
   writeFileSync(join(repo, "a.txt"), "base\n");
-  (sh(repo, "add", "."),
-    sh(repo, "commit", "-qm", "base"),
-    sh(repo, "remote", "add", "origin", origin),
-    sh(repo, "push", "-q", "origin", config.baseBranch));
+  sh(repo, "add", ".");
+  sh(repo, "commit", "-qm", "base");
+  sh(repo, "remote", "add", "origin", origin);
+  sh(repo, "push", "-q", "origin", config.baseBranch);
   // someone's feature branch exists only on origin
   sh(repo, "checkout", "-qb", "HSK-QA679L33");
   writeFileSync(join(repo, "feature.txt"), "earlier work\n");
-  (sh(repo, "add", "."),
-    sh(repo, "commit", "-qm", "earlier work"),
-    sh(repo, "push", "-q", "origin", "HSK-QA679L33"));
-  (sh(repo, "checkout", "-q", config.baseBranch), sh(repo, "branch", "-q", "-D", "HSK-QA679L33"));
+  sh(repo, "add", ".");
+  sh(repo, "commit", "-qm", "earlier work");
+  sh(repo, "push", "-q", "origin", "HSK-QA679L33");
+  sh(repo, "checkout", "-q", config.baseBranch);
+  sh(repo, "branch", "-q", "-D", "HSK-QA679L33");
 
   const b = await prepareBranch("HSK-NEWTASK", name, "HSK-QA679L33", name, { mustExist: true });
   assert.equal(b.branch, "HSK-QA679L33");

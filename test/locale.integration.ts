@@ -12,7 +12,9 @@ import {
   resolveOutputLocale,
 } from "../src/agent/language.ts";
 import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "../src/agent/stepPrompt.ts";
-import { repairPrompt } from "../src/agent/verify.ts";
+import { repairPrompt, type VerificationRound, type VerifyConfig } from "../src/agent/verify.ts";
+import type { ResolvedContext, StepInput } from "../src/workflow/context.ts";
+import type { RunRow, StepRow } from "../src/workflow/types.ts";
 import { messages, readUiLocale } from "../web/src/i18n/messages.ts";
 import { buildStepMessage } from "../src/telegram.ts";
 
@@ -22,13 +24,18 @@ before(async () => {
 });
 after(() => pool.end());
 
-const step: any = {
+const step = {
   key: "implement",
   name: "Implementation",
   type: "coding_agent",
-  config: { instructions: "Implement it.", independent: true },
-};
-const ctx: any = { repositories: ["oms-api"], knowledge: [], overridden: [], disclosure: [] };
+  config: { instructions: "Implement it.", independent: true } as StepRow["config"],
+} as StepRow;
+const ctx = {
+  repositories: ["oms-api"],
+  knowledge: [] as ResolvedContext["knowledge"],
+  overridden: [] as ResolvedContext["overridden"],
+  disclosure: [] as ResolvedContext["disclosure"],
+} as ResolvedContext;
 
 test("output locale validation and legacy fallback stay distinct", () => {
   assert.equal(resolveOutputLocale(undefined), "vi");
@@ -72,7 +79,7 @@ test("prompts follow the run output locale and keep machine-readable contracts",
       branch: "T-1",
       allowed_repositories: ["oms-api"],
       output_locale: "en",
-    } as any,
+    } as RunRow,
     step,
     ctx,
     "coding",
@@ -84,7 +91,7 @@ test("prompts follow the run output locale and keep machine-readable contracts",
       branch: "T-1",
       allowed_repositories: ["oms-api"],
       output_locale: null,
-    } as any,
+    } as RunRow,
     step,
     ctx,
     "coding",
@@ -94,19 +101,19 @@ test("prompts follow the run output locale and keep machine-readable contracts",
   assert.doesNotMatch(en, /in Vietnamese/);
   assert.match(legacy, /in Vietnamese/);
   assert.match(languagePolicy("en"), /JSON property names/);
-  const input: any = {
-    run: { inputs: {}, selected_repositories: [], output_locale: "en" },
+  const input = {
+    run: { inputs: {}, selected_repositories: [] as string[], output_locale: "en" },
     work_item: null,
     upstream: {},
-    answers: [],
+    answers: [] as StepInput["answers"],
     pending: null,
-  };
+  } as StepInput;
   assert.match(buildUserPrompt(input, []), /Continue in English/);
   assert.match(buildResumeMessage(input, undefined, [], "vi"), /Continue in Vietnamese/);
   const repair = repairPrompt(
-    { repos: [] } as any,
+    { repos: [] as VerificationRound["repos"] } as VerificationRound,
     1,
-    { command: "go test ./...", maxRepairs: 2 } as any,
+    { command: "go test ./...", maxRepairs: 2 } as VerifyConfig,
     "en",
   );
   assert.match(repair, /go test \.\/\.\.\./);

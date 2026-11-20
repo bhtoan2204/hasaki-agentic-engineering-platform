@@ -1,7 +1,7 @@
 import { definitionRepository } from "../workflow/definitionRepository.ts";
 import { pool, q, one, withTx, json, inTx, txWrote, type Db } from "../db/pool.ts";
 import { CacheAside } from "../cache/index.ts";
-import { CATEGORIES, SCOPES, type KnowledgeCandidate } from "./resolve.ts";
+import { CATEGORIES, SCOPES, type Applicability, type KnowledgeCandidate } from "./resolve.ts";
 import { isExternal } from "./external.ts";
 import { HttpError } from "../http/error.ts";
 
@@ -92,7 +92,7 @@ export const knowledge = {
     const now = Date.now();
     const effective_version =
       versions.find(
-        (v: any) =>
+        (v: { version: number; effective_from: string | Date | null }) =>
           v.version <= item.current_version &&
           (!v.effective_from || new Date(v.effective_from).getTime() <= now),
       )?.version ?? null;
@@ -419,8 +419,8 @@ interface CandidateSet {
       versions: Array<{
         version: number;
         content: string;
-        applicability: any;
-        metadata: any;
+        applicability: Applicability | null;
+        metadata: Record<string, unknown> | null;
         effective_from: string | null;
       }>;
     }

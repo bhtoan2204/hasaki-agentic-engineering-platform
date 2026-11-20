@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newMetrics, accumulateMetrics, addUsage } from "../src/agent/metrics.ts";
+import {
+  newMetrics,
+  accumulateMetrics,
+  addUsage,
+  type AgentMetrics,
+} from "../src/agent/metrics.ts";
 import { normalizeProviderFailure, safeDiagnostics, usageSummary } from "../src/agent/telemetry.ts";
 import { parseCodexLine } from "../src/agent/codex/stream.ts";
 import { telemetryGroups } from "../src/api/metrics.ts";
@@ -28,7 +33,8 @@ test("missing final Claude events and partial Codex usage never invent tokens or
   assert.equal(ev.event.usage?.output_tokens, null);
   assert.equal(ev.event.usage?.reasoning_output_tokens, null);
   addUsage(m, { output_tokens: -1, input_tokens: NaN });
-  assert.equal((m.tokens as any)?.output, null);
+  const updated: AgentMetrics = m;
+  assert.equal(updated.tokens?.output, null);
 });
 
 test("provider taxonomy prioritizes codes and redacts diagnostics", () => {

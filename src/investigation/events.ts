@@ -233,12 +233,21 @@ export function normalizeEvent(
   tz: string,
 ): LogEvent {
   const rawText = str(row._raw) ?? "";
-  const parsed = tryJson(rawText) as Record<string, any> | undefined;
+  const parsed = tryJson(rawText);
   const pick = (names: string[]) => {
     for (const n of names) {
       const v =
         str(row[n]) ??
-        (parsed ? str(n.split(".").reduce<any>((o, k) => (o == null ? o : o[k]), parsed)) : null);
+        (parsed
+          ? str(
+              n
+                .split(".")
+                .reduce<unknown>(
+                  (o, k) => (o == null ? o : (o as Record<string, unknown>)[k]),
+                  parsed,
+                ),
+            )
+          : null);
       if (v) return v;
     }
     return null;
@@ -297,14 +306,19 @@ function parseCsv(text: string): Record<string, string>[] {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (quoted) {
-      if (c === '"' && text[i + 1] === '"') ((cur += '"'), i++);
-      else if (c === '"') quoted = false;
+      if (c === '"' && text[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (c === '"') quoted = false;
       else cur += c;
     } else if (c === '"') quoted = true;
-    else if (c === ",") (row.push(cur), (cur = ""));
-    else if (c === "\n" || c === "\r") {
+    else if (c === ",") {
+      row.push(cur);
+      cur = "";
+    } else if (c === "\n" || c === "\r") {
       if (c === "\r" && text[i + 1] === "\n") i++;
-      (row.push(cur), (cur = ""));
+      row.push(cur);
+      cur = "";
       if (row.some((x) => x !== "")) rows.push(row);
       row = [];
     } else cur += c;
@@ -316,6 +330,12 @@ function parseCsv(text: string): Record<string, string>[] {
   return body.map((r) => Object.fromEntries(head.map((h, i) => [h.trim(), r[i] ?? ""])));
 }
 
+type PastedJson = {
+  results?: Record<string, unknown>[];
+  result?: Record<string, unknown>;
+  preview?: boolean;
+};
+
 /**
  * Results pasted by a user who ran the SPL in Splunk Web: Splunk JSON ({results:[…]}), a JSON array, export JSON
  * lines ({"result":{…}} per line) or CSV with a header row (Export → CSV, or copy of the table view).
@@ -325,7 +345,7 @@ export function parsePastedResults(text: string): Record<string, unknown>[] {
   if (!t) return [];
   if (t.startsWith("[") || t.startsWith("{")) {
     try {
-      const j: any = JSON.parse(t);
+      const j: PastedJson | PastedJson[] = JSON.parse(t);
       if (Array.isArray(j))
         return j.map((x) => (x?.result && typeof x.result === "object" ? x.result : x));
       if (Array.isArray(j?.results)) return j.results;
@@ -335,7 +355,7 @@ export function parsePastedResults(text: string): Record<string, unknown>[] {
       const lines = t.split(/\r?\n/).filter((l) => l.trim());
       const out: Record<string, unknown>[] = [];
       for (const l of lines) {
-        const j: any = tryJson(l);
+        const j = tryJson(l) as PastedJson | undefined;
         if (!j) throw new Error("pasted text is neither JSON, JSON lines nor CSV");
         if (j.preview === true) continue;
         out.push(j.result ?? j);

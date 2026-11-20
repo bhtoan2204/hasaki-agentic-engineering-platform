@@ -470,7 +470,7 @@ function remoteWorkspacePath(
  * `subtaskId` cuts a branch from the run workspace so two coding steps cannot check out the same branch.
  */
 export async function prepareWorkspace(
-  run: { id: number; branch: string; inputs?: Record<string, any> | null },
+  run: { id: number; branch: string; inputs?: Record<string, unknown> | null },
   repo: string,
   checkLive?: () => Promise<void>,
   opts: PrepareWorkspaceOptions = {},
@@ -520,7 +520,7 @@ export async function prepareWorkspace(
 }
 
 async function prepareLockedWorkspace(
-  run: { id: number; branch: string; inputs?: Record<string, any> | null },
+  run: { id: number; branch: string; inputs?: Record<string, unknown> | null },
   repo: string,
   reg: {
     id: number;
@@ -706,7 +706,7 @@ export function subtaskWorkspacesOf(runId: number, db: Db = pool) {
  * parent branch of a stacked run while that branch is unmerged, else the repository's default branch.
  */
 export async function workspaceBase(
-  run: { branch: string; inputs?: Record<string, any> | null },
+  run: { branch: string; inputs?: Record<string, unknown> | null },
   w: { repo: string; branch: string; path: string },
 ): Promise<{ ref: string; target: string }> {
   const fallback = await repositoryBaseBranch(w.repo).catch(() => config.baseBranch);

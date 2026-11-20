@@ -35,6 +35,17 @@ export async function resolveBitbucket() {
 
 type BitbucketCredentials = NonNullable<Awaited<ReturnType<typeof resolveBitbucket>>>;
 
+interface BitbucketPullRequest {
+  id?: number;
+  title?: string;
+  state?: string;
+  source?: { branch?: { name?: string } };
+  destination?: { branch?: { name?: string } };
+  author?: { display_name?: string };
+  links?: { html?: { href?: string } };
+  updated_on?: string;
+}
+
 async function call(creds: BitbucketCredentials, path: string, init: RequestInit = {}) {
   // Bounded: a hung API call must not hold the step (and its lease) forever. A timed-out create may still have
   // succeeded remotely — the caller reconciles by looking up the open PR before creating another.
@@ -148,7 +159,7 @@ export async function listPullRequests(
     creds,
     `/repositories/${ws}/${slug}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`,
   );
-  return (body.values ?? []).map((p: any) => ({
+  return ((body.values ?? []) as BitbucketPullRequest[]).map((p) => ({
     id: p.id,
     title: p.title,
     state: p.state,

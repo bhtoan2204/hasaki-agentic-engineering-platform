@@ -23,6 +23,7 @@ import { contractKeys, missingContractKeys } from "../src/agent/contract.ts";
 import { runInvestigationBenchmark } from "../src/eval/investigation.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
 import { validateSpec } from "../src/workflow/graph.ts";
+import type { WorkflowSpec } from "../src/workflow/types.ts";
 import { catalog } from "../web/src/i18n/catalog.ts";
 
 const verifiedLog = {
@@ -479,10 +480,10 @@ test("independent review: a speculative state change never passes on green tests
     "legacy runs (no approved scope) are unchanged",
   );
   // The verifier sees the platform scope check of the coding step, never the author's summary.
-  const graph = [
+  const graph: Parameters<typeof independentUpstream>[0] = [
     { key: "implement", type: "coding_agent", depends_on: [] },
     { key: "review", type: "agent", depends_on: ["implement"] },
-  ] as any;
+  ];
   const seen = independentUpstream(graph, {
     implement: {
       output: {
@@ -501,7 +502,7 @@ test("independent review: a speculative state change never passes on green tests
 
 test("context propagation: compact summary keeps uncertainty and never amplifies claims", () => {
   const big = "lorem ipsum ".repeat(4000);
-  const upstream: Record<string, any> = {
+  const upstream: Parameters<typeof evidenceSummary>[0] = {
     analyze: {
       status: "COMPLETED",
       output: {
@@ -569,8 +570,8 @@ test("legacy compatibility: optional contract keys, templates validate, old outp
   assert.deepEqual(contractKeys("{ a, b?: string[], c?, d: { e } }"), ["a", "d"]);
   assert.deepEqual(missingContractKeys("{ summary, scope_deviations?: [] }", { summary: "x" }), []);
   for (const t of TEMPLATES) assert.doesNotThrow(() => validateSpec(t.spec), t.key);
-  const bug = TEMPLATES.find((t) => t.key === "bug-investigation")!.spec as any;
-  const by = Object.fromEntries(bug.steps.map((s: any) => [s.key, s.config]));
+  const bug = TEMPLATES.find((t) => t.key === "bug-investigation")!.spec as WorkflowSpec;
+  const by = Object.fromEntries(bug.steps.map((s) => [s.key, s.config]));
   assert.deepEqual(
     [
       by.analyze.evidence,
@@ -582,13 +583,13 @@ test("legacy compatibility: optional contract keys, templates validate, old outp
     ["analysis", "root_cause", "fix_proposal", "fix_proposal", true],
   );
   assert.deepEqual(
-    contractKeys(by.implement.output_contract),
+    contractKeys(by.implement.output_contract as string),
     ["summary", "pull_requests", "verification"],
     "Codex is never failed for a missing optional evidence field",
   );
-  const feature = TEMPLATES.find((t) => t.key === "feature-implementation")!.spec as any;
+  const feature = TEMPLATES.find((t) => t.key === "feature-implementation")!.spec as WorkflowSpec;
   assert.ok(
-    !feature.steps.some((s: any) => s.config?.evidence || s.config?.scope_review),
+    !feature.steps.some((s) => s.config?.evidence || s.config?.scope_review),
     "other templates are unchanged",
   );
 });

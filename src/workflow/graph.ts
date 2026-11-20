@@ -114,10 +114,10 @@ export function ancestors(steps: Pick<StepSpec, "key" | "depends_on">[], key: st
 
 /** Read a dot path ("output.exit_code", "items.0.name") from a value. */
 export function getPath(value: unknown, path: string): unknown {
-  let cur: any = value;
+  let cur: unknown = value;
   for (const part of path.split(".").filter(Boolean)) {
     if (cur == null) return undefined;
-    cur = cur[part];
+    cur = (cur as Record<string, unknown>)[part];
   }
   return cur;
 }

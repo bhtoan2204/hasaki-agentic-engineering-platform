@@ -3,6 +3,7 @@ import { CHARACTERS } from "./characters.ts";
 import type {
   Activity,
   AgentView,
+  AttemptError,
   AttemptLite,
   EventLite,
   GraphStepLite,
@@ -11,6 +12,7 @@ import type {
   Role,
   StepLite,
   StepStatus,
+  ToolInput,
 } from "./types.ts";
 
 /**
@@ -141,7 +143,7 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…"
 /** A real tool call → what the hands do + a short human description. Unknown tools fall back to the role's work. */
 export function activityFromTool(
   name: string,
-  input: any,
+  input: ToolInput | null | undefined,
   locale: UiLocale = "vi",
 ): { activity: Activity; text: string } | null {
   const n = name.replace(/^mcp__platform__/, "");
@@ -271,7 +273,7 @@ export function activityFromEvents(
   return null;
 }
 
-function firstLine(err: any) {
+function firstLine(err: AttemptError | undefined) {
   const m =
     typeof err === "string"
       ? err

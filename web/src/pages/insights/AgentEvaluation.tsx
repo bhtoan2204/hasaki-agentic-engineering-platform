@@ -4,20 +4,25 @@ import { useApi } from "../../api.ts";
 import { PageHeader, ErrorBox, navigate } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { AnalyticsFilters, defaultFilters } from "../analytics/AnalyticsFilters.tsx";
-import { Notice, AnalyticsSkeleton, fmt } from "../analytics/shared.tsx";
+import { Notice, AnalyticsSkeleton, fmt, type Row } from "../analytics/shared.tsx";
 import { EvaluationScorecards } from "./EvaluationScorecards.tsx";
 import { EvaluationDimensions } from "./EvaluationDimensions.tsx";
 import { EvaluationEvidence } from "./EvaluationEvidence.tsx";
 import { ProviderExperimentForm } from "./ProviderExperimentForm.tsx";
 import { EvaluationRecommendations } from "./EvaluationRecommendations.tsx";
+import type {
+  EvaluationAnalytics,
+  EvaluationCohortRow,
+  EvaluationColumn,
+} from "./EvaluationTable.tsx";
 import "../analytics/analytics.css";
 export function AgentEvaluation() {
   const { t } = useI18n();
   const p = new URLSearchParams(location.hash.split("?")[1] ?? "");
   for (const [k, v] of Object.entries(defaultFilters())) if (v && !p.has(k)) p.set(k, v);
   const query = p.toString(),
-    response = useApi<any>(`/api/agent-evaluation?${query}`),
-    options = useApi<any>("/api/analytics/options");
+    response = useApi<EvaluationAnalytics>(`/api/agent-evaluation?${query}`),
+    options = useApi<Row>("/api/analytics/options");
   const change = (params: URLSearchParams) => navigate(`/insights/evaluation?${params}`);
   const filter = (key: string, value: string) => {
     const next = new URLSearchParams(query);
@@ -28,14 +33,14 @@ export function AgentEvaluation() {
   };
   const data = response.data;
   const title = t("an.eval.title");
-  const common = [
+  const common: Array<EvaluationColumn<EvaluationCohortRow>> = [
     {
       label: t("an.eval.providerRoute"),
-      value: (r: any) => r.provider_path,
+      value: (r) => r.provider_path,
     },
     {
       label: t("an.eval.configuredModels"),
-      value: (r: any) => (
+      value: (r) => (
         <>
           {r.model_path}
           <br />
@@ -43,7 +48,7 @@ export function AgentEvaluation() {
             {t("an.eval.reported")}
             {r.reported_model_sets
               ?.flat()
-              .map((m: any) => `${m.provider}/${m.model}`)
+              .map((m) => `${m.provider}/${m.model}`)
               .join(", ") || "—"}
           </span>
         </>
@@ -51,17 +56,17 @@ export function AgentEvaluation() {
     },
     {
       label: t("an.eval.evidence"),
-      value: (r: any) => r.evidence_kind,
+      value: (r) => r.evidence_kind,
     },
     {
       label: t("an.eval.categoryCohort"),
-      value: (r: any) => (
+      value: (r) => (
         <>
           <span>
             {r.category} · {r.context_variant}
           </span>
           <br />
-          <button className="quiet xs" onClick={() => filter("cohort", r.constraints_hash)}>
+          <button className="quiet xs" onClick={() => filter("cohort", r.constraints_hash ?? "")}>
             {r.constraints_hash?.slice(0, 12)}
           </button>
         </>
@@ -69,25 +74,25 @@ export function AgentEvaluation() {
     },
     {
       label: t("an.eval.verifiedGraded"),
-      value: (r: any) =>
+      value: (r) =>
         `${r.successes} / ${r.graded} (${r.distinct_tasks} ${t("an.eval.tasks")})`,
     },
     {
       label: t("an.eval.verifiedSuccess"),
-      value: (r: any) => fmt(r.verified_success_rate, "pct"),
+      value: (r) => fmt(r.verified_success_rate, "pct"),
     },
     {
       label: "p50 / p95",
-      value: (r: any) => `${fmt(r.median_ms, "ms")} / ${fmt(r.p95_ms, "ms")}`,
+      value: (r) => `${fmt(r.median_ms, "ms")} / ${fmt(r.p95_ms, "ms")}`,
     },
     {
       label: t("an.eval.reportedCostCoverage"),
-      value: (r: any) =>
+      value: (r) =>
         `${fmt(r.reported_cost_usd, "usd")} · ${r.cost_samples}/${r.samples} ${t("an.eval.cases")}; ${r.cost_attempts_known ?? 0}/${r.phase_attempts ?? 0} ${t("an.eval.completeAttempts")}`,
     },
     {
       label: t("an.eval.tokensCoverage"),
-      value: (r: any) =>
+      value: (r) =>
         `${fmt(r.input_tokens)} / ${fmt(r.output_tokens)} · ${t("an.in")} ${r.token_samples}/${r.samples}; ${t("an.eval.tokensOut")} ${r.output_token_samples}/${r.samples}`,
     },
   ];

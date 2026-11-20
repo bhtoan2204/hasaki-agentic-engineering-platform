@@ -3,6 +3,7 @@
  * runs, oversized gaps and a LISTEN outage. Real HTTP server, real PostgreSQL LISTEN/NOTIFY.
  */
 import { test, before, after } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { pool, one } from "../src/db/pool.ts";
@@ -50,7 +51,21 @@ async function login(username: string, password: string) {
   return { cookie, call };
 }
 
-type Frame = { event: string; id?: number; data: any };
+type Frame = {
+  event: string;
+  id?: number;
+  data: {
+    id?: number;
+    run_id?: number;
+    step_id?: number | null;
+    attempt_id?: number | null;
+    kind?: string;
+    live?: boolean;
+    cursor?: number;
+    replayed?: number;
+    reset?: boolean;
+  };
+};
 /** A minimal EventSource: collects frames until closed. */
 async function stream(cookie: string, query = "", headers: Record<string, string> = {}) {
   const ctrl = new AbortController();
@@ -64,19 +79,22 @@ async function stream(cookie: string, query = "", headers: Record<string, string
     const dec = new TextDecoder();
     let buf = "";
     try {
-      for await (const chunk of res.body as any) {
+      for await (const chunk of res.body) {
         buf += dec.decode(chunk, { stream: true });
         let i: number;
         while ((i = buf.indexOf("\n\n")) >= 0) {
           const block = buf.slice(0, i);
           buf = buf.slice(i + 2);
-          const f: Frame = { event: "message", data: null };
+          const f: Omit<Frame, "data"> & { data: Frame["data"] | null } = {
+            event: "message",
+            data: null,
+          };
           for (const line of block.split("\n")) {
             if (line.startsWith("event: ")) f.event = line.slice(7);
             else if (line.startsWith("id: ")) f.id = Number(line.slice(4));
             else if (line.startsWith("data: ")) f.data = JSON.parse(line.slice(6));
           }
-          if (f.data !== null) frames.push(f);
+          if (f.data !== null) frames.push({ ...f, data: f.data });
         }
       }
     } catch {
@@ -105,7 +123,7 @@ async function stream(cookie: string, query = "", headers: Record<string, string
 }
 
 async function newRun(
-  call: (p: string, b?: unknown) => Promise<{ status: number; body: any }>,
+  call: (p: string, b?: unknown) => Promise<{ status: number; body: { id: number } }>,
   title: string,
 ) {
   const wi = (await call("/api/work-items", { title, project: "OMS" })).body;
@@ -140,7 +158,7 @@ before(async () => {
   await startEventStream();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   A = await login("live-a", "live-a-password");
   B = await login("live-b", "live-b-password");
   admin = await login("live-admin", "live-admin-password");
@@ -288,7 +306,7 @@ test("owner isolation: another member sees no event live, in replay or in the po
   const polled = await B.call(`/api/events?after=${from}`);
   assert.equal(polled.status, 200);
   assert.deepEqual(
-    polled.body.events.map((e: any) => e.run_id),
+    polled.body.events.map((e: { run_id: number }) => e.run_id),
     [runB],
   );
 

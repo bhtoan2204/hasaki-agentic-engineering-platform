@@ -61,12 +61,35 @@ function StepProgress({ steps }: { steps: Array<{ key: string; status: string }>
   );
 }
 
-const runDuration = (r: any) =>
+type RunCost = {
+  cost_usd: number | null;
+  wasted_usd: number;
+  availability?: string;
+  run_count?: number;
+};
+type RunListItem = {
+  id: number;
+  title: string;
+  status: string;
+  branch: string | null;
+  work_item_code: string | null;
+  definition_key: string;
+  definition_version: number;
+  steps: Array<{ key: string; status: string }> | null;
+  open_questions: number;
+  cost?: RunCost;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+type WorkflowOption = { key: string; name: string; latest_version: number };
+
+const runDuration = (r: RunListItem) =>
   r.finished_at && r.created_at
     ? dur(new Date(r.finished_at).getTime() - new Date(r.created_at).getTime())
     : "";
 
-export function RunsTable({ runs }: { runs: any[] }) {
+export function RunsTable({ runs }: { runs: RunListItem[] }) {
   const { t } = useI18n();
   if (!runs.length)
     return (
@@ -167,13 +190,13 @@ const STATUS_FILTERS = [
 export function RunsPage() {
   const { t, status: statusName } = useI18n();
   const [status, setStatus] = useState("");
-  const { data, error, loading, reload } = useApi<any[]>(
+  const { data, error, loading, reload } = useApi<RunListItem[]>(
     `/api/runs${status ? `?status=${status}` : ""}`,
     [status],
   );
   // Stat cards always describe the unfiltered list; when a status filter is active fetch it separately.
-  const { data: allRuns, reload: reloadAll } = useApi<any[]>(status ? "/api/runs" : null, [status]);
-  const { data: wfs } = useApi<any[]>("/api/workflows");
+  const { data: allRuns, reload: reloadAll } = useApi<RunListItem[]>(status ? "/api/runs" : null, [status]);
+  const { data: wfs } = useApi<WorkflowOption[]>("/api/workflows");
   useLive(null, (p) => (!p || p.kind === "status") && (reload(), status && reloadAll()));
   const [wf, setWf] = useState("");
   const [q, setQ] = useState("");

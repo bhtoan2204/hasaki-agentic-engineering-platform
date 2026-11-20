@@ -657,7 +657,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const openDelegation = async (kind: "task" | "investigation" | "plan" | "delegate") => {
     if (!activeId) return;
     const p = await act(() =>
-      api(`/api/chat/conversations/${activeId}/delegation/preview`, { kind }),
+      api<NonNullable<typeof preview>>(`/api/chat/conversations/${activeId}/delegation/preview`, { kind }),
     );
     if (p) setPreview(p);
   };
@@ -665,7 +665,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const confirmDelegation = async () => {
     if (!activeId || !preview) return;
     const r = await act(() =>
-      api(`/api/chat/conversations/${activeId}/delegation/execute`, {
+      api<{ work_item_code?: string; work_item_id: number; run_id?: number | null }>(
+        `/api/chat/conversations/${activeId}/delegation/execute`, {
         request: {
           workflow: preview.workflow?.key,
           title: preview.title,

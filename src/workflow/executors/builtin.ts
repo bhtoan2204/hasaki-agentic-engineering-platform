@@ -56,10 +56,22 @@ import {
 } from "../../repos/service.ts";
 import { getPath, ancestors } from "../graph.ts";
 import { FEATURE_TARGETED_COMMAND, PLATFORM_TARGETED_COMMAND } from "../templates.ts";
-import { classify, goBaseline, knownBaseFailures, parseGoTest } from "./baseline.ts";
+import {
+  classify,
+  goBaseline,
+  knownBaseFailures,
+  parseGoTest,
+  type BaselineComparison,
+} from "./baseline.ts";
 import { childGroups } from "../local.ts";
 import { acquireVerificationSlot, verificationSlotsInUse } from "./verificationSlots.ts";
-import { askAboutFailure, handleDecision, type Diagnosis } from "./testFailure.ts";
+import {
+  askAboutFailure,
+  handleDecision,
+  type Diagnosis,
+  type Failure,
+  type TestFailureDecision,
+} from "./testFailure.ts";
 import {
   dirtyOf,
   headOf,
@@ -303,10 +315,10 @@ const OPS: Record<string, (a: unknown, b: unknown) => boolean> = {
 };
 
 /** Pure evaluation over {upstream, inputs, run}: `config = { path: "upstream.review.output.approved", op: "eq", value: true }`. */
-export function evaluateCondition(cfg: Record<string, any>, scope: Record<string, unknown>) {
-  const op = OPS[cfg.op ?? "truthy"];
+export function evaluateCondition(cfg: Record<string, unknown>, scope: Record<string, unknown>) {
+  const op = OPS[String(cfg.op ?? "truthy")];
   if (!op) throw new Error(`unknown condition op "${cfg.op}"`);
-  const value = getPath(scope, cfg.path);
+  const value = getPath(scope, cfg.path as string);
   return { result: op(value, cfg.value), value };
 }
 
@@ -486,7 +498,7 @@ export const commandExecutor: StepExecutor = {
     const cfg = { ...ctx.step.config, ...(ctx.input.pending?.config_overrides ?? {}) };
     // Interactive failure handling (default for test steps with baseline comparison): ask the developer instead of failing.
     const interactive = String(cfg.on_failure ?? (cfg.baseline_compare ? "ask" : "fail")) === "ask";
-    let decision: any = null;
+    let decision: TestFailureDecision | null = null;
     const resumed = ctx.input.pending?.resume;
     const priorDiagnosis = resumed?.checkpoint?.test_failure as Diagnosis | undefined;
     if (interactive && priorDiagnosis && resumed?.from_attempt_id) {
@@ -605,7 +617,7 @@ export const commandExecutor: StepExecutor = {
       exit_code: number | null;
       timed_out: boolean;
       artifact_id: number;
-      baseline?: any;
+      baseline?: BaselineComparison;
       passed?: boolean;
       environment_unavailable?: string;
       skipped_known_failures?: string[];
@@ -750,7 +762,7 @@ export const commandExecutor: StepExecutor = {
           return `${f.repo} (environment unavailable, tests did not run: ${f.environment_unavailable})`;
         const reg = f.baseline?.regressions;
         if (reg?.length)
-          return `${f.repo}: ${reg.length} regression(s) vs ${config.baseBranch} — ${reg.map((x: any) => [x.package.split("/").slice(-2).join("/"), ...x.tests, ...x.build_errors].slice(0, 4).join(" ")).join("; ")}`;
+          return `${f.repo}: ${reg.length} regression(s) vs ${config.baseBranch} — ${reg.map((x) => [x.package.split("/").slice(-2).join("/"), ...x.tests, ...x.build_errors].slice(0, 4).join(" ")).join("; ")}`;
         return `${f.repo} (exit ${f.timed_out ? "timeout" : f.exit_code}${f.baseline?.note ? `, ${f.baseline.note}` : ""})`;
       };
       return {
@@ -985,11 +997,26 @@ async function selectRepositories(ctx: ExecutionContext): Promise<ExecResult> {
   };
 }
 
-function renderFindings(key: string, out: any): string {
+interface ReportFinding {
+  severity?: string;
+  repo?: string;
+  file?: string;
+  line?: number;
+  guideline?: string;
+  issue?: unknown;
+  detail?: unknown;
+  suggestion?: unknown;
+}
+
+function renderFindings(
+  key: string,
+  out: { summary?: unknown; findings?: unknown; violations?: unknown } | null | undefined,
+): string {
   if (!out) return `## ${key}\n\n(no output)\n`;
   const lines = [`## ${key}`, "", out.summary ? String(out.summary) : ""];
-  const list = out.findings ?? out.violations ?? [];
-  if (Array.isArray(list) && list.length) {
+  const raw = out.findings ?? out.violations ?? [];
+  const list: ReportFinding[] = Array.isArray(raw) ? raw : [];
+  if (list.length) {
     lines.push("", "| Severity | Location | Issue | Suggestion |", "|---|---|---|---|");
     for (const f of list)
       lines.push(
@@ -1012,7 +1039,7 @@ async function publishReport(ctx: ExecutionContext): Promise<ExecResult> {
   ].join("\n");
   const findings = from.flatMap((k) => {
     const o = ctx.input.upstream[k]?.output;
-    return (o?.findings ?? o?.violations ?? []).map((f: any) => ({ ...f, source: k }));
+    return (o?.findings ?? o?.violations ?? []).map((f: ReportFinding) => ({ ...f, source: k }));
   });
   const artifactId = await ctx.artifact("report", `${title}.md`, md, { findings });
   return {
@@ -1077,7 +1104,7 @@ export async function integrateSubtasks(ctx: ExecutionContext): Promise<ExecResu
   const upstream = ctx.input.upstream ?? {};
   const subtaskOutputs = Object.entries(upstream)
     .filter(([k]) => k.startsWith("subtask-"))
-    .map(([k, v]) => ({ key: k, ...(v as any) }));
+    .map(([k, v]) => ({ key: k, ...v }));
 
   await ctx.log("system", `integrating ${subtaskOutputs.length} completed subtask(s)...`);
 
@@ -1185,8 +1212,19 @@ export const integrationExecutor: StepExecutor = {
 // ---------------------------------------------------------------- git_pull_request
 
 /** PR title/summary/decisions for one repo, from the content step's output (shared with the PR preview). */
-export function prFields(source: any, repo: string, code: string | undefined, runTitle: string) {
-  const content = source?.pull_requests?.[repo] ?? {};
+interface PrContent {
+  title?: unknown;
+  summary?: unknown;
+  decisions?: unknown;
+}
+
+export function prFields(
+  source: (PrContent & { pull_requests?: Record<string, PrContent> | null }) | null | undefined,
+  repo: string,
+  code: string | undefined,
+  runTitle: string,
+) {
+  const content: PrContent = source?.pull_requests?.[repo] ?? {};
   return {
     title: String(content.title ?? source?.title ?? `${code ? code + ": " : ""}${runTitle}`).slice(
       0,
@@ -1200,13 +1238,18 @@ export function prFields(source: any, repo: string, code: string | undefined, ru
   };
 }
 
+interface AcceptedTestException {
+  base_sha: string | null;
+  failures: Array<Pick<Failure, "repo" | "package" | "test" | "build_error">>;
+}
+
 export function prDescription(x: {
   code?: string;
   runId: number;
   summary: string;
   decisions: Array<{ title: string; detail: string }>;
   commits: string;
-  testExceptions?: Array<{ step: string; exception: any }>;
+  testExceptions?: Array<{ step: string; exception: AcceptedTestException }>;
   verificationNotes?: Array<{ step: string; status: string; lines: string[] }>;
 }) {
   const exc = x.testExceptions ?? [];
@@ -1227,7 +1270,7 @@ export function prDescription(x: {
           "## Test exceptions (accepted by the developer — test result remains FAILED)",
           ...exc.flatMap((e) => [
             `- ${e.step}: failures that also fail on the base branch${e.exception.base_sha ? ` (${String(e.exception.base_sha).slice(0, 9)})` : ""}:`,
-            ...e.exception.failures.map((f: any) =>
+            ...e.exception.failures.map((f) =>
               `  - ${f.repo} ${f.package ?? ""} ${f.test ?? f.build_error ?? ""}`.trimEnd(),
             ),
           ]),
@@ -1247,38 +1290,45 @@ export function prDescription(x: {
 
 /** Accepted baseline test exceptions recorded by upstream command steps of a run (for PR text and reports). */
 export async function testExceptionsOf(runId: number) {
-  const rows = await q(
+  const rows = await q<{ key: string; output: { accepted_exception: AcceptedTestException } }>(
     pool,
     "SELECT key, output FROM workflow_steps WHERE run_id = $1 AND type = 'command' AND output ? 'accepted_exception' ORDER BY position",
     [runId],
   );
-  return rows.map((r: any) => ({ step: r.key, exception: r.output.accepted_exception }));
+  return rows.map((r) => ({ step: r.key, exception: r.output.accepted_exception }));
 }
 
 /** Harness verification results a reviewer must see: accepted pre-existing failures and needs-review signals. */
+interface VerificationSummary {
+  status?: string;
+  needs_review?: unknown;
+  last?: Array<{ status?: string; repo?: string; note?: string }> | null;
+  review_reasons?: string[] | null;
+}
+
 export async function verificationNotesOf(runId: number) {
-  const rows = await q(
+  const rows = await q<{ key: string; v: VerificationSummary | null }>(
     pool,
     "SELECT key, output->'verification' AS v FROM workflow_steps WHERE run_id = $1 AND type = 'coding_agent' AND output ? 'verification' ORDER BY position",
     [runId],
   );
   return rows
     .filter(
-      (r: any) =>
-        r.v &&
+      (r): r is { key: string; v: VerificationSummary } =>
+        !!r.v &&
         (r.v.status === "accepted_with_preexisting" ||
-          r.v.needs_review ||
+          !!r.v.needs_review ||
           r.v.status === "disabled"),
     )
-    .map((r: any) => ({
+    .map((r) => ({
       step: r.key,
       status: String(r.v.status),
       lines: [
         ...(r.v.status === "disabled" ? ["verification disabled by the workflow definition"] : []),
-        ...((r.v.last ?? []) as any[])
+        ...(r.v.last ?? [])
           .filter((x) => x.status === "accepted_preexisting")
           .map((x) => `${x.repo}: ${x.note ?? "pre-existing failures accepted"}`),
-        ...((r.v.review_reasons ?? []) as string[]),
+        ...(r.v.review_reasons ?? []),
       ],
     }));
 }
@@ -1317,7 +1367,7 @@ export const pullRequestExecutor: StepExecutor = {
       Object.values(ctx.input.upstream).find((u) => u.output?.pull_requests)?.output ??
       {};
     const code = ctx.input.work_item?.code;
-    const out: any[] = [];
+    const out: Array<Record<string, unknown>> = [];
     // Pre-publish gate, always on (deterministic, re-read from git right now — after any approval of this step):
     //  - every published repo is clean and its HEAD is the tip of the pushed branch;
     //  - every test record bound to commits (coding verification, test steps) ran on exactly the commit to publish;

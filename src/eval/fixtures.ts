@@ -94,7 +94,9 @@ export async function materializeSuite(): Promise<BenchmarkSuite> {
     try {
       await access(join(root, ".git"));
       existing = true;
-    } catch {}
+    } catch {
+      /* ignore: no existing fixture repository */
+    }
     if (!existing) {
       await fixtureGit(root, ["init", "--quiet", "--initial-branch", config.baseBranch]);
       for (const [path, source] of Object.entries(files)) {

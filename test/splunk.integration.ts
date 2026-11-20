@@ -1,6 +1,7 @@
 import { test, after, before } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { pool } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
@@ -19,7 +20,7 @@ const COOKIE =
   "_ga=GA1; splunkd_8000=SESSIONabc; splunkweb_csrf_token_8000=CSRF123; session_id_8000=s1";
 let server: Server;
 let alive = true;
-const posts: Array<{ headers: any; form: URLSearchParams }> = [];
+const posts: Array<{ headers: IncomingHttpHeaders; form: URLSearchParams }> = [];
 
 before(async () => {
   await migrate();
@@ -65,7 +66,7 @@ before(async () => {
     json(404, {});
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  config.splunk.baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
+  config.splunk.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(async () => {
   server.close();
@@ -144,7 +145,7 @@ test("session is validated before saving; search sends the CSRF key, caps the wi
     ctx,
   );
   assert.equal(r.ok, true, String(r.error));
-  const res: any = r.result;
+  const res = r.result as Awaited<ReturnType<typeof splunkSearch>>;
   const sent = posts.at(-1)!;
   assert.equal(sent.headers["x-splunk-form-key"], "CSRF123");
   assert.equal(sent.form.get("search"), 'search index=pay "HSK-T123"');
@@ -153,9 +154,12 @@ test("session is validated before saving; search sends the CSRF key, caps the wi
   assert.equal(sent.form.get("count"), String(config.splunk.maxResults), "result count capped");
   assert.equal(res.count, 2);
   assert.equal(res.results[0]._cd, undefined, "internal fields dropped");
-  assert.doesNotMatch(res.results[0]._raw, /0912345678|nguyen\.a@gmail|4111 1111 1111 1111/);
-  assert.match(res.results[0]._raw, /HSK-T123/);
-  assert.match(res.results[1]._raw, /Bearer \*\*\*/);
+  assert.doesNotMatch(
+    String(res.results[0]._raw),
+    /0912345678|nguyen\.a@gmail|4111 1111 1111 1111/,
+  );
+  assert.match(String(res.results[0]._raw), /HSK-T123/);
+  assert.match(String(res.results[1]._raw), /Bearer \*\*\*/);
 
   assert.equal((await callTool("splunk.search", { query: "index=pay | delete" }, ctx)).ok, false);
 

@@ -24,7 +24,18 @@ import { hashOf } from "../workflow/definitions.ts";
 const dryRun = process.argv.includes("--dry-run");
 await migrate();
 const all = await repositories.list();
-const items = ((await knowledge.list()) as any[]).filter(
+interface SharedItem {
+  key: string;
+  owner_id: number | null;
+  scope_type: string;
+  scope_ref: string;
+  category: string;
+  enabled: boolean;
+  applicability: (Record<string, unknown> & { repos?: string[]; projects?: string[] }) | null;
+  metadata: { source?: unknown; parent_skill?: string } | null;
+}
+const listed: SharedItem[] = await knowledge.list();
+const items = listed.filter(
   (it) => it.owner_id == null && it.scope_type !== "REPOSITORY" && it.category !== "task_memory",
 );
 
@@ -35,22 +46,24 @@ const userDir = process.env.CLAUDE_USER_SKILLS_DIR ?? join(homedir(), ".claude",
  * (to its project, or the organization). Without that copy on this machine, fall back to the widened shapes already
  * in the registry (ORGANIZATION, or PROJECT without a repository list).
  */
-function widened(name: string, source: { sha256?: string }, it: any): boolean {
+function widened(name: string, source: { sha256?: string }, it: SharedItem): boolean {
   const copy = join(userDir, name, "SKILL.md");
   if (existsSync(copy) && source.sha256)
     return createHash("sha256").update(readFileSync(copy, "utf8")).digest("hex") === source.sha256;
   return (
     it.scope_type === "ORGANIZATION" ||
-    (it.scope_type === "PROJECT" && !(it.applicability?.repos?.length > 0))
+    (it.scope_type === "PROJECT" && !((it.applicability?.repos?.length ?? 0) > 0))
   );
 }
 const isSkillPath = (path: string) => /(^|\/)skills\/[^/]+\/[^/]+$/.test(path);
 
 /** The scope the importer would derive today; null = leave as is (cross-project or not derivable). */
-function target(it: any): ScopeSpec | null {
-  const meta = it.metadata ?? {};
-  const app = it.applicability ?? {};
-  const sources: { repo: string; path: string }[] = Array.isArray(meta.source) ? meta.source : [];
+function target(it: SharedItem): ScopeSpec | null {
+  const meta: NonNullable<SharedItem["metadata"]> = it.metadata ?? {};
+  const app: NonNullable<SharedItem["applicability"]> = it.applicability ?? {};
+  const sources: { repo: string; path: string; sha256?: string }[] = Array.isArray(meta.source)
+    ? meta.source
+    : [];
   if (meta.parent_skill) return null; // follows its parent (below)
   if (sources.length && sources.every((s) => s.repo.startsWith("~")))
     return scopeForUserSkill(skillName(sources[0].path), all);
@@ -60,7 +73,7 @@ function target(it: any): ScopeSpec | null {
     sources.every((s) => isSkillPath(s.path))
   ) {
     const name = skillName(sources[0].path);
-    if (widened(name, sources[0] as any, it)) return scopeForUserSkill(name, all);
+    if (widened(name, sources[0], it)) return scopeForUserSkill(name, all);
     return scopeForRepositories(
       sources.map((s) => s.repo),
       all,

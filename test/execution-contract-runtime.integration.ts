@@ -48,6 +48,7 @@ import { workspacesOf, prepareWorkspace } from "../src/git/provider.ts";
 import { verifyPublication } from "../src/agent/publicationVerification.ts";
 import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
 import type { StepRow } from "../src/workflow/types.ts";
+import type { StepInput } from "../src/workflow/context.ts";
 
 const repo = "contract-runtime";
 let ownerId: number;
@@ -338,13 +339,13 @@ test("custom graph approval, waiting/resume, retry and generation invalidation k
       ),
     }),
   );
-  const first = await one<{ input: any }>(
+  const first = await one<{ input: StepInput }>(
     pool,
     "SELECT input FROM workflow_step_attempts WHERE id=$1",
     [coding.current_attempt_id],
   );
-  assert.equal(first!.input.execution_contract.provenance.plan_step, "design-change");
-  assert.equal(first!.input.execution_contract.provenance.approval_step, "authorize-change");
+  assert.equal(first!.input.execution_contract?.provenance?.plan_step, "design-change");
+  assert.equal(first!.input.execution_contract?.provenance?.approval_step, "authorize-change");
   process.env.FAKE_LIFECYCLE_ACTION = "noop";
   const questions = await q<{ id: number }>(
     pool,

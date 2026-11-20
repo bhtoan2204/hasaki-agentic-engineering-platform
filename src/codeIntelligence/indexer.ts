@@ -223,12 +223,21 @@ export async function indexRepository(
   return { snapshot: result, metrics };
 }
 
+interface IndexRunJob {
+  id: number;
+  repository_id: number;
+  run_id: number | null;
+  requested_by: number | null;
+  fencing_token: number;
+  request_marker: string;
+}
+
 let active = 0;
 /** Idle work in the existing scheduler; durable PostgreSQL leases survive process crashes. */
 export async function runIndexOnce(signal?: AbortSignal) {
   if (!codeIntelligenceEnabled() || active >= config.codeIntelligence.concurrency) return false;
   active++;
-  let job: any;
+  let job: IndexRunJob | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const ac = new AbortController();
   const abort = () => ac.abort();
@@ -242,14 +251,15 @@ export async function runIndexOnce(signal?: AbortSignal) {
       fencing_token=fencing_token+1,error='Index worker lease expired',updated_at=now() WHERE instance_id=$1 AND status='running' AND lease_expires_at<now()`,
       [config.instanceId],
     );
-    job = await one(
+    const claimed = await one<IndexRunJob>(
       pool,
       `UPDATE code_intelligence.runs SET status='running',attempts=attempts+1,fencing_token=fencing_token+1,
       lease_expires_at=now()+interval '60 seconds',updated_at=now() WHERE id=(SELECT id FROM code_intelligence.runs
       WHERE instance_id=$1 AND status='queued' AND available_at<=now() ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *, requested_at::text AS request_marker`,
       [config.instanceId],
     );
-    if (!job) return false;
+    job = claimed;
+    if (!claimed) return false;
     heartbeat = setInterval(() => {
       void (async () => {
         if (
@@ -257,29 +267,32 @@ export async function runIndexOnce(signal?: AbortSignal) {
           !(await one(
             pool,
             `UPDATE code_intelligence.runs SET lease_expires_at=now()+interval '60 seconds' WHERE id=$1 AND fencing_token=$2 AND status='running' RETURNING id`,
-            [job.id, job.fencing_token],
+            [claimed.id, claimed.fencing_token],
           ))
         )
           ac.abort();
       })().catch(() => ac.abort());
     }, 10000);
-    const repo = await one(pool, "SELECT name FROM repositories WHERE id=$1", [job.repository_id]);
-    const owner = job.run_id
-      ? (await one(pool, "SELECT owner_id FROM workflow_runs WHERE id=$1", [job.run_id]))?.owner_id
-      : job.requested_by;
+    const repo = await one(pool, "SELECT name FROM repositories WHERE id=$1", [
+      claimed.repository_id,
+    ]);
+    const owner = claimed.run_id
+      ? (await one(pool, "SELECT owner_id FROM workflow_runs WHERE id=$1", [claimed.run_id]))
+          ?.owner_id
+      : claimed.requested_by;
     if (owner && !(await one(pool, "SELECT id FROM users WHERE id=$1 AND active", [owner])))
       throw new Error("Index requester is inactive");
     const execute = () =>
-      indexRepository(repo!.name, job.run_id ?? undefined, ac.signal, {
-        id: job.id,
-        token: job.fencing_token,
+      indexRepository(repo!.name, claimed.run_id ?? undefined, ac.signal, {
+        id: claimed.id,
+        token: claimed.fencing_token,
       });
     const out = owner
       ? await execution.run(
           {
             userId: Number(owner),
-            kind: job.run_id ? "run" : "user",
-            runId: job.run_id ?? undefined,
+            kind: claimed.run_id ? "run" : "user",
+            runId: claimed.run_id ?? undefined,
           },
           execute,
         )
@@ -287,7 +300,13 @@ export async function runIndexOnce(signal?: AbortSignal) {
     await q(
       pool,
       `UPDATE code_intelligence.runs SET status=CASE WHEN requested_at>$5::timestamptz THEN 'queued' ELSE 'done' END,attempts=CASE WHEN requested_at>$5::timestamptz THEN 0 ELSE attempts END,snapshot_id=$3,metrics=$4,error=NULL,updated_at=now() WHERE id=$1 AND fencing_token=$2 AND status='running'`,
-      [job.id, job.fencing_token, out.snapshot.id, JSON.stringify(out.metrics), job.request_marker],
+      [
+        claimed.id,
+        claimed.fencing_token,
+        out.snapshot.id,
+        JSON.stringify(out.metrics),
+        claimed.request_marker,
+      ],
     );
     // Completed overlays only; never remove a snapshot that is still referenced as a base or by a live run.
     await q(
@@ -329,8 +348,22 @@ export function diagnostic(e: unknown) {
     if (message.toLowerCase().includes(name)) return `Indexing ${name}`;
   return "Indexing failed; check local parser/database/Git availability";
 }
+interface IndexStatusRow {
+  name: string;
+  commit_sha: string | null;
+  indexed_files: number | null;
+  symbol_count: number | null;
+  relation_count: number | null;
+  last_indexed_at: Date | null;
+  indexing_run_id: number | null;
+  status: string | null;
+  last_indexing_error: string | null;
+  metrics: unknown;
+  updated_at: Date | null;
+}
+
 export async function status() {
-  return q(
+  return q<IndexStatusRow>(
     pool,
     `SELECT r.name, s.commit_sha,s.indexed_files,s.symbol_count,s.relation_count,s.created_at AS last_indexed_at,
     j.id AS indexing_run_id,j.status,j.error AS last_indexing_error,j.metrics,j.updated_at

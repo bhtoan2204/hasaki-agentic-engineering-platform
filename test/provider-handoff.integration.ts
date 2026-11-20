@@ -1,4 +1,5 @@
 import { test, before, after, afterEach } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -92,7 +93,7 @@ before(async () => {
   clearProviderHealthForTests();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 afterEach(async () => {
   for (const id of runs.splice(0))
@@ -108,7 +109,11 @@ after(async () => {
   await settleBackground();
   await pool.end();
 });
-async function run(provider = "claude", fallback: any = {}, extra: any = {}) {
+async function run(
+  provider = "claude",
+  fallback: Record<string, unknown> = {},
+  extra: Record<string, unknown> = {},
+) {
   const key = `handoff-${++seq}`;
   await definitions.create({
     key,
@@ -155,7 +160,12 @@ async function checkpoint(id: number) {
     id,
   ]);
 }
-const resume = (r: number, h: any, provider: string, actor: number = owner.id) =>
+const resume = (
+  r: number,
+  h: { id: number; source_attempt_id: number; workspace_fingerprint?: string | null },
+  provider: string,
+  actor: number = owner.id,
+) =>
   resumeProviderHandoff(
     r,
     "implement",
@@ -181,7 +191,7 @@ function git(path: string, ...args: string[]) {
     },
   }).trim();
 }
-async function workspace(r: any) {
+async function workspace(r: { id: number; branch: string }) {
   await repositories.upsert("fixture", { description: "Handoff fixture" });
   await q(pool, "UPDATE workflow_runs SET allowed_repositories=ARRAY['fixture'] WHERE id=$1", [
     r.id,

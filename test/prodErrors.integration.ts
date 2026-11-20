@@ -1,4 +1,5 @@
 import { test, after, before } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { pool, q, one } from "../src/db/pool.ts";
@@ -27,10 +28,10 @@ import {
 const COOKIE = "splunkd_8000=SESSIONabc; splunkweb_csrf_token_8000=CSRF123";
 let splunk: Server;
 let tg: Server;
-let rows: any[] = [];
+let rows: Array<ReturnType<typeof row>> = [];
 let polls = 0;
 const searches: URLSearchParams[] = [];
-const telegrams: any[] = [];
+const telegrams: Array<{ text: string; parse_mode: string }> = [];
 
 const row = (o: Partial<Record<string, string>>) => ({
   ns: "payment-prod",
@@ -106,11 +107,11 @@ before(async () => {
   });
   await new Promise<void>((r) => splunk.listen(0, "127.0.0.1", r));
   await new Promise<void>((r) => tg.listen(0, "127.0.0.1", r));
-  config.splunk.baseUrl = `http://127.0.0.1:${(splunk.address() as any).port}`;
+  config.splunk.baseUrl = `http://127.0.0.1:${(splunk.address() as AddressInfo).port}`;
   Object.assign(config.telegram, {
     botToken: "TEST:TOKEN",
     chatId: "42",
-    apiBase: `http://127.0.0.1:${(tg.address() as any).port}`,
+    apiBase: `http://127.0.0.1:${(tg.address() as AddressInfo).port}`,
   });
 });
 after(async () => {
@@ -255,7 +256,7 @@ test("runScan: stores groups (PII masked), keeps ignore/work item across scans, 
   assert.equal(sent.get("max_time"), String(config.prodErrors.timeoutSeconds));
   const list = await listGroups();
   assert.equal(list.groups.length, 2);
-  const zalo = list.groups.find((g: any) => g.service === "payment-zalopay");
+  const zalo = list.groups.find((g) => g.service === "payment-zalopay");
   assert.equal(zalo.severity, "critical");
   assert.doesNotMatch(zalo.sample, /0912345678/);
   assert.equal(telegrams.length, 0, "manual scans do not notify");
@@ -281,7 +282,7 @@ test("runScan: stores groups (PII masked), keeps ignore/work item across scans, 
 });
 
 test("runScan: reports progress while Splunk searches, clears it when done", async () => {
-  const seen: any[] = [];
+  const seen: Array<NonNullable<Awaited<ReturnType<typeof listGroups>>["progress"]>> = [];
   const timer = setInterval(async () => {
     const p = (await listGroups()).progress;
     if (p) seen.push({ ...p });
@@ -336,7 +337,15 @@ test("buildFailureMessage: tells how to fix an expired Splunk session; buildAler
   const many = toGroups(
     Array.from({ length: 9 }, (_, i) => row({ sig: `error ${"x".repeat(i + 1)} <b>` })),
     "2026-11-05",
-  ).map((g) => ({ ...g, status: "open" }) as any);
+  ).map(
+    (g): GroupRow => ({
+      ...g,
+      status: "open",
+      work_item_id: null,
+      notified_day: null,
+      first_seen_at: "",
+    }),
+  );
   const m = buildAlertMessage(many, "14:00");
   assert.match(m.text, /… và 3 nhóm khác/);
   assert.match(m.text, /&lt;b&gt;/, "signatures are HTML-escaped");
@@ -354,7 +363,7 @@ test("linkWorkItem: attach an existing work item by code, list it from the work 
   await runScan("manual");
   await assert.rejects(linkWorkItem(g.fingerprint, "HSK-404"), /không có work item/);
   assert.equal((await linkWorkItem(g.fingerprint, " HSK-777 ")).code, "HSK-777");
-  const listed = (await listGroups()).groups.find((x: any) => x.fingerprint === g.fingerprint);
+  const listed = (await listGroups()).groups.find((x) => x.fingerprint === g.fingerprint);
   assert.equal(listed.work_item_code, "HSK-777");
   assert.equal(listed.work_item_title, "Bug đã báo từ trước");
   assert.deepEqual(listed.pull_requests, []);
@@ -374,7 +383,7 @@ test("describeGroup: markdown with fenced log and the SPL to dig further", () =>
     work_item_id: null,
     notified_day: null,
     first_seen_at: "",
-  } as any);
+  });
   assert.match(md, /```text\n/);
   assert.doesNotMatch(md, /a ``` b/);
   assert.match(
@@ -437,7 +446,11 @@ test("scanWindow: presets, custom range, baseline and Splunk limits", async () =
       ),
     /7 ngày/,
   );
-  assert.throws(() => scanWindow({ preset: "2d" as any }, now), /không hợp lệ/);
+  const invalid: { preset: string } = { preset: "2d" };
+  assert.throws(
+    () => scanWindow(invalid as Parameters<typeof scanWindow>[0], now),
+    /không hợp lệ/,
+  );
 });
 
 test("runScan with options: only the chosen project, the chosen window; the page lists that scan", async () => {
@@ -466,7 +479,7 @@ test("runScan with options: only the chosen project, the chosen window; the page
     3600_000,
   );
   assert.deepEqual(
-    list.groups.map((g: any) => g.service),
+    list.groups.map((g) => g.service),
     ["payment-vnpay"],
     "groups of other scans are not mixed in",
   );

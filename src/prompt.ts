@@ -1,6 +1,23 @@
+export interface HasakiTask {
+  id?: number | string | null;
+  code?: string;
+  name?: string;
+  project?: { name?: string } | null;
+  note?: string | null;
+  parent?: { code?: string; name?: string } | null;
+  milestone?: { name?: string } | null;
+  created_by_user?: { staff_name?: string; staff_title?: string } | null;
+  assign_to_user?: Array<{ staff_name?: string }> | null;
+  date_end?: string | null;
+  task_ai?: {
+    ai_suggest?: { object?: string; object_value?: string; readiness_reasoning?: string } | null;
+  } | null;
+}
+
 /** Pull the fields that matter out of the raw task API payload. Accepts {data:{...}} or the bare data object. */
-export function normalizeTask(raw: any) {
-  const d = raw?.data && raw.data.code ? raw.data : raw;
+export function normalizeTask(raw: unknown) {
+  const payload = raw as (HasakiTask & { data?: HasakiTask | null }) | null | undefined;
+  const d = payload?.data && payload.data.code ? payload.data : payload;
   if (!d?.code || !d?.name) throw new Error("payload must contain data.code and data.name");
   return {
     workId: d.id ? Number(d.id) : null,
@@ -11,7 +28,7 @@ export function normalizeTask(raw: any) {
   };
 }
 
-export function buildTaskPrompt(d: any, repos: string[], files: string[]) {
+export function buildTaskPrompt(d: HasakiTask, repos: string[], files: string[]) {
   const ai = d.task_ai?.ai_suggest;
   const lines = [
     `# Task ${d.code}: ${d.name}`,
@@ -20,7 +37,7 @@ export function buildTaskPrompt(d: any, repos: string[], files: string[]) {
     d.parent ? `- Parent: ${d.parent.code} ${d.parent.name}` : "",
     d.milestone ? `- Milestone: ${d.milestone.name}` : "",
     `- Created by: ${d.created_by_user?.staff_name ?? "?"} (${d.created_by_user?.staff_title ?? ""})`,
-    `- Assignee: ${(d.assign_to_user ?? []).map((u: any) => u.staff_name).join(", ") || "?"}`,
+    `- Assignee: ${(d.assign_to_user ?? []).map((u) => u.staff_name).join(", ") || "?"}`,
     `- Deadline: ${d.date_end ?? "?"}`,
     "",
     "## Description",

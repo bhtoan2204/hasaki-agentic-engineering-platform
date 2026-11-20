@@ -1,4 +1,5 @@
 import { before, after, test } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { pool, one } from "../src/db/pool.ts";
@@ -24,7 +25,7 @@ before(async () => {
   fixture = await analyticsFixtures();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(async () => {
   server?.close();
@@ -159,22 +160,21 @@ test("service partitions preserve unknown attribution, namespace identity, share
     const h = await healthAnalytics(filters(), scope());
     assert.equal(Number(h.summary.total_errors), 33);
     assert.equal(
-      h.services.reduce((n: number, r: any) => n + Number(r.events), 0),
+      h.services.reduce((n: number, r) => n + Number(r.events), 0),
       Number(h.summary.total_errors),
     );
     assert.ok(
-      Math.abs(h.services.reduce((n: number, r: any) => n + Number(r.error_share_pct), 0) - 100) <
-        0.001,
+      Math.abs(h.services.reduce((n: number, r) => n + Number(r.error_share_pct), 0) - 100) < 0.001,
     );
     assert.ok(
       h.services.some(
-        (r: any) => r.namespace === "test-ns" && r.service === "unknown" && Number(r.events) === 6,
+        (r) => r.namespace === "test-ns" && r.service === "unknown" && Number(r.events) === 6,
       ),
     );
-    assert.equal(h.services.filter((r: any) => r.service === "oms-api").length, 2);
+    assert.equal(h.services.filter((r) => r.service === "oms-api").length, 2);
     assert.ok(
       h.services.some(
-        (r: any) => r.namespace === "oms" && r.service === "oms-api" && Number(r.events) === 24,
+        (r) => r.namespace === "oms" && r.service === "oms-api" && Number(r.events) === 24,
       ),
     );
     const service = await healthServiceAnalytics(

@@ -28,12 +28,25 @@ export function networkCode(e: unknown): string {
   const code = err?.cause?.code ?? err?.cause?.cause?.code ?? err?.code;
   return typeof code === "string" && /^[A-Za-z_]{2,40}$/.test(code) ? code : "network error";
 }
+export interface TelegramResult {
+  message_id?: number;
+  url?: string;
+  username?: string;
+  not_modified?: boolean;
+}
+interface TelegramResponse {
+  ok?: boolean;
+  result: TelegramResult;
+  error_code?: number;
+  description?: string;
+  parameters?: { retry_after?: number };
+}
 /** Never return/log a token-bearing URL or remote error description. */
 export async function telegramCall(
   method: string,
   body: unknown,
   options: { token?: string; signal?: AbortSignal; timeout?: number } = {},
-): Promise<any> {
+): Promise<TelegramResult> {
   const token = options.token ?? config.telegram.botToken;
   if (!token) throw new TelegramApiError(503);
   try {
@@ -45,7 +58,7 @@ export async function telegramCall(
         ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeout ?? 10000)])
         : AbortSignal.timeout(options.timeout ?? 10000),
     });
-    const data: any = await res.json().catch(() => ({}));
+    const data = (await res.json().catch(() => ({}))) as TelegramResponse;
     if (
       data.error_code === 400 &&
       method.startsWith("editMessage") &&

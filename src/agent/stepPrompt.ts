@@ -8,7 +8,7 @@ import type { ResolvedContext, StepInput } from "../workflow/context.ts";
 import type { RunRow, StepRow } from "../workflow/types.ts";
 import type { ToolMode } from "./toolPolicy.ts";
 import { summarizeValue } from "../context/plan.ts";
-import { externalNotice, isExternal } from "../knowledge/external.ts";
+import { externalNotice, isExternal, type ExternalSkillMeta } from "../knowledge/external.ts";
 import { languagePolicy, languageReminder, outputLocale } from "./language.ts";
 import { policyRole, rootCauseDepth, rootCausePolicy } from "./rootCause.ts";
 
@@ -22,6 +22,15 @@ const MAX_UPSTREAM_CHARS = 20_000;
 
 export const untrusted = (label: string, body: string) =>
   `<untrusted_input source="${label}">\n${body.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`;
+
+type KnowledgeMeta = ExternalSkillMeta & {
+  load?: unknown;
+  description?: unknown;
+  evolution?: { supersedes?: unknown };
+  output_contract?: unknown;
+};
+
+type ReexecuteSkill = { key: string; version: number; title?: string | null };
 
 /** What this run can use (toolRegistry.integrationCatalog); without it the section stays generic. */
 export type IntegrationCatalog = { available: string[]; unavailable: string[] };
@@ -101,9 +110,10 @@ export function buildSystemAppend(
   const tier = new Map((ctx.disclosure ?? []).map((d) => [d.key, d.disclosure]));
   const tierOf = (k: (typeof ctx.knowledge)[number]) =>
     tier.get(k.key) ??
-    (k.reason === "assigned to step" || (k.metadata as any)?.load !== "on_demand"
+    (k.reason === "assigned to step" ||
+    (k.metadata as KnowledgeMeta | undefined)?.load !== "on_demand"
       ? "inline"
-      : (k.metadata as any)?.parent_skill
+      : (k.metadata as KnowledgeMeta | undefined)?.parent_skill
         ? "search"
         : "index");
   const inline = ctx.knowledge.filter((k) => tierOf(k) === "inline");
@@ -126,7 +136,9 @@ export function buildSystemAppend(
         "mcp__platform__read_knowledge with its key BEFORE acting, follow it, and declare their registry keys in submit_result.skills_applied.",
       ...skillsToLoad.map(
         (k) =>
-          `- \`${k.key}\`: ${String((k.metadata as any)?.description ?? k.title)
+          `- \`${k.key}\`: ${String(
+            (k.metadata as KnowledgeMeta | undefined)?.description ?? k.title,
+          )
             .replace(/\s+/g, " ")
             .slice(0, 240)}`,
       ),
@@ -134,7 +146,7 @@ export function buildSystemAppend(
   if (inline.length && !ctx.contextPack) {
     lines.push("", "## Applicable knowledge (platform-curated, trusted)");
     for (const k of inline) {
-      const meta = k.metadata as any;
+      const meta = k.metadata as KnowledgeMeta | undefined;
       // An evolved rule says what it replaced: existing code may still implement the old one.
       const evo = [
         meta?.evolution?.supersedes ? `supersedes ${meta.evolution.supersedes}` : "",
@@ -162,7 +174,7 @@ export function buildSystemAppend(
     for (const k of onDemand)
       lines.push(
         `- \`${k.key}\` [${k.category}${isExternal(k.metadata) ? ", third-party" : ""}] ${k.title}: ${String(
-          (k.metadata as any)?.description ?? "",
+          (k.metadata as KnowledgeMeta | undefined)?.description ?? "",
         )
           .replace(/\s+/g, " ")
           .slice(0, 400)}`,
@@ -336,7 +348,7 @@ export function buildUserPrompt(
       parts.push(
         "## Skills selected for this re-execution (full text in the system prompt — apply them)",
         rx.skills
-          .map((s: any) => `- ${s.key} v${s.version}${s.title ? ` — ${s.title}` : ""}`)
+          .map((s: ReexecuteSkill) => `- ${s.key} v${s.version}${s.title ? ` — ${s.title}` : ""}`)
           .join("\n"),
       );
     const prev = input.previous_attempt;
@@ -421,7 +433,7 @@ export function buildResumeMessage(
         "",
         "Skills selected for this re-execution (full text in the system prompt — apply them):",
         rx.skills
-          .map((s: any) => `- ${s.key} v${s.version}${s.title ? ` — ${s.title}` : ""}`)
+          .map((s: ReexecuteSkill) => `- ${s.key} v${s.version}${s.title ? ` — ${s.title}` : ""}`)
           .join("\n"),
       );
   } else if (input.pending?.feedback)

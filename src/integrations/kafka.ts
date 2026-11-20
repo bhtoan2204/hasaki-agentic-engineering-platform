@@ -60,16 +60,20 @@ async function get(
     let msg = text.slice(0, 300);
     try {
       msg = JSON.parse(text).message ?? msg;
-    } catch {}
+    } catch {
+      /* ignore: non-JSON error body, keep the raw text */
+    }
     throw new Error(`Kafka UI ${res.status} ${path}: ${msg}`);
   }
   return text;
 }
-const getJson = async (
+const getJson = async <T = unknown>(
   path: string,
   cookie: string,
   params?: Record<string, string | number | boolean | undefined>,
-) => JSON.parse((await get(path, cookie, params)) || "null");
+): Promise<T> => JSON.parse((await get(path, cookie, params)) || "null");
+
+type KafkaCluster = { name: string; status: string; brokerCount: number; topicCount: number };
 
 function requireCookie(): string {
   if (!login.current?.valid)
@@ -82,16 +86,21 @@ function requireCookie(): string {
 }
 
 async function check(cookie: string) {
-  const clusters = await getJson("/api/clusters", cookie);
+  const clusters = await getJson<KafkaCluster[] | null>("/api/clusters", cookie);
   if (!Array.isArray(clusters))
     throw new Error("Kafka UI không trả về danh sách cluster cho phiên này");
   let user: string | null = null;
   try {
-    const a = await getJson("/api/authorization", cookie);
+    const a = await getJson<{ userInfo?: { username?: string } } | null>(
+      "/api/authorization",
+      cookie,
+    );
     user = a?.userInfo?.username ?? null;
-  } catch {}
+  } catch {
+    /* ignore: the user name is optional */
+  }
   return {
-    clusters: clusters.map((c: any) => ({
+    clusters: clusters.map((c) => ({
       name: c.name,
       status: c.status,
       brokers: c.brokerCount,
@@ -110,7 +119,9 @@ export async function loadKafkaCookie() {
   try {
     const { cookie, user } = JSON.parse(saved);
     login.current = { cookie, user: user ?? null, checkedAt: 0, valid: true };
-  } catch {}
+  } catch {
+    /* ignore: unreadable saved cookie, stay disconnected */
+  }
 }
 
 export async function kafkaStatus(force = false) {
@@ -156,12 +167,12 @@ export const kafkaExpired = () => !!login.current && !login.current.valid;
 async function clusterName(cluster?: string): Promise<string> {
   if (cluster) return cluster;
   if (config.kafka.cluster) return config.kafka.cluster;
-  const list = await getJson("/api/clusters", requireCookie());
-  const online = list.filter((c: any) => c.status !== "offline");
+  const list = await getJson<KafkaCluster[]>("/api/clusters", requireCookie());
+  const online = list.filter((c) => c.status !== "offline");
   if (!online.length) throw new Error("Kafka UI không có cluster nào online");
   if (online.length > 1)
     throw new Error(
-      `có nhiều cluster (${online.map((c: any) => c.name).join(", ")}) — truyền tham số cluster`,
+      `có nhiều cluster (${online.map((c) => c.name).join(", ")}) — truyền tham số cluster`,
     );
   return online[0].name;
 }
@@ -257,7 +268,16 @@ export async function publishMessage(m: {
 
 export async function listTopics(query?: string, cluster?: string) {
   const c = await clusterName(cluster);
-  const j = await getJson(`/api/clusters/${enc(c)}/topics`, requireCookie(), {
+  const j = await getJson<{
+    topics?: {
+      name: string;
+      partitionCount?: number;
+      replicationFactor?: number;
+      messagesCount?: number;
+      cleanUpPolicy?: string;
+    }[];
+    pageCount?: number;
+  } | null>(`/api/clusters/${enc(c)}/topics`, requireCookie(), {
     page: 1,
     perPage: 100,
     search: query,
@@ -266,20 +286,30 @@ export async function listTopics(query?: string, cluster?: string) {
   });
   return {
     cluster: c,
-    topics: (j?.topics ?? []).map((t: any) => ({
+    topics: (j?.topics ?? []).map((t) => ({
       topic: t.name,
       partitions: t.partitionCount,
       replication: t.replicationFactor,
       messages: t.messagesCount ?? undefined,
       cleanup: t.cleanUpPolicy,
     })),
-    ...(j?.pageCount > 1 ? { note: "more topics exist — narrow the query" } : {}),
+    ...((j?.pageCount ?? 0) > 1 ? { note: "more topics exist — narrow the query" } : {}),
   };
 }
 
 export async function consumerGroups(query?: string, cluster?: string) {
   const c = await clusterName(cluster);
-  const j = await getJson(`/api/clusters/${enc(c)}/consumer-groups/paged`, requireCookie(), {
+  const j = await getJson<{
+    consumerGroups?: {
+      groupId: string;
+      state?: string;
+      members?: number;
+      topics?: number;
+      consumerLag?: number;
+      messagesBehind?: number;
+      coordinator?: { id?: number };
+    }[];
+  } | null>(`/api/clusters/${enc(c)}/consumer-groups/paged`, requireCookie(), {
     page: 1,
     perPage: 50,
     search: query,
@@ -287,7 +317,7 @@ export async function consumerGroups(query?: string, cluster?: string) {
   });
   return {
     cluster: c,
-    groups: (j?.consumerGroups ?? []).map((g: any) => ({
+    groups: (j?.consumerGroups ?? []).map((g) => ({
       group: g.groupId,
       state: g.state,
       members: g.members,
@@ -300,14 +330,30 @@ export async function consumerGroups(query?: string, cluster?: string) {
 
 export async function consumerGroupDetail(group: string, cluster?: string) {
   const c = await clusterName(cluster);
-  const g = await getJson(`/api/clusters/${enc(c)}/consumer-groups/${enc(group)}`, requireCookie());
+  const g = await getJson<{
+    groupId: string;
+    state?: string;
+    members?: number;
+    consumerLag?: number;
+    messagesBehind?: number;
+    partitions?: {
+      topic: string;
+      partition: number;
+      currentOffset?: number;
+      endOffset?: number;
+      consumerLag?: number;
+      messagesBehind?: number;
+      consumerId?: string;
+      host?: string;
+    }[];
+  }>(`/api/clusters/${enc(c)}/consumer-groups/${enc(group)}`, requireCookie());
   return {
     cluster: c,
     group: g.groupId,
     state: g.state,
     members: g.members,
     lag: g.consumerLag ?? g.messagesBehind,
-    partitions: (g.partitions ?? []).map((p: any) => ({
+    partitions: (g.partitions ?? []).map((p) => ({
       topic: p.topic,
       partition: p.partition,
       offset: p.currentOffset,
@@ -330,8 +376,24 @@ export interface MessageQuery {
   limit?: number;
 }
 
+type KafkaMessage = {
+  partition?: number;
+  offset?: number;
+  timestamp?: string;
+  key?: string | null;
+  content?: string;
+  headers?: Record<string, string>;
+};
+type KafkaEvent = KafkaMessage & {
+  type?: string;
+  message?: KafkaMessage & { message?: string };
+  error?: string;
+  phase?: { name?: string };
+  consuming?: { messagesConsumed?: number; elapsedMs?: number };
+};
+
 /** Kafka UI streams message search results as server-sent events (TopicMessageEvent); plain JSON is accepted too. */
-export function parseMessageEvents(text: string): any[] {
+export function parseMessageEvents(text: string): KafkaEvent[] {
   const t = text.trim();
   if (t.startsWith("[")) return JSON.parse(t);
   return t

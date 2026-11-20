@@ -65,12 +65,16 @@ test("rankRetrievedCode dedupes hits, expands one dependency step and labels con
       },
     ],
   );
-  const paths = out.hits.map((h: any) => h.file_path);
+  const paths = out.hits.map((h: { file_path: string }) => h.file_path);
   assert.deepEqual(paths, ["a.ts", "dep.ts", "b.ts"]);
   assert.equal(paths.filter((p: string) => p === "a.ts").length, 1);
-  const dep = out.hits.find((h: any) => h.file_path === "dep.ts");
+  const dep = out.hits.find((h: { file_path: string }) => h.file_path === "dep.ts");
   assert.match(dep.evidence[0], /dependency of svc:a.ts/);
-  assert.ok(out.hits.every((h: any) => h.rank_confidence > 0 && h.rank_confidence <= 1));
+  assert.ok(
+    out.hits.every(
+      (h: { rank_confidence: number }) => h.rank_confidence > 0 && h.rank_confidence <= 1,
+    ),
+  );
 });
 
 test("unverified task memory is never inline or mandatory, even when enforced or assigned", () => {

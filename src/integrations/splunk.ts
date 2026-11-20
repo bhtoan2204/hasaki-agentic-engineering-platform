@@ -95,6 +95,29 @@ function invalidate(a: Auth) {
   if (shared && shared.auth === a) shared.valid = false;
 }
 
+type SplunkMessage = { type?: string; text?: string };
+type SplunkBody = {
+  messages?: SplunkMessage[];
+  entry?: Array<{ content?: Record<string, unknown> }>;
+  sid?: string | null;
+  results?: Record<string, unknown>[];
+};
+
+async function call(
+  method: "GET" | "POST",
+  path: string,
+  a: Auth,
+  form: Record<string, string> | undefined,
+  timeoutSeconds: number,
+  raw: true,
+): Promise<string>;
+async function call(
+  method: "GET" | "POST",
+  path: string,
+  a: Auth,
+  form?: Record<string, string>,
+  timeoutSeconds?: number,
+): Promise<SplunkBody | null>;
 async function call(
   method: "GET" | "POST",
   path: string,
@@ -102,7 +125,7 @@ async function call(
   form?: Record<string, string>,
   timeoutSeconds = config.splunk.timeoutSeconds,
   raw = false,
-) {
+): Promise<SplunkBody | string | null> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (a.kind === "session") {
     headers.Cookie = a.cookie;
@@ -138,18 +161,22 @@ async function call(
     );
   }
   if (raw && res.ok) return text;
-  let body: any = null;
+  let body: SplunkBody | null = null;
   try {
     body = text ? JSON.parse(text) : null;
-  } catch {}
+  } catch {
+    /* ignore: non-JSON body, handled as null */
+  }
   if (!res.ok) {
-    const msg = body?.messages?.map((m: any) => m.text).join("; ") || text.slice(0, 300);
-    const err = new Error(
-      res.status === 403
-        ? `Splunk 403: tài khoản Splunk không có quyền cho thao tác này (${msg})`
-        : `Splunk ${res.status}: ${msg}`,
+    const msg = body?.messages?.map((m) => m.text).join("; ") || text.slice(0, 300);
+    const err = Object.assign(
+      new Error(
+        res.status === 403
+          ? `Splunk 403: tài khoản Splunk không có quyền cho thao tác này (${msg})`
+          : `Splunk ${res.status}: ${msg}`,
+      ),
+      { status: res.status },
     );
-    (err as any).status = res.status;
     throw err;
   }
   return body;
@@ -196,7 +223,9 @@ export async function loadSplunkCookie() {
         valid: true,
       };
     }
-  } catch {}
+  } catch {
+    /* ignore: unreadable saved login, stay disconnected */
+  }
 }
 
 async function loadShared(force = false) {
@@ -482,7 +511,8 @@ export interface ValidatedSpl {
 export function validateInvestigationSpl(raw: string): ValidatedSpl {
   let spl = checkSpl(raw);
   const generating = spl.startsWith("|");
-  let [base, rest] = splitBase(spl);
+  const [initialBase, rest] = splitBase(spl);
+  let base = initialBase;
   let earliest: string | undefined;
   let latest: string | undefined;
   if (!generating) {
@@ -560,7 +590,7 @@ async function searchJob(
   if (!sid) throw new Error("Splunk không trả về search id");
   const path = `/services/search/jobs/${encodeURIComponent(sid)}`;
   const deadline = Date.now() + (timeout + Math.min(30, timeout)) * 1000;
-  let messages: any[] = [];
+  let messages: SplunkMessage[] = [];
   for (;;) {
     const c =
       (await call("GET", `${path}?output_mode=json`, a, undefined, 30))?.entry?.[0]?.content ?? {};
@@ -575,7 +605,7 @@ async function searchJob(
     messages = Array.isArray(c.messages) ? c.messages : [];
     if (state === "FAILED")
       throw new Error(
-        `Splunk search lỗi: ${messages.map((m: any) => m.text ?? m).join("; ") || "FAILED"}`,
+        `Splunk search lỗi: ${messages.map((m) => m.text ?? m).join("; ") || "FAILED"}`,
       );
     if (done) break;
     if (Date.now() > deadline) {
@@ -594,7 +624,7 @@ async function searchJob(
   return {
     sid: String(sid),
     results: res?.results ?? [],
-    messages: [...(res?.messages ?? []), ...messages.filter((m: any) => m?.type && m?.text)],
+    messages: [...(res?.messages ?? []), ...messages.filter((m) => m?.type && m?.text)],
   };
 }
 
@@ -610,14 +640,14 @@ async function exportSearch(
   try {
     text = await call("POST", "/services/search/v2/jobs/export", a, form, timeout, true);
   } catch (e) {
-    if ((e as any).status !== 404) throw e;
+    if ((e as { status?: number }).status !== 404) throw e;
     text = await call("POST", "/services/search/jobs/export", a, form, timeout, true);
   }
-  const results: any[] = [];
-  const messages: any[] = [];
+  const results: Record<string, unknown>[] = [];
+  const messages: SplunkMessage[] = [];
   for (const line of String(text).split(/\r?\n/)) {
     if (!line.trim()) continue;
-    let j: any;
+    let j: { preview?: boolean; result?: Record<string, unknown>; messages?: unknown };
     try {
       j = JSON.parse(line);
     } catch {
@@ -688,7 +718,9 @@ async function auditOnly(row: {
         row.error ?? null,
       ],
     );
-  } catch {} // auditing must never break a search
+  } catch {
+    /* ignore: auditing must never break a search */
+  }
 }
 
 const authLabel = (k: string) =>
@@ -721,9 +753,9 @@ export async function splunkSearch(q: SplunkQuery, onProgress?: (p: SearchProgre
   };
   const t0 = Date.now();
   const window = { earliest: t0 - since * 60_000, latest: t0 - until * 60_000 };
-  let j: any;
+  let j: SplunkBody | null;
   try {
-    j = await withSlot(() =>
+    j = await withSlot<SplunkBody | null>(() =>
       onProgress
         ? searchJob(lg.auth, params, count, timeout, onProgress)
         : call(
@@ -747,7 +779,7 @@ export async function splunkSearch(q: SplunkQuery, onProgress?: (p: SearchProgre
     throw e;
   }
   lg.checkedAt = Date.now();
-  const rows: any[] = j?.results ?? [];
+  const rows = j?.results ?? [];
   const mask = (v: unknown): unknown =>
     typeof v === "string" ? redactPii(v) : Array.isArray(v) ? v.map(mask) : v;
   const results = rows.map((r) => {
@@ -768,7 +800,7 @@ export async function splunkSearch(q: SplunkQuery, onProgress?: (p: SearchProgre
     ms: Date.now() - t0,
     sid: j?.sid ?? null,
   });
-  const messages = (j?.messages ?? []).map((m: any) => `${m.type}: ${m.text}`);
+  const messages = (j?.messages ?? []).map((m) => `${m.type}: ${m.text}`);
   return {
     query: spl,
     window: { earliest: `-${since}m`, latest: until ? `-${until}m` : "now" },
@@ -1009,9 +1041,13 @@ export async function investigationSearch(args: InvestigationSearchArgs, scope: 
     max_time: String(timeout),
   };
   const t0 = Date.now();
-  let r: { sid: string | null; results: any[]; messages: any[] };
+  let r: { sid: string | null; results: Record<string, unknown>[]; messages: SplunkMessage[] };
   try {
-    r = await withSlot<{ sid: string | null; results: any[]; messages: any[] }>(() =>
+    r = await withSlot<{
+      sid: string | null;
+      results: Record<string, unknown>[];
+      messages: SplunkMessage[];
+    }>(() =>
       mode === "export"
         ? exportSearch(lg.auth, params, count, timeout)
         : searchJob(lg.auth, params, count, timeout, () => {}),
@@ -1031,7 +1067,7 @@ export async function investigationSearch(args: InvestigationSearchArgs, scope: 
     .slice(0, count)
     .map((x, i) => normalizeEvent(x, i, row!.id, config.splunk.timezone));
   const messages = r.messages
-    .map((m: any) => redactPii(`${m.type ?? "INFO"}: ${m.text ?? m}`))
+    .map((m) => redactPii(`${m.type ?? "INFO"}: ${m.text ?? m}`))
     .slice(0, 20);
   const done = await one<SearchRow>(
     pool,
@@ -1147,7 +1183,7 @@ export async function searchResults(
           undefined,
           60,
         );
-        const more: any[] = res?.results ?? [];
+        const more = res?.results ?? [];
         const events = [
           ...row.events,
           ...more.map((x, i) =>
@@ -1160,7 +1196,7 @@ export async function searchResults(
           [row.id, json(events), events.length, more.length >= fetchCount],
         ))!;
       } catch (e) {
-        if ((e as any).status === 404)
+        if ((e as { status?: number }).status === 404)
           row = (await one<SearchRow>(
             pool,
             "UPDATE splunk_searches SET truncated = false, messages = messages || $2::jsonb WHERE id = $1 RETURNING *",
@@ -1227,7 +1263,7 @@ export async function searchStatus(searchId: number, scope: SearchScope = {}) {
   } catch (e) {
     return {
       ...base,
-      job: (e as any).status === 404 ? "expired" : `unavailable: ${(e as Error).message}`,
+      job: (e as { status?: number }).status === 404 ? "expired" : `unavailable: ${(e as Error).message}`,
     };
   }
 }

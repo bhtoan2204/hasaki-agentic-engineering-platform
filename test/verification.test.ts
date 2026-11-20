@@ -9,6 +9,7 @@ import {
   independentUpstream,
   normalizeVerdict,
   repairTargetFor,
+  type PublishState,
   staleVerification,
   verificationGate,
 } from "../src/agent/independentReview.ts";
@@ -17,15 +18,17 @@ import { backoff, classifyFailure } from "../src/workflow/failures.ts";
 import { applyProfile } from "../src/workflow/profiles.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
 import { validateSpec } from "../src/workflow/graph.ts";
+import type { ResolvedContext } from "../src/workflow/context.ts";
+import type { RunRow, StepSpec } from "../src/workflow/types.ts";
 
-const graph = [
+const graph: Array<Pick<StepSpec, "key" | "type" | "depends_on">> = [
   { key: "analyze", type: "agent", depends_on: [] },
   { key: "plan", type: "agent", depends_on: ["analyze"] },
   { key: "implement", type: "coding_agent", depends_on: ["plan"] },
   { key: "test", type: "command", depends_on: ["implement"] },
   { key: "lint_review", type: "agent", depends_on: ["implement"] },
   { key: "review", type: "agent", depends_on: ["test", "lint_review"] },
-] as any;
+];
 
 test("cited artifact ids are the ancestor logs an independent verifier may read", () => {
   const ids = citedArtifactIds({
@@ -48,16 +51,45 @@ test("cited artifact ids are the ancestor logs an independent verifier may read"
   assert.ok(long.text.startsWith("a") && long.text.endsWith("a"));
 });
 
+const emptyContext: ResolvedContext = {
+  snapshot_id: 1,
+  hash: "h",
+  project: "p",
+  repositories: [],
+  knowledge: [],
+  overridden: [],
+  disclosure: [],
+  upstream: { plan: {}, text: {} },
+  requestText: "",
+  fileRefs: [],
+};
+
 test("independent review is told to read platform artifacts instead of asking the developer", () => {
   const sys = buildSystemAppend(
-    { id: 95, definition_key: "feature", title: "t", allowed_repositories: [] } as any,
+    { id: 95, definition_key: "feature", title: "t", allowed_repositories: [] as string[] } as RunRow,
     {
+      id: 1,
+      run_id: 95,
       key: "review",
       name: "Review",
       type: "agent",
+      position: 0,
+      depends_on: [],
       config: { independent: true, instructions: "Review the change." },
-    } as any,
-    { repositories: [], knowledge: [], overridden: [], disclosure: [] } as any,
+      run_if: null,
+      requires_approval: false,
+      max_attempts: 1,
+      retry_backoff_s: 0,
+      status: "RUNNING",
+      generation: 1,
+      attempt_count: 1,
+      current_attempt_id: null,
+      output: null,
+      pending_input: null,
+      approval: null,
+      error: null,
+    },
+    emptyContext,
     "analysis",
   );
   assert.match(sys, /mcp__platform__read_artifact/);
@@ -65,7 +97,7 @@ test("independent review is told to read platform artifacts instead of asking th
 });
 
 test("context isolation: the verifier never sees the author's claims, only requirements and platform evidence", () => {
-  const up = {
+  const up: Record<string, { output: Record<string, unknown> }> = {
     analyze: { output: { acceptance_criteria: ["refund per shipment"] } },
     plan: { output: { steps: ["x"] } },
     implement: {
@@ -78,11 +110,11 @@ test("context isolation: the verifier never sees the author's claims, only requi
     test: { output: { results: [{ repo: "svc", passed: true }] } },
     lint_review: { output: { approved: true, summary: "LGTM" } },
   };
-  const f = independentUpstream(graph, up as any);
+  const f = independentUpstream(graph, up);
   assert.deepEqual(Object.keys(f).sort(), ["analyze", "implement", "plan", "test"]);
-  assert.equal((f.implement.output as any).summary, undefined);
-  assert.equal((f.implement.output as any).decisions, undefined);
-  assert.deepEqual((f.implement.output as any).verification, { status: "clean", passed: true });
+  assert.equal(f.implement.output.summary, undefined);
+  assert.equal(f.implement.output.decisions, undefined);
+  assert.deepEqual(f.implement.output.verification, { status: "clean", passed: true });
   assert.deepEqual(f.test.output, up.test.output, "real test evidence kept");
   assert.equal(JSON.stringify(f).includes("I am sure it works"), false);
 });
@@ -191,7 +223,7 @@ test("verdicts: a FAIL is never converted into a PASS; low-severity-only finding
 });
 
 test("verdicts: malformed or contradictory verifier output is BLOCKED, never success", () => {
-  const cases: Array<[any, RegExp]> = [
+  const cases: Array<[unknown, RegExp]> = [
     [
       {
         verdict: "PASS",
@@ -240,9 +272,11 @@ test("enforcement: PASS completes with the judged commits; FAIL repairs within b
     maxRepairs: 2,
     repairTarget: "implement",
     heads: { svc: "abc" },
-  }) as any;
+  });
+  assert.ok(pass.kind === "completed");
+  const passOutput = pass.output as { verified_heads: Record<string, string>; approved: boolean };
   assert.deepEqual(
-    [pass.kind, pass.output.verified_heads, pass.output.approved],
+    [pass.kind, passOutput.verified_heads, passOutput.approved],
     ["completed", { svc: "abc" }, true],
   );
   const r1 = enforceVerdict(fail, {
@@ -250,7 +284,8 @@ test("enforcement: PASS completes with the judged commits; FAIL repairs within b
     maxRepairs: 2,
     repairTarget: "implement",
     heads: {},
-  }) as any;
+  });
+  assert.ok(r1.kind === "reexecute");
   assert.deepEqual([r1.kind, r1.target], ["reexecute", "implement"]);
   assert.match(r1.feedback, /repair 2 of 2/);
   const done = enforceVerdict(fail, {
@@ -258,7 +293,8 @@ test("enforcement: PASS completes with the judged commits; FAIL repairs within b
     maxRepairs: 2,
     repairTarget: "implement",
     heads: {},
-  }) as any;
+  });
+  assert.ok(done.kind === "failed");
   assert.deepEqual([done.kind, done.retryable], ["failed", false]);
   assert.equal(
     enforceVerdict(fail, { repairsUsed: 0, maxRepairs: 2, repairTarget: null, heads: {} }).kind,
@@ -268,9 +304,9 @@ test("enforcement: PASS completes with the judged commits; FAIL repairs within b
   const blocked = enforceVerdict(
     normalizeVerdict({ verdict: "BLOCKED", blocked_reason: "need spec" }),
     { repairsUsed: 0, maxRepairs: 2, repairTarget: "implement", heads: {} },
-  ) as any;
-  assert.equal(blocked.kind, "waiting_input");
-  assert.match(blocked.questions[0].question, /need spec/);
+  );
+  assert.ok(blocked.kind === "waiting_input");
+  assert.match(blocked.questions![0].question, /need spec/);
   assert.match(findingsFeedback(fail, 1, 2), /a\.go:1 — wrong\n {3}evidence: x/);
 });
 
@@ -316,7 +352,7 @@ test("PR gate: every required verifier needs a valid PASS bound to the exact, cl
     verificationGate([pass({ svc: "a", api: "b" })], { svc: clean("a"), api: clean("b") }),
     [],
   );
-  const g = (v: any[], p: any) => verificationGate(v, p).join(" | ");
+  const g = (v: Parameters<typeof verificationGate>[0], p: Record<string, PublishState>) => verificationGate(v, p).join(" | ");
   assert.match(
     g([pass({ svc: "a" })], { svc: clean("b") }),
     /svc: changed after independent verification "review" \(verified a, now b\)/,
@@ -511,7 +547,7 @@ test("model routing: step config > profile/role routing > '*' > global default; 
       model: "m-global",
       source: "global default",
     });
-    config.model = undefined as any;
+    config.model = "";
     config.agent.models = undefined;
     assert.deepEqual(modelFor({ type: "agent", config: {} }, null), {
       model: "",

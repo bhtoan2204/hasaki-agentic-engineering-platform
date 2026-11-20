@@ -58,6 +58,10 @@ export interface StepLite {
   status: StepStatus | string;
   current_attempt_id?: number | null;
   position?: number;
+  agent?: { provider?: string; model?: string | null } | null;
+  handoff?: unknown;
+  pending_input?: { provider_handoff?: unknown } | null;
+  input?: { pending?: { provider_handoff?: unknown } | null } | null;
 }
 export interface GraphStepLite {
   key: string;
@@ -72,10 +76,38 @@ export interface AttemptLite {
   status: string;
   started_at?: string | null;
   finished_at?: string | null;
-  error?: any;
+  error?: AttemptError;
   /** Attempt metrics (incl. harness `verification`) and output, when the API provides them. */
-  metrics?: any;
-  output?: any;
+  metrics?: {
+    verification?: AttemptVerification;
+    provider?: string;
+    model?: string;
+    normalized_failure_category?: string;
+  } | null;
+  output?: { verification?: AttemptVerification } | null;
+}
+export type AttemptError =
+  string | { message?: string; error?: string; failure_category?: string } | null;
+export interface AttemptVerification {
+  status?: string;
+  outcome?: string;
+  passed?: boolean;
+  needs_review?: boolean;
+  rounds?: number;
+  repairs?: number;
+  max_repairs?: number;
+  duration_ms?: number;
+  reason?: string;
+  review_reasons?: string[];
+  last?: Array<{
+    repo: string;
+    status?: string;
+    passed?: boolean;
+    regressions?: Array<{ package?: string; tests?: string[] }>;
+    weakened?: string[];
+    note?: string;
+    error?: string;
+  }>;
 }
 export interface QuestionLite {
   step_key: string;
@@ -85,13 +117,42 @@ export interface EventLite {
   id: number;
   kind: string;
   content: string;
-  data?: any;
+  data?: { name?: string; input?: ToolInput } | null;
   created_at: string;
+}
+export interface ToolInput {
+  file_path?: string;
+  notebook_path?: string;
+  command?: string;
+  pattern?: string;
+  path?: string;
+  query?: string;
+  key?: string;
+  name?: string;
+  step_key?: string;
+  subagent_type?: string;
+  url?: string;
+  description?: string;
+  [key: string]: unknown;
+}
+export interface RunSummaryLite {
+  id: number;
+  title: string;
+  status: string;
+  steps?: Array<{ status: string }> | null;
+  updated_at?: string | null;
+  created_at?: string | null;
 }
 
 /** Everything the office needs from one run (real API data, or the clearly-labelled preview). */
 export interface OfficeSnapshot {
-  run: { id: number; title: string; status: string; branch?: string } | null;
+  run: {
+    id: number;
+    title: string;
+    status: string;
+    branch?: string;
+    agent_provider?: string | null;
+  } | null;
   steps: StepLite[];
   graph: GraphStepLite[];
   attempts: AttemptLite[];

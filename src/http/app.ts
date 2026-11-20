@@ -72,7 +72,7 @@ function serveStatic(url: URL, res: ServerResponse) {
   return true;
 }
 
-async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<any> {
+async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const c of req) {
@@ -132,7 +132,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       );
     }
     if (key === "POST /api/auth/login") {
-      const body = await readJson(req);
+      const body = (await readJson(req)) as { username?: unknown; password?: unknown };
       try {
         const result = await login(String(body.username ?? ""), String(body.password ?? ""), req);
         setSessionCookie(res, req, result.token);
@@ -171,7 +171,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       return send(res, 200, { ok: true });
     }
     if (key === "POST /api/auth/password") {
-      const body = await readJson(req);
+      const body = (await readJson(req)) as { password?: unknown };
       await setPassword(actor.id, String(body.password ?? ""));
       await logout(req);
       clearSessionCookie(res, req);

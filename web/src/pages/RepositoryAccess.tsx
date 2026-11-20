@@ -39,6 +39,15 @@ type Matrix = {
   }>;
 };
 
+type AccessAuditEntry = {
+  id: number;
+  action: string;
+  actor: string | null;
+  repository: string | null;
+  created_at: string;
+  detail: { user_id?: number | string; before?: Level; after?: Level } | null;
+};
+
 const RANK: Record<Level, number> = { none: 0, read: 1, write: 2, pull_request: 3 };
 const PERMS = ["read", "write", "pull_request"] as const;
 
@@ -138,7 +147,7 @@ export function BitbucketState({
 export function RepositoryAccessAdmin({ only }: { only?: string }) {
   const { t } = useI18n();
   const matrix = useApi<Matrix>("/api/repository-access");
-  const audit = useApi<any[]>(
+  const audit = useApi<AccessAuditEntry[]>(
     `/api/repository-access/audit${only ? `?repository=${encodeURIComponent(only)}` : ""}`,
   );
   const [q, setQ] = useState("");
@@ -374,10 +383,9 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
         ) : (
           <ul className="repo-audit">
             {audit.data.slice(0, 50).map((a) => {
+              const userId = a.detail?.user_id;
               const user =
-                a.detail?.user_id != null
-                  ? m.users.find((u) => u.id === Number(a.detail.user_id))?.username
-                  : null;
+                userId != null ? m.users.find((u) => u.id === Number(userId))?.username : null;
               return (
                 <li key={a.id}>
                   <span className="muted small">{time(a.created_at)}</span> <b>{a.actor ?? "—"}</b>{" "}

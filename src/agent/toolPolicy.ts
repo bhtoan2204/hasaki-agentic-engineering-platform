@@ -416,7 +416,10 @@ export function parseShell(command: string): ShellParse {
         quoted = true;
         j = close + 1;
       } else {
-        if (command[j] === "\\") ((quoted = true), j++);
+        if (command[j] === "\\") {
+          quoted = true;
+          j++;
+        }
         const m = command.slice(j).match(/^[A-Za-z0-9_]+/);
         if (!m) return fail("heredoc without a delimiter");
         delim = m[0];
@@ -830,7 +833,9 @@ export function packageInstallViolation(
     try {
       if (dir && isInside(dir, workspaces))
         symlinked ||= lstatSync(resolve(dir, "node_modules")).isSymbolicLink();
-    } catch {}
+    } catch {
+      /* ignore: no node_modules in this worktree */
+    }
     if (symlinked)
       return "node_modules in this worktree is a symlink to the primary checkout: installing/changing packages would modify the primary checkout. Remove the symlink first (rm node_modules) and install into the worktree, or report the needed dependency in submit_result";
   }

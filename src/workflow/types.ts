@@ -284,6 +284,7 @@ export interface JobRow {
   lease_expires_at: string | null;
   fencing_token: number;
   claims: number;
+  force: boolean;
 }
 
 export interface QuestionInput {

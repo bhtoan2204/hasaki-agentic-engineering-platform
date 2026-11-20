@@ -8,7 +8,7 @@ import {
   primaryStep,
   roleOfStep,
 } from "../web/src/office/workflowToAgentMapper.ts";
-import type { OfficeSnapshot } from "../web/src/office/types.ts";
+import type { EventLite, OfficeSnapshot, StepLite } from "../web/src/office/types.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
 
 test("office: every step of every built-in template maps to the expected character", () => {
@@ -35,7 +35,7 @@ test("office: every step of every built-in template maps to the expected charact
     task_result_report: "pr",
   };
   for (const t of TEMPLATES) {
-    const steps = (t.spec as any).steps as any[];
+    const steps = (t.spec as { steps: Array<Pick<StepLite, "key" | "name" | "type">> }).steps;
     for (const s of steps) {
       const role = roleOfStep(s, steps);
       if (expected[s.key]) assert.equal(role, expected[s.key], `${t.key}/${s.key}`);
@@ -95,7 +95,7 @@ test("office: tool calls map to activities; unknown tools are not invented", () 
   );
   assert.equal(activityFromTool("SomethingNew", {}), null);
   // latest event wins; thinking after a tool → thinking
-  const ev = (id: number, kind: string, data?: any) => ({
+  const ev = (id: number, kind: string, data?: EventLite["data"]) => ({
     id,
     kind,
     content: "",

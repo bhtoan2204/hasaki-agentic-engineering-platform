@@ -95,7 +95,7 @@ export async function executeProviderPhase(ctx: ExecutionContext): Promise<ExecR
     },
     async () => {
       let pack = null,
-        retrieval: any = null;
+        retrieval: string | null = null;
       if (cfg.context_variant !== "minimal") {
         pack = await ensureContextPack(ctx, metrics, policy);
         ctx.context.contextPack = pack;

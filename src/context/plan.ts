@@ -25,8 +25,10 @@ export interface ScorableKnowledge {
   category: string;
   content: string;
   scope_type?: string;
-  metadata?: any;
+  metadata?: unknown;
 }
+const metadataOf = (k: { metadata?: unknown }): Record<string, unknown> =>
+  k.metadata && typeof k.metadata === "object" ? (k.metadata as Record<string, unknown>) : {};
 /** A resolved item (resolveKnowledge output): scorable plus why it applies. */
 export interface KnowledgeLike extends ScorableKnowledge {
   reason: string;
@@ -101,7 +103,7 @@ export function scoreKnowledge(
   stepType: string,
 ): { score: number; why: string } {
   const want = requestTerms(requestText);
-  const desc = String(k.metadata?.description ?? "");
+  const desc = String(metadataOf(k).description ?? "");
   const fields: Array<[string, string[], number]> = [
     ["title", termsOf(k.title + " " + k.key.replace(/[._-]/g, " ")), 3],
     ["description", termsOf(desc), 2],
@@ -119,8 +121,9 @@ export function scoreKnowledge(
   if (k.scope_type === "REPOSITORY") score += 2;
   if (stepType === "coding_agent" && /coding_standard|repository_convention/.test(k.category))
     score += 1;
-  if (k.category === "agent_skill" && k.metadata?.applicable_steps) {
-    const steps = Array.isArray(k.metadata.applicable_steps) ? k.metadata.applicable_steps : [];
+  const applicableSteps = metadataOf(k).applicable_steps;
+  if (k.category === "agent_skill" && applicableSteps) {
+    const steps = Array.isArray(applicableSteps) ? applicableSteps : [];
     if (steps.length > 0 && !steps.includes(stepType)) {
       score = Math.max(0, score - 5);
     }
@@ -141,7 +144,7 @@ export function planKnowledge(
   const unverified = (x: (typeof scored)[number]) => knowledgeTier(x.k) === "unverified_suggestion";
   const mandatory = (x: (typeof scored)[number]) => isMandatory(x.k);
   const wantsInline = (x: (typeof scored)[number]) =>
-    !unverified(x) && (mandatory(x) || x.k.metadata?.load !== "on_demand");
+    !unverified(x) && (mandatory(x) || metadataOf(x.k).load !== "on_demand");
   const out: DisclosureEntry[] = [];
   let used = 0;
   // inline: mandatory first, then the most relevant inline-type items while the budget lasts; overflow → index
@@ -173,7 +176,8 @@ export function planKnowledge(
   // it never takes an index slot.
   let indexed = 0;
   for (const x of rest) {
-    const companion = !!x.k.metadata?.parent_skill;
+    const parentSkill = metadataOf(x.k).parent_skill;
+    const companion = !!parentSkill;
     // Unverified observations always stay visible as an index line (with notice) and never use a slot.
     const pinned = unverified(x) && !companion;
     const disclosure = pinned || (!companion && indexed < opts.indexSize) ? "index" : "search";
@@ -184,7 +188,7 @@ export function planKnowledge(
       score: x.score,
       tokens: x.tokens,
       why: companion
-        ? `supporting file of ${x.k.metadata.parent_skill}; ${x.why}`
+        ? `supporting file of ${parentSkill}; ${x.why}`
         : demoted.includes(x)
           ? `over inline budget; ${x.why}`
           : x.why,
@@ -351,15 +355,32 @@ export type KnowledgeTier =
 export function knowledgeTier(k: {
   category: string;
   enforced?: boolean;
-  metadata?: any;
+  metadata?: unknown;
 }): KnowledgeTier {
   if (k.category === "task_memory") {
     // Production task_memory stores provenance under metadata.memory (see knowledge/memory.ts); missing = unverified.
-    const t = String(k.metadata?.memory?.trust ?? "unverified");
+    const memory = metadataOf(k).memory;
+    const trust =
+      memory && typeof memory === "object" && "trust" in memory ? memory.trust : undefined;
+    const t = String(trust ?? "unverified");
     return t === "approved" || t === "verified" ? "task_observation" : "unverified_suggestion";
   }
   if (k.enforced === true) return "organizational_rule";
   return "approved_knowledge";
+}
+
+interface RetrievedHit {
+  repository: string;
+  file_path: string;
+  line_range?: number[];
+  confidence?: unknown;
+  qualified_name?: string;
+  symbol_name?: string;
+}
+interface RetrievedDependency {
+  repository: string;
+  file_path: string;
+  candidate_definitions?: Array<{ repository: string; file_path: string }>;
 }
 
 /**
@@ -367,11 +388,17 @@ export function knowledgeTier(k: {
  * files the best hits depend on are added as discounted candidates, and every hit carries rank_confidence + evidence.
  * Pure; a body without a hits array is returned unchanged.
  */
-export function rankRetrievedCode(search: any, dependencies: any[] | undefined, limit = 12): any {
-  const raw: any[] = Array.isArray(search?.hits) ? search.hits : [];
+export function rankRetrievedCode(
+  search: unknown,
+  dependencies: RetrievedDependency[] | undefined,
+  limit = 12,
+): any {
+  if (!search || typeof search !== "object" || !("hits" in search) || !Array.isArray(search.hits))
+    return search;
+  const raw: RetrievedHit[] = search.hits;
   if (!raw.length) return search;
   const keyOf = (r: string, p: string, a?: number, b?: number) => `${r}:${p}:${a ?? ""}-${b ?? ""}`;
-  const original = new Map<string, any>();
+  const original = new Map<string, RetrievedHit>();
   const hits: CodeHit[] = raw.map((h) => {
     const line = h.line_range?.[0];
     const endLine = h.line_range?.[1];

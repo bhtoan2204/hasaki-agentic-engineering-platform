@@ -164,12 +164,16 @@ export async function openChrome(
         s.releaseProfile = () => {
           try {
             rmdirSync(lock);
-          } catch {}
+          } catch {
+            /* ignore: lock already released */
+          }
         };
         let previousEndpoint = "";
         try {
           previousEndpoint = readFileSync(join(profile, "DevToolsActivePort"), "utf8");
-        } catch {}
+        } catch {
+          /* ignore: no previous DevTools endpoint */
+        }
         const args = [
           `--user-data-dir=${nativeProfile}`,
           "--remote-debugging-port=0",
@@ -196,7 +200,9 @@ export async function openChrome(
                 ["-NoProfile", "-Command", `taskkill /PID ${pid} /T /F 2>$null | Out-Null`],
                 { stdio: "ignore", timeout: 5000 },
               );
-            } catch {}
+            } catch {
+              /* ignore: process already exited */
+            }
           };
         } else {
           const child = spawn(executable, args, { stdio: "ignore" });
@@ -226,7 +232,9 @@ export async function openChrome(
               `ws://127.0.0.1:${s.relay?.port ?? port}${socket}`,
               { timeout: windows ? 5000 : 700 },
             );
-          } catch {}
+          } catch {
+            /* ignore: retry until the deadline */
+          }
         }
       }
       if (s.state !== "waiting") {

@@ -404,7 +404,7 @@ const mysqlDriver: Driver = async (db, sql, maxRows) => {
       const query = conn.query({ sql, timeout: db.timeout_ms });
       query
         .on("fields", (f: Array<{ name: string }>) => (columns = (f ?? []).map((x) => x.name)))
-        .on("result", (row: any) => {
+        .on("result", (row: Record<string, unknown>) => {
           if (done) return;
           if (rows.length >= maxRows) {
             // Enough: stop reading instead of buffering the rest of a large result.

@@ -94,7 +94,7 @@ test("extractLog extracts test failure logs, strips ANSI escapes, and caps at ma
   ].join("\n");
 
   const extracted = extractLog(goOutput, "TestFail", null);
-  assert.match(extracted, /=== RUN   TestFail/);
+  assert.match(extracted, /=== RUN {3}TestFail/);
   assert.match(extracted, /fail_test\.go:42/);
   assert.match(extracted, /--- FAIL: TestFail/);
   assert.doesNotMatch(extracted, /TestPass/);
@@ -119,7 +119,7 @@ test("extractLog extracts test failure logs, strips ANSI escapes, and caps at ma
   // ANSI escape stripping
   const colored = "\x1b[31m=== RUN   TestColor\x1b[0m\n\x1b[32m--- FAIL: TestColor (0.01s)\x1b[0m";
   const uncolored = extractLog(colored, "TestColor", null);
-  assert.doesNotMatch(uncolored, /\x1b\[/);
+  assert.ok(!uncolored.includes("\x1b["));
 
   // length capping at max
   const longOutput = "abcdefghij\n".repeat(50);

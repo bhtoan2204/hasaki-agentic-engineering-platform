@@ -11,6 +11,13 @@ interface Decision {
 interface BrokerPolicy {
   mode: string;
 }
+interface BrokerMessage {
+  token?: unknown;
+  kind?: unknown;
+  payload?: unknown;
+  name?: unknown;
+  args?: unknown;
+}
 
 /**
  * Per-attempt broker between the Codex process tree and the worker.
@@ -31,7 +38,7 @@ export interface BrokerDeps<P extends BrokerPolicy = BrokerPolicy> {
   /** Cursor shares the authenticated worker transport without Codex-specific hook requirements. */
   requireHooks?: boolean;
   /** Maps the provider's hook payload onto the platform policy decision. */
-  decideHook: (payload: any, policy: P, cwd: string) => Decision;
+  decideHook(payload: Record<string, unknown>, policy: P, cwd: string): Decision;
   /** Platform tool dispatch, bound to the attempt (envFromExecution). */
   dispatch(name: string, args: unknown): Promise<string>;
   onDenied?(tool: string, reason: string): void | Promise<void>;
@@ -72,8 +79,10 @@ export async function startBroker<P extends BrokerPolicy>(deps: BrokerDeps<P>): 
     return b.length === tokenBuf.length && timingSafeEqual(b, tokenBuf);
   };
 
-  const handle = async (msg: any): Promise<unknown> => {
-    if (!msg || !authorized(msg.token)) return { ok: false, error: "unauthorized" };
+  const handle = async (raw: unknown): Promise<unknown> => {
+    if (!raw || typeof raw !== "object") return { ok: false, error: "unauthorized" };
+    const msg = raw as BrokerMessage;
+    if (!authorized(msg.token)) return { ok: false, error: "unauthorized" };
     if (msg.kind === "hook" || msg.kind === "tool") deps.onActivity?.();
     if (msg.kind === "hook") {
       hookCalls++;

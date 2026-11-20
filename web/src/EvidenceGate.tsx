@@ -15,10 +15,44 @@ const TONE: Record<string, string> = {
   HIGH: "var(--st-err)",
 };
 
-export const hasEvidence = (o: any) =>
+interface Claim {
+  classification?: string;
+  verification_status?: string;
+}
+
+interface GateState {
+  satisfied: boolean;
+  missing?: string[];
+}
+
+interface Scope {
+  proposal_hash?: string;
+  summary?: string;
+  changes?: Array<{ repo: string; files?: string[]; description: string }>;
+  risk?: string | null;
+  root_cause_status?: string | null;
+  gate?: GateState | null;
+  assumptions?: string[];
+  approved_by?: string;
+  risk_acknowledged?: boolean;
+}
+
+interface EvidenceOutput {
+  root_cause_assessment?: { status?: string; explanation?: string };
+  fix_assessment?: { risk?: string; risk_reasons?: string[] };
+  claims?: Claim[];
+  missing_evidence?: string[];
+  evidence_gate?: GateState;
+  approved_scope?: Scope;
+}
+
+export const hasEvidence = (o: unknown): o is EvidenceOutput =>
   !!o &&
   typeof o === "object" &&
-  (o.root_cause_assessment || o.fix_assessment || Array.isArray(o.claims) || o.approved_scope);
+  (("root_cause_assessment" in o && !!o.root_cause_assessment) ||
+    ("fix_assessment" in o && !!o.fix_assessment) ||
+    ("claims" in o && Array.isArray(o.claims)) ||
+    ("approved_scope" in o && !!o.approved_scope));
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -33,13 +67,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export function EvidenceSummary({ output, scope }: { output?: any; scope?: any }) {
+export function EvidenceSummary({ output, scope }: { output?: EvidenceOutput; scope?: Scope }) {
   const { t } = useI18n();
-  const o = output ?? {};
-  const claims: any[] = Array.isArray(o.claims) ? o.claims : [];
+  const o: EvidenceOutput = output ?? {};
+  const claims: Claim[] = Array.isArray(o.claims) ? o.claims : [];
   const verified = claims.filter(
     (c) =>
-      ["OBSERVED_FACT", "CODE_FACT"].includes(c.classification) &&
+      ["OBSERVED_FACT", "CODE_FACT"].includes(c.classification ?? "") &&
       c.verification_status === "verified",
   ).length;
   const contradicted = claims.filter((c) => c.verification_status === "contradicted").length;
@@ -69,8 +103,8 @@ export function EvidenceSummary({ output, scope }: { output?: any; scope?: any }
       {risk && (
         <Row label={t("ev.fixRisk")}>
           {badge(risk, t(`ev.risk.${risk}`))}
-          {o.fix_assessment?.risk_reasons?.length > 0 && (
-            <span className="small muted"> {o.fix_assessment.risk_reasons.join(" · ")}</span>
+          {(o.fix_assessment?.risk_reasons?.length ?? 0) > 0 && (
+            <span className="small muted"> {o.fix_assessment?.risk_reasons?.join(" · ")}</span>
           )}
         </Row>
       )}
@@ -108,7 +142,7 @@ export function EvidenceSummary({ output, scope }: { output?: any; scope?: any }
           </span>
         </div>
       )}
-      {s?.changes?.length > 0 && (
+      {s?.changes && s.changes.length > 0 && (
         <details open={!!scope} style={{ marginTop: 6 }}>
           <summary className="small">
             {scope ? t("ev.scopeToApprove") : t("ev.approvedScope")}{" "}
@@ -120,17 +154,19 @@ export function EvidenceSummary({ output, scope }: { output?: any; scope?: any }
             </p>
           )}
           <ul className="small" style={{ margin: "4px 0 0 18px" }}>
-            {s.changes.map((c: any, i: number) => (
+            {s.changes.map((c, i) => (
               <li key={i}>
                 <b className="mono">{c.repo}</b>{" "}
-                {c.files?.length > 0 && <span className="mono muted">{c.files.join(", ")}</span>} —{" "}
-                {c.description}
+                {(c.files?.length ?? 0) > 0 && (
+                  <span className="mono muted">{c.files?.join(", ")}</span>
+                )}{" "}
+                — {c.description}
               </li>
             ))}
           </ul>
-          {s.assumptions?.length > 0 && (
+          {(s.assumptions?.length ?? 0) > 0 && (
             <p className="small muted" style={{ margin: "4px 0 0" }}>
-              {t("ev.assumptions")}: {s.assumptions.join(" · ")}
+              {t("ev.assumptions")}: {s.assumptions?.join(" · ")}
             </p>
           )}
           {s.approved_by && (

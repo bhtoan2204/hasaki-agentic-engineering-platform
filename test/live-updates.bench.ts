@@ -14,6 +14,7 @@
  * Output: one JSON line per scenario with request counts per endpoint, total server DB queries and server CPU ms.
  */
 import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import pg from "pg";
 import { chromium, type Page } from "playwright-core";
 import { pool, one } from "../src/db/pool.ts";
@@ -36,14 +37,14 @@ await createUser({ username: "bench", password: "bench-password", role: "member"
 await stream.startEventStream();
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 // Count every statement the server sends to PostgreSQL (pool.query goes through Client#query exactly once).
 let dbQueries = 0;
 const origQuery = pg.Client.prototype.query;
-(pg.Client.prototype as any).query = function (this: any, ...a: any[]) {
+pg.Client.prototype.query = function (this: pg.Client, ...a: unknown[]) {
   dbQueries++;
-  return (origQuery as any).apply(this, a);
+  return Reflect.apply(origQuery, this, a);
 };
 
 const browser = await chromium.launch({
@@ -246,7 +247,7 @@ try {
 } finally {
   await browser.close();
   await new Promise<void>((r) => server.close(() => r()));
-  await (stream as any).stopEventStream?.();
+  await stream.stopEventStream?.();
   await pool.end().catch(() => {});
   process.exit(0); // the LISTEN client has no stop hook on older code
 }

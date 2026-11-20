@@ -125,7 +125,19 @@ export async function loadAccountSettings() {
 
 // ---------------------------------------------------------------- Telegram
 
-async function telegramApi(token: string, method: string, body?: unknown) {
+type TelegramChat = {
+  id: number | string;
+  type: string;
+  title?: string;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+};
+type TelegramUpdate = Partial<
+  Record<"message" | "channel_post" | "my_chat_member" | "edited_message", { chat?: TelegramChat }>
+>;
+
+async function telegramApi<T = unknown>(token: string, method: string, body?: unknown): Promise<T> {
   const res = await fetch(`${config.telegram.apiBase.replace(/\/$/, "")}/bot${token}/${method}`, {
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json" } : {},
@@ -144,7 +156,7 @@ async function telegramApi(token: string, method: string, body?: unknown) {
       `không gọi được Telegram (${networkCode(e)}): máy chạy platform không kết nối được tới ${host}; kiểm tra mạng, VPN hoặc proxy (TELEGRAM_API_BASE)`,
     );
   });
-  const j: any = await res.json().catch(() => ({}));
+  const j: { ok?: boolean; description?: string; result: T } = await res.json().catch(() => ({}));
   if (!res.ok || !j.ok)
     throw new Error(
       `Telegram ${method}: ${String(j.description ?? `HTTP ${res.status}`)
@@ -183,7 +195,7 @@ export async function setTelegram(input: { botToken?: string; chatId?: string })
     throw new Error("bot token không đúng dạng <số>:<chuỗi> của @BotFather");
   if (chatId && !/^-?\d+$/.test(chatId) && !/^@\w{4,}$/.test(chatId))
     throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
-  const me = await telegramApi(botToken, "getMe");
+  const me = await telegramApi<{ username?: string } | undefined>(botToken, "getMe");
   saved.telegram = { botToken, chatId };
   await putSharedSecret("telegram", JSON.stringify(saved.telegram));
   apply();
@@ -196,7 +208,7 @@ export async function telegramChats(input: { botToken?: string }) {
   if (!token) throw new Error("nhập bot token trước, rồi nhắn /start cho bot");
   const key = botKey(token),
     client = await pool.connect();
-  let updates: any[];
+  let updates: TelegramUpdate[];
   const locked = (
     await client.query("SELECT pg_try_advisory_lock($1::int) AS ok", [advisoryKey(key)])
   ).rows[0].ok;
@@ -207,7 +219,7 @@ export async function telegramChats(input: { botToken?: string }) {
       [key],
     );
     if (!locked || active || config.telegram.mode !== "off") return observedChats(key);
-    updates = await telegramApi(token, "getUpdates");
+    updates = await telegramApi<TelegramUpdate[]>(token, "getUpdates");
   } finally {
     if (locked)
       await client.query("SELECT pg_advisory_unlock($1::int)", [advisoryKey(key)]).catch(() => {});
@@ -252,6 +264,11 @@ export async function clearTelegram() {
 // ---------------------------------------------------------------- Bitbucket
 
 const BB = "https://api.bitbucket.org/2.0";
+type BitbucketBody = {
+  error?: { message?: string };
+  display_name?: string;
+  username?: string;
+};
 async function bbGet(user: string, token: string, path: string) {
   const res = await fetch(BB + path, {
     headers: {
@@ -260,7 +277,7 @@ async function bbGet(user: string, token: string, path: string) {
     },
     signal: AbortSignal.timeout(10_000),
   });
-  const j: any = await res.json().catch(() => ({}));
+  const j: BitbucketBody = await res.json().catch(() => ({}));
   return { status: res.status, ok: res.ok, body: j };
 }
 

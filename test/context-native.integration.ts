@@ -1,4 +1,5 @@
 import { before, after, afterEach, test } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -131,7 +132,7 @@ before(async () => {
   });
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 afterEach(async () => {
   for (const id of runs.splice(0)) {
@@ -525,7 +526,10 @@ async function stdioCall(bridge: "codex" | "cursor", env: ReturnType<typeof envF
     },
   );
   let buf = Buffer.alloc(0);
-  const replies = new Map<number, any>();
+  const replies = new Map<
+    number,
+    { id: number; result: { tools: Array<{ name: string }>; content: Array<{ text: string }> } }
+  >();
   const done = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("bridge deadline")), 5000);
     child.on("error", reject);
@@ -576,10 +580,10 @@ test("Claude dispatch and real Codex/Cursor stdio bridges expose the same bound 
     assert.match(direct.description, /idempotent/);
     if (provider !== "claude") {
       const replies = await stdioCall(provider, env);
-      const names = replies.get(1).result.tools.map((t: any) => t.name);
+      const names = replies.get(1)!.result.tools.map((t) => t.name);
       for (const t of CONTEXT_TOOLS) assert.ok(names.includes(t.name));
       assert.ok(!names.includes("prepare_branch"));
-      assert.match(replies.get(2).result.content[0].text, /idempotent/);
+      assert.match(replies.get(2)!.result.content[0].text, /idempotent/);
     }
   }
   for (const t of CONTEXT_TOOLS)
@@ -698,7 +702,7 @@ test("native code adapters use the existing symbol/dependency index and label st
         env,
       ),
     );
-    assert.ok(result.hits.some((h: any) => h.symbol_name === "StockRefund"));
+    assert.ok(result.hits.some((h: { symbol_name: string }) => h.symbol_name === "StockRefund"));
     assert.ok(result.hits[0].snapshot.commit);
     const symbol = JSON.parse(
       await dispatchPlatformTool(

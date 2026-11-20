@@ -1,5 +1,5 @@
 import { IntakeQueue } from "./Intake.tsx";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
 import {
   ChevronRight,
   CircleHelp,
@@ -59,6 +59,120 @@ import { CostCell, CostPanel } from "../components/Cost.tsx";
 import type { UiLocale } from "../i18n/messages.ts";
 import "./WorkItems.css";
 
+interface ProdErrorRef {
+  fingerprint: string;
+  severity: string;
+  service: string;
+  signature: string;
+  day: string;
+  latest_day: string;
+  today_count: number;
+  yesterday_count: number;
+  last_at: string | null;
+}
+
+interface WorkStatus {
+  loggedIn: boolean;
+  windowOpen?: boolean;
+  expiresAt?: string | null;
+  browserMode: string;
+  chromeProfile?: string;
+  connectionState: string;
+  connectionError?: string | null;
+}
+
+interface WorkInboxRow {
+  work_id: number | string;
+  code: string;
+  project?: string | null;
+  name: string;
+  work_item_id?: number | null;
+  run_status?: string | null;
+}
+
+interface WorkItemRow {
+  id: number;
+  status: string;
+  code: string;
+  source: string;
+  project?: string | null;
+  title: string;
+  run_count: number;
+  last_run_status?: string | null;
+  cost?: ComponentProps<typeof CostCell>["cost"];
+  updated_at: string;
+}
+
+interface WorkItemDetailView {
+  id: number;
+  title: string;
+  code: string;
+  status: string;
+  source: string;
+  project?: string | null;
+  description: string;
+  description_source?: string;
+  attachments?: Array<{ name: string; url: string }>;
+  payload?: Record<string, unknown> | null;
+  prod_errors: ProdErrorRef[];
+  runs: ComponentProps<typeof RunsTable>["runs"];
+  pull_requests: Array<{
+    id: number;
+    repo: string;
+    url: string;
+    title: string;
+    source_branch: string;
+    target_branch: string;
+  }>;
+  legacy?: {
+    questions: Array<{ id: number; question: string; answer?: string | null }>;
+    events: Array<{ id: number; created_at: string; kind: string; content: string }>;
+  } | null;
+  automation_policy?: { workflow: string } | null;
+}
+
+interface WorkflowOption {
+  key: string;
+  name: string;
+  latest_version: number;
+  description?: string | null;
+}
+
+/** Run summary (GET /api/runs/:id/summary, src/report/runSummary.ts). */
+interface RunSummary {
+  run: { id: number; status: string; duration_ms: number | null; error: string | null };
+  totals: { steps_run: number; attempts: number; retries: number; cost_usd: number | null };
+  steps: Array<{
+    key: string;
+    name: string;
+    status: string;
+    attempts: number;
+    duration_ms: number | null;
+    summary: string;
+    lists: Array<{ label: string; items: string[] }>;
+  }>;
+  changes: Array<{
+    repo: string;
+    branch: string;
+    commits: Array<{ hash: string; subject: string }>;
+    files: Array<{ path: string; additions: number | null; deletions: number | null }>;
+    additions: number;
+    deletions: number;
+    note?: string;
+  }>;
+  tests: Array<{ repo: string; passed: boolean; skipped?: boolean; detail: string }>;
+  pull_requests: Array<{
+    repo: string;
+    url: string;
+    title: string;
+    source_branch: string;
+    target_branch: string;
+  }>;
+  decisions: Array<{ kind: "answer" | "approval"; question: string; answer: string }>;
+  problems: Array<{ step: string; attempt: number; status: string; message: string }>;
+  markdown: string;
+}
+
 /** Production error groups this work item fixes, with their latest counts (did the fix make them stop?). */
 const WI_STATUS_KEY: Record<string, string> = {
   open: "wi.open",
@@ -75,7 +189,7 @@ function WiStatus({ s }: { s: string }) {
 const sourceLabel = (t: (k: string) => string, s: string) =>
   t(`wi.src.${s}`) === `wi.src.${s}` ? s : t(`wi.src.${s}`);
 
-function ProdErrorRefs({ rows }: { rows: any[] }) {
+function ProdErrorRefs({ rows }: { rows: ProdErrorRef[] }) {
   const { t } = useI18n();
   if (!rows?.length) return null;
   const hm = (t: string | null) =>
@@ -135,8 +249,8 @@ function ProdErrorRefs({ rows }: { rows: any[] }) {
 
 function HasakiPanel({ onImported }: { onImported: () => void }) {
   const { t } = useI18n();
-  const { data: st, reload: reloadSt } = useApi<any>("/api/work/status");
-  const { data: inbox, reload: reloadInbox } = useApi<any[]>("/api/work/inbox");
+  const { data: st, reload: reloadSt } = useApi<WorkStatus>("/api/work/status");
+  const { data: inbox, reload: reloadInbox } = useApi<WorkInboxRow[]>("/api/work/inbox");
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   useEffect(() => {
@@ -149,13 +263,20 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
   const [busy, setBusy] = useState(false);
   const refresh = async () => {
     setBusy(true);
-    const r = await act(() => api<any>("/api/work/refresh", {}));
+    const r = await act(() => api<unknown>("/api/work/refresh", {}));
     setBusy(false);
     if (r) reloadInbox();
   };
   const pick = async (workId: number | string) => {
-    const r = await act(() => api<any>(`/api/work/pick/${workId}`, {}), t("wi.importedRun"));
-    if (r) (reloadInbox(), onImported(), navigate(`/work-items/${r.work_item_id}`));
+    const r = await act(
+      () => api<{ work_item_id: number }>(`/api/work/pick/${workId}`, {}),
+      t("wi.importedRun"),
+    );
+    if (r) {
+      reloadInbox();
+      onImported();
+      navigate(`/work-items/${r.work_item_id}`);
+    }
   };
   return (
     <section className="card wi-hasaki">
@@ -346,11 +467,11 @@ export function WorkItemsPage({ query }: { query: string }) {
     syncUrl(source, statusF, queryText);
   };
 
-  const { data, error, loading, refreshing, reload } = useApi<any[]>(
+  const { data, error, loading, refreshing, reload } = useApi<WorkItemRow[]>(
     `/api/work-items${source ? `?source=${source}` : ""}`,
     [source],
   );
-  const { data: meta } = useApi<any>("/api/meta");
+  const { data: meta } = useApi<{ jiraEnabled?: boolean }>("/api/meta");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
   const [form, setForm] = useState({ title: "", project: "", description: "" });
   const [paste, setPaste] = useState("");
@@ -366,10 +487,17 @@ export function WorkItemsPage({ query }: { query: string }) {
       });
     }
     const r = await act(
-      () => api<any>("/api/work-items/import", { source: src, payload }),
+      () =>
+        api<{ item?: { id: number }; work_item_id?: number }>("/api/work-items/import", {
+          source: src,
+          payload,
+        }),
       t("wi.importedOnly"),
     );
-    if (r) (setPaste(""), navigate(`/work-items/${r.item?.id ?? r.work_item_id}`));
+    if (r) {
+      setPaste("");
+      navigate(`/work-items/${r.item?.id ?? r.work_item_id}`);
+    }
   };
 
   const counts = useMemo(() => {
@@ -560,7 +688,7 @@ export function WorkItemsPage({ query }: { query: string }) {
             <button
               disabled={!form.title.trim()}
               onClick={async () => {
-                const w = await act(() => api<any>("/api/work-items", form));
+                const w = await act(() => api<{ id: number }>("/api/work-items", form));
                 if (w) navigate(`/work-items/${w.id}`);
               }}
             >
@@ -608,7 +736,7 @@ export function WorkItemsPage({ query }: { query: string }) {
                   className="ghost"
                   onClick={async () => {
                     const r = await act(() =>
-                      api<any>("/api/work-items/import", {
+                      api<{ item: { id: number } }>("/api/work-items/import", {
                         source: "jira",
                         key: jiraKey,
                       }),
@@ -653,7 +781,10 @@ function DescriptionEditor({
       t("wi.savedDesc"),
     );
     setBusy(false);
-    if (r) (setEditing(false), onSaved());
+    if (r) {
+      setEditing(false);
+      onSaved();
+    }
   };
   return (
     <div>
@@ -731,7 +862,7 @@ const fmtDur = (ms: number | null) => {
 };
 
 /** "What did the run do?" — a factual summary of a finished run (steps, code, tests, PRs, decisions, problems). */
-export function RunSummaryCard({ runs }: { runs: any[] }) {
+export function RunSummaryCard({ runs }: { runs: Array<{ id: number; status: string }> }) {
   const { t } = useI18n();
   const finished = useMemo(
     () => (runs ?? []).filter((r) => FINISHED.includes(r.status)).sort((a, b) => b.id - a.id),
@@ -744,7 +875,7 @@ export function RunSummaryCard({ runs }: { runs: any[] }) {
     data: s,
     error,
     loading,
-  } = useApi<any>(current ? `/api/runs/${current}/summary${refresh ? "?refresh=1" : ""}` : null, [
+  } = useApi<RunSummary>(current ? `/api/runs/${current}/summary${refresh ? "?refresh=1" : ""}` : null, [
     refresh,
   ]);
   if (!finished.length) return null;
@@ -789,7 +920,7 @@ export function RunSummaryCard({ runs }: { runs: any[] }) {
 }
 
 /** Presentational part of the run summary (also rendered standalone for visual checks). */
-export function RunSummaryView({ s }: { s: any }) {
+export function RunSummaryView({ s }: { s: RunSummary }) {
   const { t } = useI18n();
   return (
     <div className="wi-sum-body">
@@ -807,12 +938,12 @@ export function RunSummaryView({ s }: { s: any }) {
         </span>
         {s.changes.length > 0 && (
           <span>
-            <b>{s.changes.reduce((n: number, c: any) => n + c.files.length, 0)}</b> {t("sum.files")}{" "}
+            <b>{s.changes.reduce((n, c) => n + c.files.length, 0)}</b> {t("sum.files")}{" "}
             <span className="wi-sum-add">
-              +{s.changes.reduce((n: number, c: any) => n + c.additions, 0)}
+              +{s.changes.reduce((n, c) => n + c.additions, 0)}
             </span>{" "}
             <span className="wi-sum-del">
-              −{s.changes.reduce((n: number, c: any) => n + c.deletions, 0)}
+              −{s.changes.reduce((n, c) => n + c.deletions, 0)}
             </span>
           </span>
         )}
@@ -829,7 +960,7 @@ export function RunSummaryView({ s }: { s: any }) {
 
       <div className="wi-sum-h">{t("sum.done")}</div>
       <ol className="wi-sum-steps">
-        {s.steps.map((st: any) => (
+        {s.steps.map((st) => (
           <li key={st.key} className={`wi-sum-step st-${st.status}`}>
             <div className="wi-sum-step-head">
               {st.status === "COMPLETED" ? (
@@ -851,9 +982,9 @@ export function RunSummaryView({ s }: { s: any }) {
             {st.lists.length > 0 && (
               <details className="wi-sum-more">
                 <summary>
-                  {st.lists.map((l: any) => `${l.label} (${l.items.length})`).join(" · ")}
+                  {st.lists.map((l) => `${l.label} (${l.items.length})`).join(" · ")}
                 </summary>
-                {st.lists.map((l: any) => (
+                {st.lists.map((l) => (
                   <div key={l.label} className="wi-sum-list">
                     {st.lists.length > 1 && <div className="muted small">{l.label}</div>}
                     <ul>
@@ -872,7 +1003,7 @@ export function RunSummaryView({ s }: { s: any }) {
       {s.changes.length > 0 && (
         <>
           <div className="wi-sum-h">{t("sum.changes")}</div>
-          {s.changes.map((c: any) => (
+          {s.changes.map((c) => (
             <details key={c.repo} className="wi-sum-repo">
               <summary>
                 <b>{c.repo}</b> <span className="mono small">{c.branch}</span> ·{" "}
@@ -882,13 +1013,13 @@ export function RunSummaryView({ s }: { s: any }) {
                 {t("sum.nCommits", { n: c.commits.length })}
                 {c.note && <span className="muted"> · {c.note}</span>}
               </summary>
-              {c.commits.map((cm: any) => (
+              {c.commits.map((cm) => (
                 <div key={cm.hash} className="small">
                   <GitCommit size={12} /> <span className="mono">{cm.hash}</span> {cm.subject}
                 </div>
               ))}
               <ul className="wi-sum-files">
-                {c.files.map((f: any) => (
+                {c.files.map((f) => (
                   <li key={f.path} className="mono small">
                     {f.path} <span className="wi-sum-add">+{f.additions ?? "bin"}</span>{" "}
                     <span className="wi-sum-del">−{f.deletions ?? "bin"}</span>
@@ -904,7 +1035,7 @@ export function RunSummaryView({ s }: { s: any }) {
         <>
           <div className="wi-sum-h">{t("sum.tests")}</div>
           <ul className="wi-sum-plain">
-            {s.tests.map((x: any, n: number) => (
+            {s.tests.map((x, n) => (
               <li key={n}>
                 {x.skipped ? "⏭" : x.passed ? "✅" : "❌"} <b>{x.repo}</b>
                 {x.detail && <span className="muted"> — {x.detail}</span>}
@@ -918,7 +1049,7 @@ export function RunSummaryView({ s }: { s: any }) {
         <>
           <div className="wi-sum-h">{t("common.pullRequests")}</div>
           <ul className="wi-sum-plain">
-            {s.pull_requests.map((p: any) => (
+            {s.pull_requests.map((p) => (
               <li key={p.url}>
                 <b>{p.repo}</b> ·{" "}
                 <a href={p.url} target="_blank" rel="noopener">
@@ -937,7 +1068,7 @@ export function RunSummaryView({ s }: { s: any }) {
         <>
           <div className="wi-sum-h">{t("sum.decisions")}</div>
           <ul className="wi-sum-plain">
-            {s.decisions.map((d: any, n: number) => (
+            {s.decisions.map((d, n) => (
               <li key={n}>
                 {d.kind === "answer" ? (
                   <>
@@ -961,7 +1092,7 @@ export function RunSummaryView({ s }: { s: any }) {
             <AlertTriangle size={13} /> {t("sum.problems")}
           </div>
           <ul className="wi-sum-plain small">
-            {s.problems.map((p: any, n: number) => (
+            {s.problems.map((p, n) => (
               <li key={n}>
                 <span className="mono">
                   {p.step} #{p.attempt}
@@ -977,8 +1108,8 @@ export function RunSummaryView({ s }: { s: any }) {
 }
 
 export function WorkItemDetail({ id }: { id: number }) {
-  const { data: w, error, loading, reload } = useApi<any>(`/api/work-items/${id}`);
-  const { data: wfs } = useApi<any[]>("/api/workflows");
+  const { data: w, error, loading, reload } = useApi<WorkItemDetailView>(`/api/work-items/${id}`);
+  const { data: wfs } = useApi<WorkflowOption[]>("/api/workflows");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
   const { t, locale } = useI18n();
   const [wf, setWf] = useState("feature-implementation");
@@ -993,10 +1124,11 @@ export function WorkItemDetail({ id }: { id: number }) {
   useEffect(() => setSettingsOpen(false), [id]);
   useEffect(() => {
     if (!w || wfTouched) return;
-    api<any>("/api/workflows/route", { text: `${w.title ?? ""}\n${w.description ?? ""}` })
+    api<{ workflow?: string } | null>("/api/workflows/route", {
+      text: `${w.title ?? ""}\n${w.description ?? ""}`,
+    })
       .then((r) => r?.workflow && !wfTouched && setWf(r.workflow))
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [w?.id]);
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
@@ -1008,7 +1140,7 @@ export function WorkItemDetail({ id }: { id: number }) {
     );
   const start = async (mode: "start" | "step" | "pending") => {
     const r = await act(() =>
-      api<any>(`/api/work-items/${id}/runs`, {
+      api<{ id: number }>(`/api/work-items/${id}/runs`, {
         workflow: wf,
         start: mode === "start",
         profile,
@@ -1066,7 +1198,7 @@ export function WorkItemDetail({ id }: { id: number }) {
               source={w.description_source}
               onSaved={reload}
             />
-            {w.attachments?.length > 0 && (
+            {!!w.attachments?.length && (
               <div className="wi-attachments">
                 <div className="wi-attachments-head">{t("wi.attachments")}</div>
                 <div className="wi-attachments-grid">
@@ -1094,7 +1226,7 @@ export function WorkItemDetail({ id }: { id: number }) {
 
           <RunSummaryCard runs={w.runs} />
 
-          {w.runs?.length > 0 && <CostPanel kind="work_item" id={id} />}
+          {!!w.runs?.length && <CostPanel kind="work_item" id={id} />}
 
           <section className="wi-section">
             <div className="wi-section-head">
@@ -1114,7 +1246,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                 <h4>{t("common.pullRequests")}</h4>
               </div>
               <div className="wi-prs">
-                {w.pull_requests.map((p: any) => (
+                {w.pull_requests.map((p) => (
                   <div key={p.id} className="wi-pr">
                     <div className="wi-pr-main">
                       <b>{p.repo}</b> ·{" "}
@@ -1139,13 +1271,13 @@ export function WorkItemDetail({ id }: { id: number }) {
                   events: w.legacy.events.length,
                 })}
               </summary>
-              {w.legacy.questions.map((q: any) => (
+              {w.legacy.questions.map((q) => (
                 <div key={q.id} className="q">
                   <b>{q.question}</b>
                   <div className="muted">→ {q.answer ?? t("wi.unanswered")}</div>
                 </div>
               ))}
-              {w.legacy.events.map((e: any) => (
+              {w.legacy.events.map((e) => (
                 <div key={e.id} className="small">
                   <span className="muted">{time(e.created_at)}</span> <b>{e.kind}</b> {e.content}
                 </div>
@@ -1212,7 +1344,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                 className="ghost sm"
                 onClick={async () => {
                   const r = await act(() =>
-                    api<any>(`/api/work-items/${id}/analyze`, {
+                    api<{ id: number }>(`/api/work-items/${id}/analyze`, {
                       output_locale: outputLocale,
                       agent_provider: agentProvider,
                     }),

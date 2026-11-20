@@ -93,7 +93,7 @@ async function persist(next: SignozConfig | null) {
 function errorMessage(text: string) {
   try {
     const e = JSON.parse(text)?.error;
-    const detail = Array.isArray(e?.errors) ? e.errors.map((x: any) => x?.message).filter(Boolean) : [];
+    const detail = Array.isArray(e?.errors) ? e.errors.map((x: { message?: string } | null) => x?.message).filter(Boolean) : [];
     return [e?.message, ...detail].filter(Boolean).join("; ").slice(0, 600) || null;
   } catch {
     return null;
@@ -481,12 +481,29 @@ export function listServicesQuery(w: Window) {
 
 // ---------------------------------------------------------------- response parsing (documented v5 shapes)
 
-const resultsOf = (json: any): any[] => json?.data?.data?.results ?? json?.data?.results ?? [];
+type SignozResult = {
+  nextCursor?: string;
+  rows?: Array<{ timestamp?: string; data?: Record<string, unknown> }>;
+  aggregations?: Array<{
+    series?: Array<{
+      labels?: Array<{ key?: string | { name?: string }; value?: unknown }>;
+      values?: Array<{ timestamp?: unknown; value?: unknown }>;
+    }>;
+  }>;
+  columns?: Array<{ name?: string }>;
+  data?: unknown[][];
+};
+type SignozResponse = { data?: { data?: { results?: SignozResult[] }; results?: SignozResult[] } } | null | undefined;
+
+const resultsOf = (json: unknown): SignozResult[] => {
+  const d = (json as SignozResponse)?.data;
+  return d?.data?.results ?? d?.results ?? [];
+};
 
 const cut = (v: unknown) => (typeof v === "string" && v.length > 2000 ? `${v.slice(0, 2000)}…` : v);
 
 /** Raw rows with nested attribute maps flattened, deduplicated by id (or timestamp+content). */
-export function parseRaw(json: any) {
+export function parseRaw(json: unknown) {
   const seen = new Set<string>();
   const rows: Array<{ timestamp: string; data: Record<string, unknown> }> = [];
   let nextCursor: string | null = null;
@@ -508,7 +525,7 @@ export function parseRaw(json: any) {
   return { rows, nextCursor };
 }
 
-export function parseTimeSeries(json: any, maxSeries = 50, maxPoints = 120) {
+export function parseTimeSeries(json: unknown, maxSeries = 50, maxPoints = 120) {
   const series: Array<{
     labels: Record<string, string>;
     points: Array<[number, number]>;
@@ -521,9 +538,9 @@ export function parseTimeSeries(json: any, maxSeries = 50, maxPoints = 120) {
         total++;
         if (series.length >= maxSeries) continue;
         const labels: Record<string, string> = {};
-        for (const l of s?.labels ?? []) labels[String(l?.key?.name ?? l?.key ?? "")] = String(l?.value ?? "");
+        for (const l of s?.labels ?? []) labels[String((typeof l?.key === "object" ? l.key?.name : undefined) ?? l?.key ?? "")] = String(l?.value ?? "");
         const values = (s?.values ?? [])
-          .map((v: any) => [Number(v?.timestamp), Number(v?.value)] as [number, number])
+          .map((v) => [Number(v?.timestamp), Number(v?.value)] as [number, number])
           .filter(([t, v]: [number, number]) => Number.isFinite(t) && Number.isFinite(v));
         if (!values.length) continue;
         const nums = values.map((v: [number, number]) => v[1]);
@@ -542,9 +559,9 @@ export function parseTimeSeries(json: any, maxSeries = 50, maxPoints = 120) {
   return { series, total_series: total, truncated: total > series.length };
 }
 
-export function parseScalar(json: any, maxRows = 200) {
-  const r = resultsOf(json)[0] ?? {};
-  const columns: string[] = (r.columns ?? []).map((c: any) => String(c?.name ?? ""));
+export function parseScalar(json: unknown, maxRows = 200) {
+  const r: SignozResult = resultsOf(json)[0] ?? {};
+  const columns: string[] = (r.columns ?? []).map((c) => String(c?.name ?? ""));
   const data: unknown[][] = r.data ?? [];
   return { columns, rows: data.slice(0, maxRows), total_rows: data.length, truncated: data.length > maxRows };
 }
@@ -627,7 +644,7 @@ export const searchTraces = (
 export const getTrace = (a: { trace_id: string; since_minutes?: number; earliest?: string; latest?: string }, scope: SearchScope) =>
   rawQuery(traceById(resolveWindow(a, 24 * 60), a.trace_id), "traces", scope);
 
-async function inline(body: ReturnType<typeof envelope>, scope: SearchScope, parse: (json: any) => { empty: boolean } & Record<string, unknown>) {
+async function inline(body: ReturnType<typeof envelope>, scope: SearchScope, parse: (json: unknown) => { empty: boolean } & Record<string, unknown>) {
   const json = await run(body, scope);
   const parsed = parse(json);
   const stored = await record(body, [], scope, parsed.empty ? EMPTY : "aggregate result returned inline");

@@ -3,24 +3,85 @@ import { api, useApi } from "../api.ts";
 import { act, EmptyState, ErrorBox, Loading, navigate } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
-const number = (v: any, digits = 1) => (v == null ? "—" : Number(v).toFixed(digits));
+type BenchmarkSuite = {
+  id: number;
+  title: string;
+  version: string;
+  cases: number;
+  categories: string[];
+};
+type EvaluationRunRow = {
+  id: number;
+  status: string;
+  configuration: { adapter: string; code_intelligence: boolean; prompt_version: string };
+  finished: number;
+  tasks: number;
+  successes: number;
+  average_score: number | null;
+};
+type ComparedCase = {
+  status: string;
+  quality_score: number | null;
+  data: { evidence: { duration_ms: number } };
+};
+type EvaluationComparison = {
+  report: {
+    verdict: string;
+    sample_note: string;
+    warnings: string[];
+    pairs: Array<{
+      task: string;
+      repetition: number;
+      baseline: ComparedCase | null;
+      candidate: ComparedCase;
+    }>;
+    baseline: unknown;
+    candidate: unknown;
+  };
+};
+type EvaluationRunDetail = {
+  id: number;
+  status: string;
+  workflow_run_id: number;
+  summary: {
+    successes: number;
+    graded: number;
+    median_duration_ms: number | null;
+    p95_duration_ms: number | null;
+    cost_per_success: number | null;
+  };
+  cases: Array<{
+    task_id: string;
+    repetition: number;
+    status: string | null;
+    step_status: string;
+    quality_score: number | null;
+    base_commit: string;
+    origin: unknown;
+    failure_class: string | null;
+    definition: { description: string; expected_behavior: unknown };
+    data: { scoring?: unknown; evidence?: unknown } | null;
+  }>;
+};
+
+const number = (v: unknown, digits = 1) => (v == null ? "—" : Number(v).toFixed(digits));
 export function EvaluationBenchmarks() {
   const { t, status: statusText } = useI18n();
-  const suites = useApi<any[]>("/api/benchmark-suites");
-  const runs = useApi<any>("/api/evaluation-runs");
+  const suites = useApi<BenchmarkSuite[]>("/api/benchmark-suites");
+  const runs = useApi<{ enabled: boolean; runs: EvaluationRunRow[] }>("/api/evaluation-runs");
   const [adapter, setAdapter] = useState("reference"),
     [ci, setCi] = useState(true),
     [repetitions, setRepetitions] = useState(2);
   const [selected, setSelected] = useState<number | null>(null),
     [baseline, setBaseline] = useState(""),
     [candidate, setCandidate] = useState(""),
-    [comparison, setComparison] = useState<any>(null),
-    [detail, setDetail] = useState<any>(null);
+    [comparison, setComparison] = useState<EvaluationComparison | null>(null),
+    [detail, setDetail] = useState<EvaluationRunDetail | null>(null);
   const create = async () => {
     const suite = suites.data?.[0];
     if (!suite) return;
     await act(async () => {
-      const run: any = await api("/api/evaluation-runs", {
+      const run = await api<{ id: number }>("/api/evaluation-runs", {
         suite_id: suite.id,
         request_key: crypto.randomUUID(),
         configuration: {
@@ -33,12 +94,12 @@ export function EvaluationBenchmarks() {
       await api(`/api/evaluation-runs/${run.id}/start`, {});
       runs.reload();
       setSelected(run.id);
-      setDetail(await api(`/api/evaluation-runs/${run.id}`));
+      setDetail(await api<EvaluationRunDetail>(`/api/evaluation-runs/${run.id}`));
     }, t("bench.toast.queued"));
   };
   const inspect = async (id: number) => {
     setSelected(id);
-    setDetail(await api(`/api/evaluation-runs/${id}`));
+    setDetail(await api<EvaluationRunDetail>(`/api/evaluation-runs/${id}`));
   };
   if (suites.error || runs.error)
     return (
@@ -153,7 +214,7 @@ export function EvaluationBenchmarks() {
                 </td>
               </tr>
             ) : (
-              runs.data.runs.map((r: any) => (
+              runs.data.runs.map((r) => (
                 <tr key={r.id}>
                   <td>
                     <button className="ghost sm" onClick={() => inspect(r.id)}>
@@ -183,7 +244,7 @@ export function EvaluationBenchmarks() {
           {t("bench.baseline")}{" "}
           <select value={baseline} onChange={(e) => setBaseline(e.target.value)}>
             <option value="">{t("bench.chooseRun")}</option>
-            {runs.data.runs.map((r: any) => (
+            {runs.data.runs.map((r) => (
               <option key={r.id} value={r.id}>
                 #{r.id}
               </option>
@@ -194,7 +255,7 @@ export function EvaluationBenchmarks() {
           {t("bench.candidate")}{" "}
           <select value={candidate} onChange={(e) => setCandidate(e.target.value)}>
             <option value="">{t("bench.chooseRun")}</option>
-            {runs.data.runs.map((r: any) => (
+            {runs.data.runs.map((r) => (
               <option key={r.id} value={r.id}>
                 #{r.id}
               </option>
@@ -205,11 +266,11 @@ export function EvaluationBenchmarks() {
           disabled={!baseline || !candidate || baseline === candidate}
           onClick={() =>
             act(async () => {
-              const c: any = await api("/api/evaluation-comparisons", {
+              const c = await api<{ id: number }>("/api/evaluation-comparisons", {
                 baseline_id: Number(baseline),
                 candidate_id: Number(candidate),
               });
-              setComparison(await api(`/api/evaluation-comparisons/${c.id}`));
+              setComparison(await api<EvaluationComparison>(`/api/evaluation-comparisons/${c.id}`));
             }, t("bench.toast.compared"))
           }
         >
@@ -235,7 +296,7 @@ export function EvaluationBenchmarks() {
                 </tr>
               </thead>
               <tbody>
-                {comparison.report.pairs.map((p: any) => (
+                {comparison.report.pairs.map((p) => (
                   <tr key={`${p.task}-${p.repetition}`}>
                     <td>
                       {p.task} / {p.repetition}
@@ -308,7 +369,7 @@ export function EvaluationBenchmarks() {
               cost: number(detail.summary.cost_per_success, 4),
             })}
           </p>
-          {detail.cases.map((c: any) => (
+          {detail.cases.map((c) => (
             <details key={`${c.task_id}-${c.repetition}`}>
               <summary>
                 {c.task_id} / {c.repetition} · {c.status ? (statusText(c.status) || c.status) : c.step_status} · {t("cl.score", { n: number(c.quality_score) })}

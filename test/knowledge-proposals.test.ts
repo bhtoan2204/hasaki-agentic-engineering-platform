@@ -40,8 +40,9 @@ describe("ruleTerms", () => {
 
   test("handles empty, null, or undefined input", () => {
     assert.equal(ruleTerms("").size, 0);
-    assert.equal(ruleTerms(null as any).size, 0);
-    assert.equal(ruleTerms(undefined as any).size, 0);
+    const untypedRuleTerms = ruleTerms as (text: string | null | undefined) => Set<string>;
+    assert.equal(untypedRuleTerms(null).size, 0);
+    assert.equal(untypedRuleTerms(undefined).size, 0);
   });
 });
 

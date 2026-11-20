@@ -689,7 +689,7 @@ export async function importFromRepositories(
         /\.claude$/.test(x.key),
     )) {
       const repo = await repositories.get(c.scope_ref!);
-      const desc = String((c.metadata as any)?.description ?? "").slice(0, 400);
+      const desc = String(c.metadata?.description ?? "").slice(0, 400);
       if (repo && !repo.description && desc)
         await repositories.upsert(repo.name, { description: desc });
     }
@@ -704,7 +704,7 @@ export async function importFromRepositories(
   if (opts.only) return report;
   const produced = new Set(candidates.map((c) => c.key));
   const scannedSet = new Set(scanned);
-  for (const it of (await knowledge.list()) as any[]) {
+  for (const it of await knowledge.list()) {
     if (!it.enabled || produced.has(it.key) || !it.metadata?.imported_from_repository) continue;
     const sources: { repo: string; path: string }[] = it.metadata.source ?? [];
     if (!sources.length || !sources.every((s) => scannedSet.has(s.repo))) continue;
@@ -874,7 +874,7 @@ async function applyCandidates(
   // Deleted by an admin (knowledge_deletions): never re-created while the source file still exists.
   const deleted = await knowledge.deletedKeys();
   for (const c of candidates) {
-    const parent = (c.metadata as any)?.parent_skill as string | undefined;
+    const parent = c.metadata?.parent_skill as string | undefined;
     if (deleted.has(c.key) || (parent && deleted.has(parent))) {
       report.skipped.push({
         path: c.source.map((s) => `${s.repo}/${s.path}`).join(", "),
@@ -946,12 +946,10 @@ async function applyCandidates(
         hashOf(v.applicability ?? {}) === hashOf(c.applicability ?? {}) &&
         hashOf(v.metadata?.source ?? null) === hashOf(source) &&
         // Parser fixes (e.g. folded YAML descriptions) change these without touching the file.
-        (v.metadata?.description ?? null) === ((item.metadata as any)?.description ?? null) &&
-        hashOf(v.metadata?.companions ?? null) ===
-          hashOf((item.metadata as any)?.companions ?? null) &&
+        (v.metadata?.description ?? null) === (item.metadata?.description ?? null) &&
+        hashOf(v.metadata?.companions ?? null) === hashOf(item.metadata?.companions ?? null) &&
         !!v.metadata?.imported_from_repository === opts.owned &&
-        !!v.metadata?.imported_from_local_skill ===
-          !!(item.metadata as any)?.imported_from_local_skill &&
+        !!v.metadata?.imported_from_local_skill === !!item.metadata?.imported_from_local_skill &&
         existing.scope_type === c.scope_type &&
         existing.scope_ref === (c.scope_ref ?? "");
       action = same && !wasRetired ? "unchanged" : "update";

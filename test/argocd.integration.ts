@@ -1,4 +1,5 @@
 import { test, after, before } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { pool } from "../src/db/pool.ts";
@@ -108,7 +109,7 @@ before(async () => {
     json(404, { error: "not found" });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  config.argocd.baseUrl = `http://127.0.0.1:${(server.address() as any).port}/`;
+  config.argocd.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
 });
 after(async () => {
   server.close();
@@ -152,7 +153,7 @@ test("token is validated against Argo CD before saving; tools work and are read-
   assert.equal(st.user, "dev@hasaki.vn");
 
   assert.deepEqual(
-    (await listApps("payment zalopay")).map((a: any) => a.app),
+    (await listApps("payment zalopay")).map((a) => a.app),
     ["payment-zalopay-qc"],
   );
   const tree = await appPods("payment-zalopay-qc");
@@ -170,7 +171,7 @@ test("token is validated against Argo CD before saving; tools work and are read-
     ctx,
   );
   assert.equal(r.ok, true, String(r.error));
-  const logs: any = r.result;
+  const logs = r.result as Awaited<ReturnType<typeof podLogs>>;
   assert.equal(logs.namespace, "payment", "namespace looked up from the resource tree");
   assert.equal(logs.count, 2);
   assert.match(logs.lines[0].line, /Bearer \*\*\*/);
@@ -181,7 +182,7 @@ test("token is validated against Argo CD before saving; tools work and are read-
   assert.equal(q.searchParams.get("sinceSeconds"), "1800");
   assert.equal(q.searchParams.get("follow"), "false");
 
-  const wl: any = await podLogs({
+  const wl = await podLogs({
     app: "payment-zalopay-qc",
     workload: { kind: "Deployment", name: "payment-zalopay" },
   });

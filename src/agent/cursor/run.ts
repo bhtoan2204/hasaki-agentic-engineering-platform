@@ -17,7 +17,7 @@ import {
 import { envFromExecution, dispatchPlatformTool } from "../platformTools.ts";
 import { newMetrics } from "../metrics.ts";
 import type { AgentMetrics } from "../metrics.ts";
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, type ExecFileException } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,7 +74,8 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
       maxBuffer: 1024 * 1024,
     });
     help = `${out.stdout}\n${out.stderr}`;
-  } catch (e: any) {
+  } catch (caught) {
+    const e = caught as ExecFileException;
     const missing = e?.code === "ENOENT";
     return finish({
       ok: false,
@@ -116,7 +117,8 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
           error:
             "Cursor CLI is not authenticated. Run `agent login` on this machine, or set CURSOR_API_KEY. The platform will not fall back to Claude.",
         });
-    } catch (e: any) {
+    } catch (caught) {
+      const e = caught as ExecFileException;
       return finish({
         ok: false,
         bin,
@@ -228,7 +230,9 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     const kill = () => {
       try {
         if (child.pid) process.kill(-child.pid, "SIGKILL");
-      } catch {}
+      } catch {
+        /* ignore: group already gone */
+      }
     };
     const limits = turnLimits(
       input.ctx.attempt.effective_agent,
@@ -347,9 +351,8 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
           workspaces: [...new Set([...input.policy.workspaces, ...ws])],
         };
         const decision = cursorToolDecision(ev.tool_call, policy, input.cwd);
-        const path = String(
-          (shape?.body as any)?.args?.path ?? (shape?.body as any)?.args?.file_path ?? "",
-        );
+        const body = shape?.body as { args?: { path?: unknown; file_path?: unknown } } | undefined;
+        const path = String(body?.args?.path ?? body?.args?.file_path ?? "");
         const outside =
           (shape?.name === "write" || shape?.name === "edit") &&
           path &&
@@ -552,7 +555,9 @@ export async function cursorComplete(
   const kill = () => {
     try {
       if (child.pid) process.kill(-child.pid, "SIGKILL");
-    } catch {}
+    } catch {
+      /* ignore: group already gone */
+    }
   };
   signal?.addEventListener("abort", kill, { once: true });
   let stdout = "";

@@ -42,6 +42,122 @@ import "./Investigations.css";
 
 export const INVESTIGATION_WORKFLOW = "production-incident-investigation";
 
+type RunListItem = {
+  id: number;
+  definition_key: string;
+  title: string;
+  status: string;
+  created_at: string;
+};
+type SplunkInfo = {
+  connected: boolean;
+  environment: string;
+  timezone: string;
+  limits: { defaultIndexes: string[] };
+};
+type InvestigationStep = {
+  key: string;
+  name: string;
+  status: string;
+  error?: string | null;
+  config?: { action?: string } | null;
+  output?: { status?: string; business_summary?: string } | null;
+};
+type InvestigationRun = {
+  id: number;
+  title: string;
+  status: string;
+  definition_key: string;
+  output_locale?: string | null;
+  steps: InvestigationStep[];
+};
+type FollowUp = { id: number; status: string };
+type EvidenceRef = { event_type: string; evidence_ref: string };
+type TimelineEntry = EvidenceRef & {
+  timestamp?: string | null;
+  attempt?: number | null;
+  delivery?: { n: number; of: number } | null;
+  conflicts?: string[];
+  service?: string | null;
+  ids?: Record<string, string[]>;
+  confidence: string;
+  time_original?: string | null;
+  precision?: string | null;
+  link?: { via?: string[] } | null;
+  payload?: string | null;
+  excerpt?: string | null;
+};
+type LatencyEntry = {
+  label: string;
+  attempt?: number | null;
+  confidence: string;
+  from: EvidenceRef;
+  to: EvidenceRef;
+  shared_ids?: string[];
+  qualification?: string;
+  notes?: string[];
+  latency_ms?: number | null;
+  latency_text?: string | null;
+};
+type InvestigationReport = {
+  status: string;
+  report_markdown?: string;
+  summary: {
+    entity?: string | null;
+    outbound_at?: string | null;
+    partner_response: Array<{
+      key: string;
+      label: string;
+      at?: string | null;
+      latency?: string | null;
+      confidence: string;
+      qualification?: string;
+    }>;
+    shipping_label?: { at: string; kind: string } | null;
+    outbound_message?: {
+      evidence_ref: string;
+      payload?: string | null;
+      excerpt?: string | null;
+    } | null;
+    missing?: Array<{ objective: string; needed: string }>;
+  };
+};
+type SearchEvent = {
+  ref: string;
+  time?: { iso?: string } | null;
+  service?: string | null;
+  message: string;
+  raw: string;
+};
+type InvestigationSearch = {
+  id: number;
+  status: string;
+  step_key?: string | null;
+  earliest: string;
+  latest: string;
+  result_count?: number | null;
+  truncated?: boolean;
+  duration_ms?: number | null;
+  mode: string;
+  splunk_url?: string | null;
+  query: string;
+  error?: string | null;
+  events?: SearchEvent[];
+};
+type InvestigationData = {
+  environment: string;
+  timezone: string;
+  report: InvestigationReport | null;
+  correlation: {
+    timeline?: TimelineEntry[];
+    rejected?: Array<EvidenceRef & { reason: string }>;
+    uncorrelated?: Array<EvidenceRef & { timestamp?: string | null }>;
+  } | null;
+  latency: { latencies?: LatencyEntry[] } | null;
+  searches: InvestigationSearch[];
+  follow_ups?: FollowUp[];
+};
+
 /**
  * Investigation content follows the language chosen for the run (output_locale), not the UI language: the labels
  * around the agent's text must match it. Falls back to the UI language for runs without a recorded choice.
@@ -60,8 +176,8 @@ export function InvestigationsPage({ id }: { id?: number }) {
 
 function InvestigationHome() {
   const { t } = useI18n();
-  const { data: runs, error, loading, reload } = useApi<any[]>("/api/runs");
-  const { data: splunk } = useApi<any>("/api/integrations/splunk");
+  const { data: runs, error, loading, reload } = useApi<RunListItem[]>("/api/runs");
+  const { data: splunk } = useApi<SplunkInfo>("/api/integrations/splunk");
   const mine = useMemo(
     () => (runs ?? []).filter((r) => r.definition_key === INVESTIGATION_WORKFLOW),
     [runs],
@@ -131,7 +247,13 @@ function InvestigationHome() {
   );
 }
 
-function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () => void }) {
+function NewInvestigation({
+  splunk,
+  onStarted,
+}: {
+  splunk: SplunkInfo | null;
+  onStarted: () => void;
+}) {
   const { t, locale } = useI18n();
   const [request, setRequest] = useState("");
   const [indexes, setIndexes] = useState("");
@@ -139,13 +261,13 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
   const [latest, setLatest] = useState("");
   const [outputLocale, setOutputLocale] = useState(locale);
   const [environment, setEnvironment] = useState<string>(splunk?.environment ?? "production");
-  const { data: argo } = useApi<any>("/api/integrations/argocd");
-  const [route, setRoute] = useState<any>(null);
+  const { data: argo } = useApi<{ loggedIn: boolean }>("/api/integrations/argocd");
+  const [route, setRoute] = useState<{ workflow: string | null } | null>(null);
   useEffect(() => {
     if (request.trim().length < 12) return setRoute(null);
     const h = setTimeout(
       () =>
-        api("/api/workflows/route", { text: request })
+        api<{ workflow: string | null }>("/api/workflows/route", { text: request })
           .then(setRoute)
           .catch(() => setRoute(null)),
       500,
@@ -161,7 +283,7 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
   const start = async () => {
     const run = await act(
       () =>
-        api("/api/runs", {
+        api<{ id: number }>("/api/runs", {
           workflow: INVESTIGATION_WORKFLOW,
           title: request.trim().split("\n")[0].slice(0, 120),
           inputs: {
@@ -246,7 +368,10 @@ function NewInvestigation({ splunk, onStarted }: { splunk: any; onStarted: () =>
             />
           </Field>
           <Field label={t("inv.reportLanguage")}>
-            <select value={outputLocale} onChange={(e) => setOutputLocale(e.target.value as any)}>
+            <select
+              value={outputLocale}
+              onChange={(e) => setOutputLocale(e.target.value as UiLocale)}
+            >
               <option value="vi">Tiếng Việt</option>
               <option value="en">English</option>
             </select>
@@ -275,16 +400,25 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 function InvestigationDetail({ id }: { id: number }) {
-  const { data: run, loading: runLoading, reload: reloadRun, error } = useApi<any>(`/api/runs/${id}`);
+  const {
+    data: run,
+    loading: runLoading,
+    reload: reloadRun,
+    error,
+  } = useApi<InvestigationRun>(`/api/runs/${id}`);
   const t = useRunT(run?.output_locale);
-  const { data: inv, loading: invLoading, reload } = useApi<any>(`/api/runs/${id}/investigation`);
+  const {
+    data: inv,
+    loading: invLoading,
+    reload,
+  } = useApi<InvestigationData>(`/api/runs/${id}/investigation`);
   useLive(id, (p) => {
     if (isStateChange(p)) reloadRun();
     reload(); // searches and evidence arrive with transcript events
   });
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const events = useMemo(() => {
-    const m = new Map<string, any>();
+    const m = new Map<string, SearchEvent>();
     for (const s of inv?.searches ?? []) for (const e of s.events ?? []) m.set(e.ref, e);
     return m;
   }, [inv]);
@@ -292,8 +426,8 @@ function InvestigationDetail({ id }: { id: number }) {
   if ((runLoading || invLoading) && (!run || !inv)) return <Loading />;
   if (!run || !inv) return <EmptyState title={t("common.notFound")} />;
   const report = inv.report;
-  const timeline: any[] = inv.correlation?.timeline ?? [];
-  const latencies: any[] = inv.latency?.latencies ?? [];
+  const timeline = inv.correlation?.timeline ?? [];
+  const latencies = inv.latency?.latencies ?? [];
   const maxMs = Math.max(1, ...latencies.map((l) => l.latency_ms ?? 0));
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   return (
@@ -317,7 +451,7 @@ function InvestigationDetail({ id }: { id: number }) {
         }
       />
       <div className="inv-steps" aria-label={t("inv.progress")}>
-        {run.steps.map((s: any) => (
+        {run.steps.map((s) => (
           <span key={s.key} className={`inv-step st-${s.status}`} title={s.error ?? s.status}>
             <Badge s={s.status} /> {s.name}
           </span>
@@ -348,7 +482,7 @@ function InvestigationDetail({ id }: { id: number }) {
               <dd>{report.summary.entity ?? "—"}</dd>
               <dt>{t("inv.sentAt")}</dt>
               <dd className="mono">{report.summary.outbound_at ?? t("inv.unknown")}</dd>
-              {report.summary.partner_response.map((p: any) => (
+              {report.summary.partner_response.map((p) => (
                 <Fragment key={p.key}>
                   <dt>{p.label}</dt>
                   <dd>
@@ -386,9 +520,9 @@ function InvestigationDetail({ id }: { id: number }) {
                 </pre>
               </div>
             )}
-            {report.summary.missing?.length > 0 && (
+            {(report.summary.missing?.length ?? 0) > 0 && (
               <ul className="inv-missing small">
-                {report.summary.missing.map((m: any, i: number) => (
+                {report.summary.missing?.map((m, i) => (
                   <li key={i}>
                     <b>{m.objective}</b>: {m.needed}
                   </li>
@@ -480,7 +614,7 @@ function InvestigationDetail({ id }: { id: number }) {
                       <td>{e.service ?? "—"}</td>
                       <td className="small">
                         {Object.entries(e.ids ?? {})
-                          .map(([k, v]: any) => `${k}=${v.join(",")}`)
+                          .map(([k, v]) => `${k}=${v.join(",")}`)
                           .join(" · ")}
                       </td>
                       <td>
@@ -493,7 +627,7 @@ function InvestigationDetail({ id }: { id: number }) {
                     {open[e.evidence_ref] && (
                       <tr className="inv-expand">
                         <td colSpan={7}>
-                          {e.conflicts?.map((c: string, i: number) => (
+                          {e.conflicts?.map((c, i) => (
                             <div key={i} className="inv-warn small">
                               {c}
                             </div>
@@ -534,17 +668,17 @@ function InvestigationDetail({ id }: { id: number }) {
             <summary>
               {t("inv.excluded", {
                 n:
-                  (inv.correlation.rejected?.length ?? 0) +
-                  (inv.correlation.uncorrelated?.length ?? 0),
+                  (inv.correlation?.rejected?.length ?? 0) +
+                  (inv.correlation?.uncorrelated?.length ?? 0),
               })}
             </summary>
             <ul>
-              {inv.correlation.rejected?.map((r: any, i: number) => (
+              {inv.correlation?.rejected?.map((r, i) => (
                 <li key={`r${i}`}>
                   <code>{r.evidence_ref}</code> {r.event_type}: {r.reason}
                 </li>
               ))}
-              {inv.correlation.uncorrelated?.map((u: any) => (
+              {inv.correlation?.uncorrelated?.map((u) => (
                 <li key={u.evidence_ref}>
                   <code>{u.evidence_ref}</code> {u.event_type} {u.timestamp} —{" "}
                   {t("inv.uncorrelated")}
@@ -564,7 +698,7 @@ function InvestigationDetail({ id }: { id: number }) {
         {!inv.searches.length ? (
           <p className="muted small">{t("inv.noSearches")}</p>
         ) : (
-          inv.searches.map((s: any) => (
+          inv.searches.map((s) => (
             <SearchCard
               key={s.id}
               t={t}
@@ -602,7 +736,7 @@ function SearchCard({
   onToggle,
 }: {
   t: (k: string, p?: Record<string, string | number>) => string;
-  s: any;
+  s: InvestigationSearch;
   runId: number;
   onPasted: () => void;
   open: boolean;
@@ -680,7 +814,7 @@ function SearchCard({
       )}
       {open && (
         <div className="inv-events">
-          {(s.events ?? []).map((e: any) => (
+          {(s.events ?? []).map((e) => (
             <details key={e.ref}>
               <summary className="small">
                 <code>{e.ref}</code> <span className="mono">{e.time?.iso ?? "—"}</span> ·{" "}
@@ -696,11 +830,11 @@ function SearchCard({
 }
 
 /** Compact card for the run view sidebar. */
-export function InvestigationRunCard({ run }: { run: any }) {
+export function InvestigationRunCard({ run }: { run: InvestigationRun }) {
   const t = useRunT(run.output_locale);
   if (run.definition_key !== INVESTIGATION_WORKFLOW) return null;
   const rep = run.steps.find(
-    (s: any) => s.config?.action === "investigation_report" || s.key === "report",
+    (s) => s.config?.action === "investigation_report" || s.key === "report",
   )?.output;
   return (
     <div className="rv-card">
@@ -727,9 +861,34 @@ export function InvestigationRunCard({ run }: { run: any }) {
  * Localized view of an investigation step's output (findings agent, report) for the step inspector. The raw JSON
  * stays below it: property names and enums are technical keys and are not translated.
  */
-export function InvestigationOutput({ value, locale }: { value: any; locale?: string | null }) {
+type OutputAnswer = { question?: string; answer?: string; evidence_refs?: unknown };
+type OutputFinding = {
+  classification: string;
+  statement?: string;
+  code_location?: string;
+  evidence_refs?: unknown;
+};
+type OutputListItem = string | { hypothesis?: string; supporting_refs?: unknown };
+type InvestigationStepOutput = {
+  report_markdown?: unknown;
+  status?: string;
+  answers?: unknown;
+  findings?: unknown;
+  hypotheses?: unknown;
+  missing_evidence?: unknown;
+  next_steps?: unknown;
+};
+
+export function InvestigationOutput({
+  value: raw,
+  locale,
+}: {
+  value: unknown;
+  locale?: string | null;
+}) {
   const t = useRunT(locale);
-  if (!value || typeof value !== "object") return null;
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as InvestigationStepOutput;
   if (typeof value.report_markdown === "string")
     return (
       <div className="rv-card">
@@ -745,10 +904,10 @@ export function InvestigationOutput({ value, locale }: { value: any; locale?: st
         <Markdown text={value.report_markdown} />
       </div>
     );
-  const answers: any[] = Array.isArray(value.answers) ? value.answers : [];
-  const findings: any[] = Array.isArray(value.findings) ? value.findings : [];
+  const answers: OutputAnswer[] = Array.isArray(value.answers) ? value.answers : [];
+  const findings: OutputFinding[] = Array.isArray(value.findings) ? value.findings : [];
   if (!answers.length && !findings.length) return null;
-  const refs = (r: any) =>
+  const refs = (r: unknown) =>
     Array.isArray(r) && r.length ? (
       <span className="small muted">
         {" "}
@@ -758,7 +917,7 @@ export function InvestigationOutput({ value, locale }: { value: any; locale?: st
         ))}
       </span>
     ) : null;
-  const list = (title: string, items: any[]) =>
+  const list = (title: string, items: OutputListItem[]) =>
     items.length > 0 && (
       <>
         <h5 className="inv-out-h">{title}</h5>
@@ -830,9 +989,9 @@ function FixButton({
   followUps,
   t,
 }: {
-  run: any;
+  run: InvestigationRun;
   hasReport: boolean;
-  followUps?: any[];
+  followUps?: FollowUp[];
   t: (k: string, p?: Record<string, string | number>) => string;
 }) {
   const active = (followUps ?? []).find((r) => !["FAILED", "CANCELED"].includes(r.status));
@@ -857,7 +1016,7 @@ function FixButton({
         });
         if (!ok) return;
         const r = await act(
-          () => api<any>(`/api/runs/${run.id}/investigation/fix`, {}),
+          () => api<{ run_id: number }>(`/api/runs/${run.id}/investigation/fix`, {}),
           t("inv.fixStarted"),
         );
         if (r?.run_id) navigate(`#/runs/${r.run_id}`);

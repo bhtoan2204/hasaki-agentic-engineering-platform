@@ -232,7 +232,7 @@ export async function investigationParse(ctx: ExecutionContext): Promise<ExecRes
 const parsedOf = (ctx: ExecutionContext): (ParsedRequest & { indexes?: string[] }) | null =>
   (Object.values(ctx.input.upstream).find(
     (u) => u.output?.anchors && u.output?.time?.earliest_ms !== undefined,
-  )?.output as any) ?? null;
+  )?.output) ?? null;
 
 function labelsFrom(ctx: ExecutionContext): EventLabel[] {
   const labels: EventLabel[] = [];

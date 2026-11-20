@@ -30,6 +30,7 @@ import { buildReport, validateFindings } from "../src/investigation/report.ts";
 import { routeWorkflow } from "../src/investigation/service.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
 import { validateSpec } from "../src/workflow/graph.ts";
+import type { WorkflowSpec } from "../src/workflow/types.ts";
 import * as F from "../src/investigation/fixtures.ts";
 
 const TZ = "Asia/Ho_Chi_Minh";
@@ -180,7 +181,7 @@ test("evidence redaction: customer PII, credentials and signed URL parameters ne
     sanitizeText("phone=0912345678 password=hunter22 order_code=ABC123456"),
     'phone="***" password="***" order_code=ABC123456',
   );
-  const compact = compactEvent(req) as any;
+  const compact: Record<string, unknown> = compactEvent(req);
   assert.equal(compact.raw, undefined, "model-facing view carries no raw text");
   // an id that would look like a card number is extracted before masking
   const card = ev("S1:0", "2026-11-10T08:00:00+07:00", {
@@ -607,7 +608,7 @@ test("template: registered read-only with category and triggers; read-only mode 
       validateSpec({
         ...t.spec,
         steps: [
-          ...(t.spec as any).steps,
+          ...(t.spec as WorkflowSpec).steps,
           { key: "fix", type: "coding_agent", depends_on: ["report"] },
         ],
       }),
@@ -616,8 +617,9 @@ test("template: registered read-only with category and triggers; read-only mode 
 });
 
 test("intent routing: production log requests route to the investigation, ordinary coding tasks do not", () => {
-  const t = (TEMPLATES.find((x) => x.key === "production-incident-investigation")!.spec as any)
-    .triggers;
+  const t = (
+    TEMPLATES.find((x) => x.key === "production-incident-investigation")!.spec as WorkflowSpec
+  ).triggers!;
   const defs = [
     { key: "production-incident-investigation", name: "PII", triggers: t },
     { key: "feature-implementation", name: "FI", triggers: null },
@@ -687,9 +689,9 @@ test("language follows the run's chosen output locale, not the language of the r
 
 test("QC environment: no Splunk queries are planned, the plan says logs come from Argo CD", async () => {
   const { planInvestigation } = await import("../src/investigation/steps.ts");
-  const prod: any = planInvestigation(F.REQUEST_VI, {});
+  const prod = planInvestigation(F.REQUEST_VI, {});
   assert.ok(prod.initial_queries.length > 0, "production plans SPL");
-  const qc: any = planInvestigation(F.REQUEST_VI, { environment: "qc" });
+  const qc = planInvestigation(F.REQUEST_VI, { environment: "qc" });
   assert.deepEqual(qc.initial_queries, []);
   assert.match(JSON.stringify(qc.notes), /Argo CD/);
 });

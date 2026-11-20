@@ -37,15 +37,19 @@ function nativeName(name: string): string | null {
   return null;
 }
 
-function toolInput(native: string, body: any): Record<string, unknown> {
-  const args = body?.args ?? body ?? {};
-  if (typeof args === "string") {
+function toolInput(native: string, body: unknown): Record<string, unknown> {
+  const raw =
+    (body && typeof body === "object" ? (body as { args?: unknown }).args : undefined) ??
+    body ??
+    {};
+  if (typeof raw === "string") {
     try {
-      return JSON.parse(args);
+      return JSON.parse(raw);
     } catch {
-      return native === "Bash" ? { command: args } : { path: args };
+      return native === "Bash" ? { command: raw } : { path: raw };
     }
   }
+  const args = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   if (native === "Bash") return { command: String(args.command ?? args.cmd ?? "") };
   if (native === "Grep") return { pattern: args.pattern ?? args.query ?? "", path: args.path };
   if (native === "Glob")

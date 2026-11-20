@@ -16,6 +16,8 @@ import { approvedScopeIn } from "./evidence.ts";
  */
 
 const exec = promisify(execFile);
+const record = (v: unknown): Record<string, unknown> =>
+  v !== null && typeof v === "object" ? (v as Record<string, unknown>) : {};
 
 export type Verdict = "PASS" | "FAIL" | "BLOCKED";
 export interface Finding {
@@ -34,14 +36,14 @@ export interface VerdictOutput {
   scope_check?: Record<string, unknown>;
 }
 
-export const isIndependent = (cfg: Record<string, any> | undefined) => cfg?.independent === true;
+export const isIndependent = (cfg: Record<string, unknown> | undefined) => cfg?.independent === true;
 
 /**
  * Upstream outputs an independent verifier may see. Coding steps contribute ONLY their platform-generated
  * `verification` record; agent steps downstream of a coding step (other reviews) are dropped; pre-implementation steps
  * (analysis, plan, approvals, discovery) and deterministic steps (tests, commands) are kept.
  */
-export function independentUpstream<T extends { output: any }>(
+export function independentUpstream<T extends { output: unknown }>(
   graph: Array<Pick<StepSpec, "key" | "type" | "depends_on">>,
   upstream: Record<string, T>,
 ): Record<string, T> {
@@ -51,8 +53,10 @@ export function independentUpstream<T extends { output: any }>(
   while (grew) {
     grew = false;
     for (const s of graph)
-      if (!afterCoding.has(s.key) && s.depends_on.some((d) => coding.has(d) || afterCoding.has(d)))
-        (afterCoding.add(s.key), (grew = true));
+      if (!afterCoding.has(s.key) && s.depends_on.some((d) => coding.has(d) || afterCoding.has(d))) {
+        afterCoding.add(s.key);
+        grew = true;
+      }
   }
   const type = new Map(graph.map((s) => [s.key, s.type]));
   const out: Record<string, T> = {};
@@ -60,17 +64,18 @@ export function independentUpstream<T extends { output: any }>(
     if (coding.has(key)) {
       // scope_check is platform-computed (files vs approved scope) plus deviations the author admitted: evidence, not claims of success.
       // symptom_signals is platform-computed; remediation is the author's classification, kept to be checked, not trusted.
+      const o = record(u.output);
       const scope = {
-        ...(u.output?.scope_check ? { scope_check: u.output.scope_check } : {}),
-        ...(u.output?.symptom_signals ? { symptom_signals: u.output.symptom_signals } : {}),
-        ...(u.output?.remediation ? { remediation: u.output.remediation } : {}),
-        ...(u.output?.regression_proof ? { regression_proof: u.output.regression_proof } : {}),
+        ...(o.scope_check ? { scope_check: o.scope_check } : {}),
+        ...(o.symptom_signals ? { symptom_signals: o.symptom_signals } : {}),
+        ...(o.remediation ? { remediation: o.remediation } : {}),
+        ...(o.regression_proof ? { regression_proof: o.regression_proof } : {}),
       };
       out[key] = {
         ...u,
-        output: u.output?.verification
+        output: o.verification
           ? {
-              verification: u.output.verification,
+              verification: o.verification,
               ...scope,
               note: "coding agent's own summary/decisions withheld (independent verification)",
             }
@@ -156,8 +161,8 @@ export function independentSubmissionGap(
   return null;
 }
 
-export function normalizeVerdict(raw: any): VerdictOutput {
-  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+export function normalizeVerdict(raw: unknown): VerdictOutput {
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? record(raw) : {};
   const summary = typeof o.summary === "string" ? o.summary : "";
   const blocked = (reason: string, findings: Finding[] = []): VerdictOutput => ({
     verdict: "BLOCKED",
@@ -173,18 +178,19 @@ export function normalizeVerdict(raw: any): VerdictOutput {
     );
   if (o.findings !== undefined && o.findings !== null && !Array.isArray(o.findings))
     return blocked("the verifier returned malformed findings (not a list)");
-  const findings: Finding[] = (o.findings ?? []).map((f: any) => ({
-    severity: SEVERITIES.has(String(f?.severity).toLowerCase())
-      ? (String(f.severity).toLowerCase() as Finding["severity"])
-      : "medium",
-    file: String(f?.file ?? ""),
-    line:
-      Number.isFinite(Number(f?.line)) && f?.line !== null && f?.line !== ""
-        ? Number(f.line)
-        : null,
-    explanation: String(f?.explanation ?? f?.issue ?? ""),
-    evidence: String(f?.evidence ?? f?.suggestion ?? ""),
-  }));
+  const findings: Finding[] = (Array.isArray(o.findings) ? o.findings : []).map((item: unknown) => {
+    const f = record(item);
+    return {
+      severity: SEVERITIES.has(String(f.severity).toLowerCase())
+        ? (String(f.severity).toLowerCase() as Finding["severity"])
+        : "medium",
+      file: String(f.file ?? ""),
+      line:
+        Number.isFinite(Number(f.line)) && f.line !== null && f.line !== "" ? Number(f.line) : null,
+      explanation: String(f.explanation ?? f.issue ?? ""),
+      evidence: String(f.evidence ?? f.suggestion ?? ""),
+    };
+  });
   let verdict: Verdict | null = hasVerdict ? (named as Verdict) : null;
   if (
     verdict &&
@@ -229,15 +235,17 @@ export function normalizeVerdict(raw: any): VerdictOutput {
  */
 export function enforceScopeReview(
   v: VerdictOutput,
-  raw: any,
-  upstream: Record<string, { output: any; status?: string }>,
+  raw: unknown,
+  upstream: Record<string, { output: unknown; status?: string }>,
 ): VerdictOutput {
   const scope = approvedScopeIn(upstream);
   if (!scope) return v;
-  const c = raw && typeof raw === "object" ? raw : null;
-  const coding = Object.values(upstream)
-    .map((u) => u.output?.scope_check)
-    .find(Boolean);
+  const c = raw && typeof raw === "object" ? record(raw) : null;
+  const coding = record(
+    Object.values(upstream)
+      .map((u) => record(u.output).scope_check)
+      .find(Boolean),
+  );
   const out: VerdictOutput = { ...v, scope_check: c ?? undefined } as VerdictOutput;
   if (v.verdict !== "PASS") return out;
   const blocked = (reason: string): VerdictOutput => ({
@@ -249,8 +257,10 @@ export function enforceScopeReview(
     return blocked(
       "scope review missing: a PASS must include scope_check against the approved proposal",
     );
-  const listed = (k: string) =>
-    Array.isArray(c[k]) ? c[k].filter((x: unknown) => String(x ?? "").trim()) : [];
+  const listed = (k: string) => {
+    const v = c[k];
+    return Array.isArray(v) ? v.filter((x: unknown) => String(x ?? "").trim()) : [];
+  };
   if (c.in_scope !== true)
     return blocked("the verifier did not confirm that the diff stays inside the approved scope");
   if (listed("unsupported_assumptions").length)
@@ -266,9 +276,9 @@ export function enforceScopeReview(
     (scope.risk === "HIGH" && c.invariants_preserved !== true)
   )
     return blocked("business invariants of the HIGH-risk change were not confirmed preserved");
-  if (coding?.requires_reapproval && !coding?.reapproved)
+  if (coding.requires_reapproval && !coding.reapproved)
     return blocked(
-      `the implementation deviates from the approved scope without renewed approval: ${(coding.reasons ?? []).join("; ")}`,
+      `the implementation deviates from the approved scope without renewed approval: ${(Array.isArray(coding.reasons) ? coding.reasons : []).join("; ")}`,
     );
   return out;
 }
@@ -382,7 +392,7 @@ export interface PublishState {
  * clean worktree. Returns the reasons the PR must not be opened (empty = allowed).
  */
 export function verificationGate(
-  verifiers: Array<{ key: string; status: string; output: any }>,
+  verifiers: Array<{ key: string; status: string; output: unknown }>,
   publish: Record<string, PublishState>,
 ): string[] {
   const problems: string[] = [];
@@ -399,7 +409,7 @@ export function verificationGate(
       );
   }
   for (const v of verifiers) {
-    const o = v.output ?? {};
+    const o = record(v.output);
     if (
       v.status !== "COMPLETED" ||
       o.independent !== true ||
@@ -539,10 +549,11 @@ export async function evidenceDrift(
 }
 
 /** Real test evidence among upstream outputs (command steps with results). */
-export function hasTestEvidence(upstream: Record<string, { output: any }>) {
-  return Object.values(upstream).some(
-    (u) => Array.isArray(u.output?.results) && u.output.results.length > 0,
-  );
+export function hasTestEvidence(upstream: Record<string, { output: unknown }>) {
+  return Object.values(upstream).some((u) => {
+    const results = record(u.output).results;
+    return Array.isArray(results) && results.length > 0;
+  });
 }
 
 /**
@@ -552,18 +563,16 @@ export function hasTestEvidence(upstream: Record<string, { output: any }>) {
 export const REVIEW_POLICY_VERSION = "2026-11-18.1";
 
 /** Test evidence among upstream outputs, reduced to what a verdict depends on (results + the commits they ran on). */
-export function testDigestOf(upstream: Record<string, { output: any }>) {
+export function testDigestOf(upstream: Record<string, { output: unknown }>) {
   return Object.entries(upstream)
-    .filter(
-      ([, u]) =>
-        Array.isArray(u.output?.results) || u.output?.tested_heads || u.output?.verification,
-    )
+    .map(([k, u]) => [k, record(u.output)] as const)
+    .filter(([, o]) => Array.isArray(o.results) || o.tested_heads || o.verification)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, u]) => [
+    .map(([k, o]) => [
       k,
-      u.output?.results ?? null,
-      u.output?.tested_heads ?? null,
-      u.output?.verification?.passed ?? null,
+      o.results ?? null,
+      o.tested_heads ?? null,
+      record(o.verification).passed ?? null,
     ]);
 }
 
@@ -603,22 +612,23 @@ export function verificationKey(input: {
 
 /** A prior PASS may be reused only for the identical key AND identical verified commits. */
 export function reusablePass(
-  prior: { output: any } | null | undefined,
+  prior: { output: unknown } | null | undefined,
   key: string,
   heads: Record<string, string>,
 ) {
-  const o = prior?.output;
+  const o = record(prior?.output);
   if (
-    !o ||
+    !prior?.output ||
     o.verdict !== "PASS" ||
     o.approved !== true ||
     o.independent !== true ||
     o.verification_key !== key
   )
     return false;
+  const verified = o.verified_heads as Record<string, string> | undefined;
   return (
-    staleVerification(o.verified_heads, heads).length === 0 &&
-    Object.keys(o.verified_heads ?? {}).length === Object.keys(heads).length
+    staleVerification(verified, heads).length === 0 &&
+    Object.keys(verified ?? {}).length === Object.keys(heads).length
   );
 }
 
@@ -627,15 +637,15 @@ export function reusablePass(
  * base tips; otherwise the whole diff must be reviewed again.
  */
 export function incrementalCheckpoint(
-  prior: { id: number; output: any } | null | undefined,
+  prior: { id: number; output: unknown } | null | undefined,
   heads: Record<string, string>,
   baseTips: Record<string, string>,
 ) {
-  const o = prior?.output;
-  if (!o || o.verdict !== "FAIL" || o.independent !== true || !Array.isArray(o.findings))
+  const o = record(prior?.output);
+  if (!prior?.output || o.verdict !== "FAIL" || o.independent !== true || !Array.isArray(o.findings))
     return null;
-  const was: Record<string, string> = o.verified_heads ?? {};
-  const tips: Record<string, string> | undefined = o.verified_base_tips;
+  const was = (o.verified_heads as Record<string, string> | undefined) ?? {};
+  const tips = o.verified_base_tips as Record<string, string> | undefined;
   const repos = Object.keys(heads).sort();
   if (!tips || repos.join("\0") !== Object.keys(was).sort().join("\0")) return null;
   if (repos.some((r) => !was[r] || !baseTips[r] || tips[r] !== baseTips[r])) return null;
@@ -693,8 +703,12 @@ export function incrementalReviewBrief(checkpoint: {
 }
 
 /** Deterministic scope results recorded by coding steps that still lack a renewed approval. A PASS cannot override them. */
-export function unresolvedScope(rows: Array<{ key: string; sc: any }>) {
+export function unresolvedScope(rows: Array<{ key: string; sc: unknown }>) {
   return rows
-    .filter((r) => r.sc?.requires_reapproval === true && !r.sc?.reapproved)
-    .map((r) => `${r.key}: ${(r.sc.reasons ?? []).slice(0, 3).join("; ") || "scope violation"}`);
+    .map((r) => ({ key: r.key, sc: record(r.sc) }))
+    .filter(({ sc }) => sc.requires_reapproval === true && !sc.reapproved)
+    .map(
+      ({ key, sc }) =>
+        `${key}: ${(Array.isArray(sc.reasons) ? sc.reasons : []).slice(0, 3).join("; ") || "scope violation"}`,
+    );
 }

@@ -8,6 +8,7 @@ import type {
   OfficeSnapshot,
   QuestionLite,
   StepLite,
+  ToolInput,
 } from "./types.ts";
 
 /**
@@ -51,7 +52,7 @@ const GRAPH: GraphStepLite[] = [
   },
 ];
 
-type Ev = { kind: string; name?: string; input?: any; content?: string };
+type Ev = { kind: string; name?: string; input?: ToolInput; content?: string };
 interface Frame {
   caption: string;
   status: Record<string, string>;
@@ -248,7 +249,10 @@ export function usePreviewOffice(enabled: boolean) {
       s.status,
     );
     if (active && !tm.started[s.key]) tm.started[s.key] = now;
-    if (s.status === P) (delete tm.started[s.key], delete tm.finished[s.key]);
+    if (s.status === P) {
+      delete tm.started[s.key];
+      delete tm.finished[s.key];
+    }
     if (["COMPLETED", "FAILED", "CANCELED", "SKIPPED"].includes(s.status) && !tm.finished[s.key])
       tm.finished[s.key] = now;
     if (!["COMPLETED", "FAILED", "CANCELED", "SKIPPED"].includes(s.status))

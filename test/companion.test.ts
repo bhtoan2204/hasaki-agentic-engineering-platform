@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { companionActivity, prioritizeCompanionRuns } from "../web/src/office/companionState.ts";
-import type { OfficeSnapshot, StepLite } from "../web/src/office/types.ts";
+import type { AgentView, OfficeSnapshot, StepLite } from "../web/src/office/types.ts";
 
 const run = (status = "RUNNING"): OfficeSnapshot["run"] => ({
   id: 42,
@@ -14,13 +14,13 @@ const step = (status = "RUNNING", type = "coding_agent"): StepLite => ({
   type,
   status,
 });
-const agent: any = { role: "developer", pose: "work", activity: "typing", retrying: false };
+const agent = { role: "developer", pose: "work", activity: "typing", retrying: false } as AgentView;
 const state = (
   over: {
     run?: OfficeSnapshot["run"];
     step?: StepLite | null;
-    agent?: any;
-    attempt?: any;
+    agent?: AgentView | null;
+    attempt?: Parameters<typeof companionActivity>[3] & { status?: string };
     pending?: boolean;
   } = {},
 ) =>
@@ -49,10 +49,7 @@ test("companion: approval, question, handoff, failure, retry, and success use re
   assert.equal(state({ step: step("WAITING_APPROVAL") }).state, "APPROVAL_REQUIRED");
   assert.equal(state({ step: step("WAITING_INPUT") }).state, "ASKING");
   assert.equal(state({ pending: true, step: step("READY") }).action, "question");
-  assert.equal(
-    state({ step: { ...step("WAITING_INPUT"), handoff: true } as any }).state,
-    "HANDOFF",
-  );
+  assert.equal(state({ step: { ...step("WAITING_INPUT"), handoff: true } }).state, "HANDOFF");
   assert.equal(state({ step: step("FAILED") }).state, "FAILED");
   assert.equal(
     state({ step: step("FAILED"), attempt: { normalized_failure_category: "QUOTA_EXHAUSTED" } })

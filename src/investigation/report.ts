@@ -35,6 +35,24 @@ export interface Finding {
   notes?: string[];
 }
 
+export interface InvestigationHypothesis {
+  hypothesis: string;
+  supporting_refs: string[];
+  status: string;
+}
+
+/** Agent outputs of the findings and code steps: untrusted JSON, checked where used. */
+interface RawFindings {
+  findings?: unknown;
+  hypotheses?: unknown;
+  missing_evidence?: unknown;
+  next_steps?: unknown;
+}
+interface RawCode {
+  code_locations?: unknown;
+  log_patterns?: unknown;
+}
+
 export interface ReportInput {
   locale: "vi" | "en";
   parsed: ParsedRequest;
@@ -44,8 +62,8 @@ export interface ReportInput {
   latencies: LatencyResult[];
   completeness: { complete: boolean; missing: Array<{ objective: string; needed: string }> };
   searches: SearchSummary[];
-  findings?: any;
-  code?: any;
+  findings?: RawFindings | null;
+  code?: RawCode | null;
   access: { connected: boolean; manual_pending: number };
   /** Iterative round state (hypotheses, impact, coverage, stop reason); absent for callers that do not evaluate it. */
   round?: RoundState;
@@ -172,11 +190,11 @@ const RANK: Record<Confidence, number> = { confirmed: 2, inferred: 1, unknown: 0
 
 /** Cap the findings agent's claims by the evidence they cite. */
 export function validateFindings(
-  raw: any,
+  raw: RawFindings | null | undefined,
   timeline: TimelineEvent[],
   knownRefs: Set<string>,
   locale: "vi" | "en" = "en",
-): { findings: Finding[]; hypotheses: any[]; dropped: string[] } {
+): { findings: Finding[]; hypotheses: InvestigationHypothesis[]; dropped: string[] } {
   const byRef = new Map(timeline.map((t) => [t.evidence_ref, t]));
   for (const t of timeline) for (const d of t.duplicates ?? []) byRef.set(d, t);
   const dropped: string[] = [];
@@ -224,7 +242,7 @@ export function validateFindings(
       ...(notes.length ? { notes } : {}),
     });
   }
-  const hypotheses = (Array.isArray(raw?.hypotheses) ? raw.hypotheses : []).map((h: any) => ({
+  const hypotheses = (Array.isArray(raw?.hypotheses) ? raw.hypotheses : []).map((h) => ({
     hypothesis: String(h?.statement ?? h?.hypothesis ?? h ?? "").slice(0, 800),
     supporting_refs: (Array.isArray(h?.supporting_refs) ? h.supporting_refs : [])
       .map(String)
@@ -507,7 +525,7 @@ export function buildReport(i: ReportInput) {
   const code = [
     ...(Array.isArray(i.code?.code_locations) ? i.code.code_locations : []),
     ...(Array.isArray(i.code?.log_patterns)
-      ? i.code.log_patterns.filter((p: any) => p?.code_location)
+      ? i.code.log_patterns.filter((p) => p?.code_location)
       : []),
   ];
   if (code.length) {

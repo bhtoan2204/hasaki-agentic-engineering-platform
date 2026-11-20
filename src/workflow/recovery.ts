@@ -138,7 +138,7 @@ async function recoverInterrupted(
     [attempt.id],
   );
   if (handoff)
-    (pending as any).provider_handoff = {
+    pending.provider_handoff = {
       id: handoff.id,
       source_attempt_id: attempt.id,
       status: "BLOCKED",

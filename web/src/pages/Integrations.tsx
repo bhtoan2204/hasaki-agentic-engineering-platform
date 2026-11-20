@@ -159,9 +159,66 @@ function PasteForm({
 
 // ---------------------------------------------------------------- investigation sources (agent tools, read-only)
 
+type ArgoStatus = {
+  baseUrl: string;
+  loggedIn: boolean;
+  user: string | null;
+  expiresAt: string | null;
+  expired: boolean;
+};
+type KafkaStatus = {
+  baseUrl: string;
+  connected: boolean;
+  expired: boolean;
+  user: string | null;
+  clusters?: Array<{ name: string; status: string; brokers: number; topics: number }>;
+};
+type SplunkStatus = {
+  baseUrl: string;
+  connected: boolean;
+  expired: boolean;
+  user: string | null;
+  roles: string[];
+  checkedAt: string | null;
+  shared: { configured: boolean; valid: boolean; allowed: boolean; user: string | null };
+  limits: { maxMinutes: number; maxResults: number; allowedIndexes: string[] };
+};
+type SplunkTestResult = {
+  ok: boolean;
+  auth: string;
+  user: string;
+  read_only: boolean;
+  warning?: string;
+  indexes: Array<
+    { index: string; ok: true; events_15m: number } | { index: string; ok: false; error: string }
+  >;
+  latency_ms: number;
+};
+type SignozStatus = {
+  configured: boolean;
+  enabled: boolean;
+  connected: boolean;
+  base_url: string | null;
+  auth: "api_key" | "session" | null;
+  token_set: boolean;
+  last_ok_at: string | null;
+  last_error: string | null;
+};
+type SignozTestResult =
+  { ok: true; latency_ms: number } | { ok: false; kind: string; message: string };
+type VaultStatus = {
+  baseUrl: string;
+  connected: boolean;
+  expired: boolean;
+  user: string | null;
+  policies: string[];
+  expiresAt: string | null;
+  renewable: boolean;
+};
+
 function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/argocd");
+  const { data: st, reload } = useApi<ArgoStatus>("/api/integrations/argocd");
   const health: Health = !st ? "loading" : st.loggedIn ? "ok" : st.expired ? "expired" : "off";
   const href = st?.baseUrl ?? "https://argocd-qc-v2.hasaki.dev";
   return (
@@ -219,7 +276,7 @@ function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
 
 function Kafka(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/kafka?check=1");
+  const { data: st, reload } = useApi<KafkaStatus>("/api/integrations/kafka?check=1");
   const health: Health = !st ? "loading" : st.connected ? "ok" : st.expired ? "expired" : "off";
   return (
     <Row
@@ -233,7 +290,7 @@ function Kafka(p: { open: boolean; onToggle: (id: string) => void }) {
         st?.connected ? (
           <>
             {st.user ?? t("ig.signedIn")}
-            {st.clusters?.map((c: any) => (
+            {st.clusters?.map((c) => (
               <span key={c.name}>
                 {" "}
                 · {c.name} ({t("ig.kafka.topics", { n: c.topics })})
@@ -293,7 +350,7 @@ function Kafka(p: { open: boolean; onToggle: (id: string) => void }) {
 
 function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/splunk");
+  const { data: st, reload } = useApi<SplunkStatus>("/api/integrations/splunk");
   const health: Health = !st ? "loading" : st.connected ? "ok" : st.expired ? "expired" : "off";
   const check = async () => (await act(() => api("/api/integrations/splunk?check=1"))) && reload();
   return (
@@ -381,13 +438,13 @@ function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
 /** SigNoz: the user's own domain and API key or session tokens (never sent back), enable switch, test and disconnect. */
 function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/signoz");
+  const { data: st, reload } = useApi<SignozStatus>("/api/integrations/signoz");
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [auth, setAuth] = useState<"api_key" | "session" | null>(null);
   const [token, setToken] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [refreshToken, setRefreshToken] = useState("");
-  const [res, setRes] = useState<any>(null);
+  const [res, setRes] = useState<SignozTestResult | null | undefined>(null);
   const mode = auth ?? st?.auth ?? "api_key";
   const keepStored = st?.token_set && st?.auth === mode;
   const health: Health = !st
@@ -511,7 +568,7 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
             <button
               className="sm ghost"
               onClick={async () => {
-                setRes(await act(() => api("/api/integrations/signoz/test", {})));
+                setRes(await act(() => api<SignozTestResult>("/api/integrations/signoz/test", {})));
                 reload();
               }}
             >
@@ -577,7 +634,7 @@ function SplunkToken({ onSaved, connected }: { onSaved: () => void; connected: b
 /** Test connection: identity, read-only posture and access to the default indexes. Never shows credentials. */
 function SplunkTest({ connected }: { connected: boolean }) {
   const { t } = useI18n();
-  const [res, setRes] = useState<any>(null);
+  const [res, setRes] = useState<SplunkTestResult | null | undefined>(null);
   const [busy, setBusy] = useState(false);
   if (!connected) return null;
   return (
@@ -588,7 +645,9 @@ function SplunkTest({ connected }: { connected: boolean }) {
         onClick={async () => {
           setBusy(true);
           setRes(
-            await act(() => api("/api/integrations/splunk/test", {})).finally(() => setBusy(false)),
+            await act(() => api<SplunkTestResult>("/api/integrations/splunk/test", {})).finally(
+              () => setBusy(false),
+            ),
           );
         }}
       >
@@ -603,7 +662,7 @@ function SplunkTest({ connected }: { connected: boolean }) {
           · {res.user} ({res.auth}) · {res.latency_ms} ms
           {!res.read_only && <div className="ig-err-text">{res.warning}</div>}
           <ul>
-            {res.indexes.map((i: any) => (
+            {res.indexes.map((i) => (
               <li key={i.index}>
                 <code>{i.index}</code>:{" "}
                 {i.ok ? t("ig.splunk.indexOk", { n: i.events_15m }) : i.error}
@@ -617,9 +676,9 @@ function SplunkTest({ connected }: { connected: boolean }) {
 }
 
 /** Administrators: a shared read-only service-account token; members use it only when splunk.allowSharedToken is on. */
-function SplunkShared({ st, onSaved }: { st: any; onSaved: () => void }) {
+function SplunkShared({ st, onSaved }: { st: SplunkStatus | null; onSaved: () => void }) {
   const { t } = useI18n();
-  const { data: me } = useApi<any>("/api/auth/me");
+  const { data: me } = useApi<{ user: { role: string } }>("/api/auth/me");
   if (me?.user?.role !== "admin" || !st) return null;
   return (
     <details className="ig-more">
@@ -662,7 +721,7 @@ function SplunkShared({ st, onSaved }: { st: any; onSaved: () => void }) {
 
 function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/vault?check=1");
+  const { data: st, reload } = useApi<VaultStatus>("/api/integrations/vault?check=1");
   const health: Health = !st ? "loading" : st.connected ? "ok" : st.expired ? "expired" : "off";
   return (
     <Row
@@ -744,9 +803,37 @@ const EMPTY_DB = {
   enabled: true,
 };
 
+type DbInfo = {
+  key: string;
+  project: string;
+  repositories?: string[];
+  environment?: string;
+  database_name: string;
+  description?: string;
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  username?: string;
+  has_password?: boolean;
+  last_status?: "ok" | "failed" | null;
+  last_checked_at?: string | null;
+  last_used_at?: string | null;
+  last_error_kind?: string | null;
+  last_error?: string | null;
+  last_version?: string | null;
+  last_can_write?: boolean | null;
+  last_latency_ms?: number | null;
+};
+type DbForm = Omit<typeof EMPTY_DB, "port" | "max_rows" | "timeout_ms"> & {
+  port: number | string;
+  max_rows: number | string;
+  timeout_ms: number | string;
+  has_password?: boolean;
+};
+
 /** A database's state as shown: a test in progress wins, then disabled, then the last known result. */
 type DbState = "checking" | "ok" | "failed" | "untested" | "off";
-const dbState = (d: any, checking: Set<string>): DbState =>
+const dbState = (d: DbInfo, checking: Set<string>): DbState =>
   checking.has(d.key)
     ? "checking"
     : d.enabled === false
@@ -767,7 +854,7 @@ function DbCard({
   onEdit,
   onDelete,
 }: {
-  d: any;
+  d: DbInfo;
   state: DbState;
   isAdmin: boolean;
   onTest: () => void;
@@ -859,8 +946,8 @@ function DbCard({
  */
 function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; isAdmin: boolean }) {
   const { t } = useI18n();
-  const { data, reload } = useApi<any[]>("/api/integrations/databases");
-  const [form, setForm] = useState<any>(null);
+  const { data, reload } = useApi<DbInfo[]>("/api/integrations/databases");
+  const [form, setForm] = useState<DbForm | null>(null);
   const [checking, setChecking] = useState<Set<string>>(new Set());
   const list = data ?? [];
   const enabled = list.filter((d) => d.enabled !== false);
@@ -897,9 +984,12 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
       )
       .map((d) => d.key);
     void test(stale);
-  }, [p.isAdmin, data]); // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (k: string, v: unknown) => setForm({ ...form, [k]: v });
+  }, [p.isAdmin, data]);
+  const set = (k: keyof DbForm, v: DbForm[keyof DbForm]) => {
+    if (form) setForm({ ...form, [k]: v });
+  };
   const save = async () => {
+    if (!form) return;
     const body = {
       ...Object.fromEntries(
         Object.entries(form).filter(
@@ -917,7 +1007,10 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
         .filter(Boolean),
       password: form.password || undefined,
     };
-    const r = await act(() => api<any>("/api/integrations/databases", body), t("ig.db.saved"));
+    const r = await act(
+      () => api<{ key: string }>("/api/integrations/databases", body),
+      t("ig.db.saved"),
+    );
     if (r) {
       setForm(null);
       reload();
@@ -1117,7 +1210,44 @@ function sourceLabel(t: (k: string) => string, source: string) {
   return source === "platform" || source === "env" ? t(`ig.src.${source}`) : "";
 }
 
-function EnvNote({ st, which, reload }: { st: any; which: string; reload: () => void }) {
+type BitbucketStatus = {
+  configured: boolean;
+  source: string;
+  personal: boolean;
+  envAvailable: boolean;
+  user: string | null;
+  token: string;
+  workspace: string;
+  reviewers: string[];
+};
+type GithubStatus = { configured: boolean; source: string; personal: boolean; token: string };
+type TelegramPrefKey = "approvals" | "questions" | "failures" | "completions" | "interactive";
+type TelegramPrefs = Partial<Record<TelegramPrefKey, boolean>> & { locale?: string };
+type TelegramStatus = {
+  configured: boolean;
+  canManage: boolean;
+  myChatId: string | null;
+  source: string;
+  envAvailable: boolean;
+  chatId: string | null;
+  botToken: string;
+  mode: string;
+  modeSource: string;
+  needsRebind?: boolean;
+  binding?: { telegram_user_id: string; chat_id: string; created_at: string } | null;
+  preferences?: TelegramPrefs;
+  receiver?: { active: boolean; mode: string | null };
+};
+
+function EnvNote({
+  st,
+  which,
+  reload,
+}: {
+  st: { source: string; envAvailable: boolean } | null;
+  which: string;
+  reload: () => void;
+}) {
   const { t } = useI18n();
   if (st?.source === "env")
     return (
@@ -1142,7 +1272,7 @@ function EnvNote({ st, which, reload }: { st: any; which: string; reload: () => 
 
 function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/bitbucket");
+  const { data: st, reload } = useApi<BitbucketStatus>("/api/integrations/bitbucket");
   const [f, setF] = useState<{
     user?: string;
     token: string;
@@ -1158,11 +1288,14 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
   const save = async () => {
     setBusy(true);
     const r = await act(
-      () => api<any>("/api/integrations/bitbucket", { ...v, token: f.token }),
+      () => api<BitbucketStatus>("/api/integrations/bitbucket", { ...v, token: f.token }),
       t("ig.bb.saved"),
     );
     setBusy(false);
-    if (r) (setF({ token: "" }), reload());
+    if (r) {
+      setF({ token: "" });
+      reload();
+    }
   };
   return (
     <Row
@@ -1254,14 +1387,20 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
 
 function GitHubAccount(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/github");
+  const { data: st, reload } = useApi<GithubStatus>("/api/integrations/github");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
-    const r = await act(() => api<any>("/api/integrations/github", { token }), t("ig.gh.saved"));
+    const r = await act(
+      () => api<GithubStatus>("/api/integrations/github", { token }),
+      t("ig.gh.saved"),
+    );
     setBusy(false);
-    if (r) (setToken(""), reload());
+    if (r) {
+      setToken("");
+      reload();
+    }
   };
   return (
     <Row
@@ -1526,7 +1665,7 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
 
 function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<any>("/api/integrations/telegram");
+  const { data: st, reload } = useApi<TelegramStatus>("/api/integrations/telegram");
   const [token, setToken] = useState("");
   const [chatId, setChatId] = useState<string>();
   const [mine, setMine] = useState<string>();
@@ -1534,11 +1673,11 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
     null,
   );
   const [bindingLink, setBindingLink] = useState("");
-  const [prefs, setPrefs] = useState<Record<string, any>>({});
+  const [prefs, setPrefs] = useState<TelegramPrefs>({});
   const [busy, setBusy] = useState(false);
   const chat = chatId ?? st?.chatId ?? "";
   const connect = async () => {
-    const result = await act(() => api<any>("/api/integrations/telegram/connect", {}));
+    const result = await act(() => api<{ url: string }>("/api/integrations/telegram/connect", {}));
     if (result) setBindingLink(result.url);
   };
   const disconnect = async () => {
@@ -1646,7 +1785,10 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
               disabled={!token && !st.configured}
               onClick={async () => {
                 const result = await act(() =>
-                  api<any[]>("/api/integrations/telegram/chats", { botToken: token }),
+                  api<Array<{ id: string; name: string; type: string }>>(
+                    "/api/integrations/telegram/chats",
+                    { botToken: token },
+                  ),
                 );
                 if (result) setChats(result);
               }}

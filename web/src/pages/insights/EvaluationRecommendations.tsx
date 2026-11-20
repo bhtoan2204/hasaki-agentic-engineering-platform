@@ -3,19 +3,51 @@ import { api, useApi } from "../../api.ts";
 import { act, Empty, ErrorBox, Field, SkeletonRows } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
+
+type ProviderPlan = Array<{ provider: string }>;
+type Recommendation = {
+  id: number;
+  version: string;
+  evidence_hash: string;
+  category: string;
+  decision: {
+    status: string;
+    plan: ProviderPlan;
+    confidence: string;
+    samples?: number;
+    distinct_tasks?: number;
+    success_rate: number | null;
+    median_ms: number | null;
+    cost_availability?: string;
+    reason: string;
+    evidence?: Array<{
+      plan?: ProviderPlan;
+      samples: number;
+      tasks: number;
+      evaluation_ids?: number[];
+    }>;
+  };
+};
+type OptimizationPolicy = {
+  id: number;
+  recommendation_id: number;
+  category: string;
+  step_type: string;
+  enabled: boolean;
+};
 export function EvaluationRecommendations() {
   const { t } = useI18n();
-  const rows = useApi<any[]>("/api/agent-recommendations"),
-    policies = useApi<any[]>("/api/agent-optimization");
+  const rows = useApi<Recommendation[]>("/api/agent-recommendations"),
+    policies = useApi<OptimizationPolicy[]>("/api/agent-optimization");
   const [category, setCategory] = useState(""),
     [cohort, setCohort] = useState(""),
-    [active, setActive] = useState<any>(null),
+    [active, setActive] = useState<Recommendation | null>(null),
     [consent, setConsent] = useState(false),
     [cost, setCost] = useState(false);
   const generate = () =>
     act(async () => {
       const range = new URLSearchParams(location.hash.split("?")[1] ?? "");
-      const r = await api("/api/agent-recommendations", {
+      const r = await api<Recommendation>("/api/agent-recommendations", {
         ...Object.fromEntries(
           ["from", "to", "timezone"].filter((k) => range.has(k)).map((k) => [k, range.get(k)]),
         ),
@@ -56,11 +88,11 @@ export function EvaluationRecommendations() {
           {t("an.eval.insufficientEvidence")}
         </Empty>
       )}
-      {show && (
+      {show && d && (
         <>
           <h4>
             {d.status === "RECOMMENDED"
-              ? `${t("an.eval.recommended")}: ${d.plan.map((p: any) => p.provider).join(" → ")}`
+              ? `${t("an.eval.recommended")}: ${d.plan.map((p) => p.provider).join(" → ")}`
               : t("an.eval.insufficientOrUnavailable")}
           </h4>
           <p className="small">
@@ -78,9 +110,9 @@ export function EvaluationRecommendations() {
             <p className="mono small">
               {show.version} · {show.evidence_hash}
             </p>
-            {d.evidence?.map((e: any, i: number) => (
+            {d.evidence?.map((e, i) => (
               <p key={i} className="small">
-                {e.plan?.map((p: any) => p.provider).join(" → ")} · {e.samples} / {e.tasks} ·{" "}
+                {e.plan?.map((p) => p.provider).join(" → ")} · {e.samples} / {e.tasks} ·{" "}
                 {e.evaluation_ids?.map((id: number) => (
                   <a
                     style={{ marginRight: 8 }}

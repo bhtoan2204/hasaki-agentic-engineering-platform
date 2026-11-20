@@ -3,7 +3,7 @@ import { inbox } from "./db.ts";
 import { workApi } from "./hasakiAuth.ts";
 import { usersWithSecret } from "./auth/secrets.ts";
 import { execution } from "./auth/execution.ts";
-import { normalizeTask } from "./prompt.ts";
+import { normalizeTask, type HasakiTask } from "./prompt.ts";
 import { ingestWorkItem } from "./workitems/intake.ts";
 import { notify } from "./notify.ts";
 import { applyAutomationPolicy, workItems, type WorkItemRow } from "./workitems/service.ts";
@@ -11,17 +11,17 @@ import { applyAutomationPolicy, workItems, type WorkItemRow } from "./workitems/
 const today = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD, local time
 
 /** Find the task array in a list response without depending on its exact envelope. */
-function findTaskArray(json: any): any[] {
-  const seen = new Set<any>();
-  const walk = (v: any): any[] | null => {
+function findTaskArray(json: unknown): Array<HasakiTask & { project_name?: string }> {
+  const seen = new Set<object>();
+  const walk = (v: unknown): Array<HasakiTask & { project_name?: string }> | null => {
     if (!v || typeof v !== "object" || seen.has(v)) return null;
     seen.add(v);
     if (Array.isArray(v))
       return v.length && v.every((x) => x && typeof x === "object" && "code" in x && "name" in x)
         ? v
         : null;
-    for (const k of Object.keys(v)) {
-      const r = walk(v[k]);
+    for (const child of Object.values(v)) {
+      const r = walk(child);
       if (r) return r;
     }
     return null;

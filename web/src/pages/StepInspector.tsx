@@ -1,7 +1,7 @@
 import { ProviderHandoff } from "../ProviderHandoff.tsx";
 import { EvidenceSummary, hasEvidence } from "../EvidenceGate.tsx";
 import { StepAgentOverride } from "../StepAgentOverride.tsx";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { agentKey, asProvider, type AgentProvider } from "../agentProvider.tsx";
 import {
   AlertTriangle,
@@ -62,11 +62,11 @@ import {
 import { stepTypeIcon } from "../graph.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { Transcript } from "./Transcript.tsx";
-import { ReportPanel } from "./Report.tsx";
+import { ReportPanel, type ReportArtifact, type ReportSpec, type TaskReport } from "./Report.tsx";
 import { InvestigationOutput } from "./Investigations.tsx";
 import "./RunView.css";
 import { CheckpointsCard, DecisionBadge, DecisionsCard, HarnessCard } from "./ExecutionCards";
-import type { DecisionAction } from "../decisions";
+import type { CheckpointView, Decision, DecisionAction, HarnessEvidence } from "../decisions";
 
 const AGENT_TYPES = ["agent", "coding_agent"];
 type Tab =
@@ -80,6 +80,368 @@ type Tab =
   | "artifacts"
   | "history";
 
+/** The run fields the inspector reads; the run page passes its full run detail. */
+export interface InspectorRun {
+  id: number;
+  status: string;
+  agent_provider: string;
+  output_locale?: string | null;
+  selected_repositories: string[];
+  allowed_repositories: string[];
+  worker?: { local?: boolean } | null;
+}
+
+interface RepoCandidate {
+  repo: string;
+  score: number;
+  reasons?: string[];
+}
+
+interface ApprovalRequest {
+  message?: string;
+  recommended?: string[];
+  allowed?: string[];
+  branch?: string;
+  branches?: Record<string, string>;
+  candidates?: RepoCandidate[];
+  select_repositories?: boolean;
+  ask_branch?: boolean;
+  ambiguous?: boolean;
+  requires_risk_acknowledgement?: boolean;
+  recheck_reasons?: string[];
+  autonomy?: {
+    reasons?: string[];
+    shadow?: boolean;
+    result?: string;
+    required_evidence?: string[];
+    subject?: { hash?: string };
+  };
+  scope?: ComponentProps<typeof EvidenceSummary>["scope"];
+  outputs?: Record<string, unknown>;
+  report?: TaskReport;
+  markdown?: string;
+}
+
+interface BaselineGroup {
+  package?: string;
+  tests?: string[];
+  build_errors?: string[];
+}
+
+interface VerificationRepo {
+  repo?: string;
+  passed?: boolean;
+  timed_out?: boolean;
+  exit_code?: number | null;
+  artifact_id?: number | null;
+  regressions?: BaselineGroup[];
+  weakened?: string[];
+  pre_existing?: number;
+  note?: string;
+  slop?: {
+    mode?: string;
+    status?: string;
+    counts?: { new?: number; worsened?: number; existing?: number; resolved?: number };
+    blocking?: unknown[];
+    detector_ms?: number;
+  };
+}
+
+interface Verification {
+  outcome?: string;
+  passed?: boolean;
+  rounds?: number;
+  repairs?: number;
+  max_repairs?: number;
+  duration_ms?: number;
+  reason?: string;
+  failure_signatures?: unknown[];
+  last?: VerificationRepo[];
+}
+
+interface StepOutput {
+  status?: string;
+  business_summary?: string;
+  verification?: Verification;
+  accepted_exception?: { failures: unknown[] };
+  test_status?: string;
+  report?: TaskReport;
+  markdown?: string;
+}
+
+interface StepConfig {
+  action?: string;
+  agent?: { provider?: string; model?: string | null };
+  baseline_compare?: string;
+  instructions?: string;
+  on_reject?: { reexecute?: string };
+  optimization_decision?: { recommendation_id: number | string };
+  ai_suggest?: ReportSpec;
+}
+
+export interface StepHandoff {
+  status?: string;
+  failure_category?: string;
+  blocked_reason?: string | null;
+}
+
+/** A workflow step row as the run and step detail APIs return it. */
+export interface StepRow {
+  id: number;
+  key: string;
+  name: string;
+  type: string;
+  status: string;
+  generation: number;
+  current_attempt_id: number | null;
+  config: StepConfig;
+  agent_override?: { provider?: string; model?: string | null; [key: string]: unknown } | null;
+  pending_input?: { provider_handoff?: StepHandoff } | null;
+  approval?: { request?: ApprovalRequest; gate?: boolean; granted?: boolean } | null;
+  output?: StepOutput | null;
+  error: string | null;
+  depends_on: string[];
+  max_attempts: number;
+  retry_backoff_s: number;
+  requires_approval: boolean;
+  run_if?: Record<string, unknown> | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+interface TestFailure {
+  category: string;
+  repo: string;
+  package?: string;
+  test?: string;
+  build_error?: string;
+  reason: string;
+  env_signal?: boolean;
+  log: string;
+}
+
+interface VerdictFinding {
+  severity: string;
+  file: string;
+  line?: number;
+  explanation: string;
+  evidence: string;
+}
+
+interface AttemptPayload {
+  verification?: Verification;
+  verdict?: string;
+  findings?: VerdictFinding[];
+  verified_heads?: Record<string, string>;
+  summary?: string;
+  blocked_reason?: string;
+  diagnosis?: {
+    summary: string;
+    command: string;
+    results: Array<{ repo: string; timed_out?: boolean; exit_code: number }>;
+    baseline_available: boolean;
+    base_sha?: string | null;
+    explanation?: { by: string; text: string; suggestion: string } | null;
+    failures: TestFailure[];
+  };
+  decision?: { kind: string; target?: string; instructions?: string };
+  results?: CommandResult[];
+}
+
+interface CommandBaseline {
+  regressions?: Required<BaselineGroup>[];
+  pre_existing?: Required<BaselineGroup>[];
+  note?: string;
+  base_sha?: string;
+}
+
+interface CommandResult {
+  repo: string;
+  baseline?: CommandBaseline;
+}
+
+interface FailureInfo {
+  class: string;
+  action: string;
+  reason: string;
+  delay_s: number;
+}
+
+interface ReexecuteRequest {
+  instructions?: string | null;
+  skills?: Array<{ key: string; version: number; title?: string }>;
+  requested_by?: string | null;
+  at?: string | null;
+}
+
+interface AttemptMetricsData {
+  provider?: string;
+  model?: string;
+  model_source?: string;
+  reasoning_effort?: string;
+  cost_usd?: number | null;
+  turns?: number;
+  duration_ms?: number;
+  sessions?: number;
+  verification?: Verification;
+  tokens?: {
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_creation: number;
+    reasoning_output?: number;
+  };
+  disclosure: { inline: number; index: number; search: number };
+  upstream: { full: number; summary: number };
+  tool_calls?: Record<string, number>;
+  tool_errors?: number;
+  skills_loaded?: string[];
+  knowledge_searches?: string[];
+  skills?: Array<{
+    key: string;
+    version: number;
+    tier: string;
+    tokens: number;
+    states: string[];
+    evidence: string[];
+    loaded_unused: boolean;
+    provider_limited: boolean;
+  }>;
+  integration_calls?: Array<{ name: string; ok: boolean; ms: number }>;
+  subagents?: Array<{ type: string }>;
+  denied?: Array<{ tool: string; subagent?: string; reason: string }>;
+}
+
+interface AttemptRow {
+  id: number;
+  number: number;
+  generation: number;
+  status: string;
+  invalidated_at: string | null;
+  reused_from_attempt_id: number | null;
+  agent_provider?: string | null;
+  agent_model?: string | null;
+  metrics?: AttemptMetricsData | null;
+  output?: AttemptPayload | null;
+  error?: { message?: string; details?: AttemptPayload; failure?: FailureInfo } | null;
+  input?: {
+    pending?: { reexecute?: ReexecuteRequest };
+    previous_attempt?: { number: number };
+  } | null;
+  context_snapshot_id?: number | null;
+  started_at: string;
+  finished_at: string | null;
+  worker: string | null;
+}
+
+interface QuestionRow {
+  id: number;
+  attempt_id: number | null;
+  question: string;
+  context?: string | null;
+  options?: string[] | null;
+  suggested_answer?: string | null;
+  status: string;
+  answer?: string | null;
+  answered_by?: string | null;
+  answered_at?: string | null;
+  created_at: string;
+}
+
+interface ArtifactRow {
+  id: number;
+  attempt_id: number | null;
+  kind: string;
+  name: string;
+  size: number;
+  created_at: string;
+  data?: (HarnessEvidence & { exit_code?: number | null } & NonNullable<ReportArtifact["data"]>) | null;
+}
+
+interface KnowledgeItem {
+  key: string;
+  title: string;
+  version: number;
+  category: string;
+  reason: string;
+  content: string;
+}
+
+interface ContextSnapshot {
+  id: number;
+  hash: string;
+  created_at: string;
+  content: {
+    project?: string | null;
+    repositories: string[];
+    knowledge: KnowledgeItem[];
+    prompt_plan?: {
+      knowledge?: Array<{ key: string; disclosure: string; score: number; why: string }>;
+      upstream?: Record<string, { direct?: boolean; mode: string; tokens: number; full_tokens: number }>;
+    };
+    overridden?: Array<{
+      key: string;
+      version: number;
+      reason: string;
+      by: string;
+      conflict_key: string;
+    }>;
+    missing_explicit?: string[];
+  };
+}
+
+interface ArtifactContent {
+  id: number;
+  name: string;
+  content: string;
+  data?: Record<string, unknown> | null;
+}
+
+interface TranscriptEvent {
+  id: number;
+  kind: string;
+  content: string;
+  created_at: string;
+}
+
+interface SkillCatalogEntry {
+  key: string;
+  title: string;
+  current_version: number;
+  enabled: boolean;
+}
+
+interface ReexecuteBody {
+  feedback?: string;
+  persist?: boolean;
+  skills?: string[];
+  force?: boolean;
+}
+
+interface StepDetail {
+  step: StepRow;
+  attempts: AttemptRow[];
+  questions: QuestionRow[];
+  checkpoints: unknown[];
+  artifacts: ArtifactRow[];
+  sessions: Array<{ session_id: string; model?: string | null }>;
+  snapshots: ContextSnapshot[];
+  jobs: Array<{
+    id: number;
+    status: string;
+    generation: number;
+    claims: number;
+    force: boolean;
+    lease_owner: string | null;
+    last_error: string | null;
+  }>;
+  handoffs?: ComponentProps<typeof ProviderHandoff>["handoffs"];
+  checkpoint_view?: CheckpointView[];
+  latest_recoverable?: CheckpointView | null;
+  recovery_action?: ComponentProps<typeof CheckpointsCard>["recovery"];
+  decisions?: Decision[];
+}
+
 const TabLabel = ({ icon: I, children }: { icon: typeof Info; children: ReactNode }) => (
   <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
     <I size={13} strokeWidth={2} />
@@ -88,10 +450,17 @@ const TabLabel = ({ icon: I, children }: { icon: typeof Info; children: ReactNod
 );
 
 /** Render a step output: Markdown for summary-like strings, then the full structure. */
-export function OutputView({ value, locale }: { value: any; locale?: string | null }) {
+export function OutputView({ value, locale }: { value: unknown; locale?: string | null }) {
   const { t } = useI18n();
   if (value == null) return <Empty>{t("si.noOutput")}</Empty>;
-  const text = typeof value === "string" ? value : (value.summary ?? value.report ?? null);
+  const text =
+    typeof value === "string"
+      ? value
+      : typeof value === "object"
+        ? (("summary" in value ? value.summary : undefined) ??
+          ("report" in value ? value.report : undefined) ??
+          null)
+        : null;
   return (
     <div>
       {hasEvidence(value) && <EvidenceSummary output={value} />}
@@ -117,7 +486,7 @@ export function QuestionsForm({
   onDone,
   provider = "claude",
 }: {
-  questions: any[];
+  questions: QuestionRow[];
   onDone: () => void | Promise<unknown>;
   provider?: AgentProvider;
 }) {
@@ -217,8 +586,8 @@ export function ApprovalPanel({
   step,
   onDone,
 }: {
-  run: any;
-  step: any;
+  run: InspectorRun;
+  step: StepRow;
   onDone: () => void | Promise<unknown>;
 }) {
   const { t } = useI18n();
@@ -233,7 +602,7 @@ export function ApprovalPanel({
   }));
   const [repoFilter, setRepoFilter] = useState("");
   const allowed: string[] = req?.allowed ?? run.allowed_repositories ?? [];
-  const candidateNames = new Set<string>((req?.candidates ?? []).map((c: any) => c.repo));
+  const candidateNames = new Set<string>((req?.candidates ?? []).map((c) => c.repo));
   // Every allowed repository the discovery did not suggest, plus anything already selected that is not a candidate
   // (e.g. reused from an earlier run), so the reviewer can add or remove any repo, not only the suggested ones.
   const others = [...new Set([...allowed, ...repos])].filter((r) => !candidateNames.has(r)).sort();
@@ -248,7 +617,7 @@ export function ApprovalPanel({
   const onCommon = (v: string) => {
     const names: string[] = [
       ...new Set([
-        ...(req?.candidates ?? []).map((c: any) => c.repo),
+        ...(req?.candidates ?? []).map((c) => c.repo),
         ...(req?.allowed ?? run.allowed_repositories ?? []),
       ]),
     ];
@@ -264,7 +633,12 @@ export function ApprovalPanel({
     } else setBranch(v);
   };
   const send = async (approve: boolean) => {
-    const body: any = { comment };
+    const body: {
+      comment: string;
+      repositories?: string[];
+      data?: { branch?: string; branches?: Record<string, string>; acknowledge_risk?: boolean };
+      subject?: string;
+    } = { comment };
     if (approve && req?.select_repositories) body.repositories = repos;
     if (approve && req?.ask_branch)
       body.data = {
@@ -304,7 +678,7 @@ export function ApprovalPanel({
           {[...(req.autonomy.reasons ?? []), ...(req.recheck_reasons ?? [])].join("; ")}
           {req.autonomy.shadow && req.autonomy.result === "ALLOW" && <span className="muted"> · {t("au.shadow")}</span>}
           {(req.autonomy.required_evidence ?? []).length > 0 && (
-            <div className="muted">{t("au.required", { list: req.autonomy.required_evidence.join(", ") })}</div>
+            <div className="muted">{t("au.required", { list: (req.autonomy.required_evidence ?? []).join(", ") })}</div>
           )}
         </div>
       )}
@@ -330,7 +704,7 @@ export function ApprovalPanel({
             {req.ambiguous && <AlertTriangle size={14} />}
             {req.ambiguous ? t("si.ambiguous") : t("si.suggestedRepos")}
           </div>
-          {(req.candidates ?? []).map((c: any) => (
+          {(req.candidates ?? []).map((c) => (
             <label key={c.repo} className="rv-repo-opt">
               <input
                 type="checkbox"
@@ -488,7 +862,7 @@ export function StepInspector({
   onChanged,
   onReplayPreview,
 }: {
-  run: any;
+  run: InspectorRun;
   stepKey: string;
   /** Bumped when step state may have changed (reloads the step). */
   tick: number;
@@ -499,12 +873,12 @@ export function StepInspector({
   onReplayPreview?: (plan: Record<string, string> | null) => void;
 }) {
   const { t } = useI18n();
-  const { data, error, loading, reload, reloadFresh } = useApi<any>(
+  const { data, error, loading, reload, reloadFresh } = useApi<StepDetail>(
     `/api/runs/${run.id}/steps/${stepKey}`,
   );
   const [tab, setTab] = useState<Tab>(stepKey === "task_result_report" ? "report" : "overview");
   const [attemptId, setAttemptId] = useState<number | null>(null);
-  useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => void reload(), [tick]);
   useEffect(() => setAttemptId(null), [stepKey]);
   if (loading && !data)
     return (
@@ -527,8 +901,8 @@ export function StepInspector({
   const { step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs } = data;
   const isAgent = AGENT_TYPES.includes(step.type);
   const attempt =
-    attempts.find((a: any) => a.id === attemptId) ??
-    attempts.find((a: any) => a.id === step.current_attempt_id) ??
+    attempts.find((a) => a.id === attemptId) ??
+    attempts.find((a) => a.id === step.current_attempt_id) ??
     attempts[attempts.length - 1];
   const effectiveProvider = attempt
     ? (attempt.agent_provider ?? attempt.metrics?.provider ?? run.agent_provider)
@@ -537,12 +911,12 @@ export function StepInspector({
     attempt?.metrics?.model ||
     attempt?.agent_model ||
     (attempt ? null : (step.agent_override?.model ?? step.config?.agent?.model));
-  const snapshot = snapshots.find((s: any) => s.id === attempt?.context_snapshot_id);
-  const open = questions.filter((q: any) => q.status === "open");
+  const snapshot = snapshots.find((s) => s.id === attempt?.context_snapshot_id);
+  const open = questions.filter((q) => q.status === "open");
   const live = step.status === "RUNNING" && attempt?.id === step.current_attempt_id;
   const runActive = run.status !== "CANCELED";
   const refresh = () => Promise.all([reloadFresh(), Promise.resolve(onChanged())]);
-  const action = async (path: string, body: any = {}, ok?: string) =>
+  const action = async (path: string, body: unknown = {}, ok?: string) =>
     act(async () => {
       const result = await api(`/api/runs/${run.id}/steps/${step.key}/${path}`, body);
       await refresh();
@@ -564,6 +938,11 @@ export function StepInspector({
       attempt.error?.details?.verification ??
       (attempt.id === step.current_attempt_id ? step.output?.verification : undefined))
     : step.output?.verification;
+  const verdict = attempt?.output?.verdict
+    ? attempt.output
+    : attempt?.error?.details?.verdict
+      ? attempt.error.details
+      : null;
   const TypeIcon = stepTypeIcon(step.type);
 
   const tabs: Array<[Tab, React.ReactNode]> = [
@@ -625,9 +1004,11 @@ export function StepInspector({
         <div className="si-top">
           <span
             className="si-icon"
-            style={{
-              ["--si-c" as any]: STATUS_COLORS[step.status] ?? "var(--brand)",
-            }}
+            style={
+              {
+                "--si-c": STATUS_COLORS[step.status] ?? "var(--brand)",
+              } as React.CSSProperties
+            }
           >
             <TypeIcon size={20} strokeWidth={2} />
           </span>
@@ -728,7 +1109,7 @@ export function StepInspector({
                 value={attempt?.id}
                 onChange={(e) => setAttemptId(Number(e.target.value))}
               >
-                {attempts.map((a: any) => (
+                {attempts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {t("si.attemptN", { n: a.number })} · {t("cl.gen")} {a.generation} ·{" "}
                     {t("status." + a.status)}
@@ -742,7 +1123,7 @@ export function StepInspector({
       </div>
 
       <div className="si-body">
-        {isAgent && (attempts.length > 0 || data.handoffs?.length > 0) && (
+        {isAgent && (attempts.length > 0 || !!data.handoffs?.length) && (
           <ProviderHandoff
             active={runActive}
             key={step.id}
@@ -838,9 +1219,7 @@ export function StepInspector({
         {tab === "overview" && (
           <div>
             {verification && <VerificationCard v={verification} />}
-            {(attempt?.output?.verdict || attempt?.error?.details?.verdict) && (
-              <VerdictCard v={attempt.output?.verdict ? attempt.output : attempt.error.details} />
-            )}
+            {verdict && <VerdictCard v={verdict} />}
             {attempt?.error?.failure && <FailureCard f={attempt.error.failure} />}
             {step.type === "command" && (
               <TestFailurePanel
@@ -979,7 +1358,7 @@ export function StepInspector({
         {tab === "knowledge" && <KnowledgeApplied snapshot={snapshot} />}
         {tab === "qa" &&
           (questions.length ? (
-            questions.map((q: any) => (
+            questions.map((q) => (
               <div
                 key={q.id}
                 className="rv-card"
@@ -1028,7 +1407,7 @@ export function StepInspector({
                 )}
                 <div className="muted small" style={{ marginTop: 6 }}>
                   {t("si.attemptOf", {
-                    n: attempts.find((a: any) => a.id === q.attempt_id)?.number ?? "?",
+                    n: attempts.find((a) => a.id === q.attempt_id)?.number ?? "?",
                   })}{" "}
                   · {time(q.created_at)}
                 </div>
@@ -1054,7 +1433,7 @@ export function StepInspector({
                   </tr>
                 </thead>
                 <tbody>
-                  {attempts.map((a: any) => (
+                  {attempts.map((a) => (
                     <tr
                       key={a.id}
                       className="click"
@@ -1082,12 +1461,12 @@ export function StepInspector({
                             {a.input.pending.reexecute.instructions
                               ? `“${String(a.input.pending.reexecute.instructions).slice(0, 80)}”`
                               : t("si.reexecuteWord")}
-                            {a.input.pending.reexecute.skills?.length > 0 && (
+                            {!!a.input.pending.reexecute.skills?.length && (
                               <span className="muted">
                                 {" "}
                                 ·{" "}
                                 {a.input.pending.reexecute.skills
-                                  .map((s: any) => `${s.key}@v${s.version}`)
+                                  .map((s) => `${s.key}@v${s.version}`)
                                   .join(", ")}
                               </span>
                             )}
@@ -1115,7 +1494,7 @@ export function StepInspector({
                 <Cpu size={14} /> {t("si.jobs")}
               </div>
               {jobs.length ? (
-                jobs.map((j: any) => (
+                jobs.map((j) => (
                   <div
                     key={j.id}
                     className="small mono"
@@ -1157,11 +1536,11 @@ const TONE_STATUS = {
   wait: "WAITING",
   idle: "SKIPPED",
 } as const;
-const arr = (x: unknown): any[] => (Array.isArray(x) ? x : []);
+const arr = <T,>(x: T[] | null | undefined): T[] => (Array.isArray(x) ? x : []);
 const num = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
 
 /** Harness verification-and-repair result (attempt metrics / output `verification`). Renders only the fields present. */
-function VerificationCard({ v }: { v: any }) {
+function VerificationCard({ v }: { v: Verification }) {
   const { t } = useI18n();
   if (!v || typeof v !== "object") return null;
   const outcome =
@@ -1249,7 +1628,7 @@ function VerificationCard({ v }: { v: any }) {
           )}
         </div>
       )}
-      {last.map((r: any, i: number) => {
+      {last.map((r, i) => {
         const regs = arr(r?.regressions);
         const weakened = arr(r?.weakened);
         const pre = num(r?.pre_existing);
@@ -1286,7 +1665,7 @@ function VerificationCard({ v }: { v: any }) {
             </div>
             {regs.length > 0 && (
               <ul className="vf-list">
-                {regs.map((g: any, j: number) => (
+                {regs.map((g, j) => (
                   <li key={j} style={{ flexDirection: "column", gap: 1 }}>
                     <span className="mono" style={{ color: "var(--st-err)", fontWeight: 600 }}>
                       {g?.package}
@@ -1381,22 +1760,22 @@ function TestFailurePanel({
   current,
   step,
 }: {
-  attempts: any[];
-  questions: any[];
-  current: any;
-  step: any;
+  attempts: AttemptRow[];
+  questions: QuestionRow[];
+  current: AttemptRow;
+  step: StepRow;
 }) {
   const { t } = useI18n();
-  const payload = (a: any) => a?.output ?? a?.error?.details;
+  const payload = (a?: AttemptRow) => a?.output ?? a?.error?.details;
   const withDiag = [...attempts].reverse().find((a) => payload(a)?.diagnosis);
   const d = payload(current)?.diagnosis ?? payload(withDiag)?.diagnosis;
   const decisions = attempts
     .filter((a) => payload(a)?.decision)
-    .map((a) => ({ n: a.number, ...payload(a).decision }));
+    .map((a) => ({ n: a.number, ...payload(a)?.decision }));
   const exception = step.output?.accepted_exception;
   if (!d && !decisions.length) return null;
   const groups = (["new", "pre_existing", "environment", "insufficient"] as const).filter((k) =>
-    d?.failures.some((f: any) => f.category === k),
+    d?.failures.some((f) => f.category === k),
   );
   return (
     <div
@@ -1428,7 +1807,7 @@ function TestFailurePanel({
           <div className="muted small">
             {d.results
               .map(
-                (r: any) =>
+                (r) =>
                   `${r.repo}: ${t("si.exit", { code: r.timed_out ? t("si.timeout") : r.exit_code })}`,
               )
               .join(" · ")}{" "}
@@ -1453,11 +1832,11 @@ function TestFailurePanel({
           {groups.map((g) => (
             <div key={g} style={{ marginTop: 8 }}>
               <Badge s={CAT_STATUS[g]}>
-                {t(`si.cat.${g}`)} · {d.failures.filter((f: any) => f.category === g).length}
+                {t(`si.cat.${g}`)} · {d.failures.filter((f) => f.category === g).length}
               </Badge>
               {d.failures
-                .filter((f: any) => f.category === g)
-                .map((f: any, i: number) => (
+                .filter((f) => f.category === g)
+                .map((f, i) => (
                   <details key={i} style={{ marginLeft: 8 }}>
                     <summary style={{ color: "var(--ink)" }}>
                       <span className="mono small">
@@ -1486,7 +1865,7 @@ function TestFailurePanel({
         <div style={{ marginTop: 10 }}>
           <b className="small">{t("si.exchange")}</b>
           {attempts.map((a) => {
-            const qs = questions.filter((q: any) => q.attempt_id === a.id);
+            const qs = questions.filter((q) => q.attempt_id === a.id);
             const dec = payload(a)?.decision;
             if (!qs.length && !dec) return null;
             return (
@@ -1515,7 +1894,7 @@ function TestFailurePanel({
                     {dec.instructions ? ` — “${dec.instructions}”` : ""}
                   </div>
                 )}
-                {qs.map((q: any) => (
+                {qs.map((q) => (
                   <div key={q.id}>
                     <MessageCircleQuestion
                       size={12}
@@ -1549,11 +1928,13 @@ function TestFailurePanel({
 }
 
 /** Branch-vs-base classification of Go test failures for each repo of a command step. */
-function BaselineSummary({ results }: { results?: any[] }) {
+function BaselineSummary({ results }: { results?: CommandResult[] }) {
   const { t } = useI18n();
-  const withBase = (results ?? []).filter((r) => r.baseline);
+  const withBase = (results ?? []).filter(
+    (r): r is CommandResult & { baseline: CommandBaseline } => !!r.baseline,
+  );
   if (!withBase.length) return null;
-  const Item = ({ x }: { x: any }) => (
+  const Item = ({ x }: { x: Required<BaselineGroup> }) => (
     <div className="small" style={{ margin: "2px 0 6px 12px" }}>
       <span className="mono" style={{ fontWeight: 600 }}>
         {x.package}
@@ -1595,20 +1976,20 @@ function BaselineSummary({ results }: { results?: any[] }) {
           ) : (
             <div className="muted small mono">base {String(r.baseline.base_sha).slice(0, 9)}</div>
           )}
-          {r.baseline.regressions?.length > 0 && (
+          {!!r.baseline.regressions?.length && (
             <div className="err small" style={{ marginTop: 6, fontWeight: 600 }}>
               {t("si.newFaults")}
             </div>
           )}
-          {r.baseline.regressions?.map((x: any) => (
+          {r.baseline.regressions?.map((x) => (
             <Item key={x.package} x={x} />
           ))}
-          {r.baseline.pre_existing?.length > 0 && (
+          {!!r.baseline.pre_existing?.length && (
             <div className="muted small" style={{ marginTop: 6 }}>
               {t("si.oldFaults")}
             </div>
           )}
-          {r.baseline.pre_existing?.map((x: any) => (
+          {r.baseline.pre_existing?.map((x) => (
             <Item key={"p" + x.package} x={x} />
           ))}
         </div>
@@ -1630,7 +2011,7 @@ function CommandLog({
   startedAt: string;
 }) {
   const { t } = useI18n();
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<TranscriptEvent[]>([]);
   const last = useRef(0);
   const box = useRef<HTMLPreElement>(null);
   const [follow, setFollow] = useState(true);
@@ -1640,7 +2021,7 @@ function CommandLog({
     last.current = 0;
   }, [attemptId]);
   useEffect(() => {
-    api<any[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
+    api<TranscriptEvent[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
       if (!rows.length) return;
       last.current = rows[rows.length - 1].id;
       setEvents((p) => [...p, ...rows]);
@@ -1699,7 +2080,7 @@ function CommandLog({
   );
 }
 
-function AttemptMetrics({ m }: { m: any }) {
+function AttemptMetrics({ m }: { m: AttemptMetricsData }) {
   const { t } = useI18n();
   const tools = Object.entries<number>(m.tool_calls ?? {}).sort((a, b) => b[1] - a[1]);
   return (
@@ -1783,7 +2164,7 @@ function AttemptMetrics({ m }: { m: any }) {
             ? ` · ${t("si.searched", { q: m.knowledge_searches.map((q: string) => `"${q}"`).join(", ") })}`
             : ""}
         </span>
-        {m.skills?.length > 0 && (
+        {!!m.skills?.length && (
           <>
             <span>{t("si.skillActivation")}</span>
             <span className="small">
@@ -1811,19 +2192,19 @@ function AttemptMetrics({ m }: { m: any }) {
         <span>{t("si.integration")}</span>
         <span className="small">
           {(m.integration_calls ?? [])
-            .map((c: any) => `${c.name} ${c.ok ? "✓" : "✗"} ${c.ms}ms`)
+            .map((c) => `${c.name} ${c.ok ? "✓" : "✗"} ${c.ms}ms`)
             .join(", ") || "—"}
         </span>
         <span>{t("si.subagents")}</span>
         <span className="small">
-          {(m.subagents ?? []).map((s: any) => s.type).join(", ") || "—"}
+          {(m.subagents ?? []).map((s) => s.type).join(", ") || "—"}
         </span>
-        {m.denied?.length > 0 && (
+        {!!m.denied?.length && (
           <>
             <span>{t("si.blocked")}</span>
             <span className="small err">
               {m.denied
-                .map((d: any) => `${d.tool}${d.subagent ? ` (${d.subagent})` : ""}: ${d.reason}`)
+                .map((d) => `${d.tool}${d.subagent ? ` (${d.subagent})` : ""}: ${d.reason}`)
                 .join(" · ")}
             </span>
           </>
@@ -1834,7 +2215,7 @@ function AttemptMetrics({ m }: { m: any }) {
 }
 
 /** Instructions and skills this attempt was re-executed with (stored with the attempt's input). */
-function ReexecuteInfo({ rx, prev }: { rx: any; prev?: number }) {
+function ReexecuteInfo({ rx, prev }: { rx: ReexecuteRequest; prev?: number }) {
   const { t } = useI18n();
   return (
     <div className="rv-card" style={{ borderLeft: "3px solid var(--brand)" }}>
@@ -1853,10 +2234,10 @@ function ReexecuteInfo({ rx, prev }: { rx: any; prev?: number }) {
       ) : (
         <div className="muted small">{t("si.noGuidance")}</div>
       )}
-      {rx.skills?.length > 0 && (
+      {!!rx.skills?.length && (
         <div className="small" style={{ marginTop: 6 }}>
           {t("kn.cat.agent_skill")}:{" "}
-          {rx.skills.map((s: any) => (
+          {rx.skills.map((s) => (
             <span key={s.key} className="pill">
               {s.title ?? s.key} <span className="muted mono">v{s.version}</span>
             </span>
@@ -1882,9 +2263,9 @@ function ReexecuteDialog({
   onSubmit,
   onPreview,
 }: {
-  run: any;
-  step: any;
-  onSubmit: (body: any) => Promise<unknown>;
+  run: InspectorRun;
+  step: StepRow;
+  onSubmit: (body: ReexecuteBody) => Promise<unknown>;
   onPreview?: (plan: Record<string, string> | null) => void;
 }) {
   const { t } = useI18n();
@@ -1893,7 +2274,7 @@ function ReexecuteDialog({
   const [skills, setSkills] = useState<string[]>([]);
   const [persist, setPersist] = useState(true);
   const [busy, setBusy] = useState(false);
-  const { data: catalog } = useApi<any[]>(open ? "/api/knowledge?category=agent_skill" : null, [
+  const { data: catalog } = useApi<SkillCatalogEntry[]>(open ? "/api/knowledge?category=agent_skill" : null, [
     open,
   ]);
   const [force, setForce] = useState(false);
@@ -2067,7 +2448,11 @@ function ReexecuteDialog({
               ...(force ? { force } : {}),
             });
             setBusy(false);
-            if (r !== undefined) (setOpen(false), setText(""), setSkills([]));
+            if (r !== undefined) {
+              setOpen(false);
+              setText("");
+              setSkills([]);
+            }
           }}
         >
           <RotateCcw size={14} />
@@ -2081,17 +2466,17 @@ function ReexecuteDialog({
   );
 }
 
-function KnowledgeApplied({ snapshot }: { snapshot: any }) {
+function KnowledgeApplied({ snapshot }: { snapshot: ContextSnapshot | undefined }) {
   const { t } = useI18n();
   if (!snapshot) return <Empty>{t("si.noSnapshot")}</Empty>;
   const c = snapshot.content;
-  const plan = new Map<string, any>((c.prompt_plan?.knowledge ?? []).map((d: any) => [d.key, d]));
+  const plan = new Map((c.prompt_plan?.knowledge ?? []).map((d) => [d.key, d] as const));
   const TIER: Record<string, string> = {
     inline: "COMPLETED",
     index: "READY",
     search: "PENDING",
   };
-  const groups: Record<string, any[]> = {};
+  const groups: Record<string, KnowledgeItem[]> = {};
   for (const k of c.knowledge) (groups[k.category] ??= []).push(k);
   return (
     <div>
@@ -2104,43 +2489,46 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
       {Object.entries(groups).map(([cat, items]) => (
         <div key={cat}>
           <h3>{t(`kn.cat.${cat}`) === `kn.cat.${cat}` ? cat : t(`kn.cat.${cat}`)}</h3>
-          {items.map((k) => (
-            <details
-              key={k.key}
-              className="rv-card"
-              style={{ padding: "8px 12px", margin: "6px 0" }}
-            >
-              <summary style={{ color: "var(--ink)" }}>
-                <b>{k.title}</b>{" "}
-                <span className="mono muted">
-                  {k.key} v{k.version}
-                </span>{" "}
-                <span className="muted small">· {k.reason}</span>{" "}
-                {plan.get(k.key) && (
-                  <Badge s={TIER[plan.get(k.key).disclosure]}>
-                    {plan.get(k.key).disclosure} · {plan.get(k.key).score}
-                  </Badge>
-                )}
-                {plan.get(k.key) && (
-                  <div className="muted small" style={{ marginLeft: 16 }}>
-                    {plan.get(k.key).why}
-                  </div>
-                )}
-              </summary>
-              <Markdown text={k.content} />
-              <div className="row tight">
-                <a href={`#/knowledge/${k.key}`} className="small">
-                  {t("si.openKnowledge")}
-                </a>
-              </div>
-            </details>
-          ))}
+          {items.map((k) => {
+            const p = plan.get(k.key);
+            return (
+              <details
+                key={k.key}
+                className="rv-card"
+                style={{ padding: "8px 12px", margin: "6px 0" }}
+              >
+                <summary style={{ color: "var(--ink)" }}>
+                  <b>{k.title}</b>{" "}
+                  <span className="mono muted">
+                    {k.key} v{k.version}
+                  </span>{" "}
+                  <span className="muted small">· {k.reason}</span>{" "}
+                  {p && (
+                    <Badge s={TIER[p.disclosure]}>
+                      {p.disclosure} · {p.score}
+                    </Badge>
+                  )}
+                  {p && (
+                    <div className="muted small" style={{ marginLeft: 16 }}>
+                      {p.why}
+                    </div>
+                  )}
+                </summary>
+                <Markdown text={k.content} />
+                <div className="row tight">
+                  <a href={`#/knowledge/${k.key}`} className="small">
+                    {t("si.openKnowledge")}
+                  </a>
+                </div>
+              </details>
+            );
+          })}
         </div>
       ))}
       {c.prompt_plan?.upstream && Object.keys(c.prompt_plan.upstream).length > 0 && (
         <>
           <h3>{t("si.upstream")}</h3>
-          {Object.entries<any>(c.prompt_plan.upstream).map(([k, u]) => (
+          {Object.entries(c.prompt_plan.upstream).map(([k, u]) => (
             <div key={k} className="small" style={{ padding: "2px 0" }}>
               <b>{k}</b> {u.direct && <span className="muted">({t("si.direct")})</span>} —{" "}
               {u.mode === "full" ? (
@@ -2153,10 +2541,10 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
           ))}
         </>
       )}
-      {c.overridden?.length > 0 && (
+      {!!c.overridden?.length && (
         <>
           <h3>{t("si.overridden")}</h3>
-          {c.overridden.map((o: any) => (
+          {c.overridden.map((o) => (
             <div key={o.key} className="small muted">
               ✗{" "}
               {o.reason === "superseded"
@@ -2177,7 +2565,7 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
           ))}
         </>
       )}
-      {c.missing_explicit?.length > 0 && (
+      {!!c.missing_explicit?.length && (
         <div className="errorbox small">
           {t("si.missing", { list: c.missing_explicit.join(", ") })}
         </div>
@@ -2186,10 +2574,10 @@ function KnowledgeApplied({ snapshot }: { snapshot: any }) {
   );
 }
 
-export function Artifacts({ artifacts }: { artifacts: any[] }) {
+export function Artifacts({ artifacts }: { artifacts: ArtifactRow[] }) {
   const { t } = useI18n();
   const [openId, setOpenId] = useState<number | null>(null);
-  const { data } = useApi<any>(openId ? `/api/artifacts/${openId}` : null, [openId]);
+  const { data } = useApi<ArtifactContent>(openId ? `/api/artifacts/${openId}` : null, [openId]);
   if (!artifacts.length) return <Empty>{t("si.noArtifacts")}</Empty>;
   return (
     <div>
@@ -2238,11 +2626,11 @@ export function Artifacts({ artifacts }: { artifacts: any[] }) {
 }
 
 /** Independent verification verdict (fresh-session verifier; enforced before the PR). */
-function VerdictCard({ v }: { v: any }) {
+function VerdictCard({ v }: { v: AttemptPayload }) {
   const { t } = useI18n();
   const tone =
     v.verdict === "PASS" ? "COMPLETED" : v.verdict === "FAIL" ? "FAILED" : "WAITING_INPUT";
-  const findings = (v.findings ?? []) as any[];
+  const findings = v.findings ?? [];
   return (
     <div
       className="card"
@@ -2312,7 +2700,7 @@ function VerdictCard({ v }: { v: any }) {
 }
 
 /** Failure classification and the recovery decision the engine took. */
-function FailureCard({ f }: { f: any }) {
+function FailureCard({ f }: { f: FailureInfo }) {
   const { t } = useI18n();
   return (
     <div className="card tight" style={{ borderLeft: "4px solid var(--st-err)" }}>

@@ -16,7 +16,7 @@ import { Badge, dur, time } from "../ui.tsx";
 import { chibiPalette, chibiSprite, Px } from "./pixels.tsx";
 import { ROLE_INFO } from "./workflowToAgentMapper.ts";
 import { useI18n } from "../i18n/index.tsx";
-import type { AgentView, AttemptLite, EventLite } from "./types.ts";
+import type { AgentView, AttemptLite, AttemptVerification, EventLite } from "./types.ts";
 
 const ICON: Record<string, LucideIcon> = {
   tool: Wrench,
@@ -226,7 +226,7 @@ export function AgentDetailsPanel({
 }
 
 /** Harness verification of the current attempt (real metrics only; nothing rendered when absent). */
-function VerificationCard({ v }: { v: any }) {
+function VerificationCard({ v }: { v: AttemptVerification | undefined }) {
   const { t } = useI18n();
   if (!v || typeof v !== "object") return null;
   const tone =
@@ -256,22 +256,22 @@ function VerificationCard({ v }: { v: any }) {
             <span className="small muted">· {dur(v.duration_ms)}</span>
           )}
         </div>
-        {(v.last ?? []).map((r: any) => (
+        {(v.last ?? []).map((r) => (
           <div key={r.repo} className="small office-verify-repo">
             <b>{r.repo}</b>{" "}
             <span className="mono">{r.status ?? (r.passed ? "passed" : "failed")}</span>
-            {r.regressions?.length > 0 && (
+            {r.regressions && r.regressions.length > 0 && (
               <span>
                 {" "}
                 ·{" "}
                 {r.regressions
-                  .map((g: any) =>
+                  .map((g) =>
                     [String(g.package).split("/").pop(), ...(g.tests ?? [])].slice(0, 3).join(" "),
                   )
                   .join("; ")}
               </span>
             )}
-            {r.weakened?.length > 0 && (
+            {r.weakened && r.weakened.length > 0 && (
               <span className="err">
                 {" "}
                 · {t("office.weakTests")}: {r.weakened.join(", ")}

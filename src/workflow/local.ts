@@ -17,7 +17,9 @@ export const childGroups = {
     for (const g of groups) {
       try {
         process.kill(-g, "SIGKILL");
-      } catch {}
+      } catch {
+        /* ignore: process group already gone */
+      }
     }
     groups.clear();
   },

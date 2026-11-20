@@ -39,7 +39,10 @@ function luhn(d: string): boolean {
   let sum = 0;
   for (let i = 0; i < d.length; i++) {
     let n = Number(d[d.length - 1 - i]);
-    if (i % 2) ((n *= 2), n > 9 && (n -= 9));
+    if (i % 2) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
     sum += n;
   }
   return sum % 10 === 0;
@@ -50,5 +53,8 @@ export function redactSecrets(s: string): string {
 }
 
 export function redactPii(s: string): string {
-  return PII.reduce((acc, [re, rep]) => acc.replace(re, rep as any), redactSecrets(s));
+  return PII.reduce(
+    (acc, [re, rep]) => (typeof rep === "string" ? acc.replace(re, rep) : acc.replace(re, rep)),
+    redactSecrets(s),
+  );
 }

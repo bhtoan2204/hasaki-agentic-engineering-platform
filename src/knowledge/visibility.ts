@@ -12,8 +12,8 @@ import { listAccessibleRepositories } from "../repos/access.ts";
 type Item = {
   scope_type?: string;
   scope_ref?: string;
-  metadata?: any;
-  versions?: Array<{ metadata?: any }>;
+  metadata?: Record<string, unknown> | null;
+  versions?: Array<{ metadata?: Record<string, unknown> | null }>;
 };
 
 /** `~/.claude` and similar pseudo sources: user-level files, not repository content. */
@@ -25,7 +25,7 @@ export function knowledgeRestricted(item: Item, readable: Set<string>): boolean 
   const meta = item.metadata ?? item.versions?.[0]?.metadata;
   if (meta?.imported_from_repository || meta?.imported_from_local_skill) {
     const repos: string[] = (Array.isArray(meta.source) ? meta.source : [])
-      .map((s: any) => String(s?.repo ?? "").toLowerCase())
+      .map((s: { repo?: unknown } | null) => String(s?.repo ?? "").toLowerCase())
       .filter((r: string) => r && !isPseudoRepo(r));
     if (repos.length && !repos.some((r) => readable.has(r))) return true;
   }

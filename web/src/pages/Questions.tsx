@@ -31,8 +31,47 @@ import {
 import { useI18n } from "../i18n/index.tsx";
 import "./Questions.css";
 
+type OpenQuestion = {
+  id: number;
+  run_id: number;
+  run_title: string;
+  run_status: string;
+  work_item_code: string | null;
+  step_key: string;
+  step_name: string;
+  question: string;
+  context: string | null;
+  options: string[] | null;
+  suggested_answer: string | null;
+};
+type AnsweredQuestion = {
+  id: number;
+  run_id: number;
+  step_key: string;
+  step_name: string;
+  step_status: string;
+  question: string;
+  answer: string;
+  answered_at: string;
+};
+type PendingApproval = {
+  step_id: number;
+  run_id: number;
+  run_title: string;
+  run_status: string;
+  work_item_code: string | null;
+  step_key: string;
+  step_name: string;
+  risk: string | null;
+  message: string | null;
+  gate_missing: string[] | null;
+  quick: boolean;
+  requires_risk_acknowledgement: boolean;
+  reexecute: string | null;
+};
+
 /** One blocked step: its open questions, option picks / free-text answers, and a single submit that resumes the step. */
-function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
+function StepQuestionsCard({ qs, onDone }: { qs: OpenQuestion[]; onDone: () => void }) {
   const { t } = useI18n();
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
@@ -133,7 +172,7 @@ function StepQuestionsCard({ qs, onDone }: { qs: any[]; onDone: () => void }) {
  * One step waiting for approval. Simple approvals are decided here (comment, and the explicit risk acknowledgement the
  * engine requires for an unmet evidence gate); repository selection / branch / provider handoff open the run instead.
  */
-function ApprovalCard({ a, onDone }: { a: any; onDone: () => void }) {
+function ApprovalCard({ a, onDone }: { a: PendingApproval; onDone: () => void }) {
   const { t } = useI18n();
   const [comment, setComment] = useState("");
   const [ack, setAck] = useState(false);
@@ -188,7 +227,7 @@ function ApprovalCard({ a, onDone }: { a: any; onDone: () => void }) {
       <div className="qx-body">
         <div className="qx-q">
           <div className="qx-q-text">{a.message ?? t("qx.ap.default")}</div>
-          {a.gate_missing?.length > 0 && (
+          {!!a.gate_missing?.length && (
             <div className="qx-q-context">
               {t("qx.ap.gap", { items: a.gate_missing.join("; ") })}
             </div>
@@ -252,15 +291,15 @@ function ApprovalCard({ a, onDone }: { a: any; onDone: () => void }) {
 /** Every open question across runs, grouped by blocked step; answer inline or jump to the step in its run graph. */
 export function QuestionsPage() {
   const { t } = useI18n();
-  const { data: open, error, loading, reload } = useApi<any[]>("/api/questions");
-  const { data: history, reload: reloadHistory } = useApi<any[]>("/api/questions/history");
-  const approvals = useApi<any[]>("/api/approvals");
+  const { data: open, error, loading, reload } = useApi<OpenQuestion[]>("/api/questions");
+  const { data: history, reload: reloadHistory } = useApi<AnsweredQuestion[]>("/api/questions/history");
+  const approvals = useApi<PendingApproval[]>("/api/approvals");
   // Questions open and close with step status changes and user actions, never with transcript lines.
   useLive(null, (p) => isStateChange(p) && (reload(), reloadHistory(), approvals.reload()));
   if (loading && !open) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   const pendingApprovals = approvals.data ?? [];
-  const groups: Record<string, any[]> = {};
+  const groups: Record<string, OpenQuestion[]> = {};
   for (const q of open ?? []) (groups[`${q.run_id}:${q.step_key}`] ??= []).push(q);
   const entries = Object.entries(groups);
   const runs = new Set((open ?? []).map((q) => q.run_id)).size;

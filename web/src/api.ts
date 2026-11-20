@@ -59,7 +59,7 @@ function idempotencyKey() {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-export async function api<T = any>(path: string, body?: unknown): Promise<T> {
+export async function api<T = unknown>(path: string, body?: unknown): Promise<T> {
   const scoped = withScope(path);
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -93,8 +93,8 @@ interface CacheEntry<T> {
   data: T;
   timestamp: number;
 }
-const apiCache = new Map<string, CacheEntry<any>>();
-const inFlight = new Map<string, Promise<any>>();
+const apiCache = new Map<string, CacheEntry<unknown>>();
+const inFlight = new Map<string, Promise<unknown>>();
 
 export function clearApiCache() {
   apiCache.clear();
@@ -114,7 +114,7 @@ export function invalidateCache(prefix?: string) {
 }
 
 /** Fetch data, refetch on demand. Stale-while-revalidate: keeps previous data during background reload (no flicker). */
-export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
+export function useApi<T = unknown>(path: string | null, deps: unknown[] = []) {
   const scopedKey = path ? withScope(path) : null;
   const cached = scopedKey ? apiCache.get(scopedKey) : undefined;
 
@@ -180,7 +180,7 @@ export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
             if (inFlight.get(key) === flight) inFlight.delete(key);
           });
         }
-        const d = await p;
+        const d = (await p) as T;
         if (n === seq.current) {
           apiCache.set(key, { data: d, timestamp: Date.now() });
           setDataState(d);
@@ -203,7 +203,6 @@ export function useApi<T = any>(path: string | null, deps: unknown[] = []) {
 
   useEffect(() => {
     void reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, ...deps]);
 
   return { data, error, loading, refreshing, reload, reloadFresh, setData };
@@ -308,7 +307,10 @@ async function pollOnce() {
   }
 }
 function stopPolling() {
-  if (poll) (clearInterval(poll), (poll = null));
+  if (poll) {
+    clearInterval(poll);
+    poll = null;
+  }
 }
 function startPolling() {
   setShared("polling");
@@ -325,7 +327,10 @@ function streamUrl() {
 }
 function open() {
   if (!authed || es || !subs.size || document.visibilityState === "hidden") return;
-  if (reopen) (clearTimeout(reopen), (reopen = null));
+  if (reopen) {
+    clearTimeout(reopen);
+    reopen = null;
+  }
   try {
     const source = new EventSource(streamUrl());
     es = source;
@@ -336,7 +341,10 @@ function open() {
       if (typeof h.cursor === "number") cursor = Math.max(cursor ?? 0, h.cursor);
       if (h.live === false)
         startPolling(); // stream open but the server's LISTEN is down: don't trust it yet
-      else (stopPolling(), setShared("sse"));
+      else {
+        stopPolling();
+        setShared("sse");
+      }
       if (unknownGap) broadcast();
     });
     source.addEventListener("change", (e) => deliver(JSON.parse((e as MessageEvent).data)));
@@ -356,13 +364,19 @@ function open() {
 function close() {
   es?.close();
   es = null;
-  if (reopen) (clearTimeout(reopen), (reopen = null));
+  if (reopen) {
+    clearTimeout(reopen);
+    reopen = null;
+  }
   stopPolling();
 }
 if (typeof window !== "undefined")
   // Network back (Wi-Fi/VPN reconnected): reopen the stream if it died; the server replays what was missed.
   window.addEventListener("online", () => {
-    if (!es || es.readyState === EventSource.CLOSED) (close(), open());
+    if (!es || es.readyState === EventSource.CLOSED) {
+      close();
+      open();
+    }
   });
 if (typeof document !== "undefined")
   document.addEventListener("visibilitychange", () => {

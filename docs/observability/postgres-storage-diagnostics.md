@@ -6,7 +6,7 @@ A safe, read-only diagnostic tool that reports PostgreSQL storage consumption, t
 
 - **Strictly Read-Only**: Queries PostgreSQL system catalogs (`pg_database`, `pg_class`, `pg_namespace`, `pg_index`) and statistics views (`pg_stat_user_tables`). Never executes DDL, writes, or modifies any database state.
 - **Zero Sequential Table Scans**: Does **not** run `COUNT(*)` across tables. Row counts and dead tuples are estimated directly from catalog metadata (`pg_class.reltuples`) and background statistics (`pg_stat_user_tables.n_live_tup`, `n_dead_tup`), ensuring zero impact on active production workloads.
-- **Connection Pool Reuse**: Reuses the platform's existing PostgreSQL connection pool (`pool` from `src/db/pool.ts`) and safely releases clients upon completion.
+- **Connection Pool Reuse**: Reuses the platform's existing PostgreSQL connection pool (`pool` from `src/db/pool.ts`) issuing each query through the pool or a caller-supplied client.
 - **Zero New Dependencies**: Implemented using standard Node.js utilities (`node:util` `parseArgs`) and existing database utilities.
 - **Dual Output Formats**: Supports clean, aligned human-readable terminal tables as well as structured JSON output for automated telemetry and alerting.
 
@@ -17,11 +17,11 @@ A safe, read-only diagnostic tool that reports PostgreSQL storage consumption, t
 | Metric                  | Source                                                 | Description                                                                           |
 | :---------------------- | :----------------------------------------------------- | :------------------------------------------------------------------------------------ |
 | **Database Size**       | `pg_database_size(current_database())`                 | Total disk space used by the database on disk                                         |
-| **Table Size**          | `pg_relation_size(oid)`                                | Disk space occupied by base table heap files (excluding toast and indexes)            |
+| **Table Size**          | `pg_table_size(oid) - toast`                           | Heap files including free space and visibility maps (excluding toast and indexes)     |
 | **Index Size**          | `pg_indexes_size(oid)` / `pg_relation_size(index_oid)` | Disk space used by indexes on a table, plus a breakdown of largest individual indexes |
-| **Toast Size**          | Calculated (`total - index - table`)                   | Out-of-line storage for oversized column values (JSON blobs, large text, artifacts)   |
+| **Toast Size**          | `pg_total_relation_size(reltoastrelid)`                | Out-of-line storage for oversized column values (JSON blobs, large text, artifacts)   |
 | **Total Relation Size** | `pg_total_relation_size(oid)`                          | Complete on-disk footprint of a table including heap, toast, and all indexes          |
-| **Estimated Rows**      | `COALESCE(n_live_tup, reltuples, 0)`                   | Planner/statistics row estimate without scanning table rows                           |
+| **Estimated Rows**      | `COALESCE(n_live_tup, reltuples)` (a zero stays zero)  | Planner/statistics row estimate without scanning table rows                           |
 | **Dead Tuples**         | `pg_stat_user_tables.n_dead_tup`                       | Estimated dead tuples waiting to be vacuumed                                          |
 | **Dead Tuple Ratio**    | Calculated: `dead / (live + dead)`                     | Dead tuple percentage indicating vacuum efficiency                                    |
 | **Largest Tables**      | Ranked by `total_size_bytes DESC`                      | Top tables consuming the most storage on disk                                         |

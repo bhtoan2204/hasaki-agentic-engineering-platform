@@ -21,6 +21,7 @@ import {
   scopeCheck,
   SCOPE_REAPPROVAL_QUESTION,
   type ApprovedScope,
+  type Claim,
 } from "../src/agent/evidence.ts";
 import {
   applyProvenance,
@@ -84,8 +85,10 @@ test("scope paths: traversal, absolute, backslash, ambiguous and wildcard paths 
     ["app/./x.go", /ambiguous/],
     ["app/*.go", /wildcard/],
     ["", /empty/],
-  ] as const)
-    assert.match((normalizeScopePath(p) as any).invalid ?? "", why, p);
+  ] as const) {
+    const r = normalizeScopePath(p);
+    assert.match("invalid" in r ? r.invalid : "", why, p);
+  }
   assert.deepEqual(normalizeScopePath("./app/x.go:12-20"), { path: "app/x.go", dir: false });
   assert.deepEqual(
     normalizeScopePath("svc/app/x.go", "svc"),
@@ -543,9 +546,9 @@ test("provenance: tool/artifact references must be records of this run; free-tex
       },
     ],
     env,
-  )) as any[];
+  )) as Claim[];
   assert.equal(
-    forged.provenance.status,
+    forged.provenance?.status,
     "CONTRADICTED",
     "an agent-supplied provenance label is replaced",
   );
@@ -576,11 +579,11 @@ test("provenance: an unsupported business claim keeps its text but cannot confir
     claims: await withProvenance(raw, env),
     root_cause_assessment: { status: "CONFIRMED", explanation: "retry job" },
   });
-  const b1 = out.claims.find((c: any) => c.id === "B1");
-  assert.equal(b1.claim, "Orders in status 7 are always refunded twice", "the claim is preserved");
-  assert.equal(b1.provenance.status, "CONTRADICTED");
+  const b1 = out.claims.find((c) => c.id === "B1");
+  assert.equal(b1?.claim, "Orders in status 7 are always refunded twice", "the claim is preserved");
+  assert.equal(b1?.provenance?.status, "CONTRADICTED");
   assert.notEqual(out.root_cause_assessment.status, "CONFIRMED", "no root cause may rest on it");
-  assert.equal(out.claims.find((c: any) => c.id === "R").classification, "HYPOTHESIS");
+  assert.equal(out.claims.find((c) => c.id === "R")?.classification, "HYPOTHESIS");
   // Legacy outputs without provenance still normalize unchanged.
   const legacy = normalizeInvestigationOutput("analysis", {
     claims: [{ id: "L", claim: "legacy", classification: "HYPOTHESIS" }],

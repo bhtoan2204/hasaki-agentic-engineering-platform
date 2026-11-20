@@ -1,5 +1,6 @@
 /** Render the production bundle with partial telemetry; no database, real session or provider calls. */
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
@@ -34,7 +35,7 @@ const server = createServer(async (req, res) => {
   }
 });
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
   headless: true,

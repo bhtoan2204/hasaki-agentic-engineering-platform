@@ -4,6 +4,8 @@ import { promisify } from "node:util";
 import { config } from "../config.ts";
 import { pool, q, one, json } from "../db/pool.ts";
 import { repoPath, repositories } from "../repos/service.ts";
+import type { AttemptRow } from "../workflow/types.ts";
+import type { Classification } from "../workflow/executors/baseline.ts";
 
 /**
  * "What did this run do?" — a detailed, factual summary of a finished run, shown on the work item page.
@@ -161,7 +163,13 @@ function listsOf(output: Record<string, unknown>, en: boolean): SummaryList[] {
   return lists;
 }
 
-function stepSummaryText(type: string, output: Record<string, any>, en: boolean): string {
+interface StepOutput {
+  [key: string]: unknown;
+  diagnosis?: { summary?: unknown } | null;
+  by?: string | null;
+}
+
+function stepSummaryText(type: string, output: StepOutput, en: boolean): string {
   if (typeof output.summary === "string" && output.summary.trim()) return output.summary.trim();
   if (typeof output.diagnosis?.summary === "string") return output.diagnosis.summary;
   if (type === "human_approval") {
@@ -285,17 +293,14 @@ export async function buildRunSummary(runId: number): Promise<RunSummary> {
     "SELECT * FROM workflow_step_attempts WHERE run_id = $1 ORDER BY id",
     [runId],
   );
-  const byStep = new Map<number, any[]>();
+  const byStep = new Map<number, AttemptRow[]>();
   for (const a of attempts) byStep.set(a.step_id, [...(byStep.get(a.step_id) ?? []), a]);
 
   const stepLines: StepSummary[] = [];
   for (const s of steps) {
     const tries = byStep.get(s.id) ?? [];
     if (!tries.length && !["COMPLETED", "FAILED", "SKIPPED"].includes(s.status)) continue; // never ran
-    const output = (s.output && typeof s.output === "object" ? s.output : {}) as Record<
-      string,
-      any
-    >;
+    const output: StepOutput = s.output && typeof s.output === "object" ? s.output : {};
     const counted = tries.filter((a) => a.status !== "STALE");
     const duration = counted.reduce(
       (n, a) =>
@@ -322,7 +327,7 @@ export async function buildRunSummary(runId: number): Promise<RunSummary> {
 
   const tests: RunSummary["tests"] = [];
   for (const s of steps.filter((x) => x.type === "command" && x.output)) {
-    const o = s.output as Record<string, any>;
+    const o: StepOutput = s.output;
     if (o.skipped)
       tests.push({
         step: s.key,
@@ -332,8 +337,12 @@ export async function buildRunSummary(runId: number): Promise<RunSummary> {
         detail: String(o.reason ?? ""),
       });
     for (const r of Array.isArray(o.results) ? o.results : []) {
-      const pre = (r.baseline?.pre_existing ?? []).flatMap((p: any) => p.tests ?? []);
-      const reg = (r.baseline?.regressions ?? []).flatMap((p: any) => p.tests ?? [p.package ?? ""]);
+      const pre = (r.baseline?.pre_existing ?? []).flatMap(
+        (p: Classification["pre_existing"][number]) => p.tests ?? [],
+      );
+      const reg = (r.baseline?.regressions ?? []).flatMap(
+        (p: Classification["regressions"][number]) => p.tests ?? [p.package ?? ""],
+      );
       const detail = [
         r.timed_out ? (en ? "timed out" : "quá thời gian") : "",
         reg.length ? `${en ? "regressions" : "lỗi mới"}: ${reg.join(", ")}` : "",
@@ -372,7 +381,7 @@ export async function buildRunSummary(runId: number): Promise<RunSummary> {
   for (const s of steps.filter(
     (x) => x.type === "human_approval" && x.output && x.status === "COMPLETED",
   )) {
-    const o = s.output as Record<string, any>;
+    const o: StepOutput = s.output;
     decisions.push({
       kind: "approval",
       step: s.key,

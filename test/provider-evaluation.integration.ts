@@ -1,4 +1,5 @@
 import { compareContextEffect } from "../src/eval/contextEffect.ts";
+import type { AddressInfo } from "node:net";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
@@ -22,7 +23,7 @@ import {
 } from "../src/eval/recommendations.ts";
 import { evaluationAnalytics } from "../src/eval/analytics.ts";
 import { saveOptimizationPolicy } from "../src/eval/optimization.ts";
-import { sha256 } from "../src/eval/dataset.ts";
+import { sha256, type BenchmarkCase } from "../src/eval/dataset.ts";
 import { startPendingRun, startRun, getRun } from "../src/workflow/engine.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerDefaultExecutors } from "../src/workflow/executors/index.ts";
@@ -33,7 +34,7 @@ import { sandboxIdentity } from "../src/eval/isolation.ts";
 let owner: PublicUser,
   other: PublicUser,
   admin: PublicUser,
-  suite: any,
+  suite: Awaited<ReturnType<typeof publishBuiltinSuite>>,
   server: Server,
   base: string;
 /**
@@ -71,7 +72,7 @@ before(async () => {
   suite = await publishBuiltinSuite();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(async () => {
   setHandoffReadinessForTests(undefined);
@@ -79,7 +80,11 @@ after(async () => {
   await pool.end();
 });
 const plan = (values: string[]) => values.map((provider) => ({ provider, model: null }));
-async function evaluation(providers: string[], variant = "tools", extra: any = {}) {
+async function evaluation(
+  providers: string[],
+  variant = "tools",
+  extra: Record<string, unknown> = {},
+) {
   return createEvaluation(owner.id, {
     suite_id: suite.id,
     request_key: `p6-${++seq}`,
@@ -168,9 +173,18 @@ test(
       assert.equal(
         d.summary.successes,
         2,
-        JSON.stringify(d.cases.map((c: any) => c.data?.evidence?.details)),
+        JSON.stringify(
+          d.cases.map(
+            (c: { data?: { evidence?: { details?: unknown } } }) => c.data?.evidence?.details,
+          ),
+        ),
       );
-      assert.ok(d.cases.every((c: any) => c.data.evidence.cost_usd === null));
+      assert.ok(
+        d.cases.every(
+          (c: { data: { evidence: { cost_usd: number | null } } }) =>
+            c.data.evidence.cost_usd === null,
+        ),
+      );
       const attempts = await q(
         pool,
         "SELECT a.agent_provider,a.metrics FROM workflow_step_attempts a JOIN workflow_steps s ON s.id=a.step_id WHERE a.run_id=$1 AND s.type IN ('agent','coding_agent') ORDER BY a.id",
@@ -237,8 +251,8 @@ test(
     const budget = await evaluation(["codex"], "pack", { max_tokens: 9999 });
     await assert.rejects(() => createComparison(owner.id, b.id, budget.id, {}), /identical suite/);
     const result = await evaluationAnalytics(owner, url());
-    assert.ok(result.comparisons.every((g: any) => g.reported_cost_usd == null));
-    assert.ok(result.context.some((g: any) => g.context_variant === "minimal"));
+    assert.ok(result.comparisons.every((g) => g.reported_cost_usd == null));
+    assert.ok(result.context.some((g) => g.context_variant === "minimal"));
   },
 );
 
@@ -454,7 +468,7 @@ test("live model execution remains explicitly blocked without verified usage-bud
 test("controlled evidence query supports reproducible recommendations while keeping production observations separate", async () => {
   const manifest = structuredClone(suite.manifest);
   manifest.key = "p6-labeled-fixture";
-  manifest.cases = manifest.cases.map((c: any) => ({ ...c, category: "go-backend" }));
+  manifest.cases = manifest.cases.map((c: BenchmarkCase) => ({ ...c, category: "go-backend" }));
   const s = await one(
     pool,
     "INSERT INTO benchmark_suites(suite_key,version,content_hash,title,manifest) VALUES($1,1,$2,'Synthetic evidence fixture',$3) RETURNING id",
@@ -554,7 +568,11 @@ test("controlled evidence query supports reproducible recommendations while keep
   assert.equal(rec.decision.samples, 60);
   assert.equal(rec.decision.distinct_tasks, 15);
   assert.equal(rec.decision.cost_availability, "Unknown");
-  assert.ok(rec.decision.evidence.every((r: any) => r.evaluation_ids.length === 2));
+  assert.ok(
+    rec.decision.evidence.every(
+      (r: { evaluation_ids: unknown[] }) => r.evaluation_ids.length === 2,
+    ),
+  );
   setHandoffReadinessForTests(async () => ({
     ok: false,
     error: "Provider unavailable",

@@ -1,7 +1,18 @@
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
-import { EvaluationTable } from "./EvaluationTable.tsx";
-export function EvaluationDimensions({ data, common }: { data: any; common: any[] }) {
+import {
+  EvaluationTable,
+  type EvaluationAnalytics,
+  type EvaluationCohortRow,
+  type EvaluationColumn,
+} from "./EvaluationTable.tsx";
+export function EvaluationDimensions({
+  data,
+  common,
+}: {
+  data: EvaluationAnalytics;
+  common: Array<EvaluationColumn<EvaluationCohortRow>>;
+}) {
   const { t } = useI18n();
   return (
     <>

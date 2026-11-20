@@ -166,6 +166,40 @@ function fileDiff(diff: string, path: string) {
   );
 }
 
+type RepoChanges = {
+  repo: string;
+  path: string;
+  branch: string;
+  base: string;
+  exists: boolean;
+  status: string;
+  uncommitted_diff: string;
+  diff: string;
+  commits: Array<{ hash: string; subject: string; author: string; when: string }>;
+  files: Array<{ path: string; additions: number | null; deletions: number | null }>;
+  slop: SlopView | null;
+  pr_preview: { target: string; will_open: boolean; title: string; description: string };
+};
+type RunChanges = {
+  branch: string;
+  pr_step: { key: string; mode: string; status: string } | null;
+  repos: RepoChanges[];
+  validation: Array<{
+    key: string;
+    type: string;
+    status: string;
+    output: { passed?: boolean; approved?: boolean } | null;
+  }>;
+  pull_requests: Array<{
+    id: number;
+    repo: string;
+    url: string;
+    title: string;
+    draft: boolean;
+    created: boolean;
+  }>;
+};
+
 /** Review a run's git changes and the exact PR content before the PR step runs. */
 export function Changes({
   run,
@@ -173,26 +207,26 @@ export function Changes({
   activity = 0,
   onChanged,
 }: {
-  run: any;
+  run: { id: number };
   tick: number;
   /** Bumped on every transcript event; the diff (git on the server) is refreshed from it at most every 10 s. */
   activity?: number;
   onChanged: () => void;
 }) {
   const { t } = useI18n();
-  const { data, error, loading, reload } = useApi<any>(`/api/runs/${run.id}/changes`);
+  const { data, error, loading, reload } = useApi<RunChanges>(`/api/runs/${run.id}/changes`);
   const [file, setFile] = useState<Record<string, string | null>>({});
-  useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => void reload(), [tick]);
   const lastDiff = useRef(Date.now());
   useEffect(() => {
     if (!activity || Date.now() - lastDiff.current < 10_000) return;
     lastDiff.current = Date.now();
     void reload();
-  }, [activity]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activity]);
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <EmptyState title={t("ch.empty")} />;
-  const prWaiting = data.pr_step?.status === "WAITING_APPROVAL";
+  const prWaiting = data.pr_step?.status === "WAITING_APPROVAL" ? data.pr_step : null;
   return (
     <div>
       <div className="si-top">
@@ -239,7 +273,7 @@ export function Changes({
               className="ok big"
               onClick={async () =>
                 (await act(
-                  () => api(`/api/runs/${run.id}/steps/${data.pr_step.key}/approve`, {}),
+                  () => api(`/api/runs/${run.id}/steps/${prWaiting.key}/approve`, {}),
                   t("ch.approved"),
                 )) && (onChanged(), reload())
               }
@@ -248,7 +282,7 @@ export function Changes({
             </button>
             <button
               className="ghost"
-              onClick={() => navigate(`/runs/${run.id}/${data.pr_step.key}`)}
+              onClick={() => navigate(`/runs/${run.id}/${prWaiting.key}`)}
             >
               {t("ch.openStep")}
             </button>
@@ -256,7 +290,7 @@ export function Changes({
         </section>
       )}
       {!data.repos.length && <Empty>{t("ch.empty")}</Empty>}
-      {data.repos.map((r: any) => (
+      {data.repos.map((r) => (
         <div key={r.repo} className="rv-card" style={{ marginTop: 14 }}>
           <div className="ch-repo-head">
             <h4>
@@ -291,7 +325,7 @@ export function Changes({
                 <GitCommitHorizontal size={14} /> {t("ch.commits", { n: r.commits.length })}
               </div>
               {r.commits.length ? (
-                r.commits.map((c: any) => (
+                r.commits.map((c) => (
                   <div key={c.hash} className="ch-commit">
                     <span className="mono">{c.hash}</span>{" "}
                     <span className="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
@@ -311,7 +345,7 @@ export function Changes({
               <div className="table-wrap">
                 <table className="ch-files">
                   <tbody>
-                    {r.files.map((f: any) => (
+                    {r.files.map((f) => (
                       <tr
                         key={f.path}
                         className={"click" + (file[r.repo] === f.path ? " on" : "")}
@@ -385,7 +419,7 @@ export function Changes({
           <div className="rv-sec-title" style={{ marginTop: 18 }}>
             <ListChecks size={14} /> Validation
           </div>
-          {data.validation.map((v: any) => (
+          {data.validation.map((v) => (
             <details
               key={v.key}
               className="rv-card"
@@ -415,7 +449,7 @@ export function Changes({
           <div className="rv-sec-title" style={{ marginTop: 18 }}>
             <GitPullRequest size={14} /> Pull requests
           </div>
-          {data.pull_requests.map((p: any) => (
+          {data.pull_requests.map((p) => (
             <div key={p.id} className="rp-file">
               <GitPullRequest size={14} color="var(--brand)" />
               <b>{p.repo}</b>{" "}

@@ -93,7 +93,7 @@ export interface ToolCallContext {
   confirmedOperation?: { id: number; idempotencyKey: string };
 }
 
-export interface IntegrationTool<S extends z.ZodObject<any> = z.ZodObject<any>> {
+export interface IntegrationTool<S extends z.ZodObject = z.ZodObject> {
   name: string;
   summary: string;
   description: string;
@@ -113,7 +113,22 @@ export interface IntegrationTool<S extends z.ZodObject<any> = z.ZodObject<any>> 
 }
 
 const registry = new Map<string, IntegrationTool>();
-export function registerIntegrationTool<S extends z.ZodObject<any>>(t: IntegrationTool<S>) {
+
+interface WorkTask {
+  id?: unknown;
+  code?: unknown;
+  name?: unknown;
+  project?: { name?: unknown } | null;
+  project_name?: unknown;
+  note?: unknown;
+  status?: unknown;
+  date_end?: unknown;
+  note_files?: unknown;
+  parent?: { code?: unknown; name?: unknown } | null;
+  assign_to_user?: Array<{ staff_name?: unknown }> | null;
+  task_ai?: { ai_suggest?: { reasoning?: unknown } | null } | null;
+}
+export function registerIntegrationTool<S extends z.ZodObject>(t: IntegrationTool<S>) {
   registry.set(t.name, t as unknown as IntegrationTool);
 }
 export const integrationTools = () => [...registry.values()].filter((t) => t.enabled?.() ?? true);
@@ -410,7 +425,7 @@ export function registerBuiltinTools() {
     handler: async ({ task_id }) => {
       const userId = currentUserId();
       if (!userId) throw new Error("this run has no owner");
-      const j: any = await workApi(
+      const j: WorkTask & { data?: WorkTask } = await workApi(
         userId,
         "GET",
         config.hasakiWork.detailPath.replace("{id}", String(task_id)),
@@ -426,7 +441,7 @@ export function registerBuiltinTools() {
         date_end: d.date_end,
         note_files: d.note_files,
         parent: d.parent && { code: d.parent.code, name: d.parent.name },
-        assignees: (d.assign_to_user ?? []).map((u: any) => u.staff_name),
+        assignees: (d.assign_to_user ?? []).map((u) => u.staff_name),
         ai_hint: d.task_ai?.ai_suggest?.reasoning,
       };
     },
@@ -442,11 +457,16 @@ export function registerBuiltinTools() {
     handler: async () => {
       const userId = currentUserId();
       if (!userId) throw new Error("this run has no owner");
-      const j: any = await workApi(userId, "GET", config.hasakiWork.listPath, {
-        ...config.hasakiWork.listQuery,
-        to_date: new Date().toLocaleDateString("sv-SE"),
-      });
-      const rows: any[] = Array.isArray(j?.data) ? j.data : (j?.data?.rows ?? []);
+      const j: { data?: WorkTask[] | { rows?: WorkTask[] } } = await workApi(
+        userId,
+        "GET",
+        config.hasakiWork.listPath,
+        {
+          ...config.hasakiWork.listQuery,
+          to_date: new Date().toLocaleDateString("sv-SE"),
+        },
+      );
+      const rows: WorkTask[] = Array.isArray(j?.data) ? j.data : (j?.data?.rows ?? []);
       return rows.map((t) => ({
         id: t.id,
         code: t.code,
@@ -1169,14 +1189,23 @@ export function registerBuiltinTools() {
     available: () => true,
     handler: async ({ include_diff }, ctx) => {
       const c = await runChanges(runBound(ctx));
-      return c.repos.map((r: any) => ({
-        repo: r.repo,
-        branch: r.branch,
-        commits: r.commits,
-        files: r.files,
-        uncommitted: r.status,
-        ...(include_diff ? { diff: r.diff?.slice(0, 30000) } : {}),
-      }));
+      return c.repos.map(
+        (r: {
+          repo: string;
+          branch: string;
+          commits?: unknown;
+          files?: unknown;
+          status?: unknown;
+          diff?: string;
+        }) => ({
+          repo: r.repo,
+          branch: r.branch,
+          commits: r.commits,
+          files: r.files,
+          uncommitted: r.status,
+          ...(include_diff ? { diff: r.diff?.slice(0, 30000) } : {}),
+        }),
+      );
     },
   });
   registerIntegrationTool({

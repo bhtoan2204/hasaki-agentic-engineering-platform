@@ -80,25 +80,32 @@ async function commitMessages(runId: number): Promise<string[]> {
 }
 
 async function pullRequestUrls(runId: number): Promise<string[]> {
-  const rows = await q<{ prs: any }>(
+  const rows = await q<{ prs: Array<{ url?: unknown } | null> | null }>(
     pool,
     "SELECT output->'pull_requests' AS prs FROM workflow_steps WHERE run_id = $1 AND output ? 'pull_requests'",
     [runId],
   );
   return rows
     .flatMap((r) => (Array.isArray(r.prs) ? r.prs : []))
-    .map((p: any) => String(p?.url ?? ""))
+    .map((p) => String(p?.url ?? ""))
     .filter(Boolean);
+}
+
+interface HasakiTaskPayload {
+  id?: unknown;
+  code?: unknown;
+  amount_of_work?: unknown;
+  unit_amount_of_work?: unknown;
 }
 
 /** The values to send, from the work item, the run's commits and the approved report. */
 export function syncValues(input: {
-  workItem: { code?: string | null; payload?: any } | null | undefined;
+  workItem: { code?: string | null; payload?: HasakiTaskPayload | null } | null | undefined;
   summary: string;
   commitMessages: string[];
   prUrls: string[];
 }): HasakiSyncValues | { skipped: string } {
-  const payload = input.workItem?.payload ?? {};
+  const payload: HasakiTaskPayload = input.workItem?.payload ?? {};
   const taskId = Number(payload.id);
   if (!Number.isInteger(taskId) || taskId <= 0)
     return { skipped: "work item is not a Hasaki Work task" };
@@ -175,7 +182,7 @@ export async function sendTaskResult(
 export async function syncApprovedReport(input: {
   runId: number;
   ownerId: number | null | undefined;
-  workItem: { code?: string | null; payload?: any } | null | undefined;
+  workItem: { code?: string | null; payload?: HasakiTaskPayload | null } | null | undefined;
   summary: string;
 }): Promise<HasakiSyncResult> {
   try {

@@ -1,6 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, isStateChange, useApi, useLive, type LiveState } from "../api.ts";
-import type { EventLite, OfficeSnapshot } from "./types.ts";
+import type {
+  AttemptLite,
+  EventLite,
+  GraphStepLite,
+  OfficeSnapshot,
+  QuestionLite,
+  RunSummaryLite,
+  StepLite,
+} from "./types.ts";
+
+interface RunDetail {
+  id: number;
+  title: string;
+  status: string;
+  branch?: string;
+  steps: StepLite[];
+  graph?: { steps?: GraphStepLite[] } | null;
+  attempts?: AttemptLite[];
+  questions?: QuestionLite[];
+}
 
 const KEEP_EVENTS = 40;
 const WATCH = ["RUNNING", "RETRYING", "WAITING_INPUT", "WAITING_APPROVAL", "FAILED"];
@@ -16,7 +35,7 @@ export function useOfficeExecutionState(runId: number | null, focusStepKey: stri
     error,
     loading,
     reload,
-  } = useApi<any>(runId ? `/api/runs/${runId}` : null, [runId]);
+  } = useApi<RunDetail>(runId ? `/api/runs/${runId}` : null, [runId]);
   const [events, setEvents] = useState<Record<number, EventLite[]>>({});
   const cursor = useRef<Record<number, number>>({});
   const inflight = useRef<Set<number>>(new Set());
@@ -27,13 +46,11 @@ export function useOfficeExecutionState(runId: number | null, focusStepKey: stri
   }, [runId]);
 
   const pullTranscripts = useCallback(
-    async (r: any) => {
+    async (r: RunDetail | null) => {
       if (!r?.steps) return;
       const ids: number[] = r.steps
-        .filter(
-          (s: any) => s.current_attempt_id && (WATCH.includes(s.status) || s.key === focusStepKey),
-        )
-        .map((s: any) => Number(s.current_attempt_id));
+        .filter((s) => s.current_attempt_id && (WATCH.includes(s.status) || s.key === focusStepKey))
+        .map((s) => Number(s.current_attempt_id));
       await Promise.all(
         ids.map(async (id) => {
           if (inflight.current.has(id)) return;
@@ -103,12 +120,12 @@ export function useOfficeExecutionState(runId: number | null, focusStepKey: stri
 
 /** Runs for the picker: active ones first. Refreshed when any run changes. */
 export function useOfficeRuns() {
-  const { data, reload } = useApi<any[]>("/api/runs");
+  const { data, reload } = useApi<RunSummaryLite[]>("/api/runs");
   useLive(null, (p) => {
     if (!p || p.kind === "status") void reload();
   });
   const runs = data ?? [];
-  const isActive = (r: any) => ["RUNNING", "WAITING", "PAUSED"].includes(r.status);
+  const isActive = (r: RunSummaryLite) => ["RUNNING", "WAITING", "PAUSED"].includes(r.status);
   return { runs, active: runs.filter(isActive), isActive };
 }
 

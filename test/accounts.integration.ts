@@ -1,4 +1,5 @@
 import { test, after, before } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { pool } from "../src/db/pool.ts";
@@ -7,7 +8,7 @@ import { config } from "../src/config.ts";
 import { settings } from "../src/db.ts";
 
 let server: Server;
-const sent: any[] = [];
+const sent: Array<{ chat_id: string }> = [];
 const TOKEN = "123456:ABCdefGHIjklMNOpqrSTUvwx";
 before(async () => {
   await migrate();
@@ -38,7 +39,7 @@ before(async () => {
     });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  config.telegram.apiBase = `http://127.0.0.1:${(server.address() as any).port}`;
+  config.telegram.apiBase = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(async () => {
   server.close();
@@ -48,7 +49,9 @@ after(async () => {
 
 test("Telegram: env values are the fallback, UI values win and persist, clearing falls back; secrets masked", async () => {
   Object.assign(config.telegram, { botToken: "999:ENVTOKENxxxxxxxxxxxxxxxxx", chatId: "7" }); // as if from .env
-  const acc = await import(`../src/integrations/accounts.ts?${Date.now()}`); // captures the env fallback now
+  const acc: typeof import("../src/integrations/accounts.ts") = await import(
+    `../src/integrations/accounts.ts?${Date.now()}`
+  ); // captures the env fallback now
   await acc.loadAccountSettings();
   assert.equal((await acc.telegramStatus()).source, "env");
 
@@ -60,7 +63,7 @@ test("Telegram: env values are the fallback, UI values win and persist, clearing
   );
 
   assert.deepEqual(
-    (await acc.telegramChats({ botToken: TOKEN })).map((c: any) => c.id),
+    (await acc.telegramChats({ botToken: TOKEN })).map((c) => c.id),
     ["42", "-1001"],
   );
   const st = await acc.setTelegram({ botToken: TOKEN, chatId: "42" });
@@ -74,7 +77,7 @@ test("Telegram: env values are the fallback, UI values win and persist, clearing
   assert.equal(config.telegram.botToken, TOKEN);
   assert.equal(config.telegram.chatId, "-1001");
   await acc.testTelegram(undefined, true); // admin without a personal chat: the shared chat
-  assert.equal(sent.at(-1).chat_id, "-1001");
+  assert.equal(sent.at(-1)?.chat_id, "-1001");
   // Step notifications use the user's OWN chat: settable from the UI, shown in the status, used by "send a test".
   const { ensureTestOwner } = await import("../src/auth/testOwner.ts");
   const uid = await ensureTestOwner();
@@ -86,7 +89,7 @@ test("Telegram: env values are the fallback, UI values win and persist, clearing
   await acc.setTelegramDestination(uid, "555");
   assert.equal((await acc.telegramStatus(uid)).myChatId, "555");
   await acc.testTelegram(uid, false);
-  assert.equal(sent.at(-1).chat_id, "555");
+  assert.equal(sent.at(-1)?.chat_id, "555");
   await acc.setTelegramDestination(uid, "");
   assert.equal((await acc.telegramStatus(uid)).myChatId, null, "empty clears it");
 

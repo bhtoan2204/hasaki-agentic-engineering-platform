@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -84,7 +84,8 @@ async function probe(bin: string, model: string, effort: string): Promise<Antigr
   try {
     const v = await run(bin, ["--version"]);
     version = `${v.stdout}`.trim().split("\n")[0] ?? "";
-  } catch (e: any) {
+  } catch (caught) {
+    const e = caught as ExecFileException;
     if (e?.code === "ENOENT")
       return {
         ok: false,
@@ -114,7 +115,8 @@ async function probe(bin: string, model: string, effort: string): Promise<Antigr
         };
       }
     }
-  } catch (e: any) {
+  } catch (caught) {
+    const e = caught as ExecFileException;
     return {
       ok: false,
       bin,
@@ -129,7 +131,9 @@ async function probe(bin: string, model: string, effort: string): Promise<Antigr
   let hasToken = false;
   try {
     hasToken = existsSync(tokenFile) && statSync(tokenFile).size > 0;
-  } catch {}
+  } catch {
+    /* ignore: unreadable token file means not authenticated */
+  }
 
   const models = await modelCatalog(bin);
   if (!models && !execution.getStore()?.evaluation?.fixtureAgent) {

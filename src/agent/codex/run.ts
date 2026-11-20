@@ -1,7 +1,7 @@
 import { agentEnvironment } from "../environment.ts";
 import { nativeCompactionThreshold } from "../../context/compaction.ts";
 import { execution } from "../../auth/execution.ts";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type ExecFileException } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,7 +130,8 @@ async function probe(bin: string, model: string, effort: string): Promise<CodexC
   try {
     const v = await run(bin, ["--version"]);
     version = `${v.stdout}`.trim().split("\n")[0] ?? "";
-  } catch (e: any) {
+  } catch (caught) {
+    const e = caught as ExecFileException;
     if (e?.code === "ENOENT")
       return {
         ok: false,
@@ -168,7 +169,8 @@ async function probe(bin: string, model: string, effort: string): Promise<CodexC
           kind: "unsupported",
           error: `${version || bin}: \`codex exec resume\` does not support ${f}. Upgrade the Codex CLI. ${NO_FALLBACK}`,
         };
-  } catch (e: any) {
+  } catch (caught) {
+    const e = caught as ExecFileException;
     return {
       ok: false,
       bin,
@@ -191,7 +193,8 @@ async function probe(bin: string, model: string, effort: string): Promise<CodexC
         error: `Codex CLI on this worker is not logged in. Run \`codex login\` on the worker machine. ${NO_FALLBACK}`,
       };
     auth = m[1].trim().slice(0, 60);
-  } catch (e: any) {
+  } catch (caught) {
+    const e = caught as ExecFileException;
     return {
       ok: false,
       bin,
@@ -212,17 +215,27 @@ async function probe(bin: string, model: string, effort: string): Promise<CodexC
   return cap;
 }
 
+interface CatalogModel {
+  slug: string;
+  supported_reasoning_levels?: unknown;
+  default_reasoning_level?: unknown;
+}
+
 async function modelCatalog(bin: string): Promise<CodexCapability["models"] | null> {
   try {
     const r = await run(bin, ["debug", "models"], 30_000);
     const d = JSON.parse(r.stdout);
-    const list: any[] = Array.isArray(d) ? d : Array.isArray(d?.models) ? d.models : [];
+    const list: unknown[] = Array.isArray(d) ? d : Array.isArray(d?.models) ? d.models : [];
     return list
-      .filter((m) => typeof m?.slug === "string")
+      .filter(
+        (m): m is CatalogModel => typeof (m as Partial<CatalogModel> | null)?.slug === "string",
+      )
       .map((m) => ({
         slug: m.slug,
         efforts: Array.isArray(m.supported_reasoning_levels)
-          ? m.supported_reasoning_levels.map((x: any) => String(x?.effort ?? x)).filter(Boolean)
+          ? m.supported_reasoning_levels
+              .map((x: unknown) => String((x as { effort?: unknown } | null)?.effort ?? x))
+              .filter(Boolean)
           : [],
         default_effort:
           typeof m.default_reasoning_level === "string" ? m.default_reasoning_level : undefined,
@@ -393,25 +406,34 @@ export function killTree(child: ChildProcess) {
         const stat = readFileSync(`/proc/${d}/stat`, "utf8");
         const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
         parent.set(Number(d), ppid);
-      } catch {}
+      } catch {
+        /* ignore: process exited while scanning */
+      }
     }
     let grew = true;
     descendants.add(pid);
     while (grew) {
       grew = false;
       for (const [p, pp] of parent)
-        if (descendants.has(pp) && !descendants.has(p)) (descendants.add(p), (grew = true));
+        if (descendants.has(pp) && !descendants.has(p)) {
+          descendants.add(p);
+          grew = true;
+        }
     }
   } catch {
     /* no /proc: the group kill below still applies */
   }
   try {
     process.kill(-pid, "SIGKILL");
-  } catch {}
+  } catch {
+    /* ignore: group already gone */
+  }
   for (const p of descendants) {
     try {
       process.kill(p, "SIGKILL");
-    } catch {}
+    } catch {
+      /* ignore: process already gone */
+    }
   }
 }
 
@@ -478,7 +500,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   const toolEnv = envFromExecution(ctx, input.mode, input.policy, metrics, (o) => (submitted = o));
   // After ask_user the step waits: no further edits or state-changing commands until the engine resumes with answers.
   const livePolicy = new Proxy(input.policy, {
-    get: (t, k) => (k === "mode" && paused ? "analysis" : (t as any)[k]),
+    get: (t, k) => (k === "mode" && paused ? "analysis" : Reflect.get(t, k)),
   });
   const activity = { touch: () => {} };
   let broker: Broker;

@@ -6,6 +6,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { pool, one } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { seedTemplates } from "../src/workflow/definitions.ts";
@@ -21,12 +22,19 @@ import {
   setDatabaseDriver,
   testDatabase,
   listDatabases,
+  type ProjectDatabase,
+  type QueryResult,
+  type publicDatabase,
 } from "../src/integrations/database.ts";
 import { callTool, registerBuiltinTools } from "../src/agent/toolRegistry.ts";
+import type { ResolvedContext } from "../src/workflow/context.ts";
+import type { RunRow, StepRow } from "../src/workflow/types.ts";
 
 let server: Server;
 let base = "";
-type Call = (path: string, body?: unknown) => Promise<{ status: number; body: any; text: string }>;
+type Call = <T = unknown>(path: string, body?: unknown) => Promise<{ status: number; body: T; text: string }>;
+type DatabaseView = Awaited<ReturnType<typeof publicDatabase>>;
+type TestResult = Awaited<ReturnType<typeof testDatabase>>;
 let admin: Call, A: Call, B: Call;
 const ids: Record<string, number> = {};
 
@@ -81,7 +89,7 @@ before(async () => {
     );
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   admin = await login("db-admin", "db-admin-password");
   A = await login("db-a", "db-a-password");
   B = await login("db-b", "db-b-password");
@@ -176,7 +184,7 @@ test("admin API: create needs a password, it is never returned; members cannot m
       password: "secret-p-pw",
     },
   ]) {
-    const r = await admin("/api/integrations/databases", body);
+    const r = await admin<DatabaseView>("/api/integrations/databases", body);
     assert.equal(r.status, 200, r.text);
     assert.doesNotMatch(r.text, /secret-/);
     assert.equal(r.body.has_password, true);
@@ -221,9 +229,9 @@ test("admin API: create needs a password, it is never returned; members cannot m
     ).status,
     200,
   );
-  const list = await admin("/api/integrations/databases");
+  const list = await admin<DatabaseView[]>("/api/integrations/databases");
   assert.doesNotMatch(list.text, /secret-/);
-  assert.equal(list.body.find((d: any) => d.key === "oms-qc").has_password, true);
+  assert.equal(list.body.find((d) => d.key === "oms-qc")!.has_password, true);
   assert.ok(
     await one(
       pool,
@@ -233,7 +241,7 @@ test("admin API: create needs a password, it is never returned; members cannot m
 });
 
 test("members see only databases their repository access covers; others see none", async () => {
-  const a = (await A("/api/integrations/databases")).body.map((d: any) => d.key).sort();
+  const a = (await A<DatabaseView[]>("/api/integrations/databases")).body.map((d) => d.key).sort();
   assert.deepEqual(a, ["oms-qc", "warranty-qc"]);
   assert.ok(
     !JSON.stringify((await A("/api/integrations/databases")).body).includes("oms-db.qc"),
@@ -256,7 +264,7 @@ test("agent tools: the run scope decides which database can be listed, described
   const listed = await callTool("database.list", {}, omsRun);
   assert.ok(listed.ok);
   assert.deepEqual(
-    (listed.result as any[]).map((d) => d.key),
+    (listed.result as Array<{ key: string }>).map((d) => d.key),
     ["oms-qc"],
     "warranty-qc needs warranty-api in scope; payment-qc needs a Payment repository",
   );
@@ -267,7 +275,7 @@ test("agent tools: the run scope decides which database can be listed, described
     omsRun,
   );
   assert.ok(q.ok, q.error ?? "");
-  const r = q.result as any;
+  const r = q.result as QueryResult;
   assert.deepEqual(r.columns, ["id", "password_hash", "note"]);
   assert.equal(r.rows[0][1], "[masked]", "credential-like columns are masked");
   assert.ok(String(r.rows[0][2]).length < 1100, "long values are cut");
@@ -306,7 +314,7 @@ test("agent tools: the run scope decides which database can be listed, described
     { ...omsRun, allowedRepositories: ["warranty-api"] },
   );
   assert.ok(
-    (warranty.result as any[]).some((d) => d.key === "warranty-qc"),
+    (warranty.result as Array<{ key: string }>).some((d) => d.key === "warranty-qc"),
     "listed repositories bring a database into scope",
   );
   const disabled = await admin("/api/integrations/databases", {
@@ -332,7 +340,9 @@ test("agent tools: the run scope decides which database can be listed, described
 
 test("status is the last real connection: tests and agent queries record it, members get no technical details", async () => {
   const status = async (key: string) =>
-    (await one<any>(
+    (await one<
+      Pick<ProjectDatabase, "last_status" | "last_error_kind" | "last_error" | "last_used_at" | "last_version">
+    >(
       pool,
       "SELECT last_status, last_error_kind, last_error, last_used_at, last_version FROM project_databases WHERE key = $1",
       [key],
@@ -341,7 +351,7 @@ test("status is the last real connection: tests and agent queries record it, mem
   setDatabaseDriver(async () => {
     throw Object.assign(new Error("connect ECONNREFUSED 10.0.0.9:3306"), { code: "ECONNREFUSED" });
   });
-  const down = (await admin("/api/integrations/databases/oms-qc/test", {})).body;
+  const down = (await admin<TestResult>("/api/integrations/databases/oms-qc/test", {})).body;
   assert.deepEqual(
     [down.ok, down.kind],
     [false, "unreachable"],
@@ -354,14 +364,14 @@ test("status is the last real connection: tests and agent queries record it, mem
       code: "ER_ACCESS_DENIED_ERROR",
     });
   });
-  assert.equal((await admin("/api/integrations/databases/oms-qc/test", {})).body.kind, "auth");
-  const member = (await A("/api/integrations/databases")).body.find((d: any) => d.key === "oms-qc");
+  assert.equal((await admin<TestResult>("/api/integrations/databases/oms-qc/test", {})).body.kind, "auth");
+  const member = (await A<DatabaseView[]>("/api/integrations/databases")).body.find((d) => d.key === "oms-qc")!;
   assert.equal(member.last_status, "failed");
   assert.equal(member.last_error_kind, "auth");
   assert.equal(member.last_error, undefined, "raw errors stay with admins");
   assert.match(
-    (await admin("/api/integrations/databases")).body.find((d: any) => d.key === "oms-qc")
-      .last_error,
+    (await admin<DatabaseView[]>("/api/integrations/databases")).body.find((d) => d.key === "oms-qc")!
+      .last_error!,
     /Access denied/,
   );
   // an SQL error proves the connection works
@@ -386,7 +396,8 @@ test("status is the last real connection: tests and agent queries record it, mem
           truncated: false,
         },
   );
-  const up = (await admin("/api/integrations/databases/oms-qc/test", {})).body;
+  const up = (await admin<TestResult>("/api/integrations/databases/oms-qc/test", {})).body;
+  assert.ok(up.ok);
   assert.deepEqual([up.ok, up.version, up.can_write], [true, "10.7.8-MariaDB", false]);
   const s2 = await status("oms-qc");
   assert.deepEqual(
@@ -490,7 +501,7 @@ test("the step prompt tells the agent which integrations THIS run can use, and w
   const none = await integrationCatalog({ allowedRepositories: [], mode: "analysis" });
   assert.ok(none.unavailable.some((u) => /^database \(no project QC database/.test(u)));
 
-  const run: any = {
+  const run = {
     id: 1,
     definition_key: "bug-investigation",
     output_locale: "en",
@@ -498,9 +509,42 @@ test("the step prompt tells the agent which integrations THIS run can use, and w
     selected_repositories: ["oms-api"],
     inputs: {},
     branch: "wf/x",
+  } as RunRow;
+  const step: StepRow = {
+    id: 1,
+    run_id: 1,
+    key: "analyze",
+    name: "Analyze",
+    type: "agent",
+    position: 0,
+    depends_on: [],
+    config: {},
+    run_if: null,
+    requires_approval: false,
+    max_attempts: 1,
+    retry_backoff_s: 0,
+    status: "RUNNING",
+    generation: 1,
+    attempt_count: 1,
+    current_attempt_id: null,
+    output: null,
+    pending_input: null,
+    approval: null,
+    error: null,
   };
-  const step: any = { key: "analyze", name: "Analyze", type: "agent", config: {} };
-  const ctx: any = { knowledge: [], repositories: [], repoPaths: [], upstream: [], fileRefs: [] };
+  const ctx: ResolvedContext = {
+    snapshot_id: 1,
+    hash: "h",
+    project: "OMS",
+    repositories: [],
+    knowledge: [],
+    overridden: [],
+    disclosure: [],
+    upstream: { plan: {}, text: {} },
+    requestText: "",
+    fileRefs: [],
+    repoPaths: [],
+  };
   const prompt = buildSystemAppend(run, step, ctx, "analysis", oms);
   assert.match(prompt, /Integrations available to THIS run/);
   assert.match(prompt, /- database: project QC databases/);

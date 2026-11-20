@@ -5,6 +5,7 @@ import { parseAiSuggest, type ReportSpec } from "./aiSuggest.ts";
 import { collectEvidence, type Evidence } from "./evidence.ts";
 import { buildReport, renderMarkdown, type Proposal, type TaskReport } from "./build.ts";
 import { testExceptionsOf } from "../workflow/executors/builtin.ts";
+import type { Failure } from "../workflow/executors/testFailure.ts";
 import { languagePolicy, outputLocale } from "../agent/language.ts";
 import { completeForRun } from "../agent/complete.ts";
 import { syncApprovedReport, type HasakiSyncResult } from "./hasakiSync.ts";
@@ -234,7 +235,7 @@ export const taskResultReportExecutor: StepExecutor = {
     });
     for (const e of await testExceptionsOf(ctx.run.id))
       report.limitations.push(
-        `${spec.language === "vi" ? "Ngoại lệ test được chấp nhận (kết quả vẫn FAILED)" : "Accepted test exception (result remains FAILED)"}: ${e.step} — ${e.exception.failures.map((f: any) => f.test ?? f.build_error ?? f.package).join(", ")}`,
+        `${spec.language === "vi" ? "Ngoại lệ test được chấp nhận (kết quả vẫn FAILED)" : "Accepted test exception (result remains FAILED)"}: ${e.step} — ${e.exception.failures.map((f: Pick<Failure, "test" | "build_error" | "package">) => f.test ?? f.build_error ?? f.package).join(", ")}`,
       );
     const markdown = renderMarkdown(report);
     const jsonId = await ctx.artifact(

@@ -69,13 +69,21 @@ interface Group {
   run_status: string | null;
   pull_requests: Array<{ repo: string; url: string; title: string }>;
 }
+interface ScanRun {
+  ok: boolean;
+  trigger: string;
+  groups: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
 interface Data {
   day: string;
   today: string;
   scanning: boolean;
   progress: Progress | null;
-  lastScan: any;
-  lastOk: any;
+  lastScan: ScanRun | null;
+  lastOk: ScanRun | null;
   ignored: number;
   settings: { schedule: string[]; notify: boolean };
   splunk: { connected: boolean; expired: boolean };
@@ -108,7 +116,9 @@ function loadPrefs(): { preset: Preset; namespaces: string[] | null } {
         preset: v.preset,
         namespaces: Array.isArray(v.namespaces) ? v.namespaces : null,
       };
-  } catch {}
+  } catch {
+    /* ignore: unreadable prefs fall back to the defaults */
+  }
   return { preset: "today", namespaces: null };
 }
 const dt = (iso: string) =>
@@ -158,7 +168,9 @@ export function ScanPanel({
     setBusy(true);
     try {
       localStorage.setItem(PREF_KEY, JSON.stringify({ preset, namespaces: chosen }));
-    } catch {}
+    } catch {
+      /* ignore: prefs are a convenience when storage is unavailable */
+    }
     const body: Record<string, unknown> = {
       preset,
       namespaces: chosen.length === all.length ? [] : chosen,
@@ -170,7 +182,10 @@ export function ScanPanel({
       });
     const ok = await act(() => api("/api/prod-errors/scan", body));
     setBusy(false);
-    if (ok) (onStarted(), onClose());
+    if (ok) {
+      onStarted();
+      onClose();
+    }
   };
   return (
     <section className="card pe-scanpanel">
@@ -275,7 +290,7 @@ function reasonText(
   }
   return reason;
 }
-const secs = (a?: string, b?: string) =>
+const secs = (a?: string | null, b?: string | null) =>
   a && b ? Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000) : null;
 
 function Trend({
@@ -435,7 +450,7 @@ function GroupRow({
   const traceOnly = inSource(g, "traces") && !inSource(g, "logs");
   const investigate = async () => {
     setBusy(true);
-    const r = await act(() => api<any>(`/api/prod-errors/${g.fingerprint}/investigate`, {}));
+    const r = await act(() => api<{ created: boolean; code: string }>(`/api/prod-errors/${g.fingerprint}/investigate`, {}));
     setBusy(false);
     if (r) {
       toast(r.created ? t("pe.created", { code: r.code }) : t("pe.exists", { code: r.code }), "ok");
@@ -661,7 +676,8 @@ export function ProdErrorsPage({
   const url = new URLSearchParams(appliedQuery);
   const setFilter = (key: string, value: string) => {
     const p = new URLSearchParams(appliedQuery);
-    value ? p.set(key, value) : p.delete(key);
+    if (value) p.set(key, value);
+    else p.delete(key);
     if (key === "list_namespace") p.delete("list_service");
     // Severity and service lists differ per tab: a new tab starts from its own defaults.
     if (key === "list_source") {
@@ -726,7 +742,7 @@ export function ProdErrorsPage({
           }),
           "ok",
         );
-      else if (l) toast(t("pe.scanFail", { error: l.error }));
+      else if (l) toast(t("pe.scanFail", { error: l.error ?? "" }));
     }
     wasScanning.current = data.scanning;
   }, [data]);
@@ -825,7 +841,7 @@ export function ProdErrorsPage({
                 <span className="pe-warn">
                   {t("pe.lastFail", {
                     ago: ago(last.started_at),
-                    error: last.error,
+                    error: last.error ?? "",
                   })}
                   {lastOk && (
                     <span className="muted">

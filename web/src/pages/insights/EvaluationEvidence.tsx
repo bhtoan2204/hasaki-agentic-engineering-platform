@@ -1,11 +1,11 @@
 import { useI18n } from "../../i18n/index.tsx";
 import { Panel, fmt, BreakdownBars } from "../analytics/shared.tsx";
-import { EvaluationTable } from "./EvaluationTable.tsx";
+import { EvaluationTable, type EvaluationAnalytics } from "./EvaluationTable.tsx";
 export function EvaluationEvidence({
   data,
   onPage,
 }: {
-  data: any;
+  data: EvaluationAnalytics;
   onPage: (page: number) => void;
 }) {
   const { t } = useI18n();

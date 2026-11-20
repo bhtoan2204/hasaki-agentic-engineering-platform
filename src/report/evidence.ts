@@ -48,7 +48,7 @@ export async function collectEvidence(runId: number, reportStepId: number): Prom
     [runId, reportStepId],
   );
   const latestUpstream = steps.reduce(
-    (m: number, s: any) => Math.max(m, s.finished_at ? new Date(s.finished_at).getTime() : 0),
+    (m: number, s) => Math.max(m, s.finished_at ? new Date(s.finished_at).getTime() : 0),
     0,
   );
 
@@ -129,8 +129,8 @@ export async function collectEvidence(runId: number, reportStepId: number): Prom
   // Git: commits and changed files of every worktree (read-only).
   try {
     const ch = await runChanges(runId);
-    for (const r of ch.repos as any[]) {
-      if (!r.exists) continue;
+    for (const r of ch.repos) {
+      if (!r.exists || !("commits" in r)) continue;
       for (const c of r.commits ?? [])
         add({
           kind: "commit",
@@ -148,7 +148,9 @@ export async function collectEvidence(runId: number, reportStepId: number): Prom
         });
       }
     }
-  } catch {}
+  } catch {
+    /* ignore: git evidence is best-effort */
+  }
 
   // Artifacts of current (non-invalidated) attempts: command logs, review reports.
   for (const a of await q(

@@ -2,10 +2,11 @@
  * Token consumption benchmark (provider-reported usage, never prompt-length estimates for savings claims).
  *
  *   npm run bench:tokens -- telemetry [--days 14] [--out DIR]
- *     Read-only. Reports efficiency metrics per successful task grouped by provider, model, and execution profile:
- *     total input, output and cache tokens per successful task, first-pass success rate, retry overhead, and
- *     wasted tokens from failed attempts. Distinguishes missing usage from zero usage. Also reports workflow attempts
- *     by profile (MICRO/FAST/STANDARD/DEEP) and chat turns from recorded telemetry.
+ *     Read-only. `efficiency`: per provider, model and execution profile, attempt-level usage, retry overhead and
+ *     tokens of failed attempts, plus run- and work-item-level success, first-pass success and tokens per success
+ *     (see report/tokenBenchmark.ts). Also workflow attempts by profile (MICRO/FAST/STANDARD/DEEP) and chat turns:
+ *     median uncached input, cache reads/writes, output, tool calls, latency, retries and success, split by whether
+ *     delta context was applied (context_delivery / chat steps). Compare windows before and after enabling it.
  *
  *   npm run bench:tokens -- chat --live --owner USER --budget-usd 2 [--repeat 3] [--out DIR]
  *     Spends provider quota: runs the same multi-step chat workload with delta context off (baseline) and on
@@ -16,102 +17,37 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pool, q, one } from "../db/pool.ts";
 import { config } from "../config.ts";
-import { aggregateTokenEfficiency, type AttemptTelemetryRow } from "../report/tokenBenchmark.ts";
+import {
+  aggregateTokenEfficiency,
+  loadAttemptTelemetry,
+  median,
+} from "../report/tokenBenchmark.ts";
 
 const args = process.argv.slice(2);
 const opt = (k: string) => {
   const i = args.indexOf(`--${k}`);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const median = (xs: number[]) => {
-  const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
-  return v.length ? v[Math.floor((v.length - 1) / 2)] : null;
-};
 const out = opt("out") ?? ".eval/tokens";
 
 async function telemetry(days: number) {
-  const attempts = await q<
-    AttemptTelemetryRow & {
-      ok: boolean;
-      delta: boolean;
-      peak_occupancy: number | null;
-      compactions: number;
-      tool_calls: number | null;
-    }
-  >(
-    pool,
-    `SELECT r.id AS run_id,
-            r.profile AS run_profile,
-            r.status AS run_status,
-            COALESCE(t.execution_profile, r.profile, 'unknown') AS execution_profile,
-            COALESCE(t.provider, 'unknown') AS provider,
-            COALESCE(t.model, 'unknown') AS model,
-            a.id AS attempt_id,
-            a.step_id,
-            COALESCE(a.number, 1) AS number,
-            t.retries,
-            t.status AS status,
-            t.terminal_status,
-            t.input_tokens,
-            t.output_tokens,
-            t.cache_read_tokens,
-            t.cache_creation_tokens,
-            t.reasoning_tokens,
-            t.wall_duration_ms,
-            (t.status = 'COMPLETED') AS ok,
-            (a.metrics ? 'context_delivery') AS delta,
-            (a.metrics->'context_window'->>'peak_tokens')::bigint AS peak_occupancy,
-            COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(a.metrics->'compactions') = 'array' THEN a.metrics->'compactions' END), 0) AS compactions,
-            (SELECT sum(v::numeric) FROM jsonb_each_text(CASE WHEN jsonb_typeof(t.tool_calls) = 'object' THEN t.tool_calls ELSE '{}'::jsonb END) x(k, v))::int AS tool_calls
-       FROM execution_attempt_telemetry t
-       JOIN workflow_step_attempts a ON a.id = t.attempt_id
-       JOIN workflow_runs r ON r.id = a.run_id
-      WHERE t.start_time > now() - make_interval(days => $1)
-        AND NOT EXISTS (SELECT 1 FROM evaluation_runs e WHERE e.workflow_run_id = r.id)
-      ORDER BY t.start_time ASC, t.attempt_id ASC`,
-    [days],
-  );
-
-  // Grouped strictly by provider, model, execution_profile with all efficiency metrics per successful task
+  const attempts = await loadAttemptTelemetry(days);
   const efficiency = aggregateTokenEfficiency(attempts);
-
-  // Workflow attempts view (extended with model and efficiency metrics per slice)
   const groups = new Map<string, typeof attempts>();
   for (const a of attempts) {
-    const k = `${a.execution_profile ?? a.run_profile ?? "?"}|${a.provider}|${a.model}|${a.delta ? "delta" : "full"}`;
+    const k = `${a.execution_profile}|${a.provider}|${a.model}|${a.delta ? "delta" : "full"}`;
     groups.set(k, [...(groups.get(k) ?? []), a]);
   }
   const workflow = [...groups.entries()].map(([k, rows]) => {
     const [profile, provider, model, context] = k.split("|");
     const known = rows.filter((r) => r.input_tokens != null);
-    const sliceEfficiency = aggregateTokenEfficiency(rows)[0];
     return {
       workload: profile,
-      execution_profile: profile,
       provider,
       model,
       context,
       attempts: rows.length,
       usage_reported: known.length,
-      // Efficiency metrics per successful task
-      total_tasks: sliceEfficiency?.total_tasks ?? 0,
-      successful_tasks: sliceEfficiency?.successful_tasks ?? 0,
-      failed_tasks: sliceEfficiency?.failed_tasks ?? 0,
-      first_pass_successes: sliceEfficiency?.first_pass_successes ?? 0,
-      first_pass_success_rate: sliceEfficiency?.first_pass_success_rate ?? null,
-      total_input_tokens_per_successful_task:
-        sliceEfficiency?.total_input_tokens_per_successful_task ?? null,
-      total_output_tokens_per_successful_task:
-        sliceEfficiency?.total_output_tokens_per_successful_task ?? null,
-      total_cache_tokens_per_successful_task:
-        sliceEfficiency?.total_cache_tokens_per_successful_task ?? null,
-      total_tokens_per_successful_task: sliceEfficiency?.total_tokens_per_successful_task ?? null,
-      retry_overhead_tokens: sliceEfficiency?.retry_overhead_tokens ?? null,
-      retry_overhead_ratio: sliceEfficiency?.retry_overhead_ratio ?? null,
-      wasted_tokens_from_failed_attempts:
-        sliceEfficiency?.wasted_tokens_from_failed_attempts?.tokens?.total ?? null,
-      wasted_tokens: sliceEfficiency?.wasted_tokens ?? null,
-      usage_availability: sliceEfficiency?.usage_availability ?? "none",
       // Everything the provider read for the prompt: uncached input + cache reads + cache writes.
       median_total_input: median(
         known.map(
@@ -133,9 +69,11 @@ async function telemetry(days: number) {
       compacted_attempts: rows.filter((r) => r.compactions > 0).length,
       success_rate_compacted: (() => {
         const c = rows.filter((r) => r.compactions > 0);
-        return c.length ? c.filter((r) => r.ok).length / c.length : null;
+        return c.length ? c.filter((r) => r.status === "COMPLETED").length / c.length : null;
       })(),
-      success_rate: rows.length ? rows.filter((r) => r.ok).length / rows.length : null,
+      success_rate: rows.length
+        ? rows.filter((r) => r.status === "COMPLETED").length / rows.length
+        : null,
     };
   });
   const turns = await q<{

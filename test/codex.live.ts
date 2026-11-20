@@ -22,6 +22,7 @@ import { definitions, seedTemplates } from "../src/workflow/definitions.ts";
 import { answerQuestions, getRun, startRun } from "../src/workflow/engine.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
+import type { StepRow } from "../src/workflow/types.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { codexCapabilities } from "../src/agent/codex/run.ts";
 import { config } from "../src/config.ts";
@@ -117,7 +118,7 @@ test(
       inputs: { project: "OMS" },
     });
     await drain();
-    const qs = await q<any>(
+    const qs = await q<{ id: number }>(
       pool,
       "SELECT * FROM workflow_questions WHERE run_id = $1 AND status = 'open'",
       [run.id],
@@ -125,7 +126,7 @@ test(
     assert.equal(qs.length, 1, "analysis asked one question and paused");
     await answerQuestions({ [qs[0].id]: "refund" }, "smoke");
     await drain();
-    const steps = await q<any>(
+    const steps = await q<Pick<StepRow, "key" | "status" | "output">>(
       pool,
       "SELECT key, status, output FROM workflow_steps WHERE run_id = $1 ORDER BY id",
       [run.id],
@@ -142,7 +143,7 @@ test(
         1,
       ),
     );
-    const sessions = await q<any>(
+    const sessions = await q<{ provider: string; session_id: string; key: string }>(
       pool,
       "SELECT s.provider, s.session_id, st.key FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id JOIN workflow_steps st ON st.id = a.step_id WHERE a.run_id = $1 ORDER BY s.id",
       [run.id],
@@ -158,12 +159,12 @@ test(
       verifyThread && verifyThread !== implThread,
       "independent verification used a fresh thread",
     );
-    const denied = await one<any>(
+    const denied = await one<{ n: number }>(
       pool,
       "SELECT count(*)::int AS n FROM workflow_events WHERE run_id = $1 AND kind = 'tool' AND content LIKE 'denied %'",
       [run.id],
     );
-    assert.ok(denied.n >= 1, "the git push attempt was denied before execution");
+    assert.ok((denied?.n ?? 0) >= 1, "the git push attempt was denied before execution");
     assert.equal(steps.find((s) => s.key === "implement")?.status, "COMPLETED");
     assert.equal((await getRun(run.id)).agent_provider, "codex");
   },

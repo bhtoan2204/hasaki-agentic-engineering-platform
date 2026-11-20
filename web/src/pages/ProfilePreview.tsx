@@ -15,10 +15,28 @@ import {
 } from "lucide-react";
 import { Badge, ErrorBox, Segmented } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
-import { autoLayout, nodeTypes, toEdges, type StepNodeData } from "../graph.tsx";
+import { autoLayout, nodeTypes, toEdges, type StepLike, type StepNodeData } from "../graph.tsx";
 import "./RunView.css";
 
 export type ProfileChoice = "AUTO" | "MICRO" | "FAST" | "STANDARD" | "DEEP";
+export type AutonomyView = {
+  mode: string;
+  requested: string;
+  shadow?: boolean;
+  paused?: boolean;
+  downgraded?: string[];
+  sources?: unknown[];
+};
+type RunPreview = {
+  graph?: { steps?: StepLike[] };
+  profile: { profile: string; confidence: number; reasons?: string[]; warnings?: string[] };
+  published_steps?: number;
+  report_step?: boolean;
+  reused_repositories?: boolean;
+  selected_repositories?: string[];
+  changes?: Array<{ step: string; action: string; into?: string; detail: string }>;
+  autonomy?: AutonomyView;
+};
 const COLOR: Record<string, string> = {
   MICRO: "COMPLETED",
   FAST: "COMPLETED",
@@ -70,13 +88,13 @@ export function ProfilePreview({
   onAutonomy?: (a: string) => void;
 }) {
   const { t } = useI18n();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<RunPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const key = JSON.stringify([workflow, workItemId, repositories, inputs, value, autonomy]);
   useEffect(() => {
     if (!workflow) return;
     let stop = false;
-    api("/api/runs/preview", {
+    api<RunPreview>("/api/runs/preview", {
       workflow,
       work_item_id: workItemId ?? null,
       repositories,
@@ -89,12 +107,12 @@ export function ProfilePreview({
     return () => {
       stop = true;
     };
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [key]);
   const { nodes, edges } = useMemo(() => {
     const steps = Array.isArray(data?.graph?.steps) ? data.graph.steps : [];
     if (!steps.length) return { nodes: [], edges: [] };
     const pos = autoLayout(steps);
-    const nodes: Node<StepNodeData>[] = steps.map((s: any) => ({
+    const nodes: Node<StepNodeData>[] = steps.map((s) => ({
       id: s.key,
       type: "step",
       position: pos[s.key],
@@ -194,7 +212,7 @@ export function ProfilePreview({
           ))}
           {(data.changes ?? []).length > 0 && (
             <div className="pp-changes">
-              {(data.changes ?? []).map((c: any) => (
+              {(data.changes ?? []).map((c) => (
                 <div key={c.step + c.action}>
                   {c.action === "merged_into" ? (
                     <GitMerge size={13} />
@@ -242,7 +260,7 @@ export function ProfilePreview({
 }
 
 /** Requested vs effective autonomy and why it was narrowed (run form and run view). */
-export function AutonomySummary({ a }: { a: any }) {
+export function AutonomySummary({ a }: { a?: AutonomyView | null }) {
   const { t } = useI18n();
   if (!a?.sources?.length)
     return (

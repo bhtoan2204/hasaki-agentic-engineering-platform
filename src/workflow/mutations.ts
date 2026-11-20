@@ -38,7 +38,7 @@ async function updateStep(
   await q(
     c,
     `UPDATE workflow_steps SET ${keys.map((k, i) => `${k} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`,
-    [step.id, ...keys.map((k) => (JSON_COLS.has(k) ? json((patch as any)[k]) : (patch as any)[k]))],
+    [step.id, ...Object.entries(patch).map(([k, v]) => (JSON_COLS.has(k) ? json(v) : v))],
   );
   Object.assign(step, patch);
 }

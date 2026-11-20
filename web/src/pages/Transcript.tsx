@@ -24,11 +24,41 @@ import { Badge, Copy, dur, ago, Markdown, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./RunView.css";
 
+interface ToolInput {
+  args?: unknown;
+  file_path?: string;
+  notebook_path?: string;
+  path?: string;
+  pattern?: string;
+  command?: string;
+  repo?: string;
+  url?: string;
+  query?: string;
+  description?: string;
+  step_key?: string;
+}
+interface EvData {
+  id?: string;
+  name?: string;
+  tool?: string;
+  tool_use_id?: string;
+  is_error?: boolean;
+  parent?: string;
+  input?: ToolInput;
+  args?: ToolInput;
+  tools?: string[];
+  knowledge?: string[];
+  resume_session?: string;
+  num_turns?: number;
+  duration_ms?: number;
+  total_cost_usd?: number;
+  usage?: { input_tokens?: number; output_tokens?: number };
+}
 interface Ev {
   id: number;
   kind: string;
   content: string;
-  data: any;
+  data: EvData;
   created_at: string;
 }
 
@@ -97,12 +127,13 @@ function StatTile({
   );
 }
 
-function toolName(data: any): string {
+function toolName(data: EvData): string {
   return String(data?.name ?? data?.tool ?? "");
 }
 
-function toolHint(input: any = {}) {
-  const args = input.args && typeof input.args === "object" ? input.args : {};
+function toolHint(input: ToolInput = {}) {
+  const args: { command?: string; CommandLine?: string; cmd?: string } =
+    input.args && typeof input.args === "object" ? input.args : {};
   return String(
     input.file_path ??
       input.notebook_path ??
@@ -230,7 +261,7 @@ export function Transcript({
       case "commands":
         return e.kind === "tool" && ["Bash", "run_command", "exec_command"].includes(name);
       case "errors":
-        return errors.includes(e) || (e.kind === "tool" && results[e.data?.id]?.data?.is_error);
+        return errors.includes(e) || (e.kind === "tool" && results[e.data?.id ?? ""]?.data?.is_error);
       case "reasoning":
         return e.kind === "thinking";
       case "prompts":
@@ -270,7 +301,7 @@ export function Transcript({
         >
           {result && (
             <div className="muted small" style={{ marginTop: 4 }}>
-              {t("tr.turns", { n: result.data?.num_turns })} · {dur(result.data?.duration_ms)}
+              {t("tr.turns", result.data?.num_turns != null ? { n: result.data.num_turns } : {})} · {dur(result.data?.duration_ms)}
               {result.data?.total_cost_usd != null &&
                 ` · $${Number(result.data.total_cost_usd).toFixed(3)}`}
             </div>
@@ -317,7 +348,7 @@ export function Transcript({
           <Entry
             key={e.id}
             e={e}
-            result={e.kind === "tool" ? results[e.data?.id] : undefined}
+            result={e.kind === "tool" ? results[e.data?.id ?? ""] : undefined}
             live={live}
             agent={agent}
           />

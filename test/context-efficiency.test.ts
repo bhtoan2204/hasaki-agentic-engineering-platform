@@ -92,7 +92,15 @@ test("context cache key: shared across steps of a run, deterministic, and change
 });
 
 test("dedup never drops high-risk items: contradicted evidence and unresolved scope violations survive the per-list cap", () => {
-  const claims = Array.from({ length: 20 }, (_, i) => ({
+  const claims: Array<{
+    id: string;
+    claim: string;
+    classification: string;
+    repository: string;
+    file_path: string;
+    commit?: string;
+    verification_status?: string;
+  }> = Array.from({ length: 20 }, (_, i) => ({
     id: `U${i}`,
     claim: `unverified observation number ${i}`,
     classification: "CODE_FACT",
@@ -107,7 +115,7 @@ test("dedup never drops high-risk items: contradicted evidence and unresolved sc
     file_path: "x.go",
     commit: "abc1234",
     verification_status: "contradicted",
-  } as any);
+  });
   const s = evidenceSummary({
     root_cause: { status: "COMPLETED", output: { claims } },
     implement: {
@@ -127,10 +135,10 @@ test("dedup never drops high-risk items: contradicted evidence and unresolved sc
     "high-risk first, despite arriving last",
   );
   assert.ok(s.unverified_or_contradicted.length <= 13);
-  assert.deepEqual((s as any).unresolved_scope_violations, [
+  assert.deepEqual(s.unresolved_scope_violations, [
     "implement: svc:app/ledger.go is outside the approved scope",
   ]);
-  assert.ok((s as any).truncated_items > 0, "ordinary overflow is still reported");
+  assert.ok((s.truncated_items ?? 0) > 0, "ordinary overflow is still reported");
 });
 
 test("code intelligence first: Codex may call the native index tools; exact search never reads secret files", () => {

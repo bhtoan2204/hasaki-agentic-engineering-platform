@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
@@ -41,14 +41,196 @@ import { dialog } from "../dialog/index.ts";
 import { useI18n } from "../i18n/index.tsx";
 import { CostPanel } from "../components/Cost.tsx";
 import { act, Badge, Copy, EmptyState, ErrorBox, Loading, navigate, time } from "../ui.tsx";
-import { autoLayout, nodeTypes, placeSteps, toEdges, type StepNodeData } from "../graph.tsx";
-import { StepInspector } from "./StepInspector.tsx";
+import {
+  autoLayout,
+  nodeTypes,
+  placeSteps,
+  toEdges,
+  type StepLike,
+  type StepNodeData,
+} from "../graph.tsx";
+import {
+  StepInspector,
+  type InspectorRun,
+  type StepHandoff,
+  type StepRow,
+} from "./StepInspector.tsx";
 import { AutonomySummary, ProfileBadge } from "./ProfilePreview.tsx";
 import { Changes } from "./Changes.tsx";
 import { TraceExplorer } from "./TraceExplorer.tsx";
 import "./RunView.css";
-import { latestStepDecisions } from "../decisions";
+import { latestStepDecisions, type Decision } from "../decisions";
 import { ReuseCard } from "./ExecutionCards";
+
+interface ReplanRecord {
+  invalidated?: string[];
+  reasons?: string[];
+  route: string;
+  source: string;
+  targets?: string[];
+}
+
+interface RunPullRequest {
+  id: number;
+  repo: string;
+  url: string;
+  title: string;
+  state?: string | null;
+  provider: string;
+}
+
+interface RecoveryEpisode {
+  id: number;
+  step_key: string;
+  category: string;
+  status: string;
+  occurrences: number;
+  auto_recoveries: number;
+  last_strategy?: { strategy?: string } | null;
+  next_eligible_at?: string | null;
+  reason?: string | null;
+}
+
+interface ProfileChange {
+  step: string;
+  action: string;
+  into?: string;
+  detail: string;
+}
+
+interface WorkerHealth {
+  instance_id?: string | null;
+  health?: string;
+  last_seen_at?: string | null;
+  available?: boolean;
+}
+
+/** Run page view (GET /api/runs/:id). */
+interface RunDetail extends InspectorRun {
+  title: string;
+  definition_key: string;
+  definition_version: number;
+  branch: string;
+  profile?: string;
+  profile_decision?: {
+    reasons?: string[];
+    warnings?: string[];
+    requested?: string;
+    confidence: number;
+  } | null;
+  created_at: string;
+  finished_at: string | null;
+  error: string | null;
+  inputs?: {
+    branches?: Record<string, string>;
+    branches_source?: string;
+    replans?: ReplanRecord[];
+  } | null;
+  work_item: { id: number; code: string } | null;
+  worker:
+    | (WorkerHealth & { local: boolean; available: boolean; recovery: string | null })
+    | null;
+  graph: {
+    steps: StepLike[];
+    feedback_step?: string;
+    replan_step?: string;
+    transitions?: Array<{ from: string; to: string; reason: string; revision: number }>;
+    profile_changes?: ProfileChange[];
+  };
+  steps: StepRow[];
+  questions: Array<{ status: string; step_key: string }>;
+  attempts: Array<{
+    step_key: string;
+    agent_provider?: string | null;
+    agent_model?: string | null;
+    metrics?: { provider?: string } | null;
+  }>;
+  decisions?: Decision[];
+  workspaces: unknown[];
+  pull_requests: RunPullRequest[];
+  recovery_episodes?: RecoveryEpisode[];
+  autonomy?: ComponentProps<typeof AutonomySummary>["a"];
+  agent_configuration?: { version: number; capture_source: string; captured_at: string } | null;
+}
+
+interface SchedulerState {
+  workers: number;
+  light_workers: number;
+  running: Array<{
+    job_id: number;
+    run_id: number;
+    step_key: string;
+    step_name: string;
+    running_seconds?: number | null;
+  }>;
+}
+
+interface DeliveryState {
+  mode: string;
+  aggregate: string;
+  pull_requests?: Array<{
+    id: number;
+    url: string;
+    repo: string;
+    lifecycle: string;
+    lifecycle_paused: boolean;
+    published_sha?: string | null;
+    remote_head_sha?: string | null;
+    observation?: {
+      pipeline?: { status: string } | null;
+      repair_plan?: { reason?: string } | null;
+    } | null;
+    repair_count: number;
+    synced_at?: string | null;
+    lifecycle_reasons?: string[];
+  }>;
+}
+
+interface RunMetrics {
+  wall_ms: number;
+  agent_provider: string;
+  bottleneck?: string | null;
+  totals: {
+    exec_ms: number;
+    queue_ms: number;
+    human_ms: number;
+    cost_unknown?: boolean;
+    cost_usd: number | null;
+    claude_sessions: number;
+    claude_ms: number;
+    turns: number;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    cache_read_tokens: number | null;
+    tool_calls: number;
+    tool_ms: number;
+    command_ms: number;
+    integration_calls: number;
+    skills_loaded: number;
+    retries: number;
+    failed: number;
+  };
+  per_step: Record<
+    string,
+    {
+      type: string;
+      attempts: number;
+      queue_ms: number;
+      exec_ms: number;
+      human_ms: number;
+      claude_ms: number;
+      turns: number;
+    }
+  >;
+}
+
+interface TimelineEvent {
+  id: number;
+  created_at: string;
+  step_key: string | null;
+  kind: string;
+  content: string;
+}
 
 /** Display order of statuses in the run summary strip. */
 const STATUS_ORDER = [
@@ -91,7 +273,9 @@ function useInspectorWidth() {
     try {
       if (w == null) localStorage.removeItem(PANE_KEY);
       else localStorage.setItem(PANE_KEY, String(Math.round(w)));
-    } catch {}
+    } catch {
+      /* ignore: storage unavailable */
+    }
   };
   const clamp = (w: number) => Math.min(paneMax(), Math.max(PANE_MIN, w));
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -136,10 +320,10 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     refreshing,
     reload,
     reloadFresh,
-  } = useApi<any>(`/api/runs/${id}`);
-  const { data: health, reload: reloadHealth } = useApi<any>(`/api/runs/${id}/worker`);
+  } = useApi<RunDetail>(`/api/runs/${id}`);
+  const { data: health, reload: reloadHealth } = useApi<WorkerHealth>(`/api/runs/${id}/worker`);
   // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
-  const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(run?.status);
+  const finished = !!run && ["COMPLETED", "FAILED", "CANCELED"].includes(run.status);
   useEffect(() => {
     if (finished) return;
     const timer = setInterval(
@@ -186,25 +370,27 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     setArranged(next);
     try {
       localStorage.setItem(ARRANGE_KEY, next ? "1" : "0");
-    } catch {}
+    } catch {
+      /* ignore: storage unavailable */
+    }
   };
-  const hasSavedLayout = !!(run?.graph.steps as any[] | undefined)?.some((s) => s.ui);
+  const hasSavedLayout = !!run?.graph.steps?.some((s) => s.ui);
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
-    const specSteps = run.graph.steps as any[];
+    const specSteps = run.graph.steps;
     const placed = arranged && hasSavedLayout ? autoLayout(specSteps) : placeSteps(specSteps);
-    const st = new Map<string, any>(run.steps.map((s: any) => [s.key, s]));
+    const st = new Map(run.steps.map((s) => [s.key, s] as const));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
       if (q.status === "open") openQ[q.step_key] = (openQ[q.step_key] ?? 0) + 1;
     const attempts: Record<string, number> = {};
     for (const a of run.attempts) attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
-    const lastReplan = (run.inputs?.replans as any[] | undefined)?.at(-1);
+    const lastReplan = run.inputs?.replans?.at(-1);
     const decided = latestStepDecisions(run.decisions, run.steps);
     const rerun = new Set<string>(lastReplan?.invalidated ?? []);
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
-      const latestAttempt = [...run.attempts].reverse().find((a: any) => a.step_key === s.key);
+      const latestAttempt = [...run.attempts].reverse().find((a) => a.step_key === s.key);
       const effectiveAgent = latestAttempt
         ? {
             provider:
@@ -279,7 +465,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
   // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
   useEffect(() => {
-    if (run && stepKey && stepKey !== "~changes" && stepKey !== "~trace" && !run.steps.some((s: any) => s.key === stepKey))
+    if (run && stepKey && stepKey !== "~changes" && stepKey !== "~trace" && !run.steps.some((s) => s.key === stepKey))
       navigate(`/runs/${id}`);
   }, [run, stepKey, id]);
   if (loading && !run) return <Loading />;
@@ -296,7 +482,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       </div>
     );
 
-  const runAction = async (a: string, body: any = {}) => {
+  const runAction = async (a: string, body: unknown = {}) => {
     if (a === "cancel") {
       const ok = await dialog.confirm({
         title: t("rv.cancel.title"),
@@ -313,7 +499,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     });
   };
   const blocked = run.steps.filter(
-    (s: any) => s.status === "WAITING_INPUT" || s.status === "WAITING_APPROVAL",
+    (s) => s.status === "WAITING_INPUT" || s.status === "WAITING_APPROVAL",
   );
   const counts: Record<string, number> = {};
   for (const s of run.steps) counts[s.status] = (counts[s.status] ?? 0) + 1;
@@ -323,7 +509,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const hasWorkspaces = run.workspaces.length > 0;
   const canFeedback =
     run.status !== "CANCELED" &&
-    (run.graph.feedback_step || run.steps.some((s: any) => s.type === "coding_agent"));
+    (run.graph.feedback_step || run.steps.some((s) => s.type === "coding_agent"));
   const openFeedback = () => {
     if (stepKey) navigate(`/runs/${id}`);
     setTimeout(() => {
@@ -353,7 +539,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     ? t("ch.title")
                     : stepKey === "~trace"
                       ? t("trace.title")
-                    : (run.steps.find((s: any) => s.key === stepKey)?.name ?? stepKey)}
+                    : (run.steps.find((s) => s.key === stepKey)?.name ?? stepKey)}
                 </span>
               </>
             )}
@@ -553,8 +739,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       </header>
 
       {run.steps
-        .filter((s: any) => s.status === "WAITING_INPUT" && s.pending_input?.provider_handoff)
-        .map((s: any) => (
+        .filter(
+          (s): s is StepRow & { pending_input: { provider_handoff: StepHandoff } } =>
+            s.status === "WAITING_INPUT" && !!s.pending_input?.provider_handoff,
+        )
+        .map((s) => (
           <div key={s.id} className="rv-banner wait">
             <b>
               {s.pending_input.provider_handoff.status === "BLOCKED"
@@ -579,7 +768,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         <div className="rv-banner wait" role="status">
           <Hand size={16} />
           <b>{t("rv.waitingYou")}</b>
-          {blocked.map((s: any) => (
+          {blocked.map((s) => (
             <button
               key={s.key}
               className="ghost xs"
@@ -681,7 +870,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           style={
             pane.width
               ? ({
-                  ["--rv-pane-w" as any]: `${pane.width}px`,
+                  "--rv-pane-w": `${pane.width}px`,
                 } as React.CSSProperties)
               : undefined
           }
@@ -772,7 +961,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                   <div className="rv-sec-title">
                     <GitPullRequest size={14} /> {t("common.pullRequests")}
                   </div>
-                  {run.pull_requests.map((p: any) => (
+                  {run.pull_requests.map((p) => (
                     <div
                       key={p.id}
                       className="rv-card soft"
@@ -824,7 +1013,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                       ))}
                     </div>
                     {(() => {
-                      const last = (run.inputs?.replans as any[] | undefined)?.at(-1);
+                      const last = run.inputs?.replans?.at(-1);
                       return last ? (
                         <div
                           className="muted small"
@@ -881,20 +1070,20 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 }
 
 /** READY steps that no worker has picked up yet: say who is holding the workers and for how long. */
-function QueueBanner({ run, tick }: { run: any; tick: number }) {
+function QueueBanner({ run, tick }: { run: RunDetail; tick: number }) {
   const { t } = useI18n();
-  const waiting = run.steps.filter((s: any) => s.status === "READY" || s.status === "RETRYING");
-  const { data, reload } = useApi<any>(
+  const waiting = run.steps.filter((s) => s.status === "READY" || s.status === "RETRYING");
+  const { data, reload } = useApi<SchedulerState>(
     waiting.length && !["PAUSED", "CANCELED"].includes(run.status) ? "/api/scheduler" : null,
   );
-  useEffect(() => void reload(), [tick, waiting.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => void reload(), [tick, waiting.length]);
   const [, force] = useState(0);
   useEffect(() => {
     const t = setInterval(() => force((x) => x + 1), 5000);
     return () => clearInterval(t);
   }, []);
   if (!waiting.length || !data) return null;
-  const others = data.running.filter((j: any) => j.run_id !== run.id);
+  const others = data.running.filter((j) => j.run_id !== run.id);
   if (!others.length) return null;
   const fmt = (s: number) =>
     s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? `${s % 60}s` : ""}`;
@@ -903,11 +1092,11 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
       <Hourglass size={15} />
       <span>
         {t("rv.queueWait", {
-          steps: waiting.map((s: any) => s.name).join(", "),
+          steps: waiting.map((s) => s.name).join(", "),
           workers: data.workers,
           light: data.light_workers,
         })}{" "}
-        {others.map((j: any) => (
+        {others.map((j) => (
           <a key={j.job_id} href={`#/runs/${j.run_id}/${j.step_key}`} style={{ marginRight: 10 }}>
             run #{j.run_id} · {j.step_name} ({fmt(j.running_seconds ?? 0)})
           </a>
@@ -919,9 +1108,9 @@ function QueueBanner({ run, tick }: { run: any; tick: number }) {
 }
 
 /** Shortcut to the Task Result Report (when this run has one). */
-function ReportCard({ run }: { run: any }) {
+function ReportCard({ run }: { run: RunDetail }) {
   const { t } = useI18n();
-  const s = run.steps.find((x: any) => x.type === "task_result_report");
+  const s = run.steps.find((x) => x.type === "task_result_report");
   if (!s) return null;
   const report = s.output?.report ?? s.approval?.request?.report;
   const md = s.output?.markdown ?? s.approval?.request?.markdown;
@@ -970,7 +1159,7 @@ function ReportCard({ run }: { run: any }) {
 
 function DeliveryCard({ runId }: { runId: number }) {
   const { t } = useI18n();
-  const { data, reload } = useApi<any>(`/api/runs/${runId}/delivery`);
+  const { data, reload } = useApi<DeliveryState>(`/api/runs/${runId}/delivery`);
   if (!data || data.mode === "off" || !data.pull_requests?.length) return null;
   return (
     <div className="rv-card">
@@ -980,7 +1169,7 @@ function DeliveryCard({ runId }: { runId: number }) {
         </h4>
         <span className="small">{t(`dl.agg.${data.aggregate}`)}</span>
       </div>
-      {data.pull_requests.map((p: any) => (
+      {data.pull_requests.map((p) => (
         <div key={p.id} className="small" style={{ margin: "4px 0" }}>
           <a href={p.url} target="_blank" rel="noreferrer">
             {p.repo}
@@ -1013,9 +1202,9 @@ function DeliveryCard({ runId }: { runId: number }) {
   );
 }
 
-function RecoveryCard({ run }: { run: any }) {
+function RecoveryCard({ run }: { run: RunDetail }) {
   const { t } = useI18n();
-  const episodes: any[] = run.recovery_episodes ?? [];
+  const episodes = run.recovery_episodes ?? [];
   if (!episodes.length) return null;
   return (
     <div className="rv-card">
@@ -1039,10 +1228,10 @@ function RecoveryCard({ run }: { run: any }) {
   );
 }
 
-function AutonomyCard({ run, onDone }: { run: any; onDone: () => void }) {
+function AutonomyCard({ run, onDone }: { run: RunDetail; onDone: () => void }) {
   const { t } = useI18n();
   if (!run.autonomy) return null;
-  const decided = (run.decisions ?? []).filter((d: any) => d.kind === "autonomy");
+  const decided = (run.decisions ?? []).filter((d) => d.kind === "autonomy");
   const paused = !!run.autonomy.paused;
   return (
     <div className="rv-card">
@@ -1062,7 +1251,7 @@ function AutonomyCard({ run, onDone }: { run: any; onDone: () => void }) {
       <AutonomySummary a={run.autonomy} />
       <div className="small muted" style={{ marginTop: 6 }}>{t("au.decisions")}</div>
       {decided.length === 0 && <div className="small muted">{t("au.none")}</div>}
-      {decided.slice(-20).map((d: any) => (
+      {decided.slice(-20).map((d) => (
         <div key={d.id} className="small">
           <span className="mono">{d.step_key}</span> · <b>{d.action}</b>
           {d.outcome === "planned" && <span className="muted"> · {t("au.planned")}</span>} ·{" "}
@@ -1074,10 +1263,10 @@ function AutonomyCard({ run, onDone }: { run: any; onDone: () => void }) {
   );
 }
 
-function ProfileCard({ run }: { run: any }) {
+function ProfileCard({ run }: { run: RunDetail }) {
   const { t } = useI18n();
   const d = run.profile_decision;
-  const changes: any[] = run.graph?.profile_changes ?? [];
+  const changes = run.graph?.profile_changes ?? [];
   if (!d) return null;
   return (
     <div className="rv-card">
@@ -1140,13 +1329,13 @@ const fmtS = (ms: number) =>
 /** Latency breakdown: measured queue / machine / human time per step (+ Claude, tools, commands), cost as an estimate. */
 function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   const { t, locale } = useI18n();
-  const { data, reload } = useApi<any>(`/api/metrics/runs/${runId}`);
-  useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { data, reload } = useApi<RunMetrics>(`/api/metrics/runs/${runId}`);
+  useEffect(() => void reload(), [tick]);
   if (!data) return null;
   const totals = data.totals;
   const num = (n: number | null | undefined) =>
     n == null ? "—" : n.toLocaleString(locale === "vi" ? "vi-VN" : "en-GB");
-  const steps = Object.entries<any>(data.per_step);
+  const steps = Object.entries(data.per_step);
   const max = Math.max(1, ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms));
   const C = {
     queue: "var(--st-idle)",
@@ -1303,7 +1492,7 @@ function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   );
 }
 
-function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
+function RepoPicker({ run, onDone }: { run: RunDetail; onDone: () => void }) {
   const { t } = useI18n();
   const [sel, setSel] = useState<string[]>(run.selected_repositories);
   return (
@@ -1355,7 +1544,7 @@ function RepoPicker({ run, onDone }: { run: any; onDone: () => void }) {
 /** Run timeline, fetched once and then incrementally (`?after=`) whenever an event arrives. */
 function RunTimeline({ runId, activity }: { runId: number; activity: number }) {
   const { t } = useI18n();
-  const [data, setData] = useState<any[] | null>(null);
+  const [data, setData] = useState<TimelineEvent[] | null>(null);
   const last = useRef(0);
   useEffect(() => {
     setData(null);
@@ -1363,7 +1552,7 @@ function RunTimeline({ runId, activity }: { runId: number; activity: number }) {
   }, [runId]);
   useEffect(() => {
     let stop = false;
-    api<any[]>(`/api/runs/${runId}/events?after=${last.current}`)
+    api<TimelineEvent[]>(`/api/runs/${runId}/events?after=${last.current}`)
       .then((rows) => {
         if (stop) return;
         if (rows.length) last.current = rows[rows.length - 1].id;

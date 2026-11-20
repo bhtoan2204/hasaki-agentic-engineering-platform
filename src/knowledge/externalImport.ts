@@ -119,7 +119,7 @@ export function planExternalSkills(root: string, only?: string): ExternalPlan {
     for (const c of items) {
       if (s.conflict_key) c.conflict_key = s.conflict_key;
       if (s.pilot === "ponytail") c.priority = 10;
-      const file = (c.metadata as any)?.skill_file ?? "SKILL.md";
+      const file = c.metadata?.skill_file ?? "SKILL.md";
       const f = s.files.find((x) => x.file === file);
       c.source = c.source.map((x) => ({ ...x, sha256: f?.upstream_sha256 ?? x.sha256 }));
       c.metadata = {
@@ -175,7 +175,7 @@ export async function applyExternalSkills(
   const report: ExternalApplyReport = { rows: [], superseded: [] };
   const deleted = await knowledge.deletedKeys();
   for (const c of plan.candidates) {
-    const parent = (c.metadata as any)?.parent_skill as string | undefined;
+    const parent = c.metadata?.parent_skill as string | undefined;
     if (deleted.has(c.key) || (parent && deleted.has(parent))) {
       report.rows.push({ key: c.key, action: "skipped", note: "deleted from the registry" });
       continue;
@@ -195,7 +195,8 @@ export async function applyExternalSkills(
     const action = !existing ? "create" : same ? "unchanged" : "update";
     report.rows.push({ key: c.key, action });
     if (opts.dryRun || action === "unchanged") continue;
-    const note = `third-party skill ${(metadata as any).origin.repo}@${String((metadata as any).origin.commit).slice(0, 7)}`;
+    const origin = c.metadata?.origin as ExternalManifestSkill["origin"];
+    const note = `third-party skill ${origin.repo}@${String(origin.commit).slice(0, 7)}`;
     if (action === "create")
       await knowledge.create({
         ...item,

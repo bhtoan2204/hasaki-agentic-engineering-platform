@@ -14,13 +14,27 @@ export const FAILURE_CATEGORIES = [
 ] as const;
 export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 
+interface ProviderFailureDetail {
+  code?: unknown;
+  type?: unknown;
+  message?: unknown;
+}
+
+interface ProviderFailure extends ProviderFailureDetail {
+  error?: string | ProviderFailureDetail;
+  status?: unknown;
+  errors?: { join?: (separator: string) => unknown };
+  result?: unknown;
+}
+
 /** Structured codes take priority. A timeout is never evidence of depleted quota. */
 export function normalizeProviderFailure(error: unknown): FailureCategory {
-  const e = error as any;
+  const e = error as ProviderFailure | null | undefined;
+  const detail = typeof e?.error === "string" ? undefined : e?.error;
   const code = String(
     e?.code ??
-      (typeof e?.error === "string" ? e.error : e?.error?.code) ??
-      e?.error?.type ??
+      (typeof e?.error === "string" ? e.error : detail?.code) ??
+      detail?.type ??
       e?.status ??
       e?.type ??
       "",
@@ -29,7 +43,7 @@ export function normalizeProviderFailure(error: unknown): FailureCategory {
   if (exact !== "UNKNOWN" && (FAILURE_CATEGORIES as readonly string[]).includes(exact))
     return exact as FailureCategory;
   const text = String(
-    e?.message ?? e?.error?.message ?? e?.errors?.join?.(" ") ?? e?.result ?? error ?? "",
+    e?.message ?? detail?.message ?? e?.errors?.join?.(" ") ?? e?.result ?? error ?? "",
   ).toLowerCase();
   const classify = (s: string): FailureCategory | null => {
     if (
@@ -60,7 +74,7 @@ export function normalizeProviderFailure(error: unknown): FailureCategory {
 export function safeDiagnostics(value: unknown): string {
   const text =
     value instanceof Error
-      ? JSON.stringify({ message: value.message, code: (value as any).code })
+      ? JSON.stringify({ message: value.message, code: (value as NodeJS.ErrnoException).code })
       : typeof value === "string"
         ? value
         : JSON.stringify(value);
@@ -69,8 +83,32 @@ export function safeDiagnostics(value: unknown): string {
     .slice(0, 4000);
 }
 
+type UsageSession = Record<string, unknown> & { tokens?: Record<string, unknown> | null };
+
+type UsageRow = Record<string, unknown> & {
+  provider_sessions?: Record<string, UsageSession> | null;
+  normalized_failure_category?: string | null;
+};
+
+interface UsageCoverage {
+  reported: number;
+  missing: number;
+  partial: number;
+  sessions_missing: number;
+}
+
+type UsageSummary = Record<string, unknown> & {
+  attempts: number;
+  coverage: Record<string, UsageCoverage>;
+  failures: Record<string, number>;
+  latency_ms: Record<string, number | null>;
+  provider_latency_ms: Record<string, number | null>;
+};
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
 /** Null-preserving totals expose known subtotals together with explicit coverage. */
-export function usageSummary(rows: any[]) {
+export function usageSummary(rows: UsageRow[]): UsageSummary {
   const fields = [
     "input_tokens",
     "output_tokens",
@@ -85,12 +123,12 @@ export function usageSummary(rows: any[]) {
     "human_wait_ms",
     "tool_failures",
   ];
-  const result: Record<string, any> = { attempts: rows.length, coverage: {}, failures: {} };
+  const totals: Record<string, number | null> = {};
+  const coverage: Record<string, UsageCoverage> = {};
+  const failures: Record<string, number> = {};
   for (const field of fields) {
-    const values = rows
-      .map((r) => r[field])
-      .filter((v) => typeof v === "number" && Number.isFinite(v));
-    result[field] = values.length ? values.reduce((a, b) => a + b, 0) : null;
+    const values = rows.map((r) => r[field]).filter(isFiniteNumber);
+    totals[field] = values.length ? values.reduce((a, b) => a + b, 0) : null;
     const tokenKeys: Record<string, string> = {
       input_tokens: "input",
       output_tokens: "output",
@@ -103,7 +141,7 @@ export function usageSummary(rows: any[]) {
     for (const row of rows) {
       if (!tokenKeys[field] && !["reported_cost_usd", "provider_execution_ms"].includes(field))
         continue;
-      const sessions = Object.values(row.provider_sessions ?? {}) as any[];
+      const sessions = Object.values(row.provider_sessions ?? {});
       if (!sessions.length) continue;
       const missing = sessions.filter(
         (s) => (tokenKeys[field] ? s.tokens?.[tokenKeys[field]] : s[field]) == null,
@@ -111,7 +149,7 @@ export function usageSummary(rows: any[]) {
       sessionsMissing += missing;
       if (missing && missing < sessions.length) partial++;
     }
-    result.coverage[field] = {
+    coverage[field] = {
       reported: values.length,
       missing: rows.length - values.length,
       partial,
@@ -120,12 +158,11 @@ export function usageSummary(rows: any[]) {
   }
   for (const r of rows)
     if (r.normalized_failure_category)
-      result.failures[r.normalized_failure_category] =
-        (result.failures[r.normalized_failure_category] ?? 0) + 1;
+      failures[r.normalized_failure_category] = (failures[r.normalized_failure_category] ?? 0) + 1;
   const percentiles = (field: string) => {
     const times = rows
       .map((r) => r[field])
-      .filter((v) => typeof v === "number" && Number.isFinite(v))
+      .filter(isFiniteNumber)
       .sort((a, b) => a - b);
     return Object.fromEntries(
       [50, 95, 99].map((p) => [
@@ -134,7 +171,12 @@ export function usageSummary(rows: any[]) {
       ]),
     );
   };
-  result.latency_ms = percentiles("wall_duration_ms");
-  result.provider_latency_ms = percentiles("provider_execution_ms");
-  return result;
+  return {
+    attempts: rows.length,
+    coverage,
+    failures,
+    ...totals,
+    latency_ms: percentiles("wall_duration_ms"),
+    provider_latency_ms: percentiles("provider_execution_ms"),
+  };
 }

@@ -6,7 +6,7 @@ import { pool, q, one, withTx } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { botKey, telegramCall, TelegramApiError, validWebhookSecret } from "./client.ts";
 import { advisoryKey, queue } from "./store.ts";
-import { ingestUpdate, processInbox } from "./updates.ts";
+import { ingestUpdate, processInbox, telegramUpdateId } from "./updates.ts";
 
 /** Session lock + renewable DB lease: dropped DB sessions cannot keep consuming after another owner takes over. */
 export async function claimConsumer(
@@ -42,7 +42,7 @@ export async function releaseConsumer(client: pg.PoolClient, owner: string, key 
   }
 }
 export async function persistPollingBatch(
-  updates: any[],
+  updates: unknown[],
   owner: string,
   epoch: number,
   key = botKey(),
@@ -56,19 +56,19 @@ export async function persistPollingBatch(
     if (!row) throw new HttpError(409, "Telegram consumer ownership lost");
     let offset = Number(row.update_offset);
     for (const update of updates) {
-      if (!Number.isSafeInteger(update?.update_id) || update.update_id < 0)
-        throw new HttpError(400, "Invalid Telegram update");
+      const updateId = telegramUpdateId(update);
+      if (updateId === null) throw new HttpError(400, "Invalid Telegram update");
       await q(
         db,
         "INSERT INTO telegram_updates(bot_key,update_id,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
-        [key, update.update_id, JSON.stringify(update)],
+        [key, updateId, JSON.stringify(update)],
       );
-      offset = Math.max(offset, update.update_id + 1);
+      offset = Math.max(offset, updateId + 1);
     }
     await q(db, "UPDATE telegram_consumers SET update_offset=$2 WHERE bot_key=$1", [key, offset]);
   });
 }
-export async function acceptWebhook(secret: unknown, update: any) {
+export async function acceptWebhook(secret: unknown, update: unknown) {
   if (config.telegram.mode !== "webhook" || !validWebhookSecret(secret))
     throw new HttpError(403, "Invalid Telegram webhook authentication");
   const consumer = await one(
@@ -276,7 +276,7 @@ export function startTelegramTransport() {
       const abort = () => session.abort();
       stopping.signal.addEventListener("abort", abort, { once: true });
       client.on("error", abort);
-      let claim: any;
+      let claim: Awaited<ReturnType<typeof claimConsumer>>;
       let heartbeat: ReturnType<typeof setInterval> | undefined;
       try {
         claim = await claimConsumer(client, owner, mode, key);
@@ -331,7 +331,7 @@ export function startTelegramTransport() {
           await expireActions();
           await deliverOutbox(30, session.signal);
           if (mode === "polling") {
-            const updates = await telegramCall(
+            const updates: unknown = await telegramCall(
               "getUpdates",
               {
                 offset: lease.update_offset,

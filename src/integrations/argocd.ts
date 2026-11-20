@@ -16,7 +16,12 @@ const login = new PersonalSession<{ value: string; exp: number; user: string }>(
 
 const baseUrl = () => config.argocd.baseUrl.replace(/\/$/, "");
 
-function jwtClaims(t: string): Record<string, any> {
+function jwtClaims(t: string): {
+  exp?: number;
+  email?: string;
+  sub?: string;
+  preferred_username?: string;
+} {
   try {
     return JSON.parse(Buffer.from(t.split(".")[1], "base64url").toString());
   } catch {
@@ -81,7 +86,10 @@ export async function setArgoToken(raw: string) {
     throw new Error(
       `token đã hết hạn lúc ${new Date(c.exp * 1000).toLocaleString("vi-VN")} — đăng nhập lại Argo CD rồi copy cookie mới`,
     );
-  const info: any = await rawGet("/api/v1/session/userinfo", value);
+  const info = (await rawGet("/api/v1/session/userinfo", value)) as {
+    loggedIn?: boolean;
+    username?: string;
+  } | null;
   if (!info?.loggedIn)
     throw new Error("Argo CD không chấp nhận token này (session/userinfo: loggedIn=false)");
   login.current = {
@@ -157,17 +165,44 @@ const get = (path: string, params?: Record<string, string | number | boolean | u
 /** Log lines can carry credentials; mask the common shapes before they reach the agent (QC: no PII masking). */
 export const redact = redactSecrets;
 
+type ArgoApp = {
+  metadata?: { name?: string; namespace?: string };
+  spec?: { project?: string; destination?: { namespace?: string } };
+  status?: { health?: { status?: string }; sync?: { status?: string } };
+};
+type ArgoNode = {
+  kind: string;
+  group?: string;
+  name: string;
+  namespace?: string;
+  health?: { status?: string; message?: string };
+  images?: string[];
+  info?: { name: string; value: string }[];
+  createdAt?: string;
+  parentRefs?: { kind: string; name: string }[];
+};
+type ArgoLogEntry = {
+  content?: string;
+  raw?: string;
+  last?: boolean;
+  timeStampStr?: string;
+  timeStamp?: string;
+  podName?: string;
+  error?: { message?: string };
+  result?: ArgoLogEntry;
+};
+
 export async function listApps(query?: string) {
-  const j: any = await get("/api/v1/applications", {
+  const j = (await get("/api/v1/applications", {
     fields:
       "items.metadata.name,items.metadata.namespace,items.spec.project,items.spec.destination,items.status.health.status,items.status.sync.status",
-  });
+  })) as { items?: ArgoApp[] } | null;
   const words = (query ?? "")
     .toLowerCase()
     .split(/[\s,]+/)
     .filter(Boolean);
   return (j?.items ?? [])
-    .map((a: any) => ({
+    .map((a) => ({
       app: a.metadata?.name,
       app_namespace: a.metadata?.namespace,
       project: a.spec?.project,
@@ -176,7 +211,7 @@ export async function listApps(query?: string) {
       sync: a.status?.sync?.status,
     }))
     .filter(
-      (a: any) =>
+      (a) =>
         !words.length ||
         words.every((w) => `${a.app} ${a.namespace} ${a.project}`.toLowerCase().includes(w)),
     )
@@ -184,11 +219,11 @@ export async function listApps(query?: string) {
 }
 
 export async function appPods(app: string, appNamespace?: string) {
-  const j: any = await get(`/api/v1/applications/${encodeURIComponent(app)}/resource-tree`, {
+  const j = (await get(`/api/v1/applications/${encodeURIComponent(app)}/resource-tree`, {
     appNamespace,
-  });
-  const nodes: any[] = j?.nodes ?? [];
-  const info = (n: any, name: string) => n.info?.find((i: any) => i.name === name)?.value;
+  })) as { nodes?: ArgoNode[] } | null;
+  const nodes = j?.nodes ?? [];
+  const info = (n: ArgoNode, name: string) => n.info?.find((i) => i.name === name)?.value;
   const workloads = nodes
     .filter((n) =>
       ["Deployment", "StatefulSet", "DaemonSet", "CronJob", "Rollout"].includes(n.kind),
@@ -248,7 +283,7 @@ export async function podLogs(q: LogQuery) {
       );
   }
   const tail = Math.min(q.tail_lines ?? 300, 2000);
-  const rows: any = await get(`/api/v1/applications/${encodeURIComponent(q.app)}/logs`, {
+  const rows = (await get(`/api/v1/applications/${encodeURIComponent(q.app)}/logs`, {
     appNamespace: q.app_namespace,
     namespace,
     container: q.container,
@@ -264,8 +299,8 @@ export async function podLogs(q: LogQuery) {
           resourceName: q.workload!.name,
           group: q.workload!.group ?? "apps",
         }),
-  });
-  const list: any[] = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  })) as ArgoLogEntry | ArgoLogEntry[] | null;
+  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
   const lines = list
     .map((r) => r?.result ?? r)
     .filter((r) => r && (r.content !== undefined || r.raw !== undefined) && !(r.last && !r.content))

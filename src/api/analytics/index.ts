@@ -7,7 +7,7 @@ import { usageAnalytics, performanceAnalytics, workflowAnalytics } from "./execu
 import { healthAnalytics, healthServiceAnalytics } from "./health.ts";
 import { HttpError } from "../../http/error.ts";
 
-const cache = new CacheAside<any>(
+const cache = new CacheAside<object>(
   "engineering.analytics",
   [
     "workflow_runs",
@@ -38,7 +38,7 @@ export async function engineeringAnalytics(actor: Actor, url: URL, dashboard: st
       WHERE r.owner_id IS NOT NULL AND ($2::boolean OR r.owner_id=$1) GROUP BY 1,2,3,4,5 ORDER BY 3 LIMIT 1000`,
           [scope.ownerId, scope.all],
         ),
-        q(
+        q<{ namespace: string; service: string }>(
           pool,
           `SELECT DISTINCT COALESCE(NULLIF(namespace,''),'unknown') AS namespace,
         COALESCE(NULLIF(service,''),'unknown') AS service FROM prod_error_groups ORDER BY 1,2 LIMIT 500`,
@@ -55,7 +55,7 @@ export async function engineeringAnalytics(actor: Actor, url: URL, dashboard: st
         namespaces: [
           ...new Set([
             ...config.prodErrors.namespaces.map((n) => n.namespace),
-            ...prodServices.map((r: any) => r.namespace),
+            ...prodServices.map((r) => r.namespace),
           ]),
         ].sort(),
         services: prodServices,

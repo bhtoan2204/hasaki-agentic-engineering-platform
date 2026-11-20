@@ -48,8 +48,8 @@ const stat = (name: string): CacheStat =>
     refreshFailures: 0,
   });
 
-const registry = new Set<CacheAside<any>>();
-const swrRegistry = new Set<StaleWhileRevalidate<any>>();
+const registry = new Set<CacheAside<unknown>>();
+const swrRegistry = new Set<StaleWhileRevalidate<unknown>>();
 
 export class CacheAside<V> {
   private entries = new Map<string, { at: number; value: V }>();

@@ -121,9 +121,13 @@ export function scanWindow(
   const nowEpoch = Math.floor(now.getTime() / 1000);
   const midnight = nowEpoch - zoned(now, tz).seconds;
   let start: number, end: number;
-  if (preset === "today") ((start = midnight), (end = nowEpoch));
-  else if (preset === "yesterday") ((start = midnight - 86400), (end = midnight));
-  else if (preset === "custom") {
+  if (preset === "today") {
+    start = midnight;
+    end = nowEpoch;
+  } else if (preset === "yesterday") {
+    start = midnight - 86400;
+    end = midnight;
+  } else if (preset === "custom") {
     start = Math.floor(Date.parse(opts.from ?? "") / 1000);
     end = Math.min(nowEpoch, Math.floor(Date.parse(opts.to ?? "") / 1000));
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
@@ -134,7 +138,10 @@ export function scanWindow(
       throw Object.assign(new Error(`khung tuỳ chọn tối đa ${MAX_CUSTOM_HOURS} giờ`), {
         status: 400,
       });
-  } else ((start = nowEpoch - Number(preset.replace("h", "")) * 3600), (end = nowEpoch));
+  } else {
+    start = nowEpoch - Number(preset.replace("h", "")) * 3600;
+    end = nowEpoch;
+  }
   const shift = end - start <= 86400 ? 86400 : end - start;
   const baseStart = start - shift;
   if ((nowEpoch - baseStart) / 60 > config.splunk.maxMinutes)
@@ -283,7 +290,7 @@ const str = (v: unknown, max: number) =>
   v == null ? "" : String(Array.isArray(v) ? v[0] : v).slice(0, max);
 
 /** Splunk result rows → group rows (exported for tests). */
-export function toGroups(rows: any[], day: string) {
+export function toGroups(rows: Partial<SourceRow>[], day: string) {
   return rows.map((r) => {
     const level = str(r.lv, 20) || "ERROR";
     const signature = str(r.sig, 200);
@@ -802,7 +809,9 @@ export async function getSettings(): Promise<ProdErrorSettings> {
   try {
     const s = JSON.parse((await settings.get("prod_errors")) ?? "null");
     if (s) return { schedule: s.schedule ?? config.prodErrors.schedule, notify: s.notify ?? true };
-  } catch {}
+  } catch {
+    /* ignore: unreadable settings fall back to defaults */
+  }
   return { schedule: config.prodErrors.schedule, notify: true };
 }
 
@@ -1128,7 +1137,7 @@ export async function investigate(fp: string, ownerId?: number) {
       "UPDATE prod_error_groups SET work_item_id = $2, updated_at = now() WHERE fingerprint = $1",
       [fp, item.id],
     );
-  const run: any = await startRun({
+  const run = await startRun({
     definitionKey: "bug-investigation",
     workItemId: item.id,
     ownerId: item.owner_id ?? ownerId,

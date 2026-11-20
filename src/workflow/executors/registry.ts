@@ -108,13 +108,15 @@ export function makeContext(
       if (m.provider_sessions) hasProviderSessions = true;
       const auxiliary: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(m)) {
-        const v = value as any;
-        if (
-          v &&
-          typeof v === "object" &&
-          typeof v.provider === "string" &&
-          ("tokens" in v || "cost_usd" in v)
-        ) {
+        const v: {
+          provider?: unknown;
+          telemetry_id?: unknown;
+          model?: unknown;
+          tokens?: unknown;
+          cost_usd?: unknown;
+          provider_execution_ms?: unknown;
+        } | null = value && typeof value === "object" ? value : null;
+        if (v && typeof v.provider === "string" && ("tokens" in v || "cost_usd" in v)) {
           auxiliary[`aux:${key}:${v.telemetry_id ?? "snapshot"}`] = {
             provider: v.provider,
             model: v.model ?? null,

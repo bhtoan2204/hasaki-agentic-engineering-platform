@@ -7,9 +7,11 @@ import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
 import { pool, one, q, withTx } from "../db/pool.ts";
 import { fixtureGit, fixtureRoot, fixtureName, harnessHash } from "./fixtures.ts";
-import { CaseSchema, referencePatches } from "./dataset.ts";
+import { CaseSchema, referencePatches, type BenchmarkSuite } from "./dataset.ts";
 import { scoreEvidence, type Evidence } from "./scoring.ts";
-import { IsolationUnavailable } from "./isolation.ts";
+import { IsolationUnavailable, type sandboxIdentity } from "./isolation.ts";
+import type { ConfigurationSchema } from "./configuration.ts";
+import type { z } from "zod";
 import { validateSource } from "./validator.ts";
 import { rankRepositories, repositories } from "../repos/service.ts";
 import { hybridRank, buildCodeContext, searchCodeExact } from "../codeIntelligence/search.ts";
@@ -122,9 +124,26 @@ export async function executeBenchmarkCase(ctx: ExecutionContext): Promise<ExecR
     () => executeIsolated(ctx, cr, task),
   );
 }
+interface CaseRun {
+  id: number;
+  evaluation_id: number;
+  repetition: number;
+  owner_id: number;
+  suite_key: string;
+  version: number;
+  suite_hash: string;
+  configuration_hash: string;
+  manifest: BenchmarkSuite;
+  scoring: Parameters<typeof scoreEvidence>[1];
+  configuration: z.infer<typeof ConfigurationSchema> & {
+    blocked: string | null;
+    harness_hash: string;
+    sandbox: Awaited<ReturnType<typeof sandboxIdentity>> | null;
+  };
+}
 async function executeIsolated(
   ctx: ExecutionContext,
-  cr: any,
+  cr: CaseRun,
   task: ReturnType<typeof CaseSchema.parse>,
 ): Promise<ExecResult> {
   const cfg = cr.configuration,
@@ -414,7 +433,7 @@ async function executeIsolated(
       task,
       workspace,
       validatorRoot,
-      cfg.sandbox.image,
+      cfg.sandbox!.image,
       signal,
     );
     e.details.build_passed = "build_passed" in validation ? validation.build_passed : null;

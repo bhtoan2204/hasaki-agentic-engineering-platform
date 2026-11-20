@@ -47,7 +47,7 @@ import "./Insights.css";
 
 const num = (x: unknown): number | null =>
   x == null || x === "" || Number.isNaN(Number(x)) ? null : Number(x);
-const sum = (rows: any[] | undefined, k: string) =>
+const sum = <R extends object>(rows: R[] | undefined, k: keyof R) =>
   (rows ?? []).reduce((a, r) => a + (num(r[k]) ?? 0), 0);
 const numLoc = () => (uiLocale() === "vi" ? "vi-VN" : "en-GB");
 const fmtInt = (x: number | null) => (x == null ? "—" : x.toLocaleString(numLoc()));
@@ -68,6 +68,96 @@ const fmtPct = (x: number | null) => (x == null ? "—" : `${fmtNum(x, 1)}%`);
 const fmtSec = (x: number | null) =>
   x == null ? "—" : x >= 60 ? `${Math.floor(x / 60)}m${Math.round(x % 60)}s` : `${fmtNum(x, 1)}s`;
 const pct = (a: number, b: number) => (b ? (a / b) * 100 : null);
+
+// ---------------------------------------------------------------- API shapes
+
+type Numeric = number | string | null;
+type WorkflowMetric = {
+  definition_key: string | null;
+  runs: Numeric;
+  completed: Numeric;
+  failed: Numeric;
+  cost_usd: Numeric;
+  tokens: Numeric;
+};
+type StepTypeMetric = {
+  type: string | null;
+  attempts: Numeric;
+  failed: Numeric;
+  avg_seconds: Numeric;
+  cost_usd: Numeric;
+};
+type ProfileMetric = {
+  profile: string | null;
+  runs: Numeric;
+  completed: Numeric;
+  avg_wall_min: Numeric;
+  claude_attempts_per_run: Numeric;
+  turns_per_run: Numeric;
+  cost_per_run: Numeric;
+};
+type ToolMetric = { tool: string; calls: Numeric; attempts: Numeric };
+type IntegrationMetric = { name: string; calls: Numeric; failed: Numeric; avg_ms: Numeric };
+type SkillMetric = { key: string; loads: Numeric };
+type SkillActivation = {
+  key: string;
+  state: string;
+  attempts: number;
+  loaded_unused: number;
+  provider_limited: number;
+};
+type DeniedTool = { tool: string; reason: string; times: Numeric };
+type StepFailure = {
+  run_id: number;
+  step_key: string;
+  type: string;
+  finished_at: string | null;
+  error: string;
+};
+type RepeatedFailure = { signature: string; times: Numeric; runs: Numeric };
+type HarnessEval = {
+  verification: Record<string, unknown>;
+  human_intervention: Record<string, unknown>;
+  repeated_failures: RepeatedFailure[];
+  decisions: Record<string, unknown>;
+  slop: Record<string, unknown>;
+};
+type MetricsSummary = {
+  by_profile: ProfileMetric[];
+  by_workflow: WorkflowMetric[];
+  by_step_type: StepTypeMetric[];
+  tools: ToolMetric[];
+  integrations: IntegrationMetric[];
+  skills: SkillMetric[];
+  skill_activation: SkillActivation[];
+  failures: StepFailure[];
+  denied: DeniedTool[];
+  evaluation: HarnessEval;
+};
+type ToolInfo = {
+  name: string;
+  summary?: string;
+  read_only: boolean;
+  available: unknown;
+  input_schema: unknown;
+};
+type EvalGroup = {
+  group: string;
+  runs: number;
+  graded: number;
+  success_rate_pct: number | null;
+  regression_rate_pct: number | null;
+  verifier: {
+    judged: number;
+    accuracy_pct: number;
+    false_pass: number;
+    false_alarm: number;
+  } | null;
+  repair_success_pct: number | null;
+  human_intervention_pct: number | null;
+  avg_wall_s: number | null;
+  avg_cost_usd: number | null;
+};
 
 // ---------------------------------------------------------------- chart primitives (plain SVG / CSS)
 
@@ -252,7 +342,13 @@ function Metric({
 }
 
 /** Plain data table inside a scroll wrapper. */
-function Table({ rows, cols }: { rows: any[]; cols: Array<[string, string, ((r: any) => any)?]> }) {
+function Table<R extends object>({
+  rows,
+  cols,
+}: {
+  rows: R[] | undefined;
+  cols: Array<[keyof R & string, string, ((r: R) => ReactNode)?]>;
+}) {
   const { t } = useI18n();
   if (!rows?.length) return <div className="ins-empty">{t("ins.empty")}</div>;
   return (
@@ -309,8 +405,11 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
     : "overview";
   const setTab = (t: InsightsTab) => navigate(`/insights/${t}`);
   const [days, setDays] = useState(30);
-  const { data, error, loading, reload } = useApi<any>(`/api/metrics/summary?days=${days}`, [days]);
-  const { data: tools } = useApi<any[]>("/api/tools");
+  const { data, error, loading, reload } = useApi<MetricsSummary>(
+    `/api/metrics/summary?days=${days}`,
+    [days],
+  );
+  const { data: tools } = useApi<ToolInfo[]>("/api/tools");
   const [wfMetric, setWfMetric] = useState<"cost" | "tokens" | "runs">("cost");
   const [stMetric, setStMetric] = useState<"avg" | "fail" | "cost">("avg");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
@@ -354,7 +453,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
       </div>
     );
 
-  const wf: any[] = data.by_workflow ?? [];
+  const wf = data.by_workflow ?? [];
   const runs = sum(wf, "runs");
   const completed = sum(wf, "completed");
   const failed = sum(wf, "failed");
@@ -408,7 +507,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
   });
   const wfSorted = [...wfRows].sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
 
-  const stRows: BarRow[] = (data.by_step_type ?? []).map((r: any) => {
+  const stRows: BarRow[] = (data.by_step_type ?? []).map((r) => {
     const att = num(r.attempts) ?? 0,
       f = num(r.failed) ?? 0;
     const base = {
@@ -628,7 +727,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
           <div className="ins-grid">
             <Panel icon={Wrench} title={t("ins.toolsTitle")} sub={t("ins.calls")}>
               <Bars
-                rows={(data.tools ?? []).map((r: any) => ({
+                rows={(data.tools ?? []).map((r) => ({
                   key: r.tool,
                   label: <span className="mono">{r.tool}</span>,
                   value: num(r.calls),
@@ -651,7 +750,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
               }
             >
               <Bars
-                rows={(data.integrations ?? []).map((r: any) => {
+                rows={(data.integrations ?? []).map((r) => {
                   const calls = num(r.calls) ?? 0,
                     f = num(r.failed) ?? 0;
                   return {
@@ -686,25 +785,17 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
               title={t("si.skillActivation")}
               sub={t("si.skillActivationSub")}
             >
-              {(data.skill_activation ?? []).map(
-                (s: {
-                  key: string;
-                  state: string;
-                  attempts: number;
-                  loaded_unused: number;
-                  provider_limited: number;
-                }) => (
-                  <div className="small" key={`${s.key}:${s.state}`}>
-                    <span className="mono">{s.key}</span> · {s.state} × {s.attempts}
-                    {s.loaded_unused ? ` · loaded_unused ${s.loaded_unused}` : ""}
-                    {s.provider_limited ? ` · provider_limited ${s.provider_limited}` : ""}
-                  </div>
-                ),
-              )}
+              {(data.skill_activation ?? []).map((s) => (
+                <div className="small" key={`${s.key}:${s.state}`}>
+                  <span className="mono">{s.key}</span> · {s.state} × {s.attempts}
+                  {s.loaded_unused ? ` · loaded_unused ${s.loaded_unused}` : ""}
+                  {s.provider_limited ? ` · provider_limited ${s.provider_limited}` : ""}
+                </div>
+              ))}
             </Panel>
             <Panel icon={Sparkles} title={t("ins.skillsLoaded")} sub={t("ins.loads")}>
               <Bars
-                rows={(data.skills ?? []).map((r: any) => ({
+                rows={(data.skills ?? []).map((r) => ({
                   key: r.key,
                   label: (
                     <a className="mono" href={`#/knowledge/${r.key}`}>
@@ -722,7 +813,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                 <div className="ins-empty">{t("ins.noneDenied")}</div>
               ) : (
                 <ul className="ins-denied">
-                  {data.denied.map((r: any, i: number) => (
+                  {data.denied.map((r, i) => (
                     <li key={i}>
                       <span className="ins-denied-times">{fmtInt(num(r.times))}×</span>
                       <div className="ins-denied-body">
@@ -836,7 +927,7 @@ const KNOWN_H = new Set(["runs", "with_human", "answers", "reexecutions", "rate_
 const humanize = (k: string) => k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 /** Fields the API may add later: scalars become metric tiles, structures are shown as JSON. */
-function Extras({ obj, known }: { obj: Record<string, any>; known: Set<string> }) {
+function Extras({ obj, known }: { obj: Record<string, unknown>; known: Set<string> }) {
   const extra = Object.entries(obj ?? {}).filter(([k]) => !known.has(k));
   if (!extra.length) return null;
   const scalars = extra.filter(([, x]) => x == null || typeof x !== "object");
@@ -862,7 +953,7 @@ function Extras({ obj, known }: { obj: Record<string, any>; known: Set<string> }
 }
 
 /** Harness evaluation — whether coding steps passed the platform's own verification; separate from run status. */
-function HarnessEvaluation({ e }: { e: any }) {
+function HarnessEvaluation({ e }: { e: HarnessEval }) {
   const { t } = useI18n();
   const v = e.verification ?? {};
   const h = e.human_intervention ?? {};
@@ -1060,7 +1151,7 @@ function SlopDetection({ s }: { s: Record<string, unknown> }) {
   );
 }
 
-function RepeatedFailures({ rows }: { rows: any[] }) {
+function RepeatedFailures({ rows }: { rows: RepeatedFailure[] }) {
   const { t } = useI18n();
   const max = Math.max(...rows.map((r) => num(r.times) ?? 0), 1);
   return (
@@ -1097,9 +1188,9 @@ function RepeatedFailures({ rows }: { rows: any[] }) {
 /** Benchmark results (eval_results): candidates × profiles, graded by hidden acceptance tests. */
 function EvalComparison() {
   const { t } = useI18n();
-  const { data } = useApi<any>("/api/evals");
-  const groups = (data?.summary ?? []) as any[];
-  const v = (x: any, suffix = "") => (x == null ? "—" : `${x}${suffix}`);
+  const { data } = useApi<{ summary?: EvalGroup[] }>("/api/evals");
+  const groups = data?.summary ?? [];
+  const v = (x: number | null, suffix = "") => (x == null ? "—" : `${x}${suffix}`);
   return (
     <section className="card">
       <div className="card-head">

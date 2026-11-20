@@ -5,7 +5,7 @@ import { pool } from "./db/pool.ts";
  * They are kept read-mostly for history and the backwards-compatible /api/tasks endpoints;
  * new execution state lives in the workflow_* tables (see src/workflow).
  */
-const q = async <T = any>(sql: string, params: unknown[] = []) =>
+const q = async <T = unknown>(sql: string, params: unknown[] = []) =>
   (await pool.query(sql, params)).rows as T[];
 
 export type TaskStatus = "queued" | "running" | "waiting_answer" | "review" | "idle" | "failed";
@@ -15,7 +15,7 @@ export interface TaskRow {
   work_id: number | null;
   name: string;
   project: string;
-  payload: any;
+  payload: unknown;
   status: TaskStatus;
   session_id: string | null;
   error: string | null;

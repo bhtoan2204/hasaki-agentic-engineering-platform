@@ -12,7 +12,24 @@ export async function providerPerformance(
 ) {
   const days = Math.min(365, Math.max(1, Math.round(o.days ?? 30)));
   const minSamples = Math.max(10, o.minSamples ?? 20);
-  const rows = await q<any>(
+  const rows = await q<{
+    provider: string;
+    step_type: string;
+    attempts: number;
+    completed: number;
+    failed: number;
+    cost_unknown: number;
+    completed_cost: string | number | null;
+    completed_with_cost: number;
+    p50_ms: number | null;
+    p95_ms: number | null;
+    with_repairs: number;
+    verified: number;
+    verified_pass: number;
+    reviews: number;
+    review_pass: number;
+    handoffs: number;
+  }>(
     db,
     `SELECT coalesce(t.provider, 'unknown') AS provider, s.type AS step_type,
             count(*)::int AS attempts,

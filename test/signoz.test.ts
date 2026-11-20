@@ -19,7 +19,12 @@ import {
 } from "../src/integrations/signoz.ts";
 
 const W = { start: 1_000_000, end: 1_900_000 };
-const specOf = (body: any) => body.compositeQuery.queries[0].spec;
+type QuerySpec = Record<string, unknown> & {
+  filter: { expression: string };
+  order: Array<{ direction: string }>;
+  groupBy: Array<{ name: string }>;
+};
+const specOf = (body: ReturnType<typeof logsSearch>) => body.compositeQuery.queries[0].spec as QuerySpec;
 
 test("addresses are classified: metadata always blocked, private ranges internal, the rest public", () => {
   for (const ip of ["169.254.169.254", "fd00:ec2::254", "::ffff:169.254.169.254"]) assert.equal(classifyAddress(ip), "metadata", ip);

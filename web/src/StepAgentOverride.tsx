@@ -1,18 +1,18 @@
 import { useState } from "react";
-import { StepAgentFields } from "./StepAgentFields.tsx";
+import { StepAgentFields, type StepAgentConfig } from "./StepAgentFields.tsx";
 import { useI18n } from "./i18n/index.tsx";
 
 export function StepAgentOverride({
   value,
   save,
 }: {
-  value?: Record<string, any> | null;
-  save: (value: Record<string, any> | null) => Promise<unknown>;
+  value?: StepAgentConfig | null;
+  save: (value: StepAgentConfig | null) => Promise<unknown>;
 }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState(value ?? {});
   const [busy, setBusy] = useState(false);
-  const submit = async (v: Record<string, any> | null) => {
+  const submit = async (v: StepAgentConfig | null) => {
     setBusy(true);
     try {
       await save(v);

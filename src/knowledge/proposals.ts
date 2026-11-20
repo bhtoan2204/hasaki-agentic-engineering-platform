@@ -169,8 +169,11 @@ export function lineDiff(before: string, after: string, maxLines = 800): DiffLin
   let i = 0,
     j = 0;
   while (i < n && j < m) {
-    if (a[i] === b[j]) (out.push({ op: " ", line: a[i] }), i++, j++);
-    else if (dp[i + 1][j] >= dp[i][j + 1]) out.push({ op: "-", line: a[i++] });
+    if (a[i] === b[j]) {
+      out.push({ op: " ", line: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) out.push({ op: "-", line: a[i++] });
     else out.push({ op: "+", line: b[j++] });
   }
   while (i < n) out.push({ op: "-", line: a[i++] });
@@ -252,7 +255,19 @@ export async function createProposal(
   if (!CHANGE_TYPES.includes(x.changeType))
     throw new HttpError(400, `unknown change type ${x.changeType}`);
   if (!x.evidence.length) throw new HttpError(400, "a proposal needs evidence");
-  let target: any = null;
+  let target:
+    | {
+        id: number;
+        key: string;
+        category: string;
+        scope_type: string;
+        scope_ref: string;
+        enforced: boolean;
+        current_version: number;
+        content: string;
+      }
+    | null
+    | undefined = null;
   if (x.changeType !== "CREATE") {
     if (!x.targetKey) throw new HttpError(400, `${x.changeType} needs the existing item (target)`);
     target = await one(
@@ -448,7 +463,11 @@ export interface ApproveOptions {
  * Approve and apply in one transaction. Idempotent: approving an approved proposal returns it unchanged.
  * `afterCommit` receives the applied proposal (skill evolution runs there, outside the transaction).
  */
-export async function approveProposal(id: number, o: ApproveOptions, onApplied?: (p: any) => void) {
+export async function approveProposal(
+  id: number,
+  o: ApproveOptions,
+  onApplied?: (p: { id: number; parent_id: number | null }) => void,
+) {
   if (!o.by?.trim()) throw new HttpError(400, "approval needs the reviewer");
   return withTx(async (c, afterCommit) => {
     const p = await one(c, "SELECT * FROM knowledge_proposals WHERE id = $1 FOR UPDATE", [id]);
@@ -459,8 +478,8 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
       throw new HttpError(
         409,
         `automatic validation failed (${(p.validation.checks ?? [])
-          .filter((x: any) => !x.passed)
-          .map((x: any) => x.name)
+          .filter((x: { passed: boolean }) => !x.passed)
+          .map((x: { name: string }) => x.name)
           .join(", ")}); fix the text or approve with override_validation`,
       );
     const edits: ProposedChange = Object.fromEntries(
@@ -536,7 +555,7 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
           target.key,
           {
             content: prop.content,
-            applicability: (prop.applicability as any) ?? cur.applicability,
+            applicability: prop.applicability ?? cur.applicability,
             metadata,
             effective_from: prop.effective_from ?? null,
             change_note: note,
@@ -584,7 +603,7 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
             conflict_key: conflictKey,
             priority: target.priority,
             content: prop.content!,
-            applicability: (prop.applicability as any) ?? {},
+            applicability: prop.applicability ?? {},
             metadata: { evolution: { proposal_id: id, supersedes: target.key, approved_by: o.by } },
             effective_from: prop.effective_from ?? null,
             change_note: note,
@@ -697,7 +716,7 @@ export async function approveProposal(id: number, o: ApproveOptions, onApplied?:
             title: prop.title || key,
             conflict_key: prop.conflict_key ?? null,
             content: prop.content!,
-            applicability: (prop.applicability as any) ?? {},
+            applicability: prop.applicability ?? {},
             metadata: { evolution: { proposal_id: id, approved_by: o.by } },
             effective_from: prop.effective_from ?? null,
             change_note: note,
@@ -768,7 +787,11 @@ export async function rollbackProposal(id: number, o: { by: string; comment?: st
   return withTx(async (c) => rollbackTx(c, id, o));
 }
 
-async function rollbackTx(c: Db, id: number, o: { by: string; comment?: string }): Promise<any> {
+async function rollbackTx(
+  c: Db,
+  id: number,
+  o: { by: string; comment?: string },
+): Promise<Record<string, unknown> | undefined> {
   const p = await one(c, "SELECT * FROM knowledge_proposals WHERE id = $1 FOR UPDATE", [id]);
   if (!p) throw new HttpError(404, "proposal not found");
   if (p.status === "rolled_back") return p;

@@ -118,7 +118,9 @@ function useTheme(): [Theme, (t: Theme) => void] {
     document.documentElement.dataset.theme = theme;
     try {
       localStorage.setItem("hasaki.theme", theme);
-    } catch {}
+    } catch {
+      /* ignore: storage unavailable */
+    }
   }, [theme]);
   return [theme, setTheme];
 }
@@ -200,7 +202,10 @@ export function App() {
   };
   const refreshCount = () =>
     // The badge counts everything waiting for a human: open questions AND steps waiting for approval.
-    Promise.all([api<any[]>("/api/questions"), api<any[]>("/api/approvals").catch(() => [])])
+    Promise.all([
+      api<unknown[]>("/api/questions"),
+      api<unknown[]>("/api/approvals").catch(() => []),
+    ])
       .then(([q, a]) => setOpenQuestions(q.length + a.length))
       .catch(() => {});
   useEffect(() => {
@@ -289,7 +294,7 @@ export function App() {
 
   useEffect(() => {
     if (!me || hash.startsWith("/")) return;
-    api(`/api/tasks/${encodeURIComponent(hash)}`)
+    api<{ work_item_id: number }>(`/api/tasks/${encodeURIComponent(hash)}`)
       .then((t) => (location.hash = `/work-items/${t.work_item_id}`))
       .catch(() => (location.hash = "/overview"));
   }, [hash, me]);

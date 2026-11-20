@@ -86,6 +86,13 @@ export interface Claim {
   };
 }
 
+const PROVENANCE_STATUSES = [
+  "VERIFIED_BY_PLATFORM",
+  "AGENT_REPORTED",
+  "UNVERIFIED",
+  "CONTRADICTED",
+] as const;
+
 export interface RootCauseAssessment {
   status: RootCauseStatus;
   confidence: Level | null;
@@ -155,6 +162,8 @@ const maxOf = <T extends string>(list: readonly T[], a: T, b: T) =>
 /** "unknown", "n/a", "TBD", "not checked", "chưa rõ" … do not count as an answer. */
 const PLACEHOLDER =
   /^(?:-|—|\?|none|null|n\/?a|tbd|todo|unknown|unclear|not (?:checked|verified|known|available)|chưa(?: rõ| kiểm tra| xác minh| biết)?|không rõ)\.?$/i;
+const record = (v: unknown): Record<string, unknown> =>
+  v !== null && typeof v === "object" ? (v as Record<string, unknown>) : {};
 const answered = (v: unknown) =>
   typeof v === "string"
     ? !!v.trim() && !PLACEHOLDER.test(v.trim())
@@ -172,8 +181,11 @@ export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
   }
   const out: Claim[] = [];
   const byText = new Map<string, Claim>();
-  raw.slice(0, 60).forEach((r: any, i) => {
-    const text = typeof r === "string" ? clip(r, 500) : str(r?.claim, 500);
+  raw.slice(0, 60).forEach((item: unknown, i) => {
+    const r = record(item);
+    const prov = record(r.provenance);
+    const provStatus = PROVENANCE_STATUSES.find((s) => s === prov.status);
+    const text = typeof item === "string" ? clip(item, 500) : str(r.claim, 500);
     if (!text) return;
     const id = str(r?.id, 40) ?? `C${i + 1}`;
     const cls = String(r?.classification ?? "")
@@ -202,17 +214,17 @@ export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
       contradicts: Array.isArray(r?.contradicts)
         ? r.contradicts.map((x: unknown) => String(x)).slice(0, 10)
         : undefined,
-      ...(r?.provenance?.by === "platform" &&
-      ["VERIFIED_BY_PLATFORM", "AGENT_REPORTED", "UNVERIFIED", "CONTRADICTED"].includes(
-        r.provenance.status,
-      )
+      ...(prov.by === "platform" && provStatus
         ? {
             provenance: {
               by: "platform" as const,
-              status: r.provenance.status,
-              verifies: r.provenance.verifies ?? null,
-              reason: r.provenance.reason ?? null,
-              ...(r.provenance.stale ? { stale: true } : {}),
+              status: provStatus,
+              verifies:
+                prov.verifies === "location" || prov.verifies === "source_record"
+                  ? prov.verifies
+                  : null,
+              reason: typeof prov.reason === "string" ? prov.reason : null,
+              ...(prov.stale ? { stale: true } : {}),
             },
           }
         : {}),
@@ -316,7 +328,7 @@ export function assessRootCause(
   priorClaims: Claim[],
   notes: string[],
 ): RootCauseAssessment {
-  const r: any = raw && typeof raw === "object" ? raw : {};
+  const r = record(raw);
   let status = (ROOT_CAUSE_STATUSES as readonly string[]).includes(
     String(r.status ?? "").toUpperCase(),
   )
@@ -411,25 +423,33 @@ export function detectRisk(texts: string[]): { risk: FixRisk; reasons: string[] 
   let risk: FixRisk = "LOW";
   for (const t of texts) {
     for (const [re, why] of HIGH_PATTERNS)
-      if (re.test(t)) (reasons.add(`HIGH: ${why}`), (risk = "HIGH"));
+      if (re.test(t)) {
+        reasons.add(`HIGH: ${why}`);
+        risk = "HIGH";
+      }
     for (const [re, why] of MEDIUM_PATTERNS)
-      if (re.test(t)) (reasons.add(`MEDIUM: ${why}`), (risk = maxOf(RISKS, risk, "MEDIUM")));
+      if (re.test(t)) {
+        reasons.add(`MEDIUM: ${why}`);
+        risk = maxOf(RISKS, risk, "MEDIUM");
+      }
   }
   return { risk, reasons: [...reasons] };
 }
 
-export function proposalTexts(output: any): string[] {
-  const changes = Array.isArray(output?.changes) ? output.changes : [];
+export function proposalTexts(output: unknown): string[] {
+  const o = record(output);
+  const changes: unknown[] = Array.isArray(o.changes) ? o.changes : [];
   return [
-    ...changes.map((c: any) =>
-      [c?.description, Array.isArray(c?.files) ? "" : c?.files].filter(Boolean).join(" "),
-    ),
-    String(output?.summary ?? ""),
+    ...changes.map((change) => {
+      const c = record(change);
+      return [c.description, Array.isArray(c.files) ? "" : c.files].filter(Boolean).join(" ");
+    }),
+    String(o.summary ?? ""),
   ].filter((t) => t.trim());
 }
 
-export function assessFix(raw: unknown, output: any, notes: string[]): FixAssessment {
-  const r: any = raw && typeof raw === "object" ? raw : {};
+export function assessFix(raw: unknown, output: unknown, notes: string[]): FixAssessment {
+  const r = record(raw);
   const declared = (RISKS as readonly string[]).includes(String(r.risk ?? "").toUpperCase())
     ? (String(r.risk).toUpperCase() as FixRisk)
     : null;
@@ -440,7 +460,7 @@ export function assessFix(raw: unknown, output: any, notes: string[]): FixAssess
     notes.push(`fix risk raised ${declared} → ${risk}: ${detected.reasons.join("; ")}`);
   const inv =
     r.business_invariants && typeof r.business_invariants === "object"
-      ? r.business_invariants
+      ? record(r.business_invariants)
       : null;
   return {
     risk,
@@ -453,10 +473,10 @@ export function assessFix(raw: unknown, output: any, notes: string[]): FixAssess
     rollback: str(r.rollback, 400) ?? "",
     business_invariants: inv
       ? Object.fromEntries(
-          INVARIANT_FIELDS.filter((k) => inv[k] !== undefined).map((k) => [
-            k,
-            clip(Array.isArray(inv[k]) ? inv[k].join("; ") : inv[k], 300),
-          ]),
+          INVARIANT_FIELDS.filter((k) => inv[k] !== undefined).map((k) => {
+            const v = inv[k];
+            return [k, clip(Array.isArray(v) ? v.join("; ") : v, 300)];
+          }),
         )
       : null,
   };
@@ -496,7 +516,7 @@ export function evidenceGate(root: RootCauseStatus, fix: FixAssessment): Evidenc
 // ---------------------------------------------------------------- per-step normalization
 
 export type EvidenceRole = "analysis" | "root_cause" | "fix_proposal";
-export const evidenceRole = (cfg: Record<string, any> | undefined): EvidenceRole | null =>
+export const evidenceRole = (cfg: Record<string, unknown> | undefined): EvidenceRole | null =>
   (["analysis", "root_cause", "fix_proposal"] as const).find((r) => r === cfg?.evidence) ?? null;
 
 const list = (v: unknown, n = 20, len = 300) =>
@@ -510,20 +530,44 @@ const list = (v: unknown, n = 20, len = 300) =>
  * for the no-escalation rule. `unavailable` = evidence sources the platform itself could not reach for this attempt;
  * they are added to missing_evidence so a later step cannot forget them.
  */
-export function normalizeInvestigationOutput(
-  role: EvidenceRole,
-  output: Record<string, any>,
-  upstream: Record<string, any> = {},
+export interface NormalizedInvestigationOutput {
+  [key: string]: unknown;
+  claims: Claim[];
+  missing_evidence: string[];
+  impact_assessment?: Record<string, unknown>;
+  root_cause_assessment?: RootCauseAssessment;
+  fix_assessment?: FixAssessment;
+  evidence_gate?: EvidenceGate;
+  prohibited_assumptions?: string[];
+  required_tests?: string[];
+  evidence_validation?: EvidenceValidation;
+}
+type EvidenceValidation = { notes: string[]; downgraded: number; normalized_at: "platform" };
+type RoleOutputFields = {
+  analysis: { impact_assessment: Record<string, unknown> };
+  root_cause: { root_cause_assessment: RootCauseAssessment };
+  fix_proposal: {
+    root_cause_assessment: RootCauseAssessment;
+    fix_assessment: FixAssessment;
+    evidence_gate: EvidenceGate;
+    prohibited_assumptions: string[];
+    required_tests: string[];
+  };
+};
+
+export function normalizeInvestigationOutput<R extends EvidenceRole>(
+  role: R,
+  output: Record<string, unknown>,
+  upstream: Record<string, unknown> = {},
   unavailable: string[] = [],
-) {
+): NormalizedInvestigationOutput & { evidence_validation: EvidenceValidation } & RoleOutputFields[R] {
   const notes: string[] = [];
   const claims = normalizeClaims(output.claims, notes);
-  const out: Record<string, any> = { ...output, claims };
   const missing = list(output.missing_evidence, 30);
   for (const u of unavailable)
     if (!missing.some((m) => m.toLowerCase().includes(u.toLowerCase())))
       missing.push(`${u}: unavailable to this step (not inspected)`);
-  out.missing_evidence = missing;
+  const out: NormalizedInvestigationOutput = { ...output, claims, missing_evidence: missing };
   const prior = latestAssessment(upstream);
   if (role === "analysis") {
     for (const k of [
@@ -534,9 +578,9 @@ export function normalizeInvestigationOutput(
       "safe_next_actions",
     ])
       out[k] = list(output[k]);
-    const impact =
+    const impact: Record<string, unknown> =
       output.impact_assessment && typeof output.impact_assessment === "object"
-        ? { ...output.impact_assessment }
+        ? { ...record(output.impact_assessment) }
         : { summary: str(output.impact_assessment, 600) ?? "" };
     // A blast radius needs data; one log event is not one affected record.
     if (missing.length && (impact.exact === true || typeof impact.affected_count === "number")) {
@@ -558,7 +602,7 @@ export function normalizeInvestigationOutput(
       notes,
     );
   }
-  if (role === "fix_proposal") {
+  if (role === "fix_proposal" && out.root_cause_assessment) {
     const fix = assessFix(output.fix_assessment, output, notes);
     out.fix_assessment = fix;
     out.evidence_gate = evidenceGate(out.root_cause_assessment.status, fix);
@@ -570,20 +614,25 @@ export function normalizeInvestigationOutput(
     downgraded: claims.filter((c) => c.notes?.some((n) => n.includes("→"))).length,
     normalized_at: "platform",
   };
-  return out;
+  return out as NormalizedInvestigationOutput & {
+    evidence_validation: EvidenceValidation;
+  } & RoleOutputFields[R];
 }
 
-function latestAssessment(upstream: Record<string, any>) {
+function latestAssessment(upstream: Record<string, unknown>) {
   let found: { assessment: RootCauseAssessment; claims: Claim[] } | null = null;
-  for (const o of Object.values(upstream)) {
-    const a = o?.root_cause_assessment;
+  for (const step of Object.values(upstream)) {
+    const o = record(step);
+    const status = ROOT_CAUSE_STATUSES.find((st) => st === record(o.root_cause_assessment).status);
     if (
-      a &&
-      (ROOT_CAUSE_STATUSES as readonly string[]).includes(a.status) &&
+      status &&
       (!found ||
-        rank(ROOT_CAUSE_STATUSES, a.status) < rank(ROOT_CAUSE_STATUSES, found.assessment.status))
+        rank(ROOT_CAUSE_STATUSES, status) < rank(ROOT_CAUSE_STATUSES, found.assessment.status))
     )
-      found = { assessment: a, claims: Array.isArray(o.claims) ? o.claims : [] }; // the most cautious earlier verdict binds
+      found = {
+        assessment: o.root_cause_assessment as RootCauseAssessment,
+        claims: Array.isArray(o.claims) ? o.claims : [],
+      }; // the most cautious earlier verdict binds
   }
   return found;
 }
@@ -603,17 +652,21 @@ export interface ApprovedScope {
   required_tests: string[];
 }
 
-export function approvedScopeFrom(stepKey: string, proposal: any): ApprovedScope | null {
-  if (!proposal || typeof proposal !== "object") return null;
+export function approvedScopeFrom(stepKey: string, raw: unknown): ApprovedScope | null {
+  if (!raw || typeof raw !== "object") return null;
+  const proposal = record(raw);
   const changes = (Array.isArray(proposal.changes) ? proposal.changes : [])
     .slice(0, 20)
-    .map((c: any) => ({
-      repo: String(c?.repo ?? ""),
-      files: (Array.isArray(c?.files) ? c.files : c?.files ? [c.files] : [])
-        .map(String)
-        .slice(0, 30),
-      description: clip(c?.description, 500),
-    }));
+    .map((change: unknown) => {
+      const c = record(change);
+      return {
+        repo: String(c.repo ?? ""),
+        files: (Array.isArray(c.files) ? c.files : c.files ? [c.files] : [])
+          .map(String)
+          .slice(0, 30),
+        description: clip(c.description, 500),
+      };
+    });
   const claims: Claim[] = Array.isArray(proposal.claims) ? proposal.claims : [];
   return {
     source_step: stepKey,
@@ -623,9 +676,10 @@ export function approvedScopeFrom(stepKey: string, proposal: any): ApprovedScope
       .slice(0, 16),
     summary: clip(proposal.summary, 600),
     changes,
-    risk: proposal.fix_assessment?.risk ?? null,
-    root_cause_status: proposal.root_cause_assessment?.status ?? null,
-    gate: proposal.evidence_gate ?? null,
+    risk: RISKS.find((r) => r === record(proposal.fix_assessment).risk) ?? null,
+    root_cause_status:
+      ROOT_CAUSE_STATUSES.find((st) => st === record(proposal.root_cause_assessment).status) ?? null,
+    gate: (proposal.evidence_gate as EvidenceGate | undefined) ?? null,
     assumptions: claims
       .filter((c) => c.classification === "ASSUMPTION" || c.classification === "HYPOTHESIS")
       .map((c) => c.claim)
@@ -649,15 +703,16 @@ export function scopeCheck(
   revision: string | null = null,
 ) {
   const ev = evaluateScope(scope, files);
-  const deviations = (Array.isArray(declared) ? declared : []).slice(0, 10).map((d: any) => {
-    const description = clip(typeof d === "string" ? d : d?.description, 400);
-    const declaredRisk = (RISKS as readonly string[]).includes(String(d?.risk ?? "").toUpperCase())
+  const deviations = (Array.isArray(declared) ? declared : []).slice(0, 10).map((item: unknown) => {
+    const d = record(item);
+    const description = clip(typeof item === "string" ? item : d.description, 400);
+    const declaredRisk = (RISKS as readonly string[]).includes(String(d.risk ?? "").toUpperCase())
       ? (String(d.risk).toUpperCase() as FixRisk)
       : "LOW";
     const detected = detectRisk([description]);
     return {
       description,
-      reason: clip(d?.reason, 300),
+      reason: clip(d.reason, 300),
       risk: maxOf(RISKS, declaredRisk, detected.risk),
     };
   });
@@ -699,7 +754,14 @@ export const GENERIC_PROHIBITED = [
  * the most cautious root-cause verdict, fix risk, approved scope, prohibited assumptions, invariants and required tests.
  * Full outputs stay retrievable on demand (platform.get_step_output); `refs` says where.
  */
-export function evidenceSummary(upstream: Record<string, { output: any; status?: string }>) {
+type RecordedScope = ApprovedScope & {
+  approved_by?: string;
+  approved_at?: string;
+  comment?: string;
+  risk_acknowledged?: boolean;
+};
+
+export function evidenceSummary(upstream: Record<string, { output: unknown; status?: string }>) {
   const facts: string[] = [],
     hyps: string[] = [],
     unverified: string[] = [],
@@ -715,9 +777,7 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
     from: string;
     invariants: FixAssessment["business_invariants"];
   } | null = null;
-  let scope:
-    | (ApprovedScope & { approved_by?: string; approved_at?: string; comment?: string })
-    | null = null;
+  let scope: RecordedScope | null = null;
   let rca: Record<string, unknown> | null = null;
   let dropped = 0;
   const highRisk = new WeakMap<string[], number>(); // count of high-risk items kept at the front of each list
@@ -739,17 +799,15 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
     arr.push(clip(s, 240));
   };
   for (const [key, u] of Object.entries(upstream)) {
-    const o = u?.output;
-    if (!o || typeof o !== "object") continue;
+    if (!u?.output || typeof u.output !== "object") continue;
+    const o = record(u.output);
+    const scopeCheck = record(o.scope_check);
     // Unresolved scope violations matter whatever the step's status (a step waiting for re-approval is exactly that case).
-    if (o.scope_check?.requires_reapproval === true && !o.scope_check?.reapproved)
-      for (const r of (Array.isArray(o.scope_check.reasons) ? o.scope_check.reasons : []).slice(
-        0,
-        20,
-      ))
+    if (scopeCheck.requires_reapproval === true && !scopeCheck.reapproved)
+      for (const r of (Array.isArray(scopeCheck.reasons) ? scopeCheck.reasons : []).slice(0, 20))
         unresolvedScope.push(clip(`${key}: ${r}`, 240));
     if (u.status && u.status !== "COMPLETED") continue;
-    if (o.approved_scope) scope = o.approved_scope;
+    if (o.approved_scope) scope = o.approved_scope as RecordedScope;
     const isInvestigation =
       Array.isArray(o.claims) ||
       o.root_cause_assessment ||
@@ -791,21 +849,21 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
     for (const m of list(o.missing_evidence, 30)) push(missing, m);
     for (const p of list(o.prohibited_assumptions, 15)) push(prohibited, p);
     for (const t of list(o.required_tests, 15)) push(tests, t);
-    const a = o.root_cause_assessment;
+    const a = record(o.root_cause_assessment);
+    const status = ROOT_CAUSE_STATUSES.find((st) => st === a.status);
     if (
-      a &&
-      (ROOT_CAUSE_STATUSES as readonly string[]).includes(a.status) &&
-      (!root || rank(ROOT_CAUSE_STATUSES, a.status) <= rank(ROOT_CAUSE_STATUSES, root.status))
+      status &&
+      (!root || rank(ROOT_CAUSE_STATUSES, status) <= rank(ROOT_CAUSE_STATUSES, root.status))
     )
       root = {
-        status: a.status,
-        confidence: a.confidence ?? null,
+        status,
+        confidence: (a.confidence as Level | null | undefined) ?? null,
         explanation: clip(a.explanation, 300),
-        supporting_claims: a.supporting_claims ?? [],
+        supporting_claims: (a.supporting_claims as string[] | undefined) ?? [],
         from: key,
       };
     if (o.rca && typeof o.rca === "object" && !Array.isArray(o.rca)) {
-      const r = o.rca;
+      const r = record(o.rca);
       rca = {
         symptom: clip(r.symptom, 240),
         expected: clip(r.expected, 240),
@@ -818,17 +876,18 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
         from: key,
       };
     }
-    if (o.fix_assessment?.risk)
+    const fixAssessment = o.fix_assessment as Partial<FixAssessment> | undefined;
+    if (fixAssessment?.risk)
       fix = {
-        risk: o.fix_assessment.risk,
-        gate: o.evidence_gate ?? null,
+        risk: fixAssessment.risk,
+        gate: (o.evidence_gate as EvidenceGate | undefined) ?? null,
         from: key,
-        invariants: o.fix_assessment.business_invariants ?? null,
+        invariants: fixAssessment.business_invariants ?? null,
       };
   }
   if (!refs.length && !scope && !unresolvedScope.length) return null;
   for (const h of hyps)
-    prohibited.length < 20 &&
+    if (prohibited.length < 20)
       prohibited.push(
         `Do not implement as fact: ${h.replace(/^\[[A-Z_]+\]\s*/, "").slice(0, 200)}`,
       );
@@ -850,7 +909,7 @@ export function evidenceSummary(upstream: Record<string, { output: any; status?:
           approved_by: scope.approved_by,
           approved_at: scope.approved_at,
           comment: scope.comment,
-          risk_acknowledged: (scope as any).risk_acknowledged ?? false,
+          risk_acknowledged: scope.risk_acknowledged ?? false,
         }
       : null,
     prohibited_assumptions: [...new Set(prohibited)].slice(0, 20),
@@ -872,12 +931,14 @@ export const SCOPE_REAPPROVAL_QUESTION = "Scope deviation needs renewed approval
 
 /** The approved scope recorded by the latest approval step among the upstream outputs (null for legacy runs). */
 export function approvedScopeIn(
-  upstream: Record<string, { output: any; status?: string }>,
+  upstream: Record<string, { output: unknown; status?: string }>,
 ): ApprovedScope | null {
   let found: ApprovedScope | null = null;
-  for (const u of Object.values(upstream))
-    if ((!u.status || u.status === "COMPLETED") && u.output?.approved_scope?.proposal_hash)
-      found = u.output.approved_scope;
+  for (const u of Object.values(upstream)) {
+    const scope = record(u.output).approved_scope;
+    if ((!u.status || u.status === "COMPLETED") && record(scope).proposal_hash)
+      found = scope as ApprovedScope;
+  }
   return found;
 }
 

@@ -63,16 +63,18 @@ export class NdjsonStream {
 function parseLine(
   line: string,
 ): { ok: true; event: CursorEvent } | { ok: false; error: ParseError } {
-  let raw: any;
+  let parsed: unknown;
   try {
-    raw = JSON.parse(line);
+    parsed = JSON.parse(line);
   } catch (e) {
     return {
       ok: false,
       error: { type: "malformed", line: line.slice(0, 500), error: (e as Error).message },
     };
   }
-  if (!raw || typeof raw !== "object" || typeof raw.type !== "string")
+  const raw =
+    parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
+  if (!raw || typeof raw.type !== "string")
     return {
       ok: false,
       error: { type: "malformed", line: line.slice(0, 500), error: "event has no type" },
@@ -90,7 +92,10 @@ function parseLine(
       timestamp_ms: typeof raw.timestamp_ms === "number" ? raw.timestamp_ms : undefined,
       model_call_id: typeof raw.model_call_id === "string" ? raw.model_call_id : undefined,
       call_id: typeof raw.call_id === "string" ? raw.call_id : undefined,
-      tool_call: raw.tool_call && typeof raw.tool_call === "object" ? raw.tool_call : undefined,
+      tool_call:
+        raw.tool_call && typeof raw.tool_call === "object"
+          ? (raw.tool_call as Record<string, unknown>)
+          : undefined,
       is_error: typeof raw.is_error === "boolean" ? raw.is_error : undefined,
       duration_ms: typeof raw.duration_ms === "number" ? raw.duration_ms : undefined,
       result: typeof raw.result === "string" ? raw.result : undefined,
@@ -99,11 +104,17 @@ function parseLine(
   };
 }
 
-function assistantText(raw: any): string | undefined {
-  const content = raw.message?.content;
+function assistantText(raw: Record<string, unknown>): string | undefined {
+  const message = raw.message as { content?: unknown } | null | undefined;
+  const content = message?.content;
   if (!Array.isArray(content)) return undefined;
   const parts = content
-    .filter((c) => c && c.type === "text" && typeof c.text === "string")
+    .filter(
+      (c: unknown): c is { type: "text"; text: string } =>
+        !!c &&
+        (c as { type?: unknown }).type === "text" &&
+        typeof (c as { text?: unknown }).text === "string",
+    )
     .map((c) => c.text);
   return parts.length ? parts.join("") : undefined;
 }
@@ -151,7 +162,7 @@ export function isDuplicateAssistant(ev: CursorEvent, partial: boolean): boolean
 /** First key of a tool_call object, e.g. readToolCall → { name: "read", body }. */
 export function toolCallShape(
   toolCall: Record<string, unknown> | undefined,
-): { name: string; body: any } | null {
+): { name: string; body: unknown } | null {
   if (!toolCall) return null;
   if (toolCall.function && typeof toolCall.function === "object") {
     const fn = toolCall.function as { name?: string; arguments?: unknown };

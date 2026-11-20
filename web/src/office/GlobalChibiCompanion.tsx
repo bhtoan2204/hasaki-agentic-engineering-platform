@@ -151,7 +151,9 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
         };
         try {
           localStorage.setItem(PREF_KEY, JSON.stringify(next));
-        } catch {}
+        } catch {
+          /* ignore: storage unavailable */
+        }
         return next;
       }),
     [],

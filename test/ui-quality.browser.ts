@@ -1,5 +1,6 @@
 /** Layout regression checks use real HTTP/DB fixtures; no production data or external actions. */
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -62,13 +63,13 @@ const out = resolve(`docs/validation/ui-quality/${phase}`);
 mkdirSync(out, { recursive: true });
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
   headless: true,
   args: ["--no-sandbox", "--disable-dev-shm-usage"],
 });
-const measurements: any[] = [];
+const measurements: unknown[] = [];
 const errors: string[] = [];
 const query = "from=2026-11-01&to=2026-11-03&timezone=UTC&bucket=day";
 try {

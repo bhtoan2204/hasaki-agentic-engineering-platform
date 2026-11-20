@@ -672,9 +672,9 @@ test("diffTestsAgainstBase: detects a deleted test in a real worktree (committed
     join(wt, "pkg/a_test.go"),
     'package pkg\n\nimport "testing"\n\nfunc TestA(t *testing.T) {}\n\nfunc TestB(t *testing.T) {}\n',
   );
-  (sh(wt, "add", "."),
-    sh(wt, "commit", "-qm", "base"),
-    sh(wt, "push", "-q", "origin", "release/prod"));
+  sh(wt, "add", ".");
+  sh(wt, "commit", "-qm", "base");
+  sh(wt, "push", "-q", "origin", "release/prod");
   sh(wt, "checkout", "-qb", "T1");
   writeFileSync(
     join(wt, "pkg/a_test.go"),

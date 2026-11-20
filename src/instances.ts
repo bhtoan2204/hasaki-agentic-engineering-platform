@@ -90,7 +90,7 @@ export async function registerInstance(id = config.instanceId, session = instanc
     if (!row) {
       // The live-looking registration may belong to a process of THIS machine that already exited without marking
       // itself stopped (killed, terminal closed). Its PID proves it: take over at once instead of waiting it out.
-      const prev = await one<{ metadata: any }>(
+      const prev = await one<{ metadata: { host?: unknown; pid?: unknown } | null }>(
         c,
         "SELECT metadata FROM platform_instances WHERE instance_id = $1 FOR UPDATE",
         [id],

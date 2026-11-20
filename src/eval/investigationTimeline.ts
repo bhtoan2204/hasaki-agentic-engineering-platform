@@ -250,8 +250,8 @@ export function runTimelineBenchmark(scenarios = TIMELINE_SCENARIOS) {
   }
   for (const m of Object.values(metrics)) {
     m.rate = m.total ? m.passed / m.total : 0;
-    const w = wilson(m.passed, m.total) as any;
-    m.ci95 = Array.isArray(w) ? [w[0], w[1]] : [w.low ?? 0, w.high ?? 0];
+    const w = wilson(m.passed, m.total);
+    m.ci95 = [w?.low ?? 0, w?.high ?? 0];
   }
   return {
     scenarios: results.length,

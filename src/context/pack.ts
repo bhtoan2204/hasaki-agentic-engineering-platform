@@ -155,11 +155,14 @@ export function compactContractEntry(
  * job instead of the same large pack for everyone. Required entries are never cut: if they do not fit the role budget
  * the global budget is used instead. Omitted optional entries stay retrievable through platform tools.
  */
-export function roleBudget(step: { type: string; config: Record<string, any> }): number | null {
+export function roleBudget(step: { type: string; config: Record<string, unknown> }): number | null {
   const c = step.config ?? {};
   if (c.independent === true) return 16000; // reviewer: the diff + requirements + test/risk evidence come separately
   if (step.type === "coding_agent") return 20000; // approved scope, targeted code, rules, tests
-  const role = String(c.evidence?.role ?? c.evidence_role ?? "");
+  const evidence = c.evidence;
+  const evidenceRole =
+    evidence && typeof evidence === "object" && "role" in evidence ? evidence.role : undefined;
+  const role = String(evidenceRole ?? c.evidence_role ?? "");
   if (role === "analysis") return 16000;
   if (role === "fix_proposal") return 20000;
   return null; // root cause and other agents keep the global default
@@ -840,7 +843,7 @@ export async function ensureContextPack(
         };
         const key = await makeKey();
         const prior = key
-          ? await one<{ id: number; cache: any }>(
+          ? await one<{ id: number; cache: { entries?: unknown } | null }>(
               pool,
               "SELECT id, content->'retrieval_cache' AS cache FROM agent_context_packs WHERE run_id=$1 AND owner_id=$2 AND content->'retrieval_cache'->>'key'=$3 ORDER BY id DESC LIMIT 1",
               [ctx.run.id, ctx.run.owner_id, key],
@@ -877,7 +880,7 @@ export async function ensureContextPack(
         } else {
           await retrieve("search_code", { query, operation: "context", limit: 8 }, "code", 65);
           const first = entries.find((e) => e.id === "search_code");
-          let topHits: any[] = [];
+          let topHits: Array<{ qualified_name?: unknown } | null> = [];
           try {
             topHits = first ? (JSON.parse(first.body)?.hits ?? []) : [];
           } catch {

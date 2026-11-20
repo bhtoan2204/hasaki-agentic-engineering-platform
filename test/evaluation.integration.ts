@@ -5,7 +5,7 @@ import { migrate } from "../src/db/migrate.ts";
 import { config, codeIntelligenceEnabled } from "../src/config.ts";
 import { execution } from "../src/auth/execution.ts";
 import { createUser } from "../src/auth/users.ts";
-import { SuiteSchema, sha256 } from "../src/eval/dataset.ts";
+import { SuiteSchema, sha256, type BenchmarkCase } from "../src/eval/dataset.ts";
 import { fixtureGit, fixtureRoot, fixtureName, materializeSuite } from "../src/eval/fixtures.ts";
 import {
   publishBuiltinSuite,
@@ -22,6 +22,7 @@ import {
   aggregateResults,
   compareResults,
   type Evidence,
+  type ResultLike,
 } from "../src/eval/scoring.ts";
 import {
   startPendingRun,
@@ -33,7 +34,9 @@ import {
 import { runOnce, claimJob } from "../src/workflow/scheduler.ts";
 import { registerDefaultExecutors } from "../src/workflow/executors/index.ts";
 import { allowedRepositoriesForRun } from "../src/repos/access.ts";
-let suite: any, owner: any, other: any;
+let suite: Awaited<ReturnType<typeof publishBuiltinSuite>>,
+  owner: Awaited<ReturnType<typeof createUser>>,
+  other: Awaited<ReturnType<typeof createUser>>;
 const evidence = (): Evidence => ({
   environment: true,
   authorized_changes: true,
@@ -125,7 +128,7 @@ async function drive(id: number) {
 }
 test("15 labeled synthetic cases have valid pinned repositories and immutable suite versions", async () => {
   assert.equal(suite.manifest.cases.length, 15);
-  assert.ok(suite.manifest.cases.every((c: any) => c.origin === "synthetic"));
+  assert.ok(suite.manifest.cases.every((c: BenchmarkCase) => c.origin === "synthetic"));
   SuiteSchema.parse(suite.manifest);
   const again = await materializeSuite();
   assert.deepEqual(again, suite.manifest);
@@ -174,7 +177,7 @@ test("Hard gates override a high weighted score; unknown/incorrect usage stays u
       weights: { ...defaultScoring.weights, efficiency: 1 },
     }),
   );
-  const row: any = {
+  const row: ResultLike = {
     scenario: "BENCH-001",
     status: "PASS",
     correct: true,
@@ -317,8 +320,8 @@ test("Fixture evaluations use existing jobs, objective validators, checkpoints, 
     30,
     JSON.stringify(
       b.cases
-        .filter((c: any) => c.correct !== true)
-        .map((c: any) => ({
+        .filter((c: ResultLike) => c.correct !== true)
+        .map((c: ResultLike & { task_id: string }) => ({
           task: c.task_id,
           diagnostic: c.data?.evidence?.details?.diagnostic,
           checks: c.data?.evidence?.details?.validation_checks,
@@ -330,12 +333,12 @@ test("Fixture evaluations use existing jobs, objective validators, checkpoints, 
     28,
     "Metadata-only control misses only the two repository-discovery repetitions",
   );
-  const clarification = b.cases.find((c: any) => c.task_id === "BENCH-010");
+  const clarification = b.cases.find((c: { task_id: string }) => c.task_id === "BENCH-010");
   assert.equal(clarification.data.evidence.clarification_passed, true);
   assert.equal(clarification.human_gates, 2);
-  const retry = b.cases.find((c: any) => c.task_id === "BENCH-013");
+  const retry = b.cases.find((c: { task_id: string }) => c.task_id === "BENCH-013");
   assert.equal(retry.repairs, 1);
-  const freshness = b.cases.find((c: any) => c.task_id === "BENCH-015");
+  const freshness = b.cases.find((c: { task_id: string }) => c.task_id === "BENCH-015");
   assert.ok(freshness.data.evidence.details.stale_fallback > 0);
   assert.equal(b.summary.average_input_tokens, null);
   assert.equal(b.summary.cost_per_success, 0);

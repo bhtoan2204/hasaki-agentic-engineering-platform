@@ -4,7 +4,7 @@ import { audit, wantsSupport, type Actor } from "../authz/access.ts";
 import { parseAnalyticsFilters } from "../api/analytics/filters.ts";
 import { HttpError } from "../http/error.ts";
 
-const cache = new CacheAside<any>(
+const cache = new CacheAside<Awaited<ReturnType<typeof loadEvaluationAnalytics>>>(
   "agent.evaluation.analytics",
   [
     "evaluation_runs",

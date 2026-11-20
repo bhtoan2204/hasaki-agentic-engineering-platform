@@ -121,20 +121,20 @@ test("stale memory: files edited on the base branch after the task commit make t
   execFileSync("git", ["init", "-q", "--bare", origin]);
   execFileSync("git", ["clone", "-q", origin, repo]);
   sh(repo, "checkout", "-qb", "release/prod");
-  (writeFileSync(join(repo, "a.go"), "package a\n"),
-    writeFileSync(join(repo, "b.go"), "package a\n"));
-  (sh(repo, "add", "."),
-    sh(repo, "commit", "-qm", "base"),
-    sh(repo, "push", "-q", "origin", "release/prod"));
+  writeFileSync(join(repo, "a.go"), "package a\n");
+  writeFileSync(join(repo, "b.go"), "package a\n");
+  sh(repo, "add", ".");
+  sh(repo, "commit", "-qm", "base");
+  sh(repo, "push", "-q", "origin", "release/prod");
   sh(repo, "checkout", "-qb", "task");
   writeFileSync(join(repo, "a.go"), "package a\n// task\n");
   sh(repo, "commit", "-qam", "task");
   const taskSha = sh(repo, "rev-parse", "HEAD");
   // merged unchanged → fresh
-  (sh(repo, "checkout", "-q", "release/prod"),
-    sh(repo, "merge", "-q", "--ff-only", "task"),
-    sh(repo, "push", "-q", "origin", "release/prod"),
-    sh(repo, "fetch", "-q", "origin"));
+  sh(repo, "checkout", "-q", "release/prod");
+  sh(repo, "merge", "-q", "--ff-only", "task");
+  sh(repo, "push", "-q", "origin", "release/prod");
+  sh(repo, "fetch", "-q", "origin");
   const meta = (files: string[]): MemoryMeta => ({
     run_id: 1,
     work_item: null,
@@ -150,9 +150,9 @@ test("stale memory: files edited on the base branch after the task commit make t
   assert.equal(await isStale(meta(["a.go"]), repo), false, "merged as-is");
   // someone edits a.go later on the base branch → stale; b.go untouched → fresh
   writeFileSync(join(repo, "a.go"), "package a\n// rewritten later\n");
-  (sh(repo, "commit", "-qam", "later"),
-    sh(repo, "push", "-q", "origin", "release/prod"),
-    sh(repo, "fetch", "-q", "origin"));
+  sh(repo, "commit", "-qam", "later");
+  sh(repo, "push", "-q", "origin", "release/prod");
+  sh(repo, "fetch", "-q", "origin");
   assert.equal(await isStale(meta(["a.go"]), repo), true);
   assert.equal(await isStale(meta(["b.go"]), repo), false);
   assert.equal(
@@ -161,7 +161,7 @@ test("stale memory: files edited on the base branch after the task commit make t
     "unknown commit cannot be vouched for",
   );
   // three states: FRESH / STALE / UNKNOWN — missing provenance is never assumed fresh
-  const st = async (m: any, dir: string | null = repo, opts = {}) =>
+  const st = async (m: Partial<MemoryMeta> | null, dir: string | null = repo, opts = {}) =>
     (await memoryFreshness(m, dir, opts)).state;
   assert.equal(await st(meta(["b.go"])), "FRESH");
   assert.equal(await st(meta(["a.go"])), "STALE");

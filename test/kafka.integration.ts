@@ -1,4 +1,5 @@
 import { test, after, before } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -7,7 +8,10 @@ import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
 import {
   clearKafkaCookie,
+  consumerGroupDetail,
+  consumerGroups,
   kafkaStatus,
+  listTopics,
   parseKafkaCookie,
   parseMessageEvents,
   readMessages,
@@ -85,10 +89,11 @@ before(async () => {
       );
       return;
     }
-    (res.writeHead(404), res.end("{}"));
+    res.writeHead(404);
+    res.end("{}");
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  config.kafka.baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
+  config.kafka.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(async () => {
   server.close();
@@ -133,13 +138,16 @@ test("session validated before saving; topics, groups and message search work; e
   assert.equal(st.user, "dev@hasaki.vn");
   assert.equal(st.clusters?.[0].name, "qc");
 
-  const topics: any = (await callTool("kafka.list_topics", { query: "fanout" }, ctx)).result;
+  const topics = (await callTool("kafka.list_topics", { query: "fanout" }, ctx)).result as Awaited<
+    ReturnType<typeof listTopics>
+  >;
   assert.equal(topics.cluster, "qc", "single online cluster picked automatically");
   assert.equal(topics.topics[0].topic, "fanout-es-event");
-  const groups: any = (await callTool("kafka.consumer_groups", { query: "payment" }, ctx)).result;
+  const groups = (await callTool("kafka.consumer_groups", { query: "payment" }, ctx))
+    .result as Awaited<ReturnType<typeof consumerGroups>>;
   assert.equal(groups.groups[0].lag, 42);
-  const detail: any = (await callTool("kafka.consumer_groups", { group: "payment-projector" }, ctx))
-    .result;
+  const detail = (await callTool("kafka.consumer_groups", { group: "payment-projector" }, ctx))
+    .result as Awaited<ReturnType<typeof consumerGroupDetail>>;
   assert.equal(detail.partitions[0].lag, 42);
 
   const r = await callTool(
@@ -148,7 +156,7 @@ test("session validated before saving; topics, groups and message search work; e
     ctx,
   );
   assert.equal(r.ok, false, "limit above 200 rejected by the schema");
-  const m: any = await readMessages({
+  const m = await readMessages({
     topic: "fanout-es-event",
     filter: "HSK-123",
     since_minutes: 60,

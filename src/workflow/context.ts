@@ -18,7 +18,7 @@ import {
 } from "../context/plan.ts";
 import { projectsOfRepositories, repoPath } from "../repos/service.ts";
 import { independentUpstream, isIndependent } from "../agent/independentReview.ts";
-import { memoryFreshness } from "../knowledge/memory.ts";
+import { memoryFreshness, type MemoryMeta } from "../knowledge/memory.ts";
 import { skillAvailability } from "../knowledge/external.ts";
 import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
@@ -35,7 +35,7 @@ export interface StepInput {
   run: {
     id: number;
     title: string;
-    inputs: Record<string, any>;
+    inputs: Record<string, unknown>;
     branch: string;
     definition_key: string;
     selected_repositories: string[];
@@ -63,8 +63,8 @@ export interface StepInput {
     number: number;
     generation: number;
     status: string;
-    output: any;
-    error: any;
+    output: unknown;
+    error: unknown;
   } | null;
 }
 
@@ -330,10 +330,18 @@ export async function resolveContext(
     const repoRows = await q<import("../repos/service.ts").RepositoryRow>(
       c,
       "SELECT * FROM repositories WHERE name = ANY($1)",
-      [[...new Set(memoryItems.map((k) => String((k.metadata as any)?.memory?.repo ?? "")))]],
+      [
+        [
+          ...new Set(
+            memoryItems.map((k) =>
+              String((k.metadata?.memory as Partial<MemoryMeta> | undefined)?.repo ?? ""),
+            ),
+          ),
+        ],
+      ],
     );
     for (const k of memoryItems) {
-      const m = (k.metadata as any)?.memory;
+      const m = k.metadata?.memory as Partial<MemoryMeta> | undefined;
       const trusted = m && (m.trust === "verified" || m.trust === "approved");
       const row = repoRows.find((r) => r.name === m?.repo);
       const fresh = trusted
@@ -351,7 +359,7 @@ export async function resolveContext(
     // Outcome lessons (learning/lessons.ts): only active ones of this kind of task, the best few — never prompt stuffing.
     const lesson = (k: (typeof res.applied)[number]) => k.key.startsWith("memory.lesson.");
     const meta = (k: (typeof res.applied)[number]) =>
-      ((k.metadata as any)?.memory ?? {}) as {
+      (k.metadata?.memory ?? {}) as {
         status?: string;
         task_class?: string;
         corroborated_by?: string[];
@@ -374,7 +382,7 @@ export async function resolveContext(
       if (!relevant.includes(k))
         memoryStates.push({
           key: k.key,
-          trust: (k.metadata as any)?.memory?.trust ?? null,
+          trust: (k.metadata?.memory as Partial<MemoryMeta> | undefined)?.trust ?? null,
           state: "EXCLUDED",
           reason: "lesson not active, other task class, or over the lesson budget",
         });
@@ -387,8 +395,8 @@ export async function resolveContext(
     if (!a.available) unavailable.set(k.key, a.reason);
   }
   for (const k of res.applied) {
-    const parent = (k.metadata as any)?.parent_skill;
-    if (parent && unavailable.has(parent) && !unavailable.has(k.key))
+    const parent = k.metadata?.parent_skill;
+    if (typeof parent === "string" && unavailable.has(parent) && !unavailable.has(k.key))
       unavailable.set(k.key, `supporting file of unavailable ${parent}`);
   }
   const unavailableSkills: Array<{ key: string; reason: string }> = [];
@@ -529,7 +537,7 @@ export async function resolveContext(
   };
 }
 
-function verificationPlan(cfg: Record<string, any>) {
+function verificationPlan(cfg: Record<string, unknown>) {
   const v = verifyConfig(cfg, TEST_COMMAND);
   if (!v) return { enabled: false };
   return {

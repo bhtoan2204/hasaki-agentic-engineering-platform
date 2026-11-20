@@ -92,16 +92,16 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       };
     let v = normalizeVerdict(s.submitted ?? {});
     if (ctx.step.config.scope_review === true)
-      v = enforceScopeReview(v, (s.submitted as any)?.scope_check, ctx.input.upstream);
+      v = enforceScopeReview(v, s.submitted?.scope_check, ctx.input.upstream);
     v = enforceRootCauseReview(
       v,
-      (s.submitted as any)?.root_cause_check,
+      s.submitted?.root_cause_check,
       ctx.input.upstream,
       rootCauseDepth(ctx.run, ctx.step),
     );
     // Deterministic scope violations without a renewed approval: a reviewer PASS never overrides them.
     const unresolved = unresolvedScope(
-      await q<{ key: string; sc: any }>(
+      await q<{ key: string; sc: unknown }>(
         pool,
         "SELECT key, output->'scope_check' AS sc FROM workflow_steps WHERE run_id = $1 AND output ? 'scope_check'",
         [ctx.run.id],
@@ -154,8 +154,8 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       incrementalFrom: incremental?.attemptId,
     });
     if (decided.kind === "completed" && reviewKey)
-      (decided as any).output = {
-        ...(decided as any).output,
+      decided.output = {
+        ...(decided.output && typeof decided.output === "object" ? decided.output : {}),
         verification_key: reviewKey,
         review_policy_version: REVIEW_POLICY_VERSION,
       };

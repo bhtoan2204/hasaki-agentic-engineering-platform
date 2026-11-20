@@ -16,8 +16,59 @@ const compact = (n: number) =>
       ? `${(n / 1e3).toFixed(1)}k`
       : String(Math.round(n));
 
+interface TokenTotals {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
+  reasoning: number;
+}
+
+interface CostBucket {
+  cost_usd: number | null;
+  attempts: number;
+  attempts_without_cost: number;
+  tokens: TokenTotals;
+}
+
+interface BudgetLine {
+  limit_usd: number | null;
+  source: "own" | "default" | null;
+  used_usd: number;
+  pct: number | null;
+  status: string;
+}
+
+/** Run cost nests budgets under `run`/`work_item`; work-item cost returns the budget line itself. */
+type CostBudget = Partial<BudgetLine> & { run?: BudgetLine; work_item?: BudgetLine | null };
+
+interface CostData {
+  total: CostBucket;
+  availability: string;
+  wasted: { cost_usd: number; pct: number | null; by_reason: Record<string, number> };
+  by_step: Array<CostBucket & { step_key: string; step_name: string; wasted_usd: number }>;
+  by_model: Array<CostBucket & { provider: string; model: string }>;
+  budget?: CostBudget | null;
+  run_count?: number;
+  avg_per_run_usd?: number | null;
+  runs?: Array<{
+    run_id: number;
+    workflow: string;
+    status: string;
+    cost_usd: number | null;
+    wasted_usd: number;
+  }>;
+}
+
+interface CellCost {
+  cost_usd: number | null;
+  wasted_usd: number;
+  availability?: string;
+  run_count?: number;
+}
+
 /** List cell: total cost, with wasted share and availability in the tooltip. */
-export function CostCell({ cost }: { cost?: any }) {
+export function CostCell({ cost }: { cost?: CellCost | null }) {
   const { t } = useI18n();
   if (!cost || cost.cost_usd == null) return <span className="muted small">—</span>;
   const tip = [
@@ -36,7 +87,7 @@ export function CostCell({ cost }: { cost?: any }) {
   );
 }
 
-function BudgetBar({ line }: { line: any }) {
+function BudgetBar({ line }: { line?: Partial<BudgetLine> | null }) {
   const { t } = useI18n();
   if (!line || line.status === "none")
     return <span className="muted small">{t("cost.noBudget")}</span>;
@@ -61,13 +112,16 @@ function BudgetEditor({
 }: {
   path: string;
   current: number | null;
-  onSaved: (d: any) => void;
+  onSaved: (d: CostData) => void;
 }) {
   const { t } = useI18n();
   const [v, setV] = useState(current == null ? "" : String(current));
   useEffect(() => setV(current == null ? "" : String(current)), [current]);
   const save = (value: string | null) =>
-    act(async () => onSaved(await api(path, { budget_usd: value })), t("cost.budgetSaved"));
+    act(
+      async () => onSaved(await api<CostData>(path, { budget_usd: value })),
+      t("cost.budgetSaved"),
+    );
   return (
     <form
       className="cost-budget-edit"
@@ -115,13 +169,13 @@ export function CostPanel({
 }) {
   const { t } = useI18n();
   const base = kind === "run" ? `/api/runs/${id}` : `/api/work-items/${id}`;
-  const { data: fetched, reload } = useApi<any>(`${base}/cost`, [id]);
-  const [data, setData] = useState<any>(null);
+  const { data: fetched, reload } = useApi<CostData>(`${base}/cost`, [id]);
+  const [data, setData] = useState<CostData | null>(null);
   useEffect(() => setData(fetched), [fetched]);
-  useEffect(() => void reload(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => void reload(), [tick]);
   if (!data) return null;
   const budget = kind === "run" ? data.budget?.run : data.budget;
-  const ownBudget = budget?.source === "own" ? budget.limit_usd : null;
+  const ownBudget = budget?.source === "own" ? (budget.limit_usd ?? null) : null;
   const tk = data.total.tokens;
   const none = data.availability === "none";
   return (
@@ -149,7 +203,7 @@ export function CostPanel({
               <div className="cost-mini">
                 <span>{t("cost.avgPerRun")}</span>
                 <b>{usd(data.avg_per_run_usd)}</b>
-                <small className="muted">{t("cost.runs", { n: data.run_count })}</small>
+                <small className="muted">{t("cost.runs", { n: data.run_count ?? 0 })}</small>
               </div>
             )}
             <div className="cost-mini">
@@ -217,8 +271,8 @@ export function CostPanel({
               </thead>
               <tbody>
                 {data.by_step
-                  .filter((s: any) => s.cost_usd != null || s.attempts_without_cost > 0)
-                  .map((s: any) => (
+                  .filter((s) => s.cost_usd != null || s.attempts_without_cost > 0)
+                  .map((s) => (
                     <tr key={s.step_key}>
                       <td>{s.step_name}</td>
                       <td>{s.attempts}</td>
@@ -235,7 +289,7 @@ export function CostPanel({
         </div>
       )}
 
-      {kind === "work_item" && data.runs.length > 0 && (
+      {kind === "work_item" && data.runs && data.runs.length > 0 && (
         <div className="cost-section">
           <div className="cost-h">{t("cost.byRun")}</div>
           <div className="table-wrap">
@@ -249,7 +303,7 @@ export function CostPanel({
                 </tr>
               </thead>
               <tbody>
-                {data.runs.map((r: any) => (
+                {data.runs.map((r) => (
                   <tr key={r.run_id}>
                     <td>
                       <a href={`#/runs/${r.run_id}`}>#{r.run_id}</a>{" "}
@@ -292,7 +346,7 @@ export function CostPanel({
                 </tr>
               </thead>
               <tbody>
-                {data.by_model.map((m: any) => (
+                {data.by_model.map((m) => (
                   <tr key={`${m.provider}|${m.model}`}>
                     <td>
                       {m.model} <span className="muted small">{m.provider}</span>

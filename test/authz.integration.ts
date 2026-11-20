@@ -2,7 +2,7 @@ import { config } from "../src/config.ts";
 import { repositories } from "../src/repos/service.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { pool, q, one } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { seedTemplates } from "../src/workflow/definitions.ts";
@@ -55,7 +55,7 @@ function client() {
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
       const text = await r.text();
-      let parsed: any = {};
+      let parsed;
       try {
         parsed = text ? JSON.parse(text) : {};
       } catch {
@@ -352,7 +352,7 @@ test("a resumed run keeps the owner stored on the row", async () => {
   );
   assert.equal(again?.owner_id, a.id);
   assert.equal(again?.agent_provider, "cursor");
-  const req = { headers: { cookie: "" }, socket: {} } as any;
+  const req = { headers: { cookie: "" }, socket: {} } as IncomingMessage;
   assert.equal(await sessionFromRequest(req), null);
 });
 
@@ -411,7 +411,7 @@ test("P1 status is authenticated; reindex and cancellation require an administra
     ))!.id;
     assert.ok(
       !(await member.call("/api/repositories/index-status")).body.repositories.some(
-        (r: any) => r.name === "p1-api-status",
+        (r: { name: string }) => r.name === "p1-api-status",
       ),
       "status follows repository access",
     );
@@ -431,7 +431,7 @@ test("P1 status is authenticated; reindex and cancellation require an administra
     const status = await member.call("/api/repositories/index-status");
     assert.equal(status.status, 200);
     assert.equal(
-      status.body.repositories.find((r: any) => r.name === "p1-api-status").status,
+      status.body.repositories.find((r: { name: string }) => r.name === "p1-api-status").status,
       "queued",
     );
     assert.equal(
@@ -547,7 +547,10 @@ test("repository URL administration is admin-only, granted members share identit
     );
     const rows = await member.call("/api/repositories");
     assert.equal(rows.status, 200);
-    assert.equal(rows.body.find((r: any) => r.name === "url-registry").id, created.body.id);
+    assert.equal(
+      rows.body.find((r: { name: string }) => r.name === "url-registry").id,
+      created.body.id,
+    );
     const status = await member.call("/api/repositories/url-registry/workspace");
     assert.equal(status.status, 200);
     assert.equal(status.body.status, "not_cloned");
@@ -610,11 +613,15 @@ test("metrics use owner scope; explicit admin support access is audited includin
   assert.equal((await admin.call(`/api/metrics/runs/${run.id}?scope=all`)).status, 200);
   const own = await a.call("/api/metrics/summary?days=3&scope=all");
   assert.equal(own.status, 200);
-  assert.ok(!own.body.telemetry.by_model.some((r: any) => r.key === "codex/private-model"));
+  assert.ok(
+    !own.body.telemetry.by_model.some((r: { key: string }) => r.key === "codex/private-model"),
+  );
   for (let i = 0; i < 2; i++) {
     const all = await admin.call("/api/metrics/summary?days=3&scope=all");
     assert.equal(all.status, 200);
-    assert.ok(all.body.telemetry.by_model.some((r: any) => r.key === "codex/private-model"));
+    assert.ok(
+      all.body.telemetry.by_model.some((r: { key: string }) => r.key === "codex/private-model"),
+    );
   }
   const log = await one(
     pool,

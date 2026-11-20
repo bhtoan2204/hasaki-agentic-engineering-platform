@@ -82,7 +82,7 @@ describe("redactContextValue", () => {
   });
 
   test("bounds deeply nested content when depth > 30", () => {
-    let deep: any = { value: "leaf" };
+    let deep: object = { value: "leaf" };
     for (let i = 0; i < 35; i++) {
       deep = { child: deep };
     }

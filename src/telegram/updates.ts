@@ -11,15 +11,38 @@ import { contextHash, decisionMessage, makeAction } from "./workflow.ts";
 
 const validId = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
 const denied = "Action unavailable or unauthorized / Thao tác không khả dụng hoặc không được phép.";
-function privateIdentity(update: any) {
+interface TelegramMessage {
+  message_id?: number;
+  text?: string;
+  chat?: { id?: unknown; type?: string };
+  from?: { id?: unknown; is_bot?: boolean };
+  reply_to_message?: { message_id?: number };
+}
+interface TelegramUpdate {
+  update_id?: number;
+  message?: TelegramMessage;
+  callback_query?: {
+    id?: unknown;
+    data?: unknown;
+    from?: TelegramMessage["from"];
+    message?: TelegramMessage;
+  };
+}
+export function telegramUpdateId(update: unknown) {
+  if (typeof update !== "object" || update === null || !("update_id" in update)) return null;
+  const id = update.update_id;
+  return typeof id === "number" && Number.isSafeInteger(id) && id >= 0 ? id : null;
+}
+function privateIdentity(update: TelegramUpdate) {
   const callback = update.callback_query,
     message = callback?.message ?? update.message,
     from = callback?.from ?? message?.from;
   if (
     !message ||
     message.chat?.type !== "private" ||
-    from?.is_bot ||
-    !validId(from?.id) ||
+    !from ||
+    from.is_bot ||
+    !validId(from.id) ||
     !validId(message.chat.id) ||
     from.id !== message.chat.id
   )
@@ -72,7 +95,7 @@ async function validate(
     throw new HttpError(403, denied);
   const run = await one(db, "SELECT * FROM workflow_runs WHERE id=$1", [a.run_id]);
   await requireOwner(
-    { id: actor.user_id, username: actor.username, role: actor.role, active: true } as any,
+    { id: actor.user_id, username: actor.username, role: actor.role, active: true },
     run?.owner_id ?? null,
     false,
     "run",
@@ -324,7 +347,7 @@ async function prompt(
     await telegramAudit(db, userId, "action.prompted", id, { type: a.action_type });
   });
 }
-async function handleUpdate(update: any, retry = false) {
+async function handleUpdate(update: TelegramUpdate, retry = false) {
   const identity = privateIdentity(update),
     callback = update.callback_query;
   let result = "Saved / Đã lưu",
@@ -416,7 +439,8 @@ async function handleUpdate(update: any, retry = false) {
         updateId: update.update_id,
       });
     } else {
-      const status = (e as any).code === "23505" ? 409 : Number((e as any).status) || 500;
+      const err = e as { code?: unknown; status?: unknown };
+      const status = err.code === "23505" ? 409 : Number(err.status) || 500;
       result = status === 429 ? "Too many requests / Quá nhiều yêu cầu" : denied;
       await telegramAudit(pool, actorId, "action.denied", actionId || "update", {
         updateId: update.update_id,
@@ -454,17 +478,13 @@ async function handleUpdate(update: any, retry = false) {
   }
 }
 /** Trusted transports persist first. The HTTP route never accepts unauthenticated updates. */
-export async function ingestUpdate(update: any, key = botKey()) {
-  if (
-    !Number.isSafeInteger(update?.update_id) ||
-    update.update_id < 0 ||
-    typeof update !== "object"
-  )
-    throw new HttpError(400, "Invalid Telegram update");
+export async function ingestUpdate(update: unknown, key = botKey()) {
+  const updateId = telegramUpdateId(update);
+  if (updateId === null) throw new HttpError(400, "Invalid Telegram update");
   await q(
     pool,
     "INSERT INTO telegram_updates(bot_key,update_id,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
-    [key, update.update_id, JSON.stringify(update)],
+    [key, updateId, JSON.stringify(update)],
   );
 }
 export const MAX_UPDATE_FAILURES = 8;

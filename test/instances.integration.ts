@@ -32,7 +32,8 @@ import {
   cancelRun,
 } from "../src/workflow/engine.ts";
 import { claimJob, drain } from "../src/workflow/scheduler.ts";
-import { registerExecutor } from "../src/workflow/executors/registry.ts";
+import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
+import type { RunRow, StepRow } from "../src/workflow/types.ts";
 import { validateLocalConfiguration } from "../src/startupValidation.ts";
 import { repositories, repoPath, syncRepositoriesFromConfig } from "../src/repos/service.ts";
 import { resolveRepoPath, validateCheckout } from "../src/repos/paths.ts";
@@ -622,9 +623,9 @@ test("coding preflight pauses for missing checkout without calling a model or di
       selected_repositories: ["missing-checkout"],
       output_locale: "en",
       agent_provider: "claude",
-    },
-    step: { type: "coding_agent" },
-  } as any);
+    } as RunRow,
+    step: { type: "coding_agent" } as StepRow,
+  } as ExecutionContext);
   assert.equal(result.kind, "waiting_input");
   assert.equal((await repositories.get("missing-checkout"))!.enabled, true);
 });

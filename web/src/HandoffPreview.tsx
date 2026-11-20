@@ -1,7 +1,39 @@
 import { useI18n } from "./i18n/index.tsx";
 import { time } from "./ui.tsx";
 
-export function HandoffPreview({ handoff }: { handoff: any }) {
+interface HandoffPackage {
+  scratch_omitted?: { count: number } | null;
+  original_task?: string;
+  repository_state?: Array<{
+    repository: string;
+    branch?: string;
+    head?: string;
+    status?: string;
+    diff_summary?: string;
+  }>;
+  previous_decisions_and_pending_work?: string;
+  context_references?: unknown;
+  workspace_artifact_id?: number | null;
+  progress?: string;
+  commands_tests_and_verification?: string;
+}
+
+export interface Handoff {
+  id: number;
+  source_attempt_id: number;
+  status: string;
+  reason?: string | null;
+  ready_at?: string | null;
+  created_at?: string | null;
+  workspace_fingerprint?: string | null;
+  original_provider?: string | null;
+  target_provider?: string | null;
+  failure_category?: string | null;
+  blocked_reason?: string | null;
+  package?: HandoffPackage | null;
+}
+
+export function HandoffPreview({ handoff }: { handoff: Handoff }) {
   const { t } = useI18n();
   const pack = handoff.package;
   return (
@@ -17,7 +49,7 @@ export function HandoffPreview({ handoff }: { handoff: any }) {
           <p className="small muted">
             {t("hop.preservedAt")}: {time(handoff.ready_at)}
           </p>
-          {pack.scratch_omitted?.count > 0 && (
+          {pack.scratch_omitted && pack.scratch_omitted.count > 0 && (
             <p>{t("hop.scratchOmitted", { count: pack.scratch_omitted.count })}</p>
           )}
           <b>{t("hop.originalTask")}</b>
@@ -26,7 +58,7 @@ export function HandoffPreview({ handoff }: { handoff: any }) {
           </pre>
           <b>{t("hop.preservedChanges")}</b>
           {pack.repository_state?.length ? (
-            pack.repository_state.map((repo: any) => (
+            pack.repository_state.map((repo) => (
               <div key={repo.repository} className="small">
                 <p>
                   <b>{repo.repository}</b> · {repo.branch} · {repo.head?.slice(0, 12)}

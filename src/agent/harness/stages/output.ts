@@ -108,21 +108,18 @@ export async function outputStage(s: LifecycleState): Promise<ExecResult | void>
   if (role) {
     // Platform provenance first (repo/commit/file/lines/staleness, this run's tool calls and artifacts): it may only
     // lower a claim's status, so the root-cause caps and the evidence gate below never rest on fake or stale citations.
-    if (Array.isArray((output as any).claims))
+    if (Array.isArray(output.claims))
       output = {
         ...output,
-        claims: await withProvenance(
-          (output as any).claims,
-          await runProvenanceEnv(ctx.run as any),
-        ),
+        claims: await withProvenance(output.claims, await runProvenanceEnv(ctx.run)),
       };
-    output = normalizeInvestigationOutput(
+    const ev = normalizeInvestigationOutput(
       role,
       output,
       Object.fromEntries(Object.entries(ctx.input.upstream).map(([k, u]) => [k, u.output])),
       unavailableSources(ctx.context.contextPack),
     );
-    const ev = output as any;
+    output = ev;
     metrics.evidence = {
       role,
       claims: ev.claims?.length ?? 0,

@@ -14,12 +14,17 @@ import {
   routeTargets,
 } from "../src/workflow/replan.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
+import type { StepSpec, WorkflowSpec } from "../src/workflow/types.ts";
 import { snapshotUncommitted } from "../src/git.ts";
 
-const graphOf = (key: string) => TEMPLATES.find((t) => t.key === key)!.spec as any;
-const withDefaults = (g: any) => ({
+const graphOf = (key: string) => TEMPLATES.find((t) => t.key === key)!.spec as WorkflowSpec;
+const withDefaults = (
+  g: Omit<Parameters<typeof replanAnchors>[0], "steps"> & {
+    steps: Array<Pick<StepSpec, "key" | "type"> & Partial<Pick<StepSpec, "depends_on" | "config">>>;
+  },
+) => ({
   ...g,
-  steps: g.steps.map((s: any) => ({ depends_on: [], config: {}, ...s })),
+  steps: g.steps.map((s) => ({ depends_on: [], config: {}, ...s })),
 });
 
 test("replan anchors come from the graph: coding step, planning after repository selection, discovery, roots", () => {

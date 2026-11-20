@@ -182,7 +182,7 @@ export function SettingsPage() {
             ].includes(key),
         ),
       );
-      const view = await api("/api/settings/operator", operator);
+      const view = await api<View>("/api/settings/operator", operator);
       setData(view);
       setNote({ text: t("set.saved"), ok: true });
     } catch (e) {
@@ -205,7 +205,7 @@ export function SettingsPage() {
     setBusy(true);
     setNote(null);
     try {
-      const view = await api("/api/settings/operator/clear", {});
+      const view = await api<View>("/api/settings/operator/clear", {});
       setData(view);
       setNote({ text: t("set.restored"), ok: true });
     } catch (e) {

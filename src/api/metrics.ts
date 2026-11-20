@@ -337,7 +337,7 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
 export async function harnessEvaluation(since: string, attemptOwn = "", own = "") {
   const decisionOwn = attemptOwn.replace("a.run_id", "d.run_id");
   const [verification, patterns, human, slop, decisions] = await Promise.all([
-    one<any>(
+    one<Record<string, number | string | null>>(
       pool,
       `SELECT count(*)::int AS coding_attempts,
               count(*) FILTER (WHERE a.metrics ? 'verification' AND a.metrics->'verification'->>'outcome' NOT IN ('skipped', 'disabled'))::int AS verified,
@@ -360,7 +360,7 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
          FROM workflow_step_attempts a, jsonb_array_elements_text(COALESCE(a.metrics->'verification'->'failure_signatures', '[]'::jsonb)) sig
         WHERE a.started_at > ${since} ${attemptOwn} GROUP BY sig HAVING count(*) > 1 ORDER BY times DESC LIMIT 15`,
     ),
-    one<any>(
+    one<{ runs: number; with_human: number; answers: number; reexecutions: number }>(
       pool,
       `SELECT count(*)::int AS runs,
               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM workflow_questions qq WHERE qq.run_id = r.id AND qq.status = 'answered')
@@ -415,14 +415,18 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
     ),
   ]);
   const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : null);
+  const verificationSummary: Record<string, number | string | null> = {
+    ...verification,
+    pass_rate_pct: pct(Number(verification?.passed ?? 0), Number(verification?.verified ?? 0)),
+    first_try_pass_rate_pct: pct(
+      Number(verification?.passed_first_try ?? 0),
+      Number(verification?.verified ?? 0),
+    ),
+  };
   return {
-    verification: {
-      ...verification,
-      pass_rate_pct: pct(verification.passed, verification.verified),
-      first_try_pass_rate_pct: pct(verification.passed_first_try, verification.verified),
-    },
+    verification: verificationSummary,
     repeated_failures: patterns,
-    human_intervention: { ...human, rate_pct: pct(human.with_human, human.runs) },
+    human_intervention: { ...human, rate_pct: pct(human?.with_human ?? 0, human?.runs ?? 0) },
     // Upper-bound denominator: every scanned file is analysed at most twice (base and head).
     slop: { ...slop, cache_hit_rate_pct: pct(Number(slop?.cache_hits ?? 0), Number(slop?.files_scanned ?? 0) * 2) },
     decisions: {
@@ -434,9 +438,11 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
 }
 
 /** Each invocation retains its provider/model even if a later session resolves a different model. */
-export function telemetryGroups(attempts: any[]) {
-  const sessions = attempts.flatMap((a) => {
-    const values = Object.values(a.provider_sessions ?? {}) as any[];
+type TelemetryRow = Parameters<typeof usageSummary>[0][number];
+
+export function telemetryGroups(attempts: TelemetryRow[]) {
+  const sessions = attempts.flatMap((a): TelemetryRow[] => {
+    const values = Object.values(a.provider_sessions ?? {});
     return values.length
       ? values.map((s) => ({
           ...a,
@@ -448,7 +454,7 @@ export function telemetryGroups(attempts: any[]) {
           cache_read_tokens: s.tokens?.cache_read ?? null,
           cache_creation_tokens: s.tokens?.cache_creation ?? null,
           reasoning_tokens: s.tokens?.reasoning_output ?? null,
-          normalized_failure_category: s.normalized_failure_category ?? null,
+          normalized_failure_category: (s.normalized_failure_category ?? null) as string | null,
           provider_execution_ms: s.provider_execution_ms,
           wall_duration_ms: null,
           tool_execution_ms: null,
@@ -456,16 +462,21 @@ export function telemetryGroups(attempts: any[]) {
         }))
       : [a];
   });
-  const group = (rows: any[], key: (r: any) => string): Array<Record<string, any>> => {
-    const groups: Record<string, any[]> = {};
+  const group = (
+    rows: TelemetryRow[],
+    key: (r: TelemetryRow) => string,
+  ): Array<{ key: string } & ReturnType<typeof usageSummary>> => {
+    const groups: Record<string, TelemetryRow[]> = {};
     for (const r of rows) (groups[key(r)] ??= []).push(r);
     return Object.entries(groups).map(([key, rows]) => ({ key, ...usageSummary(rows) }));
   };
   return {
     totals: usageSummary(attempts),
-    by_provider: group(sessions, (r) => r.provider ?? "unknown"),
+    by_provider: group(sessions, (r) => String(r.provider ?? "unknown")),
     by_model: group(sessions, (r) => `${r.provider ?? "unknown"}/${r.model ?? "unknown"}`),
-    daily: group(attempts, (r) => new Date(r.start_time).toISOString().slice(0, 10)),
+    daily: group(attempts, (r) =>
+      new Date(r.start_time as string | Date).toISOString().slice(0, 10),
+    ),
     by_step: group(attempts, (r) => String(r.step_id)),
   };
 }

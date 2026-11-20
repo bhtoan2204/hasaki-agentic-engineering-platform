@@ -1,4 +1,4 @@
-import { StepAgentFields } from "../StepAgentFields.tsx";
+import { StepAgentFields, type StepAgentConfig } from "../StepAgentFields.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background,
@@ -52,12 +52,42 @@ import { useI18n } from "../i18n/index.tsx";
 import type { UiLocale } from "../i18n/messages.ts";
 import "./WorkflowEditor.css";
 
+type HumanQuestion = { question: string; options?: string[] };
+type StepConfig = {
+  instructions?: string;
+  output_contract?: string;
+  skills?: string[];
+  knowledge?: string[];
+  delegation?: { enabled?: boolean; agents?: string[] };
+  agent?: StepAgentConfig;
+  max_turns?: number;
+  questions?: HumanQuestion[];
+  message?: string;
+  show_outputs?: string[];
+  select_repositories?: boolean;
+  auto_approve_unambiguous?: boolean;
+  on_reject?: { reexecute?: string };
+  action?: string;
+  use_ai?: boolean;
+  max_candidates?: number;
+  title?: string;
+  from?: string[];
+  command?: string;
+  timeout_seconds?: number;
+  allow_failure?: boolean;
+  path?: string;
+  op?: string;
+  value?: unknown;
+  mode?: string;
+  content_from?: string;
+  [key: string]: unknown;
+};
 type Step = {
   key: string;
   type: string;
   name?: string;
   depends_on: string[];
-  config: Record<string, any>;
+  config: StepConfig;
   run_if?: { step: string; path?: string; equals: unknown };
   requires_approval?: boolean;
   max_attempts?: number;
@@ -68,10 +98,24 @@ type Spec = {
   name: string;
   description?: string;
   feedback_step?: string;
-  inputs?: Record<string, any>;
+  inputs?: unknown;
   knowledge?: string[];
   skills?: string[];
   steps: Step[];
+};
+type WorkflowDef = {
+  key: string;
+  latest_version: number;
+  draft_spec: Spec | null;
+  versions: Array<{ version: number; spec: Spec; change_note: string; published_at: string }>;
+};
+type KnowledgeOption = {
+  key: string;
+  title: string;
+  category: string;
+  enabled: boolean;
+  scope_type: string;
+  scope_ref: string;
 };
 
 const STEP_TYPES = [
@@ -104,7 +148,7 @@ const PALETTE_GROUPS: Array<[string, string[]]> = [
 ];
 const typeIcon = (t: string): LucideIcon => WF_TYPE_ICON[t] ?? Layers;
 const typeTone = (t: string) => `tone-${WF_TYPE_TONE[t] ?? "logic"}`;
-const DEFAULT_CONFIG: Record<string, Record<string, any>> = {
+const DEFAULT_CONFIG: Record<string, StepConfig> = {
   agent: { instructions: "", output_contract: "{ summary }" },
   coding_agent: {
     instructions:
@@ -147,8 +191,8 @@ export function WorkflowEditor({ wfKey }: { wfKey: string }) {
 
 function Editor({ wfKey }: { wfKey: string }) {
   const { t } = useI18n();
-  const { data: def, error, loading, reload } = useApi<any>(`/api/workflows/${wfKey}`);
-  const { data: knowledge } = useApi<any[]>("/api/knowledge");
+  const { data: def, error, loading, reload } = useApi<WorkflowDef>(`/api/workflows/${wfKey}`);
+  const { data: knowledge } = useApi<KnowledgeOption[]>("/api/knowledge");
   const [spec, setSpec] = useState<Spec | null>(null);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [selected, setSelected] = useState<string | null>(null);
@@ -175,7 +219,8 @@ function Editor({ wfKey }: { wfKey: string }) {
   }, []);
   useEffect(() => {
     if (!def || spec) return;
-    load(def.draft_spec ?? def.versions[0]?.spec);
+    const initial = def.draft_spec ?? def.versions[0]?.spec;
+    if (initial) load(initial);
     setBaseVersion(def.draft_spec ? "draft" : (def.versions[0]?.version ?? null));
   }, [def, spec, load]);
   useEffect(() => {
@@ -341,7 +386,7 @@ function Editor({ wfKey }: { wfKey: string }) {
         if (st.run_if?.step === from) st.run_if.step = to;
         if (st.config.content_from === from) st.config.content_from = to;
         if (Array.isArray(st.config.show_outputs))
-          st.config.show_outputs = st.config.show_outputs.map((d: string) => (d === from ? to : d));
+          st.config.show_outputs = st.config.show_outputs.map((d) => (d === from ? to : d));
         if (st.config.on_reject?.reexecute === from) st.config.on_reject.reexecute = to;
       }
       if (s.feedback_step === from) s.feedback_step = to;
@@ -363,11 +408,13 @@ function Editor({ wfKey }: { wfKey: string }) {
     })),
   });
   const validate = async () => {
-    const r = await act(() => api<any>("/api/workflows/validate", { spec: toSave() }));
+    const r = await act(() =>
+      api<{ valid: boolean; errors: string[] }>("/api/workflows/validate", { spec: toSave() }),
+    );
     if (!r) return false;
     setErrors(r.valid ? [] : r.errors);
     if (r.valid) toast(t("wfe.valid"), "ok");
-    return r.valid as boolean;
+    return r.valid;
   };
   const saveDraft = async () => {
     if (!(await validate())) return;
@@ -382,7 +429,11 @@ function Editor({ wfKey }: { wfKey: string }) {
   const publish = async () => {
     if (!(await validate())) return;
     await api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }).catch((e) => toast(e.message));
-    const r = await act(() => api<any>(`/api/workflows/${wfKey}/publish`, { change_note: note }));
+    const r = await act(() =>
+      api<{ unchanged?: boolean; version: number }>(`/api/workflows/${wfKey}/publish`, {
+        change_note: note,
+      }),
+    );
     if (r) {
       toast(r.unchanged ? t("wfe.noChange") : t("wfe.published", { version: r.version }), "ok");
       setDirty(false);
@@ -403,8 +454,9 @@ function Editor({ wfKey }: { wfKey: string }) {
       });
       if (!ok) return;
     }
-    if (v === "draft") load(def.draft_spec);
-    else load(def.versions.find((x: any) => String(x.version) === v).spec);
+    const next =
+      v === "draft" ? def.draft_spec : def.versions.find((x) => String(x.version) === v)?.spec;
+    if (next) load(next);
     setBaseVersion(v === "draft" ? "draft" : Number(v));
     setSelected(null);
   };
@@ -446,7 +498,7 @@ function Editor({ wfKey }: { wfKey: string }) {
               aria-label={t("wfe.openVersion")}
             >
               {def.draft_spec && <option value="draft">draft</option>}
-              {def.versions.map((v: any) => (
+              {def.versions.map((v) => (
                 <option key={v.version} value={v.version}>
                   v{v.version} · {time(v.published_at)}
                 </option>
@@ -756,7 +808,7 @@ function MultiPick({
   );
 }
 
-function knowledgeOptions(knowledge: any[], skills: boolean): Array<[string, string]> {
+function knowledgeOptions(knowledge: KnowledgeOption[], skills: boolean): Array<[string, string]> {
   return knowledge
     .filter((k) => (k.category === "agent_skill") === skills)
     .map((k) => [
@@ -772,8 +824,8 @@ function WorkflowForm({
   update,
 }: {
   spec: Spec;
-  def: any;
-  knowledge: any[];
+  def: WorkflowDef;
+  knowledge: KnowledgeOption[];
   update: (fn: (s: Spec) => Spec) => void;
 }) {
   const { t } = useI18n();
@@ -870,7 +922,7 @@ function WorkflowForm({
             </p>
           ) : (
             <ol className="wfe-versions">
-              {def.versions.map((v: any) => (
+              {def.versions.map((v) => (
                 <li key={v.version}>
                   <span className="wfe-v">v{v.version}</span>
                   <div>
@@ -900,7 +952,7 @@ function JsonField({
   rows = 4,
 }: {
   value: unknown;
-  onChange: (v: any) => void;
+  onChange: (v: unknown) => void;
   rows?: number;
 }) {
   const { t } = useI18n();
@@ -956,7 +1008,7 @@ function StepForm({
 }: {
   step: Step;
   spec: Spec;
-  knowledge: any[];
+  knowledge: KnowledgeOption[];
   updateStep: (k: string, fn: (s: Step) => void) => void;
   renameStep: (a: string, b: string) => void;
   removeStep: () => void;
@@ -1108,14 +1160,14 @@ function StepForm({
             )}
             {step.type === "human_input" && (
               <div className="wfe-questions">
-                {(cfg.questions ?? []).map((q: any, i: number) => (
+                {(cfg.questions ?? []).map((q, i) => (
                   <div key={i} className="wfe-question">
                     <div className="wfe-question-head">
                       <span className="wfe-qn">{i + 1}</span>
                       <span className="grow muted small">{t("wfe.question")}</span>
                       <button
                         className="quiet xs"
-                        onClick={() => set((s) => s.config.questions.splice(i, 1))}
+                        onClick={() => set((s) => s.config.questions?.splice(i, 1))}
                       >
                         <Trash2 size={12} /> {t("wfe.deleteQuestion")}
                       </button>
@@ -1124,20 +1176,24 @@ function StepForm({
                       placeholder={t("wfe.questionPh")}
                       value={q.question}
                       onChange={(e) =>
-                        set((s) => (s.config.questions[i].question = e.target.value))
+                        set((s) => {
+                          const qs = s.config.questions;
+                          if (qs) qs[i].question = e.target.value;
+                        })
                       }
                     />
                     <input
                       placeholder={t("wfe.optionsPh")}
                       value={(q.options ?? []).join(", ")}
                       onChange={(e) =>
-                        set(
-                          (s) =>
-                            (s.config.questions[i].options = e.target.value
+                        set((s) => {
+                          const qs = s.config.questions;
+                          if (qs)
+                            qs[i].options = e.target.value
                               .split(",")
                               .map((x) => x.trim())
-                              .filter(Boolean)),
-                        )
+                              .filter(Boolean);
+                        })
                       }
                     />
                   </div>
@@ -1300,7 +1356,9 @@ function StepForm({
                     onChange={(e) => {
                       try {
                         setCfg("value", JSON.parse(e.target.value));
-                      } catch {}
+                      } catch {
+                        /* ignore: keep the last valid value while the JSON is incomplete */
+                      }
                     }}
                   />
                 </Field>
@@ -1419,7 +1477,7 @@ function StepForm({
           <JsonField
             value={cfg}
             rows={10}
-            onChange={(v) => v && typeof v === "object" && set((s) => (s.config = v))}
+            onChange={(v) => v && typeof v === "object" && set((s) => (s.config = v as StepConfig))}
           />
         </details>
       </div>
@@ -1429,8 +1487,10 @@ function StepForm({
 
 function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
   const { t, locale } = useI18n();
-  const { data: repos } = useApi<any[]>("/api/repositories");
-  const { data: items } = useApi<any[]>("/api/work-items");
+  const { data: repos } =
+    useApi<Array<{ name: string; enabled: boolean; self?: boolean }>>("/api/repositories");
+  const { data: items } =
+    useApi<Array<{ id: number; code: string; title: string }>>("/api/work-items");
   const [sel, setSel] = useState<string[]>([]);
   const [wi, setWi] = useState("");
   const [inputs, setInputs] = useState("{}");
@@ -1446,7 +1506,7 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
       return toast(t("wfe.badInputs"));
     }
     const r = await act(() =>
-      api<any>("/api/runs", {
+      api<{ id: number }>("/api/runs", {
         workflow: wfKey,
         work_item_id: wi ? Number(wi) : null,
         repositories: sel,

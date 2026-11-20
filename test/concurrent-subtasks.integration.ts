@@ -15,6 +15,9 @@ import { prepareWorkspace, workspacesOf, subtaskWorkspacesOf } from "../src/git/
 import { subtaskBranchName } from "../src/workflow/branches.ts";
 import { repositories } from "../src/repos/service.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
+import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
+import type { StepInput } from "../src/workflow/context.ts";
+import type { JobRow, StepRow } from "../src/workflow/types.ts";
 import {
   validateExpansion,
   DEFAULT_LIMITS,
@@ -87,9 +90,9 @@ test("validateExpansion keeps parallel strategy when isolatedWorkspaces is true"
 
 test("integrateSubtasks integrates disjoint subtasks and detects file conflicts", async () => {
   const logs: string[] = [];
-  const fakeCtx = (upstream: Record<string, any>) => ({
-    input: { upstream },
-    step: { config: {} },
+  const fakeCtx = (upstream: Record<string, { output: unknown }>) => ({
+    input: { upstream } as StepInput,
+    step: { config: {} } as StepRow,
     log: async (_kind: string, msg: string) => {
       logs.push(msg);
     },
@@ -100,12 +103,12 @@ test("integrateSubtasks integrates disjoint subtasks and detects file conflicts"
     fakeCtx({
       "subtask-1": { output: { modified_files: ["src/a.ts"] } },
       "subtask-2": { output: { modified_files: ["src/b.ts"] } },
-    }) as any,
+    }) as ExecutionContext,
   );
 
   assert.equal(cleanResult.kind, "completed");
   if (cleanResult.kind === "completed") {
-    const out = cleanResult.output as any;
+    const out = cleanResult.output as { status: string; subtasks_integrated: string[] };
     assert.equal(out.status, "integrated");
     assert.deepEqual(out.subtasks_integrated, ["subtask-1", "subtask-2"]);
   }
@@ -115,12 +118,14 @@ test("integrateSubtasks integrates disjoint subtasks and detects file conflicts"
     fakeCtx({
       "subtask-1": { output: { modified_files: ["src/shared.ts", "src/a.ts"] } },
       "subtask-2": { output: { modified_files: ["src/shared.ts", "src/b.ts"] } },
-    }) as any,
+    }) as ExecutionContext,
   );
 
   assert.equal(conflictResult.kind, "failed");
   if (conflictResult.kind === "failed") {
-    const det = conflictResult.details as any;
+    const det = conflictResult.details as
+      | { conflicts: Array<{ file: string; subtasks: string[] }> }
+      | undefined;
     assert.match(conflictResult.error, /merge conflict/);
     assert.deepEqual(det?.conflicts[0].file, "src/shared.ts");
     assert.deepEqual(det?.conflicts[0].subtasks, ["subtask-1", "subtask-2"]);
@@ -180,21 +185,21 @@ test("beginAttempt admits concurrent independent subtasks and serializes conflic
     [run.id],
   ))!;
 
-  const job1 = (await one<any>(
+  const job1 = (await one<JobRow>(
     pool,
     `INSERT INTO workflow_jobs (run_id, step_id, generation, idempotency_key, status, fencing_token, lease_owner, lease_expires_at)
      VALUES ($1, $2, 1, 'job-1', 'running', 1, $3, now() + interval '30 seconds') RETURNING *`,
     [run.id, step1.id, config.instanceId],
   ))!;
 
-  const job2 = (await one<any>(
+  const job2 = (await one<JobRow>(
     pool,
     `INSERT INTO workflow_jobs (run_id, step_id, generation, idempotency_key, status, fencing_token, lease_owner, lease_expires_at)
      VALUES ($1, $2, 1, 'job-2', 'running', 1, $3, now() + interval '30 seconds') RETURNING *`,
     [run.id, step2.id, config.instanceId],
   ))!;
 
-  const jobConflict = (await one<any>(
+  const jobConflict = (await one<JobRow>(
     pool,
     `INSERT INTO workflow_jobs (run_id, step_id, generation, idempotency_key, status, fencing_token, lease_owner, lease_expires_at)
      VALUES ($1, $2, 1, 'job-conflict', 'running', 1, $3, now() + interval '30 seconds') RETURNING *`,
@@ -220,7 +225,7 @@ test("beginAttempt admits concurrent independent subtasks and serializes conflic
      RETURNING id`,
     [run.id],
   ))!;
-  const jobShared = (await one<any>(
+  const jobShared = (await one<JobRow>(
     pool,
     `INSERT INTO workflow_jobs (run_id, step_id, generation, idempotency_key, status, fencing_token, lease_owner, lease_expires_at)
      VALUES ($1, $2, 1, 'job-shared', 'running', 1, $3, now() + interval '30 seconds') RETURNING *`,
@@ -238,7 +243,7 @@ test("beginAttempt admits concurrent independent subtasks and serializes conflic
      RETURNING id`,
     [run.id],
   ))!;
-  const jobUnnamed = (await one<any>(
+  const jobUnnamed = (await one<JobRow>(
     pool,
     `INSERT INTO workflow_jobs (run_id, step_id, generation, idempotency_key, status, fencing_token, lease_owner, lease_expires_at)
      VALUES ($1, $2, 1, 'job-unnamed', 'running', 1, $3, now() + interval '30 seconds') RETURNING *`,
@@ -251,9 +256,9 @@ test("beginAttempt admits concurrent independent subtasks and serializes conflic
   assert.equal(begunConflict, null, "Step Conflict is refused and requeued due to overlapping owned files");
 
   // Verify jobConflict status was reset to queued
-  const requeued = await one<any>(pool, "SELECT status, lease_owner FROM workflow_jobs WHERE id = $1", [jobConflict.id]);
-  assert.equal(requeued.status, "queued");
-  assert.equal(requeued.lease_owner, null);
+  const requeued = await one<Pick<JobRow, "status" | "lease_owner">>(pool, "SELECT status, lease_owner FROM workflow_jobs WHERE id = $1", [jobConflict.id]);
+  assert.equal(requeued?.status, "queued");
+  assert.equal(requeued?.lease_owner, null);
 
   await q(pool, "DELETE FROM workflow_runs WHERE id = $1", [run.id]);
 });

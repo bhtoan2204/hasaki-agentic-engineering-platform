@@ -23,7 +23,7 @@ export function ProviderExperimentForm({
   onCreated: () => void;
 }) {
   const { t } = useI18n();
-  const suites = useApi<any[]>("/api/benchmark-suites");
+  const suites = useApi<Array<{ id: number }>>("/api/benchmark-suites");
   const [plan, setPlan] = useState("claude,codex"),
     [models, setModels] = useState<string[]>([]),
     [variant, setVariant] = useState("tools"),
@@ -43,7 +43,7 @@ export function ProviderExperimentForm({
             const provider_sequence = plan
               .split(",")
               .map((provider, i) => ({ provider, model: models[i] || null }));
-            const row: any = await api("/api/evaluation-runs", {
+            const row = await api<{ id: number }>("/api/evaluation-runs", {
               suite_id: suite.id,
               request_key: crypto.randomUUID(),
               paid_approval: paid,

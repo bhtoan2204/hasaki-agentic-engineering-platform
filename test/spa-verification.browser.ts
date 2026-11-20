@@ -26,6 +26,7 @@ const browser = await chromium.launch({
   args: ["--no-sandbox", "--disable-dev-shm-usage"],
 });
 
+type MarkedWindow = Window & { __companionNode?: Element; __spaWindowMarker?: number };
 const pageErrors: string[] = [];
 const screenshotDir = resolve("docs/validation/chibi-companion");
 mkdirSync(screenshotDir, { recursive: true });
@@ -356,7 +357,7 @@ try {
   await page.locator(".companion-avatar").waitFor();
   await page.screenshot({ path: resolve(screenshotDir, "01-overview-en.png"), fullPage: true });
   const avatarNode = await page.locator(".companion-avatar").evaluate((node) => {
-    (window as any).__companionNode = node;
+    (window as MarkedWindow).__companionNode = node;
     return true;
   });
   assert.equal(avatarNode, true);
@@ -369,7 +370,7 @@ try {
 
   // Mark the window object to verify no full-document reload occurs
   await page.evaluate(() => {
-    (window as any).__spaWindowMarker = 1337;
+    (window as MarkedWindow).__spaWindowMarker = 1337;
   });
 
   // 2. Test Internal Navigation from Overview to Work Items
@@ -384,14 +385,14 @@ try {
   assert.equal(
     await page
       .locator(".companion-avatar")
-      .evaluate((node) => node === (window as any).__companionNode),
+      .evaluate((node) => node === (window as MarkedWindow).__companionNode),
     true,
     "companion avatar node is not remounted on navigation",
   );
   await page.screenshot({ path: resolve(screenshotDir, "03-work-items-en.png"), fullPage: true });
 
   // Document marker must still be present (no browser document reload!)
-  const markerAfterNav1 = await page.evaluate(() => (window as any).__spaWindowMarker);
+  const markerAfterNav1 = await page.evaluate(() => (window as MarkedWindow).__spaWindowMarker);
   assert.equal(markerAfterNav1, 1337, "Internal navigation must not perform full document reload");
 
   // Sidebar and header must remain mounted
@@ -426,7 +427,7 @@ try {
   await page.waitForSelector(".wi-page", { timeout: 5000 });
 
   // Document marker still intact
-  const markerAfterBack = await page.evaluate(() => (window as any).__spaWindowMarker);
+  const markerAfterBack = await page.evaluate(() => (window as MarkedWindow).__spaWindowMarker);
   assert.equal(markerAfterBack, 1337, "Returning from detail page must not reload document");
 
   // Search input preserved!
@@ -443,7 +444,7 @@ try {
   await page.waitForSelector(".repo", { timeout: 5000 });
 
   // Marker preserved
-  const markerAfterRepos = await page.evaluate(() => (window as any).__spaWindowMarker);
+  const markerAfterRepos = await page.evaluate(() => (window as MarkedWindow).__spaWindowMarker);
   assert.equal(markerAfterRepos, 1337, "Repositories navigation must not reload document");
 
   // Return to Work Items: Cached data must render immediately without blank flash

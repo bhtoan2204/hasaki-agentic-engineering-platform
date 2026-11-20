@@ -65,7 +65,7 @@ export function buildMemoryItems(x: {
   sha: string;
   baseBranch?: string;
   files: string[];
-  verification?: any;
+  verification?: { status?: string; outcome?: string; repairs?: number } | null;
   independentVerdict?: string | null;
   testsPassed?: boolean | null;
   conclusions: Array<{ step: string; text: string }>;
@@ -143,18 +143,28 @@ export async function extractRunMemory(runId: number) {
     [runId],
   );
   if (!run || run.status !== "COMPLETED" || run.owner_id == null) return [];
-  const steps = await q(
-    pool,
-    "SELECT key, type, output FROM workflow_steps WHERE run_id = $1 ORDER BY position",
-    [runId],
-  );
-  const coding = steps.filter((s: any) => s.type === "coding_agent" && s.output);
-  const verdict = steps.find((s: any) => s.output?.independent === true)?.output?.verdict ?? null;
-  const tests = steps.filter((s: any) => s.type === "command" && s.output && !s.output.skipped);
-  const testsPassed = tests.length ? tests.every((s: any) => s.output.passed !== false) : null;
-  const conclusions = coding.flatMap((s: any) => [
-    { step: s.key, text: String(s.output.summary ?? "") },
-    ...((s.output.decisions ?? []) as any[]).map((d) => ({
+  const steps = await q<{
+    key: string;
+    type: string;
+    output: {
+      independent?: boolean;
+      verdict?: string | null;
+      skipped?: boolean;
+      passed?: boolean;
+      summary?: unknown;
+      decisions?: Array<string | { title?: string; detail?: string }>;
+      verification?: { status?: string; outcome?: string; repairs?: number } | null;
+    } | null;
+  }>(pool, "SELECT key, type, output FROM workflow_steps WHERE run_id = $1 ORDER BY position", [
+    runId,
+  ]);
+  const coding = steps.filter((s) => s.type === "coding_agent" && s.output);
+  const verdict = steps.find((s) => s.output?.independent === true)?.output?.verdict ?? null;
+  const tests = steps.filter((s) => s.type === "command" && s.output && !s.output.skipped);
+  const testsPassed = tests.length ? tests.every((s) => s.output?.passed !== false) : null;
+  const conclusions = coding.flatMap((s) => [
+    { step: s.key, text: String(s.output?.summary ?? "") },
+    ...(s.output?.decisions ?? []).map((d) => ({
       step: s.key,
       text: typeof d === "string" ? d : `${d.title ?? ""}: ${d.detail ?? ""}`,
     })),

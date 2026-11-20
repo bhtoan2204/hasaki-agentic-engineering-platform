@@ -1,5 +1,6 @@
 /** Deleting a repository from the registry: admin only, refused while in use, never re-added by config discovery. */
 import { test, before, after } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +51,7 @@ before(async () => {
   await createUser({ username: "repo-member", password: "repo-member-password", role: "member" });
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
 after(async () => {
@@ -70,7 +71,9 @@ test("an admin deletes a registered repository; it disappears from the list and 
   const r = await admin("/api/repositories/to-delete/delete", {});
   assert.equal(r.status, 200);
   assert.equal(await repositories.get("to-delete"), undefined);
-  assert.ok(!(await admin("/api/repositories")).body.some((x: any) => x.name === "to-delete"));
+  assert.ok(
+    !(await admin("/api/repositories")).body.some((x: { name: string }) => x.name === "to-delete"),
+  );
   assert.ok(
     await one(
       pool,

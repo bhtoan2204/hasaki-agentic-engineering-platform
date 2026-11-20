@@ -1,5 +1,6 @@
 /** Real HTTP + isolated PostgreSQL + Chromium verification of production consolidation. */
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -15,7 +16,7 @@ await pool.query(
 );
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const out = resolve(process.env.ANALYTICS_SCREENSHOTS || "docs/validation/production-errors");
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({
@@ -193,7 +194,7 @@ try {
   results.push("PASS all six production views in VI/EN at 1440, 1280, 1024, 768 and 390px");
   // Exercise scanner UI against simulated connection/progress; never start an external Splunk scan.
   let scanning = false;
-  let scanPayload: any;
+  let scanPayload: { preset?: string } | undefined;
   await page.route("**/api/prod-errors", async (route) => {
     const response = await route.fetch();
     const data = await response.json();
@@ -240,7 +241,7 @@ try {
   await page.locator(".pe-scanpanel").getByRole("button", { name: "Scan", exact: true }).click();
   await page.locator(".sp-card").waitFor();
   assert.equal(
-    scanPayload.preset,
+    scanPayload?.preset,
     "today",
     "analytics date range must not become scan configuration",
   );

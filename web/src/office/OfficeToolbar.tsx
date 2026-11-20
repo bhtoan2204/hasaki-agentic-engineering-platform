@@ -1,5 +1,6 @@
 import { Maximize2, Minimize2, Pause, Play, Shrink, Sparkles, Expand } from "lucide-react";
 import type { LiveState } from "../api.ts";
+import type { RunSummaryLite } from "./types.ts";
 import { useI18n } from "../i18n/index.tsx";
 
 export function OfficeToolbar({
@@ -17,7 +18,7 @@ export function OfficeToolbar({
   fullscreen,
   live,
 }: {
-  runs: any[];
+  runs: RunSummaryLite[];
   activeIds: Set<number>;
   runId: number | null;
   onRun: (id: number | null) => void;

@@ -67,15 +67,23 @@ export const STATUS_ICONS: Record<string, LucideIcon> = {
 };
 export const statusIcon = (s?: string): LucideIcon => (s && STATUS_ICONS[s]) || CircleDashed;
 
+interface StepConfig {
+  subtask?: { execution_strategy?: string; target_repos?: string[] };
+  agent?: { provider?: string; model?: string | null };
+  merged_from?: string[];
+  isolated_workspace?: boolean;
+  [key: string]: unknown;
+}
+
 export interface StepLike {
   key: string;
   type: string;
   name?: string;
   depends_on?: string[];
   ui?: { x: number; y: number };
-  run_if?: unknown;
+  run_if?: { step?: string; status?: string; equals?: unknown } | null;
   requires_approval?: boolean;
-  config?: Record<string, any>;
+  config?: StepConfig;
   handoff?: { failure_category?: string; status?: string; blocked_reason?: string | null };
   effective_agent?: { provider?: string; model?: string | null };
   /** Dynamic subtask nodes (migration 050). */
@@ -128,11 +136,11 @@ export function toEdges(
             (s as StepLike).config?.subtask?.execution_strategy === "parallel" ? "6 4" : undefined,
         },
         label:
-          (s.run_if as any)?.step !== d
+          s.run_if?.step !== d
             ? undefined
-            : (s.run_if as any).status
-              ? `if ${String((s.run_if as any).status).toLowerCase()}`
-              : `if = ${JSON.stringify((s.run_if as any).equals)}`,
+            : s.run_if.status
+              ? `if ${String(s.run_if.status).toLowerCase()}`
+              : `if = ${JSON.stringify(s.run_if.equals)}`,
         labelStyle: { fontSize: 10, fontWeight: 600, fill: "var(--ink-2)" },
         labelBgStyle: { fill: "var(--surface)", stroke: "var(--line)" },
         labelBgPadding: [6, 3],
@@ -187,13 +195,11 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
   const provider = step.effective_agent?.provider ?? step.config?.agent?.provider;
   const TypeIcon = stepTypeIcon(step.type);
   const StIcon = statusIcon(status);
-  const merged: string[] = Array.isArray((step as any).config?.merged_from)
-    ? (step as any).config.merged_from
-    : [];
+  const merged: string[] = Array.isArray(step.config?.merged_from) ? step.config.merged_from : [];
   return (
     <div
       className={cls}
-      style={{ ["--gn-c" as any]: color }}
+      style={{ ["--gn-c" as string]: color }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         data.onPick?.(step.key);

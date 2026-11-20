@@ -112,6 +112,7 @@ import {
   saveSettings as saveProdErrorSettings,
   setIgnored,
   startScan,
+  type ScanPreset,
 } from "../prodErrors/scan.ts";
 import {
   adoptEnv,
@@ -308,7 +309,7 @@ export type Ctx = { p: string[]; body: any; url: URL; actor: Actor };
 export type Route = [method: string, pattern: RegExp, handler: (c: Ctx) => unknown];
 
 const support = (c: Ctx) => wantsSupport(c.actor, c.url.searchParams.get("scope"));
-const budgetOf = (body: any) => {
+const budgetOf = (body: { budget_usd?: unknown } | null | undefined) => {
   try {
     return parseBudget(body?.budget_usd);
   } catch (e) {
@@ -398,7 +399,7 @@ async function requireReviewer(c: Ctx, id: number, createsShared = false) {
 }
 
 /** After a rule change is applied: draft updates for the skills it affects (background, each needs its own approval). */
-const evolveSkillsAfter = (row: any) => {
+const evolveSkillsAfter = (row: { id: number; parent_id: number | null }) => {
   if (!row.parent_id && config.learning.evolveSkills)
     background(`skill evolution for proposal ${row.id}`, () => proposeSkillUpdates(Number(row.id)));
 };
@@ -423,14 +424,33 @@ async function readableKnowledge(c: Ctx, key: string) {
 
 /** Knowledge derived from a repository the caller cannot read answers 404, like any unknown item. */
 async function hideRestrictedKnowledge<
-  T extends { scope_type?: string; scope_ref?: string; versions?: Array<{ metadata?: any }> },
+  T extends {
+    scope_type?: string;
+    scope_ref?: string;
+    versions?: Array<{ metadata?: Record<string, unknown> | null }>;
+  },
 >(userId: number, item: T): Promise<T> {
   if (knowledgeRestricted(item, await readableRepositoryNames(userId)))
     throw new HttpError(404, "knowledge item not found");
   return item;
 }
 
-function redactGroup(group: any, actor: Actor, showAll: boolean) {
+type IncidentGroupLinks = {
+  work_item_id?: unknown;
+  work_item_code?: unknown;
+  work_item_title?: unknown;
+  work_item_status?: unknown;
+  work_item_owner_id?: unknown;
+  run_id?: unknown;
+  run_status?: unknown;
+  pull_requests?: unknown;
+};
+
+function redactGroup<G extends IncidentGroupLinks>(
+  group: G | null | undefined,
+  actor: Actor,
+  showAll: boolean,
+) {
   if (!group?.work_item_id) return group;
   const ownerId = group.work_item_owner_id == null ? null : Number(group.work_item_owner_id);
   if (ownerId === actor.id || (showAll && actor.role === "admin" && ownerId != null)) return group;
@@ -664,7 +684,10 @@ export const routes: Route[] = [
       try {
         return { valid: true, spec: validateSpec(body.spec) };
       } catch (e) {
-        return { valid: false, errors: (e as any).errors ?? [(e as Error).message] };
+        return {
+          valid: false,
+          errors: (e as { errors?: unknown }).errors ?? [(e as Error).message],
+        };
       }
     },
   ],
@@ -1269,7 +1292,7 @@ export const routes: Route[] = [
   // Agent session storage: disk usage, file age distribution and provider breakdown (read-only admin diagnostics, no contents or credentials).
   [
     "GET",
-    /^\/api\/(admin\/)?(agent-session-storage|session-storage)(\/diagnostics)?$/,
+    /^\/api\/admin\/agent-session-storage$/,
     async (c) => (requireAdmin(c.actor), agentSessionStorageDiagnostics()),
   ],
   // Autonomy: admins manage the policies; whoever may act on a run can pause or resume its autonomy.
@@ -1885,7 +1908,7 @@ export const routes: Route[] = [
       const visible = new Set(
         (await listAccessibleRepositories(actor.id)).map((m) => m.repository.name),
       );
-      return { enabled: true, repositories: rows.filter((r: any) => visible.has(r.name)) };
+      return { enabled: true, repositories: rows.filter((r) => visible.has(r.name)) };
     },
   ],
   [
@@ -2283,7 +2306,7 @@ export const routes: Route[] = [
       });
       return {
         ...data,
-        groups: (data.groups ?? []).map((g: any) => redactGroup(g, c.actor, support(c))),
+        groups: (data.groups ?? []).map((g) => redactGroup(g, c.actor, support(c))),
       };
     },
   ],
@@ -2302,7 +2325,7 @@ export const routes: Route[] = [
       requireAdmin(actor),
       startScan("manual", {
         namespaces: Array.isArray(body.namespaces) ? body.namespaces.map(String) : undefined,
-        preset: body.preset ? (String(body.preset) as any) : undefined,
+        preset: body.preset ? (String(body.preset) as ScanPreset) : undefined,
         from: body.from ? String(body.from) : undefined,
         to: body.to ? String(body.to) : undefined,
       })
@@ -2729,7 +2752,7 @@ function providerOf(body: { agent_provider?: unknown }) {
 
 export function errorStatus(e: unknown) {
   if (e instanceof HttpError || e instanceof EngineError) return e.status;
-  const code = (e as any)?.code;
+  const code = (e as { code?: unknown } | null | undefined)?.code;
   if (code === "23505") return 409; // unique violation
   if (code === "23503" || code === "23514" || code === "22P02") return 400;
   return 400;

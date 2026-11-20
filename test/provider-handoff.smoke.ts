@@ -1,5 +1,6 @@
 /** Actual UI/HTTP and durable jobs, deterministic adapters only; no paid provider calls. */
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -69,7 +70,7 @@ assert.ok(first);
 await processJob(first, "smoke", { leaseSeconds: 120, heartbeatSeconds: 1 });
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const output = resolve("docs/orchestration/phase5/screenshots");
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({

@@ -1,5 +1,6 @@
 /** Browser integration over existing durable benchmark jobs. Synthetic controls only, no live model calls. */
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -44,7 +45,7 @@ for (const variant of ["minimal", "pack", "tools"]) {
 }
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const output = resolve("docs/evaluation/phase6/screenshots");
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({
@@ -128,7 +129,7 @@ try {
   assert.equal(result.status(), 200);
   const body = result.request().postDataJSON();
   assert.deepEqual(
-    body.configuration.provider_sequence.map((p: any) => p.provider),
+    body.configuration.provider_sequence.map((p: { provider: string }) => p.provider),
     ["claude", "codex", "cursor"],
   );
   assert.equal(body.configuration.context_variant, "pack");

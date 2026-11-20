@@ -126,23 +126,24 @@ export function OfficeScene({
         walking={!!walking[role]}
         retrying={a.retrying}
         seated={!p.away && STATIONS[role].seated && !walking[role]}
-        hit={
-          {
-            role: "button",
-            tabIndex: 0,
-            "aria-label": a.detail,
-            "aria-pressed": selected === role,
-            className: `chibi-hit${selected === role ? " is-selected" : ""}`,
-            onClick: () => onSelect(role),
-            onKeyDown: (e: KeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") (e.preventDefault(), onSelect(role));
-            },
-            onMouseEnter: () => setHover(role),
-            onMouseLeave: () => setHover((h) => (h === role ? null : h)),
-            onFocus: () => setHover(role),
-            onBlur: () => setHover((h) => (h === role ? null : h)),
-          } as any
-        }
+        hit={{
+          role: "button",
+          tabIndex: 0,
+          "aria-label": a.detail,
+          "aria-pressed": selected === role,
+          className: `chibi-hit${selected === role ? " is-selected" : ""}`,
+          onClick: () => onSelect(role),
+          onKeyDown: (e: KeyboardEvent<SVGGElement>) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSelect(role);
+            }
+          },
+          onMouseEnter: () => setHover(role),
+          onMouseLeave: () => setHover((h) => (h === role ? null : h)),
+          onFocus: () => setHover(role),
+          onBlur: () => setHover((h) => (h === role ? null : h)),
+        }}
       />
     );
   };

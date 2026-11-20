@@ -72,6 +72,7 @@ import {
   evidenceDrift,
   normalizeVerdict,
   repairTargetFor,
+  type Finding,
 } from "../src/agent/independentReview.ts";
 import { repositories } from "../src/repos/service.ts";
 import { knowledge } from "../src/knowledge/service.ts";
@@ -90,6 +91,14 @@ import { costTotalsForRuns, runCost, workItemCost } from "../src/report/cost.ts"
 import { OPTIONS, setTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
 import { testExceptionsOf, prDescription } from "../src/workflow/executors/builtin.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
+import type { AddressInfo } from "node:net";
+import type { Evidence } from "../src/report/evidence.ts";
+import type { TaskReport } from "../src/report/build.ts";
+import type { FeedbackDecision, FeedbackMode } from "../src/workflow/replan.ts";
+import type { StepInput } from "../src/workflow/context.ts";
+
+type ReplanRecord = FeedbackDecision & { id: string; targets: string[]; invalidated: string[] };
+type DeveloperDecision = { step: string; text: string; by: string; at: string };
 
 // ---------------------------------------------------------------- fakes
 
@@ -166,7 +175,7 @@ const liveVerifier =
       n: number,
       ctx: ExecutionContext,
       evidence: { heads: Record<string, string>; text: string },
-    ) => any,
+    ) => unknown,
   ): Script =>
   async (ctx, n) => {
     const ws = (await workspacesOf(ctx.run.id))
@@ -205,7 +214,9 @@ setGitProvider({
     let sha = "";
     try {
       sha = gitIn(path, "rev-parse", `refs/heads/${branch}`);
-    } catch {}
+    } catch {
+      /* ignore: an unknown branch records an empty sha */
+    }
     pushed.push({ path, branch, sha });
     return { commits: "abc123 feat: change" };
   },
@@ -351,7 +362,7 @@ test("Scenario A: manual request through Feature Implementation to a Bitbucket P
   assert.equal(final.pull_requests[0].source_branch, final.branch);
   assert.equal(final.pull_requests[0].target_branch, "release/prod");
   assert.ok(
-    final.artifacts.some((a: any) => a.kind === "log"),
+    final.artifacts.some((a) => a.kind === "log"),
     "test command log stored",
   );
   for (const a of final.attempts)
@@ -1055,7 +1066,7 @@ test("context snapshots record applied knowledge versions and are immutable", as
     run.id,
   ]);
   assert.ok(
-    s1.content.knowledge.some((k: any) => k.key === "refund-once" && k.version === 1),
+    s1.content.knowledge.some((k: { key: string; version: number }) => k.key === "refund-once" && k.version === 1),
     "old snapshot unchanged",
   );
   await assert.rejects(
@@ -1149,8 +1160,8 @@ test("light lane: short steps are claimable while a long agent/command step hold
   const begun = (await beginAttempt(busy, "general"))!;
   assert.equal(begun.step.key, "long");
   const st = await schedulerStatus();
-  assert.ok(st.running.some((j: any) => j.run_id === r1.id && j.step_key === "long"));
-  assert.ok(st.queued.some((j: any) => j.run_id === r2.id));
+  assert.ok(st.running.some((j: { run_id: number; step_key: string }) => j.run_id === r1.id && j.step_key === "long"));
+  assert.ok(st.queued.some((j: { run_id: number }) => j.run_id === r2.id));
   assert.equal(
     await claimJob("light", 30, ["human_approval"]),
     undefined,
@@ -1184,7 +1195,7 @@ test("command output streams while running; Stop kills the whole process tree an
   const run = await startRun({ definitionKey: key });
   const t0 = Date.now();
   const worker = runOnce("w-cmd", { leaseSeconds: 30, heartbeatSeconds: 1 });
-  let logs: any[] = [];
+  let logs: Array<{ kind: string; content: string }> = [];
   for (let i = 0; i < 50 && !logs.some((e) => e.content.includes("started")); i++) {
     await new Promise((r) => setTimeout(r, 200));
     logs = await q(
@@ -1409,7 +1420,7 @@ test("context snapshot records the prompt plan; big upstream outputs are summari
   const { runMetrics, metricsSummary } = await import("../src/api/metrics.ts");
   assert.equal((await runMetrics(run.id)).totals.cost_usd, 0.42);
   const summary = await metricsSummary(1);
-  assert.ok(summary.tools.some((t: any) => t.tool === "Read"));
+  assert.ok(summary.tools.some((t: { tool: string }) => t.tool === "Read"));
 });
 
 // ---------------------------------------------------------------- Task Result Report
@@ -1471,7 +1482,7 @@ test("report step: appended to the run graph only, last, depending on every term
   );
   const def = (await definitions.get(key))!;
   assert.ok(
-    !def.versions[0].spec.steps.some((s: any) => s.key === REPORT_STEP_KEY),
+    !def.versions[0].spec.steps.some((s: { key: string }) => s.key === REPORT_STEP_KEY),
     "published definition is not mutated",
   );
   assert.equal(def.latest_version, 1);
@@ -1494,7 +1505,24 @@ test("report step: not added without ai_suggest, with null suggest, or an empty 
 test("report step: never inserted twice (idempotent; custom workflow that already has one)", async () => {
   const { parseAiSuggest } = await import("../src/report/aiSuggest.ts");
   const ai = parseAiSuggest({ task_ai: { ai_suggest: AI } });
-  const spec: any = { name: "x", steps: [{ key: "a", type: "agent", depends_on: [], config: {} }] };
+  const spec: WorkflowSpec = {
+    name: "x",
+    description: "",
+    inputs: {},
+    knowledge: [],
+    skills: [],
+    steps: [
+      {
+        key: "a",
+        type: "agent",
+        depends_on: [],
+        config: {},
+        requires_approval: false,
+        max_attempts: 1,
+        retry_backoff_seconds: 5,
+      },
+    ],
+  };
   const once = withReportStep(spec, ai);
   assert.equal(withReportStep(once, ai), once);
   assert.equal(once.steps.filter((s) => s.key === REPORT_STEP_KEY).length, 1);
@@ -1643,13 +1671,13 @@ test("report flow: draft waits for review (run not COMPLETED), evidence upload +
     "WAITING",
     "run is not COMPLETED while the report awaits review",
   );
-  let draft = rep.approval.request.report;
-  const reqs = draft.sections.flatMap((s: any) => s.requirements);
-  const shot = reqs.find((r: any) => r.text.startsWith("Ảnh chụp thông tin"));
-  const code = reqs.find((r: any) => r.text.startsWith("Ảnh chụp code"));
+  let draft: TaskReport = rep.approval.request.report;
+  const reqs = draft.sections.flatMap((s) => s.requirements);
+  const shot = reqs.find((r) => r.text.startsWith("Ảnh chụp thông tin"))!;
+  const code = reqs.find((r) => r.text.startsWith("Ảnh chụp code"))!;
   assert.equal(shot.status, "MISSING", "fake reasoner said VERIFIED, rules say no screenshot");
   assert.equal(code.status, "VERIFIED");
-  assert.ok(!code.evidence.some((e: any) => e.id === "E999"));
+  assert.ok(!code.evidence.some((e) => e.id === "E999"));
   assert.ok(rep.approval.request.markdown.includes("❌ **THIẾU**"));
   const drafts1 = await q(
     pool,
@@ -1679,7 +1707,7 @@ test("report flow: draft waits for review (run not COMPLETED), evidence upload +
   rep = await stepOf(run.id, REPORT_STEP_KEY);
   draft = rep.approval.request.report;
   assert.equal(
-    draft.sections.flatMap((s: any) => s.requirements).find((r: any) => r.id === shot.id).status,
+    draft.sections.flatMap((s) => s.requirements).find((r) => r.id === shot.id)!.status,
     "VERIFIED",
   );
   assert.equal(
@@ -1743,7 +1771,7 @@ test("report: re-executing an upstream step invalidates the report; the new draf
   await drain();
   const first = await stepOf(run.id, REPORT_STEP_KEY);
   assert.ok(
-    first.approval.request.evidence.some((e: any) => e.detail.includes("implementation v1")),
+    first.approval.request.evidence.some((e: Evidence) => e.detail.includes("implementation v1")),
   );
   version = 2;
   await reexecuteStep(run.id, "implement", { feedback: "again" });
@@ -1754,8 +1782,8 @@ test("report: re-executing an upstream step invalidates the report; the new draf
   const second = await stepOf(run.id, REPORT_STEP_KEY);
   const ev = second.approval.request.evidence;
   assert.ok(
-    ev.some((e: any) => e.detail.includes("implementation v2")) &&
-      !ev.some((e: any) => e.detail.includes("implementation v1")),
+    ev.some((e: Evidence) => e.detail.includes("implementation v2")) &&
+      !ev.some((e: Evidence) => e.detail.includes("implementation v1")),
   );
   // approving now finalizes from the CURRENT generation's draft, not the invalidated one
   await approveStep(run.id, REPORT_STEP_KEY, {});
@@ -1834,11 +1862,12 @@ test("AUTO profile: small known-repo bug runs FAST (one Claude step instead of f
   assert.equal(run.profile, "FAST");
   assert.deepEqual(
     run.steps.map((s) => s.key),
-    prev.graph.steps.map((s: any) => s.key),
+    prev.graph.steps.map((s) => s.key),
   );
   assert.equal(run.steps.filter((s) => s.type === "agent" || s.type === "coding_agent").length, 1);
-  assert.equal((run.graph as any).profile, "FAST");
-  assert.ok((run.graph as any).profile_changes.length >= 4);
+  const graph = run.graph as WorkflowSpec & { profile: string; profile_changes: unknown[] };
+  assert.equal(graph.profile, "FAST");
+  assert.ok(graph.profile_changes.length >= 4);
   scripts.implement = codingDone;
   await drain();
   // confirm_repos auto-approved (repository known), PR gate still waits for a human
@@ -2053,16 +2082,23 @@ test("work item description: manual edits survive re-import and reach the agent 
     "manual edit wins over a later imported note",
   );
   const wi = (await workItems.get(item.id))!;
-  const prompt = buildUserPrompt(
-    {
-      run: { inputs: {}, selected_repositories: [] },
-      work_item: wi,
-      upstream: {},
-      answers: [],
-      pending: null,
-    } as any,
-    [],
-  );
+  const input: StepInput = {
+    run: {
+      id: 0,
+      title: "",
+      inputs: {},
+      branch: "",
+      definition_key: "",
+      selected_repositories: [],
+      allowed_repositories: [],
+    },
+    work_item: wi,
+    upstream: {},
+    answers: [],
+    pending: null,
+    approval: null,
+  };
+  const prompt = buildUserPrompt(input, []);
   assert.match(prompt, /GHN callback/);
 });
 
@@ -2070,7 +2106,12 @@ test("work item description: manual edits survive re-import and reach the agent 
 test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, deep link to the step, never fails the workflow", async () => {
   const { createServer } = await import("node:http");
   const { config } = await import("../src/config.ts");
-  const msgs: any[] = [];
+  const msgs: Array<{
+    path?: string;
+    chat_id?: string;
+    text: string;
+    reply_markup?: { inline_keyboard: Array<Array<{ text: string; url?: string }>> };
+  }> = [];
   let status = 200;
   const srv = createServer((req, res) => {
     let body = "";
@@ -2090,7 +2131,7 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
       });
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
-  const port = (srv.address() as any).port;
+  const port = (srv.address() as AddressInfo).port;
   const saved = { ...config.telegram, publicUrl: config.publicUrl };
   Object.assign(config.telegram, {
     botToken: "TEST:TOKEN",
@@ -2152,7 +2193,7 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     assert.equal(msgs.length, 2, "WAITING_APPROVAL → one more message");
     assert.match(msgs[1].text, /CẦN BẠN DUYỆT/);
     assert.match(msgs[1].text, /Duyệt kế hoạch fix/);
-    assert.deepEqual(msgs[1].reply_markup.inline_keyboard[0][0], {
+    assert.deepEqual(msgs[1].reply_markup!.inline_keyboard[0][0], {
       text: "Mở để duyệt",
       url: `https://platform.example.com/#/runs/${run.id}/approve`,
     });
@@ -2163,7 +2204,7 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     await drain();
     assert.equal(msgs.length, 3, "approval gate (requires_approval) → one message");
     assert.equal(
-      msgs[2].reply_markup.inline_keyboard[0][0].url,
+      msgs[2].reply_markup!.inline_keyboard[0][0].url,
       `https://platform.example.com/#/runs/${run.id}/gated`,
     );
     assert.equal((await stepOf(run.id, "gated")).status, "WAITING_APPROVAL");
@@ -2416,7 +2457,7 @@ test("test failure 3/4: old + new failures shown separately; rerun creates a new
   assert.equal(d.counts.pre_existing, 1);
   assert.equal(d.counts.new, 1);
   assert.equal(d.all_pre_existing, false);
-  assert.deepEqual(d.failures.map((f: any) => `${f.test}:${f.category}`).sort(), [
+  assert.deepEqual(d.failures.map((f: { test: string; category: string }) => `${f.test}:${f.category}`).sort(), [
     "TestAdd:new",
     "TestNeedsDB:pre_existing",
   ]);
@@ -2455,7 +2496,7 @@ test("test failure 4/4: waiting state survives a restart (all in PostgreSQL); du
   // "restart": nothing in memory is needed — question, diagnosis and checkpoint are read back from the database
   const detail = await stepDetail(run.id, "test");
   assert.equal(detail.step.status, "WAITING_INPUT");
-  assert.equal(detail.questions.filter((x: any) => x.status === "open").length, 1);
+  assert.equal(detail.questions.filter((x) => x.status === "open").length, 1);
   assert.partialDeepStrictEqual(detail.checkpoints.at(-1), {
     data: { test_failure: { counts: { pre_existing: 1 } } },
   });
@@ -2521,7 +2562,7 @@ test("re-execute with instructions + skill: stored before enqueue, pinned versio
     "Xem lại call sang service B. Dữ liệu đã có trong payload",
   );
   assert.deepEqual(
-    pendingNow.reexecute.skills.map((x: any) => `${x.key}@${x.version}`),
+    pendingNow.reexecute.skills.map((x: { key: string; version: number }) => `${x.key}@${x.version}`),
     [`latency-service-boundaries@${skill.current_version}`],
   );
   // the skill changes before the job runs (e.g. worker restarted) → the pinned version is still used
@@ -2657,7 +2698,7 @@ test("existing-branch directive in the work item description lands in run.inputs
 // ---------------------------------------------------------------- independent verification + failure recovery
 /** Mirrors the Claude executor's enforcement for a scripted verifier verdict. */
 const verifier =
-  (verdictFor: (n: number, ctx: ExecutionContext) => any): Script =>
+  (verdictFor: (n: number, ctx: ExecutionContext) => unknown): Script =>
   async (ctx, n) => {
     const used = (
       await one(
@@ -2723,14 +2764,14 @@ test("independent verification: STANDARD isolates the verifier, FAIL repairs the
     );
     return n < 3 ? FAIL : { verdict: "PASS", findings: [], summary: "ok" };
   });
-  const run = await startRun({ definitionKey: key, title: "iv", profile: "STANDARD" } as any);
+  const run = await startRun({ definitionKey: key, title: "iv", profile: "STANDARD" });
   await drain();
   assert.equal((await stepOf(run.id, "review")).status, "COMPLETED");
   assert.equal((await stepOf(run.id, "review")).output.verdict, "PASS");
   assert.deepEqual((await stepOf(run.id, "review")).output.verified_heads, { svc: "sha3" });
   // count per run: drain() also executes leftover jobs of earlier tests
   assert.deepEqual(
-    (await attemptsOf(run.id, "review")).map((a: any) => a.output?.verdict),
+    (await attemptsOf(run.id, "review")).map((a: { output: { verdict?: string } | null }) => a.output?.verdict),
     ["FAIL", "FAIL", "PASS"],
   );
   assert.equal((await attemptsOf(run.id, "implement")).length, 3, "two repair rounds");
@@ -2756,7 +2797,7 @@ test("independent verification: repair budget exhausted → FAILED, downstream n
     { feedback_step: "implement" },
   );
   scripts.review = verifier(() => FAIL);
-  const run = await startRun({ definitionKey: key, title: "iv2", profile: "STANDARD" } as any);
+  const run = await startRun({ definitionKey: key, title: "iv2", profile: "STANDARD" });
   await drain();
   const review = await stepOf(run.id, "review");
   assert.equal(review.status, "FAILED");
@@ -2771,7 +2812,7 @@ test("independent verification: repair budget exhausted → FAILED, downstream n
     blocked_reason: "no acceptance criteria for installment refunds",
     findings: [],
   }));
-  const run2 = await startRun({ definitionKey: key, title: "iv3", profile: "STANDARD" } as any);
+  const run2 = await startRun({ definitionKey: key, title: "iv3", profile: "STANDARD" });
   await drain();
   assert.equal((await stepOf(run2.id, "review")).status, "WAITING_INPUT");
   const qs = await openQ(run2.id);
@@ -2783,7 +2824,7 @@ test("failure recovery: auth stops at once, workspace conflict pauses for a huma
     { key: "a", type: "agent", max_attempts: 3, retry_backoff_seconds: 0 },
   ]);
   scripts.a = () => ({ kind: "failed", error: "Bitbucket HTTP 401 Unauthorized", retryable: true });
-  const r1 = await startRun({ definitionKey: key, title: "auth" } as any);
+  const r1 = await startRun({ definitionKey: key, title: "auth" });
   await drain();
   assert.equal((await stepOf(r1.id, "a")).status, "FAILED");
   assert.equal((await attemptsOf(r1.id, "a")).length, 1, "no pointless retries of an auth error");
@@ -2794,7 +2835,7 @@ test("failure recovery: auth stops at once, workspace conflict pauses for a huma
     (tries[ctx.run.id] = (tries[ctx.run.id] ?? 0) + 1) === 1
       ? { kind: "failed", error: "push rejected (non-fast-forward)", retryable: true }
       : { kind: "completed", output: { ok: true } };
-  const r2 = await startRun({ definitionKey: key, title: "conflict" } as any);
+  const r2 = await startRun({ definitionKey: key, title: "conflict" });
   await drain();
   assert.equal((await stepOf(r2.id, "a")).status, "WAITING_INPUT");
   const q2 = await openQ(r2.id);
@@ -2804,7 +2845,7 @@ test("failure recovery: auth stops at once, workspace conflict pauses for a huma
   assert.equal((await stepOf(r2.id, "a")).status, "COMPLETED", "resumed after the human fixed it");
 
   scripts.a = () => ({ kind: "failed", error: "merge conflict in go.mod", retryable: true });
-  const r3 = await startRun({ definitionKey: key, title: "conflict-stop" } as any);
+  const r3 = await startRun({ definitionKey: key, title: "conflict-stop" });
   await drain();
   const q3 = await openQ(r3.id);
   await answerQuestions({ [q3[0].id]: "Dừng ở đây" }, "dev");
@@ -2819,7 +2860,7 @@ test("failure recovery: auth stops at once, workspace conflict pauses for a huma
     error: "429 Too Many Requests: rate limit",
     retryable: true,
   });
-  const r4 = await startRun({ definitionKey: key1, title: "rate" } as any);
+  const r4 = await startRun({ definitionKey: key1, title: "rate" });
   await drain();
   assert.equal(
     (await stepOf(r4.id, "a")).status,
@@ -2858,7 +2899,7 @@ test("workspace conflict: pause costs no retry budget, the release option become
       ? { kind: "failed", error: "ECONNRESET", retryable: true }
       : { kind: "completed", output: { ok: true } };
   };
-  const run = await startRun({ definitionKey: key, title: "ws-release" } as any);
+  const run = await startRun({ definitionKey: key, title: "ws-release" });
   await drain();
   let step = await stepOf(run.id, "a");
   assert.equal(step.status, "WAITING_INPUT");
@@ -2877,7 +2918,7 @@ test("workspace conflict: pause costs no retry budget, the release option become
   assert.equal(pendings.at(-1)?.workspace_release?.approved_by, "dev");
 
   scripts.a = () => workspaceConflictQuestion([{ ...conflict, release: "never" }], false);
-  const blocked = await startRun({ definitionKey: key, title: "ws-never" } as any);
+  const blocked = await startRun({ definitionKey: key, title: "ws-never" });
   await drain();
   const [q2] = await openQ(blocked.id);
   assert.ok(
@@ -2940,7 +2981,10 @@ test("cross-task memory: only verified/approved AND provably FRESH memory reache
     await mk("memory.t5.oms-api.facts", meta("verified", { commit_sha: "f".repeat(40) })); // commit not in this clone → UNKNOWN
     const key = await customWorkflow([{ key: "a", type: "agent" }]);
     let keys: string[] = [];
-    let plan: any = null;
+    let plan: {
+      memory_freshness: Array<{ key: string; state: string }>;
+      memory_excluded: string[];
+    } | null = null;
     scripts.a = async (ctx) => {
       keys = ctx.context.disclosure.map((d) => d.key);
       plan = (
@@ -2954,7 +2998,7 @@ test("cross-task memory: only verified/approved AND provably FRESH memory reache
       definitionKey: key,
       title: "cancel shipment refund",
       repositories: ["oms-api"],
-    } as any);
+    });
     await drain();
     assert.ok(keys.includes("memory.t1.oms-api.facts"));
     assert.ok(
@@ -2971,16 +3015,16 @@ test("cross-task memory: only verified/approved AND provably FRESH memory reache
     // (memory extracted by earlier tests' runs points at other clones: also UNKNOWN → excluded; only this test's keys are asserted)
     const mine = (k: string) => k.startsWith("memory.t");
     assert.ok(
-      plan.memory_freshness.filter((m: any) => !mine(m.key)).every((m: any) => m.state !== "FRESH"),
+      plan!.memory_freshness.filter((m) => !mine(m.key)).every((m) => m.state !== "FRESH"),
     );
-    assert.deepEqual([...plan.memory_excluded].filter(mine).sort(), [
+    assert.deepEqual([...plan!.memory_excluded].filter(mine).sort(), [
       "memory.t1.oms-api.conclusions",
       "memory.t3.oms-api.facts",
       "memory.t4.oms-api.facts",
       "memory.t5.oms-api.facts",
     ]);
     const state = Object.fromEntries(
-      plan.memory_freshness.filter((m: any) => mine(m.key)).map((m: any) => [m.key, m.state]),
+      plan!.memory_freshness.filter((m) => mine(m.key)).map((m) => [m.key, m.state]),
     );
     assert.deepEqual(state, {
       "memory.t1.oms-api.facts": "FRESH",
@@ -3017,9 +3061,9 @@ test("cross-task memory: a COMPLETED run with a worktree yields verified facts +
   execFileSync("git", ["clone", "-q", origin, wt]);
   sh(wt, "checkout", "-qb", "release/prod");
   writeFileSync(join(wt, "a.go"), "package a\n");
-  (sh(wt, "add", "."),
-    sh(wt, "commit", "-qm", "base"),
-    sh(wt, "push", "-q", "origin", "release/prod"));
+  sh(wt, "add", ".");
+  sh(wt, "commit", "-qm", "base");
+  sh(wt, "push", "-q", "origin", "release/prod");
   sh(wt, "checkout", "-qb", "T");
   writeFileSync(join(wt, "a.go"), "package a\n// change\n");
   sh(wt, "commit", "-qam", "change");
@@ -3043,7 +3087,7 @@ test("cross-task memory: a COMPLETED run with a worktree yields verified facts +
     definitionKey: key,
     title: "memory run",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   assert.equal((await getRun(run.id)).status, "COMPLETED");
   await extractRunMemory(run.id); // idempotent with the afterCommit hook
@@ -3076,17 +3120,19 @@ const ACCEPTANCE: Array<[number, number, number]> = [
   [500, 1, 500],
 ];
 const refundVerifier = liveVerifier((_n, ctx, ev) => {
-  const findings: any[] = [];
+  const findings: Finding[] = [];
   for (const [repo, head] of Object.entries(ev.heads)) {
     const src = execFileSync(
       "git",
       ["-C", workspacePath[`${ctx.run.id}:${repo}`], "show", `${head}:refund.js`],
       { encoding: "utf8" },
     );
-    const mod: any = { exports: null };
+    const mod: { exports: ((amount: number, installments: number) => number) | null } = {
+      exports: null,
+    };
     new Function("module", src)(mod);
     for (const [amount, n, want] of ACCEPTANCE) {
-      const got = mod.exports(amount, n);
+      const got = mod.exports!(amount, n);
       if (got !== want)
         findings.push({
           severity: "high",
@@ -3163,9 +3209,9 @@ test("e2e: the verifier catches the defect, FAIL blocks the PR and triggers a bo
     title: "installment refunds",
     profile: "STANDARD",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
-  const verdicts = (await attemptsOf(run.id, "review")).map((a: any) => a.output?.verdict);
+  const verdicts = (await attemptsOf(run.id, "review")).map((a: { output: { verdict?: string } | null }) => a.output?.verdict);
   assert.deepEqual(verdicts, ["FAIL", "PASS"], "defect caught, then the repaired code passes");
   assert.match(
     String((await attemptsOf(run.id, "review"))[0].output.findings[0].explanation),
@@ -3201,7 +3247,7 @@ test("e2e: a defect that survives every repair exhausts the bounded budget — F
     title: "still broken",
     profile: "STANDARD",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   assert.equal(
     (await attemptsOf(run.id, "review")).length,
@@ -3231,7 +3277,7 @@ test("e2e: changing the code after a PASS invalidates it — the PR is refused u
     title: "late edit",
     profile: "STANDARD",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   assert.equal((await stepOf(run.id, "review")).output.verdict, "PASS");
   assert.equal((await stepOf(run.id, "pr")).status, "WAITING_APPROVAL");
@@ -3270,7 +3316,7 @@ test("e2e: changing the code after a PASS invalidates it — the PR is refused u
   // 3. re-verification judges the NEW commit: it is defective → FAIL → repair → PASS → PR (re-approved) publishes it
   await reexecuteStep(run.id, "review", { by: "dev" });
   await drain();
-  const verdicts = (await attemptsOf(run.id, "review")).map((a: any) => a.output?.verdict);
+  const verdicts = (await attemptsOf(run.id, "review")).map((a: { output: { verdict?: string } | null }) => a.output?.verdict);
   assert.deepEqual(
     verdicts.slice(-2),
     ["FAIL", "PASS"],
@@ -3305,7 +3351,7 @@ test("e2e: verification never judges uncommitted work; optional (opted-out) veri
     title: "dirty",
     profile: "STANDARD",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   const review = await stepOf(run.id, "review");
   assert.equal(review.status, "WAITING_INPUT");
@@ -3336,7 +3382,7 @@ test("e2e: verification never judges uncommitted work; optional (opted-out) veri
     title: "optional",
     profile: "STANDARD",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   assert.equal((await stepOf(run2.id, "review")).config.independent, false);
   assert.equal((await stepOf(run2.id, "pr")).status, "COMPLETED");
@@ -3473,7 +3519,7 @@ test("dropped database connections mid-step (Wi-Fi/VPN blip) do not fail the ste
     [run.id],
   );
   assert.deepEqual(
-    logs.map((l: any) => l.content),
+    logs.map((l: { content: string }) => l.content),
     ["before the network drop", "after the network drop"],
   );
 });
@@ -3558,7 +3604,7 @@ test("code-review without repositories asks which to review (instead of failing)
   );
   assert.equal(sel.approval?.request?.select_repositories, true);
   assert.ok(
-    (sel.approval?.request?.candidates ?? []).some((c: any) => c.repo === "oms-api"),
+    (sel.approval?.request?.candidates ?? []).some((c: { repo: string }) => c.repo === "oms-api"),
     "the project's repositories are offered",
   );
   await assert.rejects(approveStep(run.id, "select", {}), /select at least one repository/);
@@ -3679,7 +3725,7 @@ test("code review: a different branch per repository (and none = base) for revie
   const run = await startRun({ definitionKey: "code-review", inputs: { focus: "split" } });
   await drain();
   const candidates = ((await stepOf(run.id, "select")).approval?.request?.candidates ?? []).map(
-    (c: any) => c.repo,
+    (c: { repo: string }) => c.repo,
   );
   assert.ok(candidates.length >= 3, `need three candidate repositories, got ${candidates}`);
   const [a, b, c] = candidates;
@@ -4075,7 +4121,7 @@ test("hardening: an undeclared out-of-scope change blocks the PR even when the r
     title: "scoped fix",
     profile: "STANDARD",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   assert.equal(
     (await stepOf(run.id, "review")).output?.verdict,
@@ -4124,7 +4170,7 @@ test("hardening: a PR is never published from a commit other than the tested one
     definitionKey: key,
     title: "untested",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   const pr = await stepOf(run.id, "pr");
   assert.equal(pr.status, "FAILED");
@@ -4139,7 +4185,7 @@ test("hardening: a PR is never published from a commit other than the tested one
     definitionKey: key,
     title: "untracked",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   const pr2 = await stepOf(run2.id, "pr");
   assert.equal(pr2.status, "FAILED");
@@ -4225,7 +4271,7 @@ test("quality loop: outcome ladder, PR merge sync, reviewed improvement proposal
       workItemId: wi.id,
       title,
       repositories: ["oms-api"],
-    } as any);
+    });
     await drain();
     return { run, wi };
   };
@@ -4421,7 +4467,7 @@ test("smart verification: an identical passing test on the same clean commit is 
     definitionKey: key,
     title: "reuse",
     repositories: ["oms-api"],
-  } as any);
+  });
   await drain();
   assert.equal(runs(), 1);
   await reexecuteStep(run.id, "implement"); // same commit afterwards
@@ -4454,7 +4500,7 @@ test("routing guard rails: HIGH_RISK refuses FAST, records the class; provider r
     repositories: ["oms-api"],
     profile: "FAST",
     start: false,
-  } as any);
+  });
   const decision = await one(
     pool,
     "SELECT profile, profile_decision FROM workflow_runs WHERE id = $1",
@@ -4470,7 +4516,7 @@ test("routing guard rails: HIGH_RISK refuses FAST, records the class; provider r
     profile: "FAST",
     inputs: { complexity: "TRIVIAL" },
     start: false,
-  } as any);
+  });
   const od = await one(pool, "SELECT profile, profile_decision FROM workflow_runs WHERE id = $1", [
     overridden.id,
   ]);
@@ -4540,7 +4586,7 @@ test("re-execute instructions are kept as run-level developer decisions: later s
   // …then the implement step re-runs (e.g. the automatic review → implement loop): fresh input, no pending reexecute.
   await reexecuteStep(run.id, "implement");
   await drain();
-  const decisions = (await getRun(run.id)).inputs.developer_decisions as any[];
+  const decisions = (await getRun(run.id)).inputs.developer_decisions as DeveloperDecision[];
   assert.equal(decisions.length, 1);
   assert.equal(decisions[0].step, "review");
   const lastReview = seen.review.filter((c) => c.run.id === run.id).at(-1)!;
@@ -4566,7 +4612,7 @@ test("re-execute instructions are kept as run-level developer decisions: later s
   // Advice meant for one re-execution only is not kept.
   await reexecuteStep(run.id, "review", { feedback: "thử ngắn gọn hơn", persist: false });
   await drain();
-  assert.equal(((await getRun(run.id)).inputs.developer_decisions as any[]).length, 1);
+  assert.equal(((await getRun(run.id)).inputs.developer_decisions as DeveloperDecision[]).length, 1);
 });
 
 // ---------------------------------------------------------------- feedback-driven replanning
@@ -4612,7 +4658,7 @@ test("feedback: a design change plus a missing repository restarts from discover
       { by: "dev" },
     );
     let r = await getRun(run.id);
-    const replan = (r.inputs.replans as any[]).at(-1);
+    const replan = (r.inputs.replans as ReplanRecord[]).at(-1)!;
     assert.equal(replan.route, "restart", "design change + unselected repository → full replan");
     assert.equal(replan.source, "model");
     assert.deepEqual(replan.signals.unselected_repositories, ["oms-frontend"]);
@@ -4629,7 +4675,7 @@ test("feedback: a design change plus a missing repository restarts from discover
       assert.ok(replan.invalidated.includes(k), `${k} invalidated`);
     assert.match(prompt, /untrusted_input source="feedback"/);
     assert.match(
-      (r.inputs.developer_decisions as any[]).at(-1).text,
+      (r.inputs.developer_decisions as DeveloperDecision[]).at(-1)!.text,
       /Create Global Return Shipment/,
       "the feedback binds every later step",
     );
@@ -4683,7 +4729,7 @@ test("feedback: a small code fix re-runs only the coding step and its dependants
   const before = Object.fromEntries((await getRun(run.id)).steps.map((s) => [s.key, s.generation]));
   await sendFeedback(run.id, "đổi tên biến shipmentID cho đúng convention"); // no model: fallback cues
   const r = await getRun(run.id);
-  const replan = (r.inputs.replans as any[]).at(-1);
+  const replan = (r.inputs.replans as ReplanRecord[]).at(-1)!;
   assert.equal(replan.route, "reimplement");
   assert.equal(replan.source, "heuristic");
   assert.deepEqual(replan.targets, ["implement"]);
@@ -4700,21 +4746,22 @@ test("feedback: explicit Re-plan keeps the repository selection; a duplicate sub
   const run = await featureRunAtPr("Explicit replan");
   await sendFeedback(run.id, "xem lại phương án", { mode: "replan" });
   let r = await getRun(run.id);
-  assert.deepEqual((r.inputs.replans as any[]).at(-1).targets, ["plan"]);
+  assert.deepEqual((r.inputs.replans as ReplanRecord[]).at(-1)!.targets, ["plan"]);
   assert.equal(
     r.steps.find((s) => s.key === "confirm_repos")!.status,
     "COMPLETED",
     "selection reused",
   );
-  const count = (r.inputs.replans as any[]).length;
+  const count = (r.inputs.replans as ReplanRecord[]).length;
   await assert.rejects(
     sendFeedback(run.id, "xem lại phương án", { mode: "replan" }),
     /only .* steps can be re-executed/,
   );
   r = await getRun(run.id);
-  assert.equal((r.inputs.replans as any[]).length, count, "the rejected submit left no record");
+  assert.equal((r.inputs.replans as ReplanRecord[]).length, count, "the rejected submit left no record");
+  const bogusMode: string = "bogus";
   await assert.rejects(
-    sendFeedback(run.id, "x", { mode: "bogus" as any }),
+    sendFeedback(run.id, "x", { mode: bogusMode as FeedbackMode }),
     /unknown feedback mode/,
   );
 });
@@ -4727,7 +4774,7 @@ test("re-execute: skills that the run cannot load are refused; a retry keeps the
     title: "off",
     content: "x",
     change_note: "test",
-  } as any);
+  });
   await q(pool, "UPDATE knowledge_items SET enabled = false WHERE key = 'test.skill.off'");
   await knowledge.create({
     key: "test.skill.on",
@@ -4736,7 +4783,7 @@ test("re-execute: skills that the run cannot load are refused; a retry keeps the
     title: "on",
     content: "y",
     change_note: "test",
-  } as any);
+  });
   scripts.implement = codingDone;
   const key = await customWorkflow([{ key: "implement", type: "coding_agent" }]);
   const run = await startRun({
@@ -4756,7 +4803,7 @@ test("re-execute: skills that the run cannot load are refused; a retry keeps the
   await retryStep(run.id, "implement");
   const pinned = (await stepOf(run.id, "implement")).pending_input.reexecute.skills;
   assert.deepEqual(
-    pinned.map((s: any) => s.key),
+    pinned.map((s: { key: string }) => s.key),
     ["test.skill.on"],
     "the retry keeps the skills pinned for this re-execution",
   );

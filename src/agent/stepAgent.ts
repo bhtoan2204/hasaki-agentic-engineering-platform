@@ -34,8 +34,12 @@ export const FallbackPolicy = z
   })
   .strict();
 export type FallbackPolicy = z.infer<typeof FallbackPolicy>;
-export const fallbackPolicy = (step: { config: Record<string, any> }) =>
-  FallbackPolicy.parse(step.config.agent?.fallback ?? step.config.fallback ?? {});
+export const fallbackPolicy = (step: { config: Record<string, unknown> }) => {
+  const agent = step.config.agent;
+  const fallback =
+    agent && typeof agent === "object" && "fallback" in agent ? agent.fallback : undefined;
+  return FallbackPolicy.parse(fallback ?? step.config.fallback ?? {});
+};
 
 export const StepAgentConfig = z
   .object({
@@ -212,7 +216,7 @@ export function resolveStepAgent(
     profile?: string | null;
     agent_configuration?: AgentConfiguration | null;
   },
-  step: { type: string; config: Record<string, any>; agent_override?: unknown },
+  step: { type: string; config: Record<string, unknown>; agent_override?: unknown },
 ): EffectiveAgent | null {
   if (!["agent", "coding_agent"].includes(step.type)) return null;
   step = { ...step, config: step.config ?? {} };
@@ -272,9 +276,9 @@ export function resolveStepAgent(
 }
 
 export function effectiveStepConfig(
-  config: Record<string, any>,
+  config: Record<string, unknown>,
   a: EffectiveAgent | null,
-): Record<string, any> {
+): Record<string, unknown> {
   if (!a) return config;
   return {
     ...config,

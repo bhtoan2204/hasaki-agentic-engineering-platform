@@ -237,7 +237,10 @@ test("delete: a skill goes with its supporting files, leaves a tombstone, and ne
     "supporting files are deleted with the skill",
   );
   const tomb = (
-    await q<any>(pool, "SELECT * FROM knowledge_deletions WHERE key = 'skill.del-me'")
+    await q<{ reason: string; snapshot: { versions: Array<{ content: string }> } }>(
+      pool,
+      "SELECT * FROM knowledge_deletions WHERE key = 'skill.del-me'",
+    )
   )[0];
   assert.equal(tomb.reason, "unused");
   assert.equal(

@@ -43,7 +43,7 @@ try {
     persist: !args.includes("--once"),
   });
   const run = await getRun(runId);
-  const steps = (run.steps as any[]).map((s) => `${s.key}=${s.status}`).join("  ");
+  const steps = run.steps.map((s) => `${s.key}=${s.status}`).join("  ");
   const decisions = (run.inputs?.developer_decisions ?? []) as unknown[];
   console.log(`run #${runId} re-executed from "${step}" → run ${run.status}`);
   console.log(`steps: ${steps}`);

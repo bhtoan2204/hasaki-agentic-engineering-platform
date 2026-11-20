@@ -87,14 +87,14 @@ export async function checkpointStage(s: LifecycleState): Promise<ExecResult | v
         ? [
             scopeNow.proposal_hash,
             Object.values(ctx.input.upstream).map(
-              (u: any) => u.output?.scope_check?.reapproved?.revision ?? null,
+              (u) => u.output?.scope_check?.reapproved?.revision ?? null,
             ),
           ]
         : null,
       stepConfig: ctx.step.config,
       provider,
     });
-    const prior = await one<{ id: number; output: any }>(
+    const prior = await one<{ id: number; output: Record<string, unknown> }>(
       pool,
       "SELECT id, output FROM workflow_step_attempts WHERE step_id = $1 AND status = 'COMPLETED' AND output->>'verification_key' = $2 ORDER BY id DESC LIMIT 1",
       [ctx.step.id, reviewKey],
@@ -132,7 +132,7 @@ export async function checkpointStage(s: LifecycleState): Promise<ExecResult | v
     const checkpoint = humanAsked
       ? null
       : incrementalCheckpoint(
-          await one<{ id: number; output: any }>(
+          await one<{ id: number; output: unknown }>(
             pool,
             `SELECT a.id, a.output FROM workflow_step_attempts a
               WHERE a.step_id = $1 AND a.output->>'verdict' IS NOT NULL AND ${SINCE_HUMAN_REEXECUTE}

@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
+import type { ProfileChoice } from "../workflow/profiles.ts";
 
 const args = Object.fromEntries(
   process.argv
@@ -238,7 +239,7 @@ async function acceptance(runId: number, checks: Acceptance[] | undefined) {
     "SELECT repo, path FROM execution_workspaces WHERE run_id = $1 ORDER BY id DESC",
     [runId],
   );
-  return gradeIn((repo) => ws.find((w: any) => w.repo === repo)?.path ?? null, checks);
+  return gradeIn((repo) => ws.find((w) => w.repo === repo)?.path ?? null, checks);
 }
 
 const SCENARIOS: Record<
@@ -307,7 +308,7 @@ async function drive(runId: number, timeoutMs: number) {
         );
         await answerQuestions(
           Object.fromEntries(
-            qs.map((x: any) => [
+            qs.map((x) => [
               x.id,
               x.options?.[0] ?? "Use your best judgement; keep the change minimal.",
             ]),
@@ -322,7 +323,12 @@ async function drive(runId: number, timeoutMs: number) {
   return "TIMEOUT";
 }
 
-const results: any[] = [];
+interface BenchRow extends Record<string, unknown> {
+  repairs?: number;
+  human_gates?: number;
+  cost_usd_est?: number | null;
+}
+const results: BenchRow[] = [];
 let seq = 0;
 for (const sk of args.candidate === "claude-cli"
   ? []
@@ -345,14 +351,14 @@ for (const sk of args.candidate === "claude-cli"
       definitionKey: sc.workflow,
       workItemId: item.id,
       repositories: sc.repositories,
-      profile: profile as any,
+      profile: profile as ProfileChoice,
     });
-    const row: any = {
+    const row: BenchRow = {
       scenario: `${sk}. ${sc.name}`,
       requested: profile,
       profile: prev.profile.profile,
       steps: prev.graph.steps.length,
-      ai_steps: prev.graph.steps.filter((s: any) => s.type === "agent" || s.type === "coding_agent")
+      ai_steps: prev.graph.steps.filter((s) => s.type === "agent" || s.type === "coding_agent")
         .length,
       reasons: prev.profile.reasons.join("; "),
     };
@@ -361,7 +367,7 @@ for (const sk of args.candidate === "claude-cli"
         definitionKey: sc.workflow,
         workItemId: item.id,
         repositories: sc.repositories,
-        profile: profile as any,
+        profile: profile as ProfileChoice,
       });
       const status = await drive(run.id, Number(args.timeout ?? 1_200_000));
       const m = await runMetrics(run.id);
@@ -464,7 +470,12 @@ if (args.candidate === "claude-cli") {
     execFileSync("git", ["clone", "-q", join(repos, repo), dir]);
     const prompt = `${sc.task.name}\n\n${sc.task.note}\n\nChange the code in this repository to complete the task, keep the change minimal, run the tests, and commit.`;
     const t0 = Date.now();
-    let out: any = {};
+    let out: {
+      is_error?: boolean;
+      total_cost_usd?: number;
+      num_turns?: number;
+      usage?: { output_tokens?: number };
+    } = {};
     let status = "COMPLETED";
     try {
       const raw = execFileSync(
@@ -489,7 +500,7 @@ if (args.candidate === "claude-cli") {
       out = JSON.parse(raw.trim().split("\n").pop() ?? "{}");
       if (out.is_error) status = "FAILED";
     } catch (e) {
-      status = (e as any).signal === "SIGTERM" ? "TIMEOUT" : "ERROR";
+      status = (e as { signal?: string }).signal === "SIGTERM" ? "TIMEOUT" : "ERROR";
     }
     const graded = gradeIn((r) => (r === repo ? dir : null), ACCEPT[sk]);
     const row = {
@@ -616,7 +627,7 @@ if (live) {
   const verified = results.filter((r) => r.verify_passed !== null && r.verify_passed !== undefined);
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "n/a");
   console.log(
-    `\nevaluation: correct ${pct(graded.filter((r) => r.correct).length, graded.length)} of ${graded.length} graded · verification pass ${pct(verified.filter((r) => r.verify_passed).length, verified.length)} · repairs/run ${(results.reduce((s, r) => s + (r.repairs ?? 0), 0) / Math.max(1, results.length)).toFixed(2)} · runs with human gates ${pct(results.filter((r) => r.human_gates > 0).length, results.length)} · cost≈$${results.reduce((s, r) => s + (r.cost_usd_est ?? 0), 0).toFixed(3)}`,
+    `\nevaluation: correct ${pct(graded.filter((r) => r.correct).length, graded.length)} of ${graded.length} graded · verification pass ${pct(verified.filter((r) => r.verify_passed).length, verified.length)} · repairs/run ${(results.reduce((s, r) => s + (r.repairs ?? 0), 0) / Math.max(1, results.length)).toFixed(2)} · runs with human gates ${pct(results.filter((r) => (r.human_gates ?? 0) > 0).length, results.length)} · cost≈$${results.reduce((s, r) => s + (r.cost_usd_est ?? 0), 0).toFixed(3)}`,
   );
 }
 console.log(`\nresults: ${join(root, "bench-results.json")}`);

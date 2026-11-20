@@ -10,10 +10,11 @@ import {
 import { pool, q, one } from "../db/pool.ts";
 import { repositories, rankRepositories } from "../repos/service.ts";
 import { scoreKnowledge, summarizeValue } from "../context/plan.ts";
-import { memoryFreshness } from "../knowledge/memory.ts";
+import { memoryFreshness, type MemoryMeta } from "../knowledge/memory.ts";
 import { repoPath } from "../repos/service.ts";
 import { redactContextValue } from "../context/redact.ts";
 import type { PlatformToolEnv } from "./platformTools.ts";
+import type { ContextPack } from "../context/pack.ts";
 
 import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 export { CONTEXT_TOOLS, contextTool } from "./contextToolSchemas.ts";
@@ -143,9 +144,26 @@ function usageOf(env: { attemptId?: number | null }) {
   }
   return u;
 }
+/** Union of the validated CONTEXT_TOOLS inputs; each tool fills only the fields its schema declares. */
+interface ContextToolArgs {
+  query?: string;
+  symbol?: string;
+  repositories?: string[];
+  operation?: "symbols" | "exact" | "context";
+  limit?: number;
+  depth?: number;
+  step_key?: string;
+  section?: string;
+  handoff_workspace?: boolean;
+  handoff_source_pack?: boolean;
+  handoff_offset?: number;
+  handoff_limit?: number;
+  offset?: number;
+  questions?: Array<{ question: string; context?: string; options?: string[] }>;
+}
 export async function executeContextTool(
   name: string,
-  args: any,
+  args: ContextToolArgs,
   env: PlatformToolEnv,
 ): Promise<unknown> {
   switch (name) {
@@ -184,16 +202,16 @@ export async function executeContextTool(
         await env.recordMetrics?.({ code_intelligence_usage: u }).catch(() => {});
       };
       if (name === "search_code" && args.operation === "context") {
-        const context = await buildCodeContext(args.query, scope);
+        const context = await buildCodeContext(args.query!, scope);
         await env.recordMetrics?.({ code_intelligence: context.metrics });
         await note({
-          fallback: Number((context.metrics as any)?.fallback_count ?? 0),
-          empty: !(context as any).hits?.length && !(context as any).entries?.length,
+          fallback: Number(context.metrics.fallback_count ?? 0),
+          empty: !context.hits.length,
         });
         return context;
       }
       if (name === "get_symbol") {
-        const r = await findDefinitions(args.symbol, scope);
+        const r = await findDefinitions(args.symbol!, scope);
         const definitions = r.hits.slice(0, args.limit);
         await note({ fallback: r.fallback_count, empty: !definitions.length });
         return {
@@ -213,7 +231,7 @@ export async function executeContextTool(
       }
       if (name === "find_dependencies") {
         const report = { unavailable: [] as string[] };
-        const dependencies = await findDependencies(args.symbol, scope, args.depth, "out", report);
+        const dependencies = await findDependencies(args.symbol!, scope, args.depth, "out", report);
         await note({ fallback: 0, unavailable: report.unavailable, empty: !dependencies.length });
         return {
           dependencies,
@@ -230,12 +248,12 @@ export async function executeContextTool(
       if (args.operation === "exact") {
         // Exact strings, config and logs: bounded ripgrep over any non-secret file (never forced through Tree-sitter).
         const hits = (
-          await searchCodeExact(args.query, scope, args.limit, { anyFile: true })
+          await searchCodeExact(args.query!, scope, args.limit, { anyFile: true })
         ).slice(0, args.limit);
         await note({ fallback: 0, empty: !hits.length, ripgrep: true });
         return { hits, uncertainty: "text matches are not semantic proof" };
       }
-      const r = await searchSymbols(args.query, scope, args.limit);
+      const r = await searchSymbols(args.query!, scope, args.limit);
       await note({ fallback: r.fallback_count, empty: !r.hits.length });
       return r.fallback_count
         ? {
@@ -270,13 +288,13 @@ export async function executeContextTool(
           reason: "pinned applicable version",
         };
         if (k.category === "task_memory") {
-          const memory = k.metadata?.memory;
+          const memory = k.metadata?.memory as Partial<MemoryMeta> | undefined;
           const repo =
             memory?.repo && env.allowed.includes(memory.repo)
               ? await repositories.get(memory.repo)
               : null;
           freshness =
-            memory && ["verified", "approved"].includes(memory.trust)
+            memory && (memory.trust === "verified" || memory.trust === "approved")
               ? await memoryFreshness(memory, repo ? repoPath(repo) : null)
               : { state: "UNKNOWN", reason: "not approved or verified" };
         }
@@ -320,7 +338,7 @@ export async function executeContextTool(
         : { available: false, reason: "Run has no accessible linked work item" };
     }
     case "get_step_output": {
-      const u = env.upstream[args.step_key];
+      const u = env.upstream[args.step_key!];
       if (!u || u.status !== "COMPLETED")
         throw new Error("Only pinned completed ancestor outputs are available");
       return {
@@ -336,7 +354,13 @@ export async function executeContextTool(
       };
     }
     case "get_run_context": {
-      const pack = await one(
+      const pack = await one<{
+        id: number;
+        snapshot_id: number;
+        content_hash: string;
+        content: ContextPack;
+        created_at: Date;
+      }>(
         pool,
         "SELECT id,snapshot_id,content_hash,content,created_at FROM agent_context_packs WHERE attempt_id=$1 AND run_id=$2 AND step_id=$3 AND owner_id=$4",
         [env.attemptId, env.runId, env.stepId, env.ownerId],
@@ -348,12 +372,12 @@ export async function executeContextTool(
           snapshot_id: env.snapshotId ?? null,
         };
       const entries = pack.content.entries.filter(
-        (e: any) => args.section === "all" || e.section === args.section,
+        (e) => args.section === "all" || e.section === args.section,
       );
       const clamp = (n: number, min: number, max: number) =>
         Math.min(max, Math.max(min, n));
-      const offset = clamp(args.offset, 0, 1000);
-      const entryLimit = clamp(args.limit, 1, 20);
+      const offset = clamp(args.offset!, 0, 1000);
+      const entryLimit = clamp(args.limit!, 1, 20);
       return {
         pack_id: pack.id,
         snapshot_id: pack.snapshot_id,
@@ -391,8 +415,8 @@ export async function executeContextTool(
                 const text = original
                     ? JSON.stringify(original.content)
                     : (details?.content ?? JSON.stringify(h.package)),
-                  offset = clamp(args.handoff_offset, 0, 1000000),
-                  limit = clamp(args.handoff_limit, 100, 12000);
+                  offset = clamp(args.handoff_offset!, 0, 1000000),
+                  limit = clamp(args.handoff_limit!, 100, 12000);
                 return {
                   id: h.id,
                   content: text.slice(offset, offset + limit),
@@ -440,7 +464,7 @@ export async function executeContextTool(
     }
     case "request_clarification":
       return {
-        questions: await postClarification(env, args.questions),
+        questions: await postClarification(env, args.questions!),
         instruction: "STOP; end the turn. The existing workflow resumes after answers.",
       };
     default:

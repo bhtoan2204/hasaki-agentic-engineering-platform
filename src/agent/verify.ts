@@ -73,12 +73,12 @@ export interface VerifyConfig {
  * the executor records that as outcome "disabled" so it shows up in evaluation.
  */
 export function verifyConfig(
-  stepConfig: Record<string, any>,
+  stepConfig: Record<string, unknown>,
   defaultCommand: string,
 ): VerifyConfig | null {
   const v = stepConfig.verify;
   if (v === false) return null;
-  const o = typeof v === "object" && v ? v : {};
+  const o: Record<string, unknown> = typeof v === "object" && v ? { ...v } : {};
   const command = typeof o.command === "string" && o.command.trim() ? o.command : defaultCommand;
   return {
     command,
@@ -399,7 +399,10 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
   let oldFile = "";
   for (const line of diff.split("\n")) {
     const g = line.match(/^diff --git a\/(\S+) b\/(\S+)/);
-    if (g) ((oldFile = g[1]), (file = g[2]));
+    if (g) {
+      oldFile = g[1];
+      file = g[2];
+    }
     const minus = line.match(/^--- a\/(.+)$/);
     if (minus) oldFile = minus[1];
     if (line === "+++ /dev/null" && /_test\.go$/.test(oldFile))

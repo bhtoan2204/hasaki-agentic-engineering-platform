@@ -6,7 +6,7 @@ import { taskDir } from "../git.ts";
 /** Download Hasaki task attachments (note_files) next to the worktrees. Moved unchanged from the old agent.ts. */
 export async function downloadAttachments(
   dirKey: string,
-  d: any,
+  d: { note_files?: string[] } | null | undefined,
   workspace?: string,
 ): Promise<string[]> {
   const files: string[] = d?.note_files ?? [];

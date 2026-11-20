@@ -1,5 +1,6 @@
 /** Isolated UI smoke: synthetic data, no provider calls. Run after npm run build. */
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -53,7 +54,7 @@ const run = await startRun({
 });
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const output = resolve("docs/orchestration/phase4/screenshots");
 mkdirSync(output, { recursive: true });
 const browser = await chromium.launch({

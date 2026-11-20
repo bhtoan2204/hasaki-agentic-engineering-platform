@@ -6,6 +6,7 @@
  *   npm run build && npm run smoke:live-updates
  */
 import { test, before, after } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
@@ -31,7 +32,7 @@ before(async () => {
   await startEventStream();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
     headless: true,

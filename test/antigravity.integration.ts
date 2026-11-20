@@ -9,7 +9,10 @@ import { migrate } from "../src/db/migrate.ts";
 import { definitions, seedTemplates } from "../src/workflow/definitions.ts";
 import { getRun, startRun } from "../src/workflow/engine.ts";
 import { drain } from "../src/workflow/scheduler.ts";
-import { registerExecutor } from "../src/workflow/executors/registry.ts";
+import { registerExecutor, type ExecutionContext } from "../src/workflow/executors/registry.ts";
+import type { AttemptRow, RunRow, StepRow } from "../src/workflow/types.ts";
+import type { ResolvedContext, StepInput } from "../src/workflow/context.ts";
+import type { AgentMetrics } from "../src/agent/metrics.ts";
 import { newMetrics } from "../src/agent/claude.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { resolveAgentProvider } from "../src/agent/provider.ts";
@@ -606,28 +609,31 @@ test("model resolution for Antigravity step uses antigravityModelFor", () => {
 
 function fakeCtx(signal: AbortSignal) {
   const logs: Array<{ kind: string; content: string }> = [];
-  return {
-    logs,
-    ctx: {
-      run: {
-        id: 0,
-        branch: "t",
-        allowed_repositories: [],
-        selected_repositories: [],
-        output_locale: "en",
-        agent_provider: "antigravity",
-      },
-      step: { id: 0, type: "agent", config: {}, key: "analyze" },
-      attempt: { id: 0, fencing_token: null },
-      input: { upstream: {} },
-      context: { knowledge: [], disclosure: [] },
-      signal,
-      log: async (kind: string, content: string) => void logs.push({ kind, content }),
-      ask: async () => 0,
-      recordSession: async () => {},
-      recordMetrics: async () => {},
-    } as any,
+  const ctx: Omit<ExecutionContext, "artifact"> = {
+    run: {
+      id: 0,
+      branch: "t",
+      allowed_repositories: [] as string[],
+      selected_repositories: [] as string[],
+      output_locale: "en",
+      agent_provider: "antigravity",
+    } as RunRow,
+    step: { id: 0, type: "agent", config: {}, key: "analyze" } as StepRow,
+    attempt: { id: 0, fencing_token: null } as AttemptRow,
+    input: { upstream: {} } as StepInput,
+    context: {
+      knowledge: [] as ResolvedContext["knowledge"],
+      disclosure: [] as ResolvedContext["disclosure"],
+    } as ResolvedContext,
+    signal,
+    log: async (kind: string, content: string) => {
+      logs.push({ kind, content });
+    },
+    ask: async () => 0,
+    recordSession: async () => {},
+    recordMetrics: async () => {},
   };
+  return { logs, ctx: ctx as ExecutionContext };
 }
 
 const turn = (
@@ -811,7 +817,7 @@ test("antigravityComplete produces auxiliary completions and integrates with com
   assert.ok(!auxInvocation.argv.some((arg: string) => arg.includes("Summarize this context")));
   assert.equal(auxInvocation.env.containsPrompt, false);
 
-  const runRes = await completeForRun({ agent_provider: "antigravity" } as any, "Summarize again");
+  const runRes = await completeForRun({ agent_provider: "antigravity" }, "Summarize again");
   assert.equal(runRes.text, '{"summary": "quick evaluation result"}');
   assert.equal(runRes.provider, "antigravity");
   assert.equal(runRes.metrics.tokens?.input, 25);
@@ -857,7 +863,11 @@ test("end-to-end: workflow with antigravity agent completes and persists attempt
   const finishedRun = await getRun(run.id);
   assert.equal(finishedRun.status, "COMPLETED");
 
-  const attempts = await q<any>(
+  const attempts = await q<
+    Pick<AttemptRow, "agent_provider" | "status"> & {
+      metrics: AgentMetrics & { provider_sessions: Record<string, { model: string }> };
+    }
+  >(
     pool,
     "SELECT a.* FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.key = 'task'",
     [run.id],
@@ -874,6 +884,6 @@ test("end-to-end: workflow with antigravity agent completes and persists attempt
   for (const session of Object.values(metrics.provider_sessions))
     assert.equal((session as { model: string }).model, "gemini-3.8-flash-high");
   assert.equal(metrics.cost_usd, null);
-  assert.ok(metrics.tokens.input > 0);
-  assert.ok(metrics.tokens.reasoning_output > 0);
+  assert.ok((metrics.tokens?.input ?? 0) > 0);
+  assert.ok((metrics.tokens?.reasoning_output ?? 0) > 0);
 });

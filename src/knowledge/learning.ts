@@ -246,7 +246,7 @@ export type CandidateOut = z.infer<typeof Candidate>;
 
 /** Analyzer reply → candidates. Tolerates prose around the JSON; drops entries that do not match the contract. */
 export function parseCandidates(raw: unknown): { candidates: CandidateOut[]; invalid: number } {
-  let v: any = raw;
+  let v: unknown = raw;
   if (typeof raw === "string") {
     const m = raw.match(/\{[\s\S]*\}/);
     try {
@@ -255,7 +255,10 @@ export function parseCandidates(raw: unknown): { candidates: CandidateOut[]; inv
       v = {};
     }
   }
-  const list: unknown[] = Array.isArray(v?.candidates) ? v.candidates.slice(0, 10) : [];
+  const list: unknown[] =
+    v && typeof v === "object" && "candidates" in v && Array.isArray(v.candidates)
+      ? v.candidates.slice(0, 10)
+      : [];
   const candidates: CandidateOut[] = [];
   let invalid = 0;
   for (const c of list) {
@@ -437,7 +440,7 @@ export async function computeImpacts(
   const repositories = new Set(x.run.repositories);
   if (x.scope.type === "REPOSITORY" && x.scope.ref) repositories.add(x.scope.ref);
   const workflows = new Set<string>([x.run.definition_key]);
-  let conflicts: any[] = [];
+  let conflicts: Array<{ id: number | string; change_type: string }> = [];
   if (x.targetKey) {
     for (const r of await q(
       db,
@@ -487,7 +490,7 @@ const RULE_CATEGORIES = new Set([
 async function runInfo(
   runId: number,
   db: Db,
-): Promise<(RunInfo & { status: string; learning: any }) | undefined> {
+): Promise<(RunInfo & { status: string; learning: Record<string, unknown> | null }) | undefined> {
   const r = await one(
     db,
     "SELECT r.id, r.title, r.owner_id, r.status, r.definition_key, r.selected_repositories, r.agent_provider, r.profile, r.agent_configuration, r.learning, r.inputs, w.project FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1",
@@ -517,7 +520,7 @@ export async function detectKnowledgeChanges(
   runId: number,
   opts: { force?: boolean } = {},
   db: Db = pool,
-) {
+): Promise<Record<string, unknown>> {
   if (await isEvaluationRun(runId, db))
     return { status: "disabled", reason: "Benchmarks never invoke learning models" };
   const run = await runInfo(runId, db);
@@ -584,7 +587,7 @@ export async function detectKnowledgeChanges(
       skills: skills.map((s) => ({
         key: s.key,
         title: s.title,
-        description: String((s.metadata as any)?.description ?? s.content.slice(0, 200)),
+        description: String(s.metadata?.description ?? s.content.slice(0, 200)),
       })),
     },
     run,

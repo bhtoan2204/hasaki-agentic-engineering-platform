@@ -28,7 +28,18 @@ let server: Server;
 let base = "";
 let mode: "normal" | "slow" | "flaky" | "redirect" | "big" | "empty" = "normal";
 let flakyLeft = 0;
-const seen: Array<{ method: string; path: string; key: string; body: any; bearer?: string }> = [];
+type QueryBody = {
+  requestType: string;
+  start: number;
+  end: number;
+  refreshToken?: string;
+  compositeQuery: {
+    queries: Array<{
+      spec: { signal: string; limit?: number; groupBy?: Array<{ name: string }>; filter: { expression: string } };
+    }>;
+  };
+};
+const seen: Array<{ method: string; path: string; key: string; body: QueryBody; bearer?: string }> = [];
 // Session auth: valid access tokens, and the one refresh token that may rotate (each rotation issues a new pair).
 const validAccess = new Set<string>();
 let liveRefresh = "";
@@ -50,7 +61,7 @@ const SPAN_GROUPS = [
   ["payment-prod", "payment", "POST /callback", "sign not match", "500"],
 ];
 
-function respond(body: any) {
+function respond(body: QueryBody) {
   if (mode === "empty") return { status: "success", data: { type: body.requestType, data: { results: [] } } };
   const spec = body.compositeQuery.queries[0].spec;
   const keys: string[] = (spec.groupBy ?? []).map((g: { name: string }) => g.name);
@@ -239,9 +250,15 @@ test("agent tools: evidence refs, untrusted telemetry, pagination, budgets, hidd
   const ctx = { runId, allowedRepositories: [], mode: "analysis" as const, stepKey: "search_logs" };
   await asOwner(async () => {
     assert.equal(integrationTools().filter((t) => t.name.startsWith("signoz_")).length, 6);
-    const logs: any = await callTool("signoz_search_logs", { severity: "error", service: "oms-api", limit: 2 }, ctx);
-    assert.equal(logs.ok, true, logs.error);
-    const out = logs.result;
+    const logs = await callTool("signoz_search_logs", { severity: "error", service: "oms-api", limit: 2 }, ctx);
+    assert.equal(logs.ok, true, String(logs.error));
+    const out = logs.result as {
+      provider: string;
+      next_offset: number;
+      telemetry: string;
+      search_id: number;
+      content_trust: string;
+    };
     assert.equal(out.provider, "signoz");
     assert.equal(out.next_offset, 2, "a full page offers the next offset");
     assert.match(out.telemetry, /^<untrusted_input source="signoz_telemetry">/);
@@ -250,30 +267,30 @@ test("agent tools: evidence refs, untrusted telemetry, pagination, budgets, hidd
     const sent = seen.filter((s) => s.path === "/api/v5/query_range").at(-1)!.body;
     assert.equal(sent.compositeQuery.queries[0].spec.filter.expression, "service.name = 'oms-api' AND severity_text = 'ERROR'");
     assert.equal(sent.end - sent.start, 15 * 60_000, "default 15 minute window");
-    const ev: any = await callTool("splunk_get_event", { event_ref: `S${out.search_id}:0` }, ctx);
-    assert.equal(ev.ok, true, ev.error);
+    const ev = await callTool("splunk_get_event", { event_ref: `S${out.search_id}:0` }, ctx);
+    assert.equal(ev.ok, true, String(ev.error));
     assert.match(JSON.stringify(ev.result), /gift sku missing/);
 
-    const agg: any = await callTool("signoz_aggregate_logs", { group_by: ["service.name"], severity: "ERROR" }, ctx);
-    assert.equal(agg.ok, true, agg.error);
-    assert.match(agg.result.telemetry, /oms-api/);
-    const spans: any = await callTool("signoz_search_traces", { has_error: true }, ctx);
-    assert.match(spans.result.telemetry, /1250ms status=500 ERROR/);
+    const agg = await callTool("signoz_aggregate_logs", { group_by: ["service.name"], severity: "ERROR" }, ctx);
+    assert.equal(agg.ok, true, String(agg.error));
+    assert.match((agg.result as { telemetry: string }).telemetry, /oms-api/);
+    const spans = await callTool("signoz_search_traces", { has_error: true }, ctx);
+    assert.match((spans.result as { telemetry: string }).telemetry, /1250ms status=500 ERROR/);
     assert.equal((await callTool("signoz_get_trace", { trace_id: "t1" }, ctx)).ok, true);
-    const metric: any = await callTool("signoz_query_metrics", { metric: "signoz_calls_total" }, ctx);
-    assert.match(metric.result.telemetry, /"max":9/);
+    const metric = await callTool("signoz_query_metrics", { metric: "signoz_calls_total" }, ctx);
+    assert.match((metric.result as { telemetry: string }).telemetry, /"max":9/);
     assert.equal((await callTool("signoz_list_services", {}, ctx)).ok, true);
 
     mode = "empty";
-    const none: any = await callTool("signoz_search_logs", { expression: "body CONTAINS 'nothing-here'" }, ctx);
+    const none = await callTool("signoz_search_logs", { expression: "body CONTAINS 'nothing-here'" }, ctx);
     assert.match(JSON.stringify(none.result), /absence of data is not evidence/);
     mode = "normal";
 
     const cap = config.signoz.maxCallsPerStep;
     config.signoz.maxCallsPerStep = 7;
-    const over: any = await callTool("signoz_list_services", { since_minutes: 5 }, ctx);
+    const over = await callTool("signoz_list_services", { since_minutes: 5 }, ctx);
     assert.equal(over.ok, false);
-    assert.match(over.error, /SigNoz calls/);
+    assert.match(over.error ?? "", /SigNoz calls/);
     config.signoz.maxCallsPerStep = cap;
 
     await saveSignoz({ enabled: false });

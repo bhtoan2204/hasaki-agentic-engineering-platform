@@ -61,14 +61,15 @@ test("planHash is order independent", () => {
 });
 
 import { materializeSubtasks } from "../src/workflow/decomposition.ts";
+import type { Db } from "../src/db/pool.ts";
 
-type Row = Record<string, any>;
+type Row = Record<string, unknown>;
 /** In-memory fake of the pg client covering only the statements materializeSubtasks issues. */
 function fakeDb(steps: Row[]) {
   const revisions: Row[] = [];
   const inserted: Row[] = [];
-  const db: any = {
-    async query(sql: string, p: any[] = []) {
+  const db = {
+    async query(sql: string, p: unknown[] = []) {
       if (/FROM workflow_runs/.test(sql)) return { rows: [{ id: p[0] }] };
       if (/FROM workflow_steps WHERE run_id/.test(sql)) return { rows: steps };
       if (/SELECT revision FROM workflow_graph_revisions/.test(sql))
@@ -83,7 +84,7 @@ function fakeDb(steps: Row[]) {
           id: 100 + steps.length,
           key: p[1],
           type: sql.includes("'integration'") ? "integration" : "coding_agent",
-          config: JSON.parse(p[5]),
+          config: JSON.parse(String(p[5])),
           depends_on: p[4],
           requires_approval: p[9],
           position: p[3],
@@ -102,7 +103,7 @@ function fakeDb(steps: Row[]) {
       return { rows: [] };
     },
   };
-  return { db, revisions, inserted };
+  return { db: db as Db, revisions, inserted };
 }
 let gateId = 10;
 /** Plan step + one downstream step + a completed approval gate per approved plan (hash-bound, current generation). */
@@ -210,7 +211,7 @@ test("materialize adds a cleanup after the subtasks when the run's cleanup alrea
   assert.equal(added.type, "integration");
   assert.deepEqual(added.config, { action: "cleanup_workspaces", injected: true });
   assert.deepEqual(
-    [...added.depends_on].sort(),
+    [...(added.depends_on as string[])].sort(),
     [steps[2].key, "integration"].sort(),
     "waits for the work after the subtasks, not just the leaves",
   );
@@ -266,7 +267,7 @@ test("approver is recorded from the gate, not the caller", async () => {
   const p = plan(sub("a"));
   const f = fakeDb(baseSteps({ p, by: "toan" }));
   await materializeSubtasks(f.db, 1, "plan", p, { ...opts, actor: "someone-else" });
-  assert.match(f.revisions[0].actor, /approved by toan/);
+  assert.match(String(f.revisions[0].actor), /approved by toan/);
 });
 
 test("materialize enforces depth limits", async () => {

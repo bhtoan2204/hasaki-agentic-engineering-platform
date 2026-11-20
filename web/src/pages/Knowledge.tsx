@@ -101,9 +101,83 @@ function ScopeBadge({ type, scopeRef }: { type: string; scopeRef?: string }) {
     </span>
   );
 }
+type MemoryInfo = {
+  trust: string;
+  confidence: number | string;
+  run_id: number;
+  work_item?: string | null;
+  repo: string;
+  commit_sha?: string | null;
+  base_branch: string;
+  files?: string[];
+  sources?: string[];
+  extracted_at: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+};
+type KnowledgeMetadata = Record<string, unknown> & {
+  load?: string;
+  description?: string;
+  companions?: string[];
+  memory?: MemoryInfo;
+};
+type KnowledgeSummary = {
+  key: string;
+  title: string;
+  category: string;
+  scope_type: string;
+  scope_ref: string;
+  owner_id: number | null;
+  enforced: boolean;
+  enabled: boolean;
+  current_version: number;
+  metadata?: KnowledgeMetadata | null;
+};
+type KnowledgeVersion = {
+  version: number;
+  content: string;
+  applicability: Record<string, unknown> | null;
+  metadata: KnowledgeMetadata | null;
+  created_at: string;
+  created_by: string | null;
+  effective_from: string | null;
+  change_note: string | null;
+};
+type KnowledgeDetail = KnowledgeSummary & {
+  conflict_key: string | null;
+  priority: number;
+  updated_at: string;
+  expires_at?: string | null;
+  versions: KnowledgeVersion[];
+  audit: Array<{ id: number; action: string; created_at: string; detail: unknown }>;
+  superseded_by_item: { key: string } | null;
+  supersedes: Array<{ key: string }>;
+  effective_version: number | null;
+};
+type KnowledgeUsage = {
+  assigned: Array<{ workflow: string; version: number | "draft"; step?: string | null }>;
+  used: Array<{
+    run_id: number;
+    step_key: string;
+    step_name: string;
+    definition_key: string;
+    version: number;
+    created_at: string;
+  }>;
+};
+type ProposalRef = { id: number; change_type: string; status: string };
+type ImportPreview = {
+  created: number;
+  updated: number;
+  unchanged: number;
+  candidates: Array<{ key: string; action: string; category: string; repos: string[] }>;
+  skipped: Array<{ path: string; reason: string }>;
+};
+
 /** Load mode follows the context planner: metadata.load === "on_demand" → index only, anything else → inline. */
-const loadMode = (metadata: any) => (metadata?.load === "on_demand" ? "on_demand" : "inline");
-function LoadChip({ metadata }: { metadata: any }) {
+const loadMode = (metadata?: KnowledgeMetadata | null) =>
+  metadata?.load === "on_demand" ? "on_demand" : "inline";
+function LoadChip({ metadata }: { metadata?: KnowledgeMetadata | null }) {
   const { t } = useI18n();
   const m = loadMode(metadata);
   const onDemand = m === "on_demand";
@@ -152,14 +226,14 @@ const emptyDraft = (category = "business_rule"): Draft => ({
 export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: string }) {
   const { t } = useI18n();
   const me = useApi<{ user: { role: string } }>("/api/auth/me");
-  const pendingProposals = useApi<any[]>("/api/knowledge-proposals?status=pending");
+  const pendingProposals = useApi<ProposalRef[]>("/api/knowledge-proposals?status=pending");
   const [cat, setCat] = useState("");
-  const { data, error, loading, reload } = useApi<any[]>(
+  const { data, error, loading, reload } = useApi<KnowledgeSummary[]>(
     `/api/knowledge${cat ? `?category=${cat}` : ""}`,
     [cat],
   );
   // Category counts need the unfiltered list; only fetched separately while a category filter is active.
-  const all = useApi<any[]>(cat ? "/api/knowledge" : null, [cat]);
+  const all = useApi<KnowledgeSummary[]>(cat ? "/api/knowledge" : null, [cat]);
   const [q, setQ] = useState("");
   const [scope, setScope] = useState("");
   const counts = useMemo(() => {
@@ -349,20 +423,23 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
 /** Scan repositories (CLAUDE.md, skills, cursor rules, wiki docs): preview first, then import. */
 function RepoImport({ onDone }: { onDone: () => void }) {
   const { t } = useI18n();
-  const [preview, setPreview] = useState<any>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (dry: boolean) => {
     setBusy(true);
     const r = await act(
-      () => api<any>("/api/knowledge/import-repos", { dry_run: dry }),
+      () => api<ImportPreview>("/api/knowledge/import-repos", { dry_run: dry }),
       dry ? undefined : t("kn.imported"),
     );
     setBusy(false);
     if (!r) return;
     if (dry) setPreview(r);
-    else (setPreview(null), onDone());
+    else {
+      setPreview(null);
+      onDone();
+    }
   };
-  const changed = preview ? preview.candidates.filter((c: any) => c.action !== "unchanged") : [];
+  const changed = preview ? preview.candidates.filter((c) => c.action !== "unchanged") : [];
   return (
     <>
       <button className="ghost" disabled={busy} onClick={() => run(true)}>
@@ -398,7 +475,7 @@ function RepoImport({ onDone }: { onDone: () => void }) {
           </div>
           {changed.length > 0 && (
             <ul className="kn-import-list">
-              {changed.map((c: any) => (
+              {changed.map((c) => (
                 <li key={c.key}>
                   <Badge s={c.action === "create" ? "READY" : "WAITING"}>{c.action}</Badge>
                   <div className="kn-import-body">
@@ -414,7 +491,7 @@ function RepoImport({ onDone }: { onDone: () => void }) {
           {preview.skipped.length > 0 && (
             <>
               <h3>{t("kn.skipped")}</h3>
-              {preview.skipped.map((s: any) => (
+              {preview.skipped.map((s) => (
                 <div key={s.path} className="small err kn-skip">
                   {t("kn.skip", { path: s.path, reason: s.reason })}
                 </div>
@@ -454,7 +531,7 @@ function Section({
 }
 
 /** Renders applicability / metadata objects: arrays as chips, scalars as text, anything else as JSON. */
-function KeyValues({ value, empty }: { value: any; empty: string }) {
+function KeyValues({ value, empty }: { value?: Record<string, unknown> | null; empty: string }) {
   const entries = Object.entries(value ?? {});
   if (!entries.length) return <div className="muted small">{empty}</div>;
   return (
@@ -498,8 +575,12 @@ function KnowledgeEditor({
 }) {
   const { t } = useI18n();
   const isNew = itemKey === "~new";
-  const { data: item, error, reload } = useApi<any>(isNew ? null : `/api/knowledge/${itemKey}`);
-  const { data: usage } = useApi<any>(isNew ? null : `/api/knowledge/${itemKey}/usage`);
+  const {
+    data: item,
+    error,
+    reload,
+  } = useApi<KnowledgeDetail>(isNew ? null : `/api/knowledge/${itemKey}`);
+  const { data: usage } = useApi<KnowledgeUsage>(isNew ? null : `/api/knowledge/${itemKey}/usage`);
   const [d, setD] = useState<Draft>(emptyDraft(defaultCategory));
   const [tab, setTab] = useState<"overview" | "edit" | "preview" | "versions" | "audit" | "usage">(
     isNew ? "edit" : "overview",
@@ -561,7 +642,7 @@ function KnowledgeEditor({
       metadata,
     };
     const r = await act(
-      () => api<any>(isNew ? "/api/knowledge" : `/api/knowledge/${itemKey}`, body),
+      () => api<{ key: string }>(isNew ? "/api/knowledge" : `/api/knowledge/${itemKey}`, body),
       isNew ? t("kn.created") : t("kn.saved"),
     );
     if (r) {
@@ -570,11 +651,12 @@ function KnowledgeEditor({
       else reload();
     }
   };
-  const cur = isNew ? null : item.versions[0];
-  const CatIcon = CAT_ICON[isNew ? d.category : item.category] ?? FileText;
+  const cur = item ? item.versions[0] : null;
+  const CatIcon = CAT_ICON[item ? item.category : d.category] ?? FileText;
   // Permanent delete (server: admins for shared items, owners for private ones). A workflow that still assigns the key
   // blocks it (409) until the reviewer confirms a forced delete.
   const remove = async () => {
+    if (!item) return;
     const companions: string[] = cur?.metadata?.companions ?? [];
     const reason = await dialog.prompt({
       title: t("kn.delete.promptTitle"),
@@ -612,7 +694,7 @@ function KnowledgeEditor({
     onSaved();
     navigate("/knowledge");
   };
-  const tabs: Array<[typeof tab, ReactNode]> = isNew
+  const tabs: Array<[typeof tab, ReactNode]> = !item
     ? [
         [
           "edit",
@@ -682,8 +764,8 @@ function KnowledgeEditor({
           <CatIcon size={20} strokeWidth={2} />
         </span>
         <div className="kn-head-main">
-          <h2 className="kn-head-title">{isNew ? t("kn.newTitle") : d.title || item.title}</h2>
-          {isNew ? (
+          <h2 className="kn-head-title">{!item ? t("kn.newTitle") : d.title || item.title}</h2>
+          {!item ? (
             <div className="muted small">{t("kn.newHint")}</div>
           ) : (
             <>
@@ -703,7 +785,7 @@ function KnowledgeEditor({
             </>
           )}
         </div>
-        {!isNew && (
+        {item && (
           <div className="kn-head-time muted small">
             {t("kn.updatedAt", { time: time(item.updated_at) })}
             <button
@@ -722,11 +804,11 @@ function KnowledgeEditor({
       <div className="card kn-body">
         <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
-        {tab === "overview" && !isNew && cur?.metadata?.memory && (
+        {tab === "overview" && item && cur?.metadata?.memory && (
           <MemoryProvenance itemKey={item.key} m={cur.metadata.memory} onDone={reload} />
         )}
-        {tab === "overview" && !isNew && <Evolution item={item} />}
-        {tab === "overview" && !isNew && (
+        {tab === "overview" && item && <Evolution item={item} />}
+        {tab === "overview" && item && (
           <div className="kn-overview">
             <Section
               icon={FileText}
@@ -950,9 +1032,9 @@ function KnowledgeEditor({
           </div>
         )}
 
-        {tab === "versions" && !isNew && (
+        {tab === "versions" && item && (
           <ol className="kn-timeline">
-            {item.versions.map((v: any) => {
+            {item.versions.map((v) => {
               const open = viewVersion === v.version;
               return (
                 <li
@@ -1018,10 +1100,10 @@ function KnowledgeEditor({
         )}
 
         {tab === "audit" &&
-          !isNew &&
+          item &&
           (item.audit.length ? (
             <ol className="kn-timeline is-audit">
-              {item.audit.map((a: any) => (
+              {item.audit.map((a) => (
                 <li key={a.id} className="kn-tl-item">
                   <span className="kn-tl-dot" aria-hidden />
                   <div className="kn-tl-body">
@@ -1043,7 +1125,7 @@ function KnowledgeEditor({
             <Section icon={Workflow} title={t("kn.assigned")}>
               {usage.assigned.length ? (
                 <ul className="kn-use-list">
-                  {usage.assigned.map((a: any, i: number) => (
+                  {usage.assigned.map((a, i) => (
                     <li key={i}>
                       <a href={`#/workflows/${a.workflow}`} className="mono">
                         {a.workflow}
@@ -1064,7 +1146,7 @@ function KnowledgeEditor({
             <Section icon={History} title={t("kn.applied")}>
               {usage.used.length ? (
                 <ul className="kn-use-list">
-                  {usage.used.map((u: any, i: number) => (
+                  {usage.used.map((u, i) => (
                     <li key={i}>
                       <a href={`#/runs/${u.run_id}/${u.step_key}`}>
                         Run #{u.run_id} · {u.step_name}
@@ -1087,7 +1169,15 @@ function KnowledgeEditor({
 }
 
 /** Cross-task memory provenance + the explicit human promotion step (only path to trusted agent conclusions). */
-function MemoryProvenance({ itemKey, m, onDone }: { itemKey: string; m: any; onDone: () => void }) {
+function MemoryProvenance({
+  itemKey,
+  m,
+  onDone,
+}: {
+  itemKey: string;
+  m: MemoryInfo;
+  onDone: () => void;
+}) {
   const { t } = useI18n();
   const [by, setBy] = useState("");
   const tone =
@@ -1164,9 +1254,9 @@ function MemoryProvenance({ itemKey, m, onDone }: { itemKey: string; m: any; onD
 }
 
 /** Rule evolution at a glance: supersession both ways, a version waiting for its effective date, related proposals. */
-function Evolution({ item }: { item: any }) {
+function Evolution({ item }: { item: KnowledgeDetail }) {
   const { t } = useI18n();
-  const { data: props } = useApi<any[]>(
+  const { data: props } = useApi<ProposalRef[]>(
     `/api/knowledge-proposals?target=${encodeURIComponent(item.key)}`,
     [item.key],
   );
@@ -1194,7 +1284,7 @@ function Evolution({ item }: { item: any }) {
       {item.supersedes?.length > 0 && (
         <div className="kp-note small">
           {t("kp.replaces")}{" "}
-          {item.supersedes.map((x: any) => (
+          {item.supersedes.map((x) => (
             <a key={x.key} className="mono" href={`#/knowledge/${x.key}`}>
               {x.key}{" "}
             </a>
@@ -1205,7 +1295,7 @@ function Evolution({ item }: { item: any }) {
         <div className="kp-note small">
           {t("kp.waitingVersion", {
             current: item.current_version,
-            effective: item.effective_version,
+            effective: item.effective_version ?? "",
           })}
         </div>
       )}

@@ -21,6 +21,9 @@ import {
   registerIntegrationTool,
 } from "../src/agent/toolRegistry.ts";
 import { buildSystemAppend, buildUserPrompt } from "../src/agent/stepPrompt.ts";
+import type { ResolvedContext, StepInput } from "../src/workflow/context.ts";
+import type { ContextPack } from "../src/context/pack.ts";
+import type { RunRow, StepRow } from "../src/workflow/types.ts";
 
 before(async () => {
   await migrate();
@@ -133,13 +136,13 @@ test("disclosure: a skill's supporting files never take an index slot, however r
 });
 
 test("system prompt shows inline bodies, index lines, a search hint, tool discovery, and delegation only when enabled", () => {
-  const run: any = {
+  const run = {
     id: 1,
     definition_key: "wf",
     branch: "T-1",
     allowed_repositories: ["oms-api"],
-  };
-  const knowledge: any[] = [
+  } as RunRow;
+  const knowledge = [
     {
       key: "rule",
       version: 1,
@@ -167,23 +170,19 @@ test("system prompt shows inline bodies, index lines, a search hint, tool discov
       content: "SKILL B BODY",
       metadata: { description: "does B" },
     },
-  ];
-  const ctx: any = {
+  ] as ResolvedContext["knowledge"];
+  const ctx = {
     repositories: ["oms-api"],
     knowledge,
-    overridden: [],
+    overridden: [] as ResolvedContext["overridden"],
     disclosure: [
       { key: "rule", disclosure: "inline" },
       { key: "skill.a", disclosure: "index" },
       { key: "skill.b", disclosure: "search" },
     ],
-  };
-  const sys = buildSystemAppend(
-    run,
-    { key: "s", name: "S", type: "agent", config: {} } as any,
-    ctx,
-    "analysis",
-  );
+  } as ResolvedContext;
+  const step = { key: "s", name: "S", type: "agent", config: {} } as StepRow;
+  const sys = buildSystemAppend(run, step, ctx, "analysis");
   assert.ok(sys.includes("RULE BODY"));
   assert.ok(
     sys.includes("`skill.a`") && !sys.includes("SKILL A BODY"),
@@ -198,8 +197,16 @@ test("system prompt shows inline bodies, index lines, a search hint, tool discov
   // With a context pack (every agent step) description-only skills must still come with the "load before acting" rule.
   const packed = buildSystemAppend(
     run,
-    { key: "s", name: "S", type: "agent", config: {} } as any,
-    { ...ctx, contextPack: { id: "p", snapshot_id: 1, entries: [], omitted: [] } },
+    step,
+    {
+      ...ctx,
+      contextPack: {
+        id: 1,
+        snapshot_id: 1,
+        entries: [] as ContextPack["entries"],
+        omitted: [] as ContextPack["omitted"],
+      } as ContextPack,
+    },
     "analysis",
   );
   assert.match(packed, /## Skills to load before acting/);
@@ -208,7 +215,7 @@ test("system prompt shows inline bodies, index lines, a search hint, tool discov
   assert.ok(
     buildSystemAppend(
       run,
-      { key: "s", name: "S", type: "agent", config: { delegation: { enabled: true } } } as any,
+      { ...step, config: { delegation: { enabled: true } } },
       ctx,
       "analysis",
     ).includes("explorer"),
@@ -242,12 +249,14 @@ test("upstream budget: small outputs stay full, large ones are summarized; direc
   assert.ok(summarizeValue(big, 500).length <= 500);
   const prompt = buildUserPrompt(
     {
-      run: { inputs: {}, selected_repositories: [] },
+      run: { inputs: {}, selected_repositories: [] as string[] },
       work_item: null,
-      upstream: { direct: { status: "COMPLETED", attempt_id: 2, output: big } },
-      answers: [],
+      upstream: {
+        direct: { status: "COMPLETED", attempt_id: 2, output: big },
+      } as StepInput["upstream"],
+      answers: [] as StepInput["answers"],
       pending: null,
-    } as any,
+    } as StepInput,
     [],
     [],
     { plan, text },
@@ -321,8 +330,8 @@ test("tool registry: ranked discovery, on-demand schema, validated + permission-
   assert.equal(found[0].name, "bitbucket.list_pull_requests");
   assert.ok(listTools(undefined, { mode: "analysis" }).length >= 7);
   const d = describeTool("repositories.search");
-  assert.equal((d.input_schema as any).type, "object");
-  assert.ok((d.input_schema as any).properties.query);
+  assert.equal(d.input_schema.type, "object");
+  assert.ok(d.input_schema.properties?.query);
   const ctx = { runId: 0, allowedRepositories: ["oms-api"], mode: "analysis" as const };
   assert.match((await callTool("nope", {}, ctx)).error!, /unknown tool/);
   assert.match(

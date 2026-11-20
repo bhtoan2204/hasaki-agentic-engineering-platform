@@ -15,22 +15,47 @@ async function jiraCreds(ownerId?: number) {
 }
 
 /** Flatten Atlassian Document Format (Jira Cloud v3 description) into plain text. */
-export function adfToText(node: any): string {
+export function adfToText(node: unknown): string {
   if (!node) return "";
   if (typeof node === "string") return node;
-  if (node.type === "text") return node.text ?? "";
-  const inner = (node.content ?? [])
+  if (typeof node !== "object") return "";
+  const n: { type?: unknown; text?: unknown; content?: unknown } = node;
+  if (n.type === "text") return String(n.text ?? "");
+  const inner = (Array.isArray(n.content) ? n.content : [])
     .map(adfToText)
-    .join(node.type === "bulletList" || node.type === "orderedList" ? "\n" : "");
-  if (["paragraph", "heading", "codeBlock", "blockquote"].includes(node.type)) return inner + "\n";
-  if (node.type === "listItem") return "- " + inner.trim();
-  if (node.type === "hardBreak") return "\n";
+    .join(n.type === "bulletList" || n.type === "orderedList" ? "\n" : "");
+  if (
+    typeof n.type === "string" &&
+    ["paragraph", "heading", "codeBlock", "blockquote"].includes(n.type)
+  )
+    return inner + "\n";
+  if (n.type === "listItem") return "- " + inner.trim();
+  if (n.type === "hardBreak") return "\n";
   return inner;
 }
 
-export function normalizeJiraIssue(issue: any) {
-  if (!issue?.key || !issue?.fields)
-    throw new Error("not a Jira issue payload (need key and fields)");
+type JiraIssue = {
+  key: string;
+  id?: string | number;
+  fields: {
+    summary?: string;
+    description?: unknown;
+    project?: { name?: string; key?: string };
+    status?: { name?: string };
+    issuetype?: { name?: string };
+    priority?: { name?: string };
+    labels?: string[];
+  };
+};
+
+function isJiraIssue(v: unknown): v is JiraIssue {
+  return (
+    typeof v === "object" && v !== null && "key" in v && !!v.key && "fields" in v && !!v.fields
+  );
+}
+
+export function normalizeJiraIssue(issue: unknown) {
+  if (!isJiraIssue(issue)) throw new Error("not a Jira issue payload (need key and fields)");
   const f = issue.fields;
   return {
     code: String(issue.key),

@@ -1,5 +1,6 @@
 /** Real settings UI + HTTP/database, mocked Telegram API; no live bot/account required. */
 import assert from "node:assert/strict";
+import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -44,12 +45,12 @@ await new Promise<void>((r) => bot.listen(0, "127.0.0.1", r));
 const secret = "12345:UI_BOT_TOKEN_not_exposed_123456";
 Object.assign(config.telegram, {
   botToken: secret,
-  apiBase: `http://127.0.0.1:${(bot.address() as any).port}`,
+  apiBase: `http://127.0.0.1:${(bot.address() as AddressInfo).port}`,
   mode: "polling",
 });
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-const base = `http://127.0.0.1:${(server.address() as any).port}`;
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_BIN || chromium.executablePath(),
   headless: true,

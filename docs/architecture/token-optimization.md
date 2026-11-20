@@ -61,7 +61,7 @@ Dùng lại context pack, continuity record (`agent_context_continuity`), checkp
 
 ### Đo lường
 
-`npm run bench:tokens -- telemetry` báo cáo các chỉ số hiệu quả theo task thành công nhóm theo provider, model và execution profile: tổng input, output và cache tokens trên mỗi task thành công, tỉ lệ thành công ngay lần đầu (first-pass success rate), retry overhead, token lãng phí từ các attempt thất bại (phân biệt rõ ràng giữa missing usage và zero usage). Bảng attempt workflow giữ các cột: occupancy đỉnh, số attempt có compaction, tỉ lệ thành công của attempt có compaction (để đo giữ context và độ tin cậy khi phục hồi), tổng input, cache, tool calls, latency, retry.
+`npm run bench:tokens -- telemetry` báo cáo `efficiency` theo provider, model và execution profile ở ba mức: attempt (usage có/thiếu, retry overhead, token của attempt thất bại), run và work item (tỉ lệ thành công, first-pass, token mỗi lần thành công). Chỉ tính run/work item đã kết thúc; run đổi provider được tính một lần cho provider của attempt cuối, kèm token mọi attempt. Usage thiếu giữ là `null`, không thành 0. Bảng attempt workflow giữ các cột: occupancy đỉnh, số attempt có compaction, tỉ lệ thành công của attempt có compaction (để đo giữ context và độ tin cậy khi phục hồi), tổng input, cache, tool calls, latency, retry.
 
 ### Hạn chế
 

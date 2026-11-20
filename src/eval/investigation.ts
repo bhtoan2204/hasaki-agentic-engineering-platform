@@ -7,6 +7,7 @@ import {
   ROOT_CAUSE_STATUSES,
   scopeCheck,
   summaryTokens,
+  type Claim,
   type ClaimClass,
   type EvidenceRole,
   type FixRisk,
@@ -25,9 +26,9 @@ export interface Scenario {
   id: string;
   title: string;
   role: EvidenceRole;
-  upstream?: Record<string, any>;
+  upstream?: Record<string, unknown>;
   unavailable?: string[];
-  output: Record<string, any>;
+  output: Record<string, unknown>;
   expect: {
     classes?: Record<string, ClaimClass>;
     max_root_cause?: RootCauseStatus;
@@ -37,7 +38,7 @@ export interface Scenario {
     impact_unknown?: boolean;
   };
   scope?: { files: Record<string, string[]>; deviations: unknown[]; requires_reapproval: boolean };
-  review?: { raw: any; expected: Verdict };
+  review?: { raw: Record<string, unknown>; expected: Verdict };
 }
 
 const fact = (
@@ -491,9 +492,9 @@ export function scoreScenario(s: Scenario, output = s.output): ScenarioResult {
   const check = (metric: string, passed: boolean, detail: string) =>
     checks.push({ metric, passed, detail });
   const n = normalizeInvestigationOutput(s.role, output, s.upstream ?? {}, s.unavailable ?? []);
-  const byId = new Map(n.claims.map((c: any) => [c.id, c]));
+  const byId = new Map<string, Claim>(n.claims.map((c: Claim) => [c.id, c]));
   for (const [id, cls] of Object.entries(s.expect.classes ?? {})) {
-    const c: any = byId.get(id);
+    const c = byId.get(id);
     check(
       "evidence_classification",
       c?.classification === cls,
@@ -543,7 +544,7 @@ export function scoreScenario(s: Scenario, output = s.output): ScenarioResult {
       n.impact_assessment?.scope === "unknown" && n.impact_assessment?.exact === false,
       `impact scope ${n.impact_assessment?.scope}`,
     );
-  let upstream: Record<string, any> = { ...(s.upstream ?? {}), [s.role]: n };
+  let upstream: Record<string, unknown> = { ...(s.upstream ?? {}), [s.role]: n };
   if (s.scope) {
     const scope = approvedScopeFrom(s.role, n)!;
     const sc = scopeCheck(scope, s.scope.files, s.scope.deviations);
@@ -582,7 +583,7 @@ export function scoreScenario(s: Scenario, output = s.output): ScenarioResult {
       Object.entries(s.expect.classes ?? {}).some(
         ([id, cls]) =>
           !["OBSERVED_FACT", "CODE_FACT"].includes(cls) &&
-          f.includes((byId.get(id) as any)?.claim ?? "\u0000"),
+          f.includes(byId.get(id)?.claim ?? "\u0000"),
       ),
     );
     check(
@@ -612,8 +613,8 @@ export function runInvestigationBenchmark(scenarios = SCENARIOS) {
   }
   for (const m of Object.values(metrics)) {
     m.rate = m.total ? m.passed / m.total : 0;
-    const w = wilson(m.passed, m.total) as any;
-    m.ci95 = Array.isArray(w) ? [w[0], w[1]] : [w.low ?? 0, w.high ?? 0];
+    const w = wilson(m.passed, m.total);
+    m.ci95 = [w?.low ?? 0, w?.high ?? 0];
   }
   const full = results.reduce((a, r) => a + r.tokens.full_upstream, 0);
   const summary = results.reduce((a, r) => a + r.tokens.summary, 0);

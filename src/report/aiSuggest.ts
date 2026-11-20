@@ -91,8 +91,24 @@ export function analyzeRequirement(
   return { screenshot, screenshotOnly, log, code, test, outcome, accepts: [...accepts] };
 }
 
+interface AiSuggest {
+  report?: Record<string, unknown> | unknown[] | string | number | boolean | null;
+  reasoning?: unknown;
+  suggest_id?: string | null;
+  object?: string | null;
+  object_value?: unknown;
+  has_report_constraints?: unknown;
+}
+type AiSuggestPayload =
+  | {
+      task_ai?: { ai_suggest?: AiSuggest | null } | null;
+      data?: { task_ai?: { ai_suggest?: AiSuggest | null } | null } | null;
+    }
+  | null
+  | undefined;
+
 /** null when there is nothing meaningful to report (missing/null ai_suggest, empty report, only blank items). */
-export function parseAiSuggest(payload: any): ReportSpec | null {
+export function parseAiSuggest(payload: AiSuggestPayload): ReportSpec | null {
   const ai = payload?.task_ai?.ai_suggest ?? payload?.data?.task_ai?.ai_suggest;
   if (
     !ai ||
@@ -103,7 +119,7 @@ export function parseAiSuggest(payload: any): ReportSpec | null {
   )
     return null;
   const sections: ReportSpec["sections"] = [];
-  for (const [name, raw] of Object.entries<any>(ai.report)) {
+  for (const [name, raw] of Object.entries<unknown>(ai.report)) {
     const items = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [])
       .map((x) => (typeof x === "string" ? x.trim() : ""))
       .filter(Boolean);

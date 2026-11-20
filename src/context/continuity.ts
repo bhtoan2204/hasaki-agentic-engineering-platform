@@ -20,14 +20,18 @@ export async function captureContextContinuity(ctx: ExecutionContext, result?: E
           timer = setTimeout(() => reject(new Error("change evidence timed out")), 5000);
         }),
       ]);
-      files = changes.repos.slice(0, 30).map((r: any) => ({
-        repo: r.repo,
-        branch: r.branch,
-        commits: r.commits?.slice(0, 30),
-        files: r.files?.slice(0, 100),
-        uncommitted: r.status?.slice(0, 2000),
-        omitted_files: Math.max(0, (r.files?.length ?? 0) - 100),
-      }));
+      files = changes.repos.slice(0, 30).map((r) =>
+        "commits" in r
+          ? {
+              repo: r.repo,
+              branch: r.branch,
+              commits: r.commits.slice(0, 30),
+              files: r.files.slice(0, 100),
+              uncommitted: r.status.slice(0, 2000),
+              omitted_files: Math.max(0, r.files.length - 100),
+            }
+          : { repo: r.repo, branch: r.branch, omitted_files: 0 },
+      );
     } catch (error) {
       files = { available: false, reason: safeDiagnostics(error) };
     } finally {

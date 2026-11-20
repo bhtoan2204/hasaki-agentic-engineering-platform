@@ -36,6 +36,26 @@ export interface Hit {
   snippet?: string;
   content_hash?: string;
 }
+interface RelationRow {
+  id: number;
+  extraction_id: number;
+  file_path: string;
+  source_name: string;
+  target_name: string;
+  relation_type: string;
+  resolution: string;
+  line: number;
+  content_hash: string;
+}
+interface DependencyEdge extends RelationRow {
+  repository: string;
+  snapshot: Hit["snapshot"];
+  line_range: [number, number];
+  match_type: string;
+  confidence: number;
+  depth: number;
+  candidate_definitions?: Hit[];
+}
 function authorize(s: SearchScope) {
   if (s.repositories.length > 30 || s.repositories.some((r) => !s.allowed.includes(r)))
     throw new Error("Unauthorized repository search");
@@ -213,7 +233,7 @@ export async function findDependencies(
 ) {
   authorize(scope);
   if (!codeIntelligenceEnabled()) return [];
-  const result: any[] = [];
+  const result: DependencyEdge[] = [];
   let frontier = [symbol];
   const seen = new Set<string>();
   for (let d = 0; d < Math.min(3, Math.max(1, depth)) && frontier.length; d++) {
@@ -228,7 +248,7 @@ export async function findDependencies(
           if (report && !report.unavailable.includes(repo)) report.unavailable.push(repo);
           continue;
         }
-        const rows = await q(
+        const rows = await q<RelationRow>(
           pool,
           `WITH f AS (${effectiveSql}) SELECT f.file_path,r.*,e.content_hash FROM f JOIN code_intelligence.relations r ON r.extraction_id=f.extraction_id JOIN code_intelligence.extractions e ON e.id=f.extraction_id
           WHERE ${direction === "out" ? "r.source_name" : "r.target_name"}=ANY($2) ORDER BY f.file_path,r.line,r.id LIMIT 50`,
@@ -371,7 +391,7 @@ export async function searchCodeExact(
         )
       ).stdout;
     } catch (e) {
-      if ((e as any).code === 1) continue;
+      if ((e as { code?: unknown }).code === 1) continue;
       if ((e as NodeJS.ErrnoException).code === "ENOENT")
         throw new Error("ripgrep unavailable; install rg on the assigned worker");
       throw new Error("Bounded exact search unavailable");

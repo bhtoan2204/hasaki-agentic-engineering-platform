@@ -105,13 +105,16 @@ function errorText(v: unknown): string {
 }
 
 export function parseCodexLine(line: string): { event: CodexEvent } | { error: CodexParseError } {
-  let raw: any;
+  let parsed: unknown;
   try {
-    raw = JSON.parse(line);
+    parsed = JSON.parse(line);
   } catch (e) {
     return { error: { line: line.slice(0, 500), error: (e as Error).message } };
   }
-  if (!raw || typeof raw !== "object" || typeof raw.type !== "string")
+  if (!parsed || typeof parsed !== "object")
+    return { error: { line: line.slice(0, 500), error: "event has no type" } };
+  const raw = parsed as Record<string, unknown>;
+  if (typeof raw.type !== "string")
     return { error: { line: line.slice(0, 500), error: "event has no type" } };
   switch (raw.type) {
     case "thread.started":
@@ -121,7 +124,8 @@ export function parseCodexLine(line: string): { event: CodexEvent } | { error: C
     case "turn.started":
       return { event: { type: "turn.started", raw } };
     case "turn.completed": {
-      const u = raw.usage && typeof raw.usage === "object" ? raw.usage : null;
+      const u =
+        raw.usage && typeof raw.usage === "object" ? (raw.usage as Record<string, unknown>) : null;
       const usage: CodexUsage | null = u
         ? {
             input_tokens: num(u.input_tokens),
@@ -146,8 +150,9 @@ export function parseCodexLine(line: string): { event: CodexEvent } | { error: C
     case "item.started":
     case "item.updated":
     case "item.completed": {
-      const it = raw.item;
-      if (!it || typeof it !== "object" || typeof it.type !== "string")
+      const it =
+        raw.item && typeof raw.item === "object" ? (raw.item as Record<string, unknown>) : null;
+      if (!it || typeof it.type !== "string")
         return { error: { line: line.slice(0, 500), error: `${raw.type} without item.type` } };
       const item: CodexItem = {
         id: String(it.id ?? ""),
@@ -164,8 +169,11 @@ export function parseCodexLine(line: string): { event: CodexEvent } | { error: C
               : undefined,
         changes: Array.isArray(it.changes)
           ? it.changes
-              .filter((c: any) => c && typeof c.path === "string")
-              .map((c: any) => ({ path: c.path, kind: String(c.kind ?? "") }))
+              .filter(
+                (c: unknown): c is { path: string; kind?: unknown } =>
+                  !!c && typeof (c as { path?: unknown }).path === "string",
+              )
+              .map((c) => ({ path: c.path, kind: String(c.kind ?? "") }))
           : undefined,
         server: str(it.server),
         tool: str(it.tool),

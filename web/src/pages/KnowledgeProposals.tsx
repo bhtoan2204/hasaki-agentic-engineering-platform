@@ -41,6 +41,81 @@ const STATUS_TONE: Record<string, string> = {
 };
 const STATUSES = ["pending", "approved", "rejected", "rolled_back", "obsolete", ""] as const;
 
+type ProposedChange = {
+  title?: string;
+  content?: string;
+  scope_type?: string;
+  scope_ref?: string;
+  effective_from?: string | null;
+};
+type ProposalValidation = {
+  passed: boolean;
+  checks: Array<{ name: string; passed: boolean; detail: string }>;
+};
+type ProposalSummary = {
+  id: number;
+  status: string;
+  change_type: string;
+  target_key: string | null;
+  target_version: number | null;
+  proposed: ProposedChange | null;
+  source_kind: string;
+  source_run_id: number | null;
+  confidence: number | string;
+  evidence_count: number;
+  validation_passed: string | null;
+  created_at: string;
+};
+type ProposalDetailData = ProposalSummary & {
+  domain: string;
+  uncertainty: string;
+  existing_rule: string | null;
+  parent: { id: number; change_type: string; target_key: string | null } | null;
+  target: { current_version: number } | null;
+  target_changed: boolean;
+  terms: { removed: string[]; added: string[] };
+  diff: Array<{ op: string; line: string }>;
+  evidence: Array<{
+    source: string;
+    trust: string;
+    author: string;
+    quote: string;
+    ref?: { run_id?: number; step?: string; path?: string; repo?: string };
+  }> | null;
+  impacts: {
+    skills?: Array<{ key: string; reason: string }>;
+    repositories?: string[];
+    workflows?: string[];
+    competing_rules?: Array<{ key: string }>;
+    open_proposals?: Array<{ id: number }>;
+  } | null;
+  validation: ProposalValidation | null;
+  children: Array<{
+    id: number;
+    target_key: string | null;
+    status: string;
+    validation: ProposalValidation | null;
+  }>;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_comment: string | null;
+  applied: {
+    created_key?: string;
+    item_key?: string;
+    new_version?: number;
+    previous_version?: number;
+    superseded_key?: string;
+  } | null;
+  rolled_back_by: string | null;
+  rolled_back_at: string | null;
+};
+type ProposalEdits = {
+  content?: string;
+  scope_type?: string;
+  scope_ref?: string;
+  effective_from?: string | null;
+};
+
 export function ProposalStatus({ s }: { s: string }) {
   const { t } = useI18n();
   return <Badge s={STATUS_TONE[s] ?? "CANCELED"}>{t(`kp.status.${s}`)}</Badge>;
@@ -72,7 +147,7 @@ function Section({
 export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () => void }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("pending");
-  const list = useApi<any[]>(`/api/knowledge-proposals${status ? `?status=${status}` : ""}`, [
+  const list = useApi<ProposalSummary[]>(`/api/knowledge-proposals${status ? `?status=${status}` : ""}`, [
     status,
   ]);
   // Bulk review: only pending proposals are selectable; the selection is dropped whenever the list changes.
@@ -287,7 +362,7 @@ function Diff({ lines }: { lines: Array<{ op: string; line: string }> }) {
 
 function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
   const { t } = useI18n();
-  const { data: p, error, loading, reload } = useApi<any>(`/api/knowledge-proposals/${id}`, [id]);
+  const { data: p, error, loading, reload } = useApi<ProposalDetailData>(`/api/knowledge-proposals/${id}`, [id]);
   const [comment, setComment] = useState("");
   const [edit, setEdit] = useState<{
     content: string;
@@ -330,9 +405,14 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
   const pending = p.status === "pending";
   const done = () => (reload(), onChanged());
   const decide = async (what: "approve" | "reject" | "rollback") => {
-    const body: any = { comment };
+    const body: {
+      comment: string;
+      edits?: ProposalEdits;
+      accept_current_version?: boolean;
+      override_validation?: boolean;
+    } = { comment };
     if (what === "approve") {
-      const edits: any = {};
+      const edits: ProposalEdits = {};
       if (edit.content !== (p.proposed?.content ?? "")) edits.content = edit.content;
       if (
         edit.scope_type !== p.proposed?.scope_type ||
@@ -411,8 +491,8 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
           <div className="kp-note kp-warn small">
             <History size={14} />{" "}
             {t("kp.targetChanged", {
-              from: p.target_version,
-              to: p.target?.current_version,
+              from: p.target_version ?? "",
+              to: p.target?.current_version ?? "",
             })}
           </div>
         )}
@@ -461,7 +541,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
         <div className="kn-overview-grid">
           <Section icon={Quote} title={t("kp.evidence")}>
             <ul className="kp-evidence">
-              {(p.evidence ?? []).map((e: any, i: number) => (
+              {(p.evidence ?? []).map((e, i: number) => (
                 <li key={i}>
                   <div className="small">
                     <span className="kn-tag">{t(`kp.ev.${e.source}`)}</span>{" "}
@@ -497,7 +577,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 <dt>{t("kp.skills")}</dt>
                 <dd>
                   {p.impacts?.skills?.length ? (
-                    p.impacts.skills.map((s: any) => (
+                    p.impacts.skills.map((s) => (
                       <div key={s.key}>
                         <a className="mono" href={`#/knowledge/${s.key}`}>
                           {s.key}
@@ -538,11 +618,11 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                   )}
                 </dd>
               </div>
-              {p.impacts?.competing_rules?.length > 0 && (
+              {!!p.impacts?.competing_rules?.length && (
                 <div className="kn-kv-row">
                   <dt>{t("kp.competing")}</dt>
                   <dd>
-                    {p.impacts.competing_rules.map((r: any) => (
+                    {p.impacts.competing_rules.map((r) => (
                       <a key={r.key} className="pill mono" href={`#/knowledge/${r.key}`}>
                         {r.key}
                       </a>
@@ -550,13 +630,13 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                   </dd>
                 </div>
               )}
-              {p.impacts?.open_proposals?.filter((x: any) => x.id !== p.id).length > 0 && (
+              {p.impacts?.open_proposals?.some((x) => x.id !== p.id) && (
                 <div className="kn-kv-row">
                   <dt>{t("kp.otherOpen")}</dt>
                   <dd>
                     {p.impacts.open_proposals
-                      .filter((x: any) => x.id !== p.id)
-                      .map((x: any) => (
+                      .filter((x) => x.id !== p.id)
+                      .map((x) => (
                         <a key={x.id} className="pill" href={`#/knowledge/~proposals/${x.id}`}>
                           #{x.id}
                         </a>
@@ -579,7 +659,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             }
           >
             <ul className="kp-checks">
-              {p.validation.checks.map((c: any) => (
+              {p.validation.checks.map((c) => (
                 <li key={c.name} className={c.passed ? "okc" : "err"}>
                   {c.passed ? "✓" : "✗"} <b>{c.name}</b>{" "}
                   <span className="muted small">{c.detail}</span>
@@ -592,7 +672,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
         {p.children?.length > 0 && (
           <Section icon={Sparkles} title={t("kp.children")}>
             <ul className="kn-use-list">
-              {p.children.map((c: any) => (
+              {p.children.map((c) => (
                 <li key={c.id}>
                   <a href={`#/knowledge/~proposals/${c.id}`}>
                     #{c.id} {c.target_key}
@@ -730,7 +810,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 className="ok"
                 disabled={
                   (p.target_changed && !accept) ||
-                  (p.validation && !p.validation.passed && !override)
+                  (!!p.validation && !p.validation.passed && !override)
                 }
                 onClick={() => decide("approve")}
               >

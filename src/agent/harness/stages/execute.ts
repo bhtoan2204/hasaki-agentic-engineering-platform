@@ -13,7 +13,7 @@ import { progressNotes, worktreeState } from "../../claude.ts";
 import { blocksRebuild, failedTurn } from "../failure.ts";
 import { runEvents } from "../../../workflow/events.ts";
 import { outputLocale } from "../../language.ts";
-import { addUsage } from "../../metrics.ts";
+import { type AgentMetrics, addUsage } from "../../metrics.ts";
 import {
   OCR_REVIEW_INSTRUCTIONS,
   openCodeReviewGuide,
@@ -38,7 +38,11 @@ import {
   sessionStateBlock,
 } from "../../../context/compaction.ts";
 import { hashOf } from "../../../workflow/definitions.ts";
-import { normalizeProviderFailure, safeDiagnostics } from "../../telemetry.ts";
+import {
+  type FailureCategory,
+  normalizeProviderFailure,
+  safeDiagnostics,
+} from "../../telemetry.ts";
 import { integrationCatalog } from "../../toolRegistry.ts";
 import type { VerificationRound } from "../../verify.ts";
 import { TURN_ADAPTERS, type TurnResult } from "../turn.ts";
@@ -266,7 +270,23 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
     });
   };
 
-  const providerSessions: Record<string, any> = {};
+  const providerSessions: Record<
+    string,
+    {
+      complete: boolean;
+      provider: typeof provider;
+      model: string | null;
+      start_time: string;
+      provider_execution_ms: number;
+      tokens: AgentMetrics["tokens"];
+      reported_cost_usd: number | null;
+      cost_source: string;
+      cost_availability: string;
+      normalized_failure_category?: FailureCategory;
+      diagnostics?: string;
+      end_time?: string;
+    }
+  > = {};
   let sessionKey = "";
   let sessionStart = 0;
   const writeTelemetry = async (snapshot: Record<string, unknown>) => {

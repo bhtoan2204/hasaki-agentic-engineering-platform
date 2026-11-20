@@ -1,7 +1,7 @@
 import { config } from "../../config.ts";
 import { pool, q } from "../../db/pool.ts";
 import { ancestors } from "../graph.ts";
-import { parseGoTest } from "./baseline.ts";
+import { parseGoTest, type BaselineComparison } from "./baseline.ts";
 import type { ExecutionContext } from "./registry.ts";
 import type { ExecResult } from "../types.ts";
 import { languagePolicy, outputLocale, type OutputLocale } from "../../agent/language.ts";
@@ -121,7 +121,7 @@ export function diagnose(input: {
     timed_out: boolean;
     artifact_id: number;
     passed?: boolean;
-    baseline?: any;
+    baseline?: BaselineComparison;
     environment_unavailable?: string;
   }>;
 }): Diagnosis {
@@ -198,20 +198,19 @@ export function diagnose(input: {
           b?.base_sha && !(reg.get(pkg)?.reason ?? "").includes("not tested on the base");
         let category: Category;
         let reason: string;
-        if (matched)
-          ((category = "pre_existing"),
-            (reason = `the same failure occurs on ${config.baseBranch}@${String(b.base_sha).slice(0, 9)}`));
-        else if (baseTested)
-          ((category = "new"),
-            (reason = `does not fail on ${config.baseBranch}@${String(b.base_sha).slice(0, 9)}`));
-        else if (env)
-          ((category = "environment"),
-            (reason = "network/infrastructure error in the log; no baseline evidence"));
-        else
-          ((category = "insufficient"),
-            (reason = b?.note
-              ? `no baseline evidence (${b.note})`
-              : "no baseline evidence for this failure"));
+        if (matched) {
+          category = "pre_existing";
+          reason = `the same failure occurs on ${config.baseBranch}@${String(b?.base_sha).slice(0, 9)}`;
+        } else if (baseTested) {
+          category = "new";
+          reason = `does not fail on ${config.baseBranch}@${String(b.base_sha).slice(0, 9)}`;
+        } else if (env) {
+          category = "environment";
+          reason = "network/infrastructure error in the log; no baseline evidence";
+        } else {
+          category = "insufficient";
+          reason = b?.note ? `no baseline evidence (${b.note})` : "no baseline evidence for this failure";
+        }
         failures.push({
           repo: r.repo,
           package: pkg,
@@ -322,11 +321,11 @@ export function setTestFailureAdvisor(a: TestFailureAdvisor | null) {
 }
 
 /** The run's provider answers (completeForRun): a Codex or Cursor run never asks Claude here. */
-async function askClaude(
+async function askClaude<T>(
   prompt: string,
   ctx?: ExecutionContext,
   provider: AgentProvider = "claude",
-): Promise<any> {
+): Promise<T> {
   const done = await completeForRun({ ...(ctx?.run ?? {}), agent_provider: provider }, prompt, ctx?.signal);
   if (ctx)
     await ctx
@@ -554,12 +553,21 @@ export async function askAboutFailure(
   };
 }
 
+export interface TestFailureDecision {
+  kind: DecisionKind;
+  answer: string;
+  instructions: string | null;
+  confirmed: boolean;
+  from_attempt: number;
+  at: string;
+}
+
 /** Resumed after an answer: interpret and act. Returns null for "rerun" (caller runs the tests again). */
 export async function handleDecision(
   ctx: ExecutionContext,
   d: Diagnosis,
   fromAttempt: number,
-): Promise<{ result: ExecResult | null; decision: any }> {
+): Promise<{ result: ExecResult | null; decision: TestFailureDecision }> {
   const mine = ctx.input.answers.filter((a) => a.attempt_id === fromAttempt);
   const answer = mine.at(-1)?.answer ?? "";
   const history = ctx.input.answers.map((a) => ({ question: a.question, answer: a.answer }));
@@ -582,7 +590,7 @@ export async function handleDecision(
       await ctx.log("system", `answer interpretation unavailable: ${(e as Error).message}`);
     }
   }
-  const decision = {
+  const decision: TestFailureDecision = {
     kind: p.kind,
     answer,
     instructions: p.instructions || null,

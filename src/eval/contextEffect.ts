@@ -1,13 +1,34 @@
 /** Extend the existing paired-comparison report; fixture controls cannot establish model/context value. */
-export function compareContextEffect(a: any, b: any) {
+interface ContextCase {
+  task_id: string;
+  repetition: number;
+  status?: string;
+  correct?: boolean | null;
+  hard_gates_passed?: boolean | null;
+  completion_duration_ms?: number | null;
+  data?: {
+    evidence?: { duration_ms?: number; details?: { evidence_kind?: string } };
+  } | null;
+}
+interface ContextEvaluation {
+  configuration: {
+    provider_sequence?: unknown;
+    context_variant?: string;
+    mode?: string;
+    blocked?: boolean;
+  };
+  status?: string;
+  cases: ContextCase[];
+}
+export function compareContextEffect(a: ContextEvaluation, b: ContextEvaluation) {
   if (
     !a.configuration.provider_sequence ||
     !b.configuration.provider_sequence ||
     a.configuration.context_variant === b.configuration.context_variant
   )
     return null;
-  const left = new Map<string, any>(a.cases.map((r: any) => [`${r.task_id}:${r.repetition}`, r]));
-  const tasks = new Map<string, Array<{ a: any; b: any }>>();
+  const left = new Map(a.cases.map((r) => [`${r.task_id}:${r.repetition}`, r]));
+  const tasks = new Map<string, Array<{ a: ContextCase; b: ContextCase }>>();
   for (const r of b.cases) {
     const previous = left.get(`${r.task_id}:${r.repetition}`);
     if (previous) {
@@ -49,7 +70,7 @@ export function compareContextEffect(a: any, b: any) {
     const values = (key: "a" | "b") =>
       group
         .map((p) => p[key].completion_duration_ms ?? p[key].data?.evidence?.duration_ms)
-        .filter((v: any): v is number => typeof v === "number" && Number.isFinite(v));
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
     const av = values("a"),
       bv = values("b");
     if (av.length === group.length && bv.length === group.length) {

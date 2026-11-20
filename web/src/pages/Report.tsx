@@ -20,6 +20,51 @@ import { act, Badge, Copy, Empty, Markdown, Tabs, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./RunView.css";
 
+type ReportRequirement = {
+  id: string;
+  text: string;
+  status: string;
+  explanation?: string;
+  evidence: Array<{
+    id: string;
+    title: string;
+    ref?: { url?: string; artifact_id?: number; step_key?: string };
+  }>;
+};
+export type TaskReport = {
+  task?: { code?: string; title?: string };
+  object?: string;
+  object_value?: string;
+  suggest_id: string;
+  generated_by: string;
+  generated_at: string;
+  counts: { VERIFIED: number; PARTIAL: number; MISSING: number };
+  summary: string;
+  sections: Array<{ name: string; requirements: ReportRequirement[] }>;
+  limitations?: string[];
+};
+export type ReportPayload = { report?: TaskReport; markdown?: string; skipped?: boolean };
+export type ReportSpec = {
+  sections: Array<{ name: string; requirements: Array<{ id: string; text: string }> }>;
+  reasoning?: string;
+};
+export type ReportStep = {
+  key: string;
+  status: string;
+  output?: ReportPayload | null;
+  approval?: { request?: ReportPayload } | null;
+  config?: { ai_suggest?: ReportSpec };
+};
+export type ReportArtifact = {
+  id: number;
+  kind: string;
+  name: string;
+  attempt_id: number | null;
+  created_at: string;
+  data?: { mime?: string; note_only?: boolean; requirement_id?: string; final?: boolean } | null;
+};
+type EvidenceBody = { note: string } | { name: string; mime: string; data_base64: string };
+
 const ST: Record<string, [string, string]> = {
   VERIFIED: ["COMPLETED", "VERIFIED"],
   PARTIAL: ["WAITING", "PARTIAL"],
@@ -53,7 +98,7 @@ function EvidenceAdder({
   const { t } = useI18n();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const send = async (body: any) => {
+  const send = async (body: EvidenceBody) => {
     setBusy(true);
     const r = await act(
       () =>
@@ -64,7 +109,10 @@ function EvidenceAdder({
       t("rp.added"),
     );
     setBusy(false);
-    if (r) (setNote(""), onDone());
+    if (r) {
+      setNote("");
+      onDone();
+    }
   };
   return (
     <div className="row tight" style={{ marginTop: 8, gap: 6 }}>
@@ -114,10 +162,10 @@ export function ReportPanel({
   attempts,
   onChanged,
 }: {
-  run: any;
-  step: any;
-  artifacts: any[];
-  attempts: any[];
+  run: { id: number };
+  step: ReportStep;
+  artifacts: ReportArtifact[];
+  attempts: Array<{ id: number; number: number }>;
   onChanged: () => void;
 }) {
   const { t } = useI18n();
@@ -230,15 +278,15 @@ export function ReportPanel({
             </div>
             <Markdown text={report.summary} />
           </div>
-          {report.sections.map((s: any) => (
+          {report.sections.map((s) => (
             <div key={s.name}>
               <h3 style={{ textTransform: "none", letterSpacing: 0 }}>{s.name}</h3>
-              {s.requirements.map((r: any) => (
+              {s.requirements.map((r) => (
                 <div
                   key={r.id}
                   className="rp-req"
                   style={{
-                    ["--rp-c" as any]: ST_COLOR[r.status] ?? "var(--line-strong)",
+                    ["--rp-c" as string]: ST_COLOR[r.status] ?? "var(--line-strong)",
                   }}
                 >
                   <div className="rp-req-head">
@@ -250,7 +298,7 @@ export function ReportPanel({
                   </div>
                   {r.evidence.length > 0 ? (
                     <div style={{ marginTop: 6 }}>
-                      {r.evidence.map((e: any) => (
+                      {r.evidence.map((e) => (
                         <div key={e.id} className="rp-ev">
                           <Link2 size={12} /> <span className="mono muted">{e.id}</span> {e.title}{" "}
                           {e.ref?.url && (
@@ -301,7 +349,7 @@ export function ReportPanel({
               ))}
             </div>
           ))}
-          {report.limitations?.length > 0 && (
+          {!!report.limitations?.length && (
             <div className="rv-card soft">
               <div className="rv-card-head" style={{ marginBottom: 2 }}>
                 <h4>
@@ -396,7 +444,7 @@ export function ReportPanel({
               </a>{" "}
               <span className="muted">
                 {time(a.created_at)} · attempt{" "}
-                {attempts.find((t: any) => t.id === a.attempt_id)?.number ?? "?"}
+                {attempts.find((t) => t.id === a.attempt_id)?.number ?? "?"}
               </span>{" "}
               {a.data?.final && <Badge s="COMPLETED">final</Badge>}
             </div>
@@ -438,7 +486,7 @@ export function ReportPanel({
   );
 }
 
-function SpecPreview({ spec }: { spec: any }) {
+function SpecPreview({ spec }: { spec: ReportSpec }) {
   const { t } = useI18n();
   return (
     <div className="rv-card">
@@ -447,10 +495,10 @@ function SpecPreview({ spec }: { spec: any }) {
           <ClipboardList size={15} /> {t("rp.specTitle")}
         </h4>
       </div>
-      {spec.sections.map((s: any) => (
+      {spec.sections.map((s) => (
         <div key={s.name} className="small" style={{ marginTop: 4 }}>
           <b>{s.name}</b>
-          {s.requirements.map((r: any) => (
+          {s.requirements.map((r) => (
             <div key={r.id}>
               • <span className="mono muted">{r.id}</span> {r.text}
             </div>

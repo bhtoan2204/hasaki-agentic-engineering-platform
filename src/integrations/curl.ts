@@ -29,7 +29,11 @@ export function shellWords(s: string): string[] {
       continue;
     }
     if (/\s/.test(c)) {
-      if (has) (out.push(cur), (cur = ""), (has = false));
+      if (has) {
+        out.push(cur);
+        cur = "";
+        has = false;
+      }
       continue;
     }
     has = true;

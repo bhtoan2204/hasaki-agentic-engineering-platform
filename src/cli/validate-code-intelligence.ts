@@ -27,7 +27,17 @@ const expected = process.argv[2];
 if (!expected)
   throw new Error("Usage: validate-code-intelligence.ts <authorized-development-database-name>");
 const selected = ["oms-api", "oms-frontend", "oms-background"];
-const report: any = {
+interface RepositoryReport extends Record<string, unknown> {
+  name: string;
+  job: { status: string; metrics: { indexed_files?: number } };
+  languages: unknown[];
+  sample: { qualified_name: string };
+}
+const report: Record<string, unknown> & {
+  repositories: RepositoryReport[];
+  scenarios?: unknown[];
+  overlays: unknown;
+} = {
   generated_at: new Date().toISOString(),
   repositories: [],
   overlays: {},
@@ -293,7 +303,7 @@ await writeFile(
 console.log(
   JSON.stringify({
     report: "docs/validation/p1-real-repositories.json",
-    repositories: report.repositories.map((r: any) => ({
+    repositories: report.repositories.map((r) => ({
       name: r.name,
       status: r.job.status,
       files: r.job.metrics.indexed_files,

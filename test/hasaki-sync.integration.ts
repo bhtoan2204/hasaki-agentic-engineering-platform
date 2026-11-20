@@ -32,18 +32,20 @@ test("function codes come from commit footers (distinct, in order); the task cod
     virtualText: "Đã tích hợp FPT Pay.\nPR: https://bitbucket.org/x/pr/1",
   });
   const noCodes = syncValues({ workItem: { code: "HSK-3K007RX3", payload: { id: 14572969, amount_of_work: null } }, summary: "x", commitMessages: ["chore: y"], prUrls: [] });
-  assert.equal((noCodes as any).unitValue, "HSK-3K007RX3", "no function code: the task code");
-  assert.equal((noCodes as any).amount, 1, "task without amount_of_work: 1");
+  assert.ok("unitValue" in noCodes);
+  assert.equal(noCodes.unitValue, "HSK-3K007RX3", "no function code: the task code");
+  assert.equal(noCodes.amount, 1, "task without amount_of_work: 1");
   assert.deepEqual(syncValues({ workItem: { code: "X", payload: {} }, summary: "x", commitMessages: [], prUrls: [] }), { skipped: "work item is not a Hasaki Work task" });
 });
 
 test("the three Hasaki Work calls go out in order with the owner's token; a failure stops the rest", async () => {
-  const sent: Array<{ url: string; auth: string | null; type: string | null; body: any }> = [];
+  const sent: Array<{ url: string; auth: string | null; type: string | null; body: unknown }> = [];
   const real = globalThis.fetch;
   let failAt = -1;
-  globalThis.fetch = (async (url: any, init: any) => {
-    const body = init?.body instanceof FormData ? Object.fromEntries(init.body.entries()) : JSON.parse(init?.body ?? "null");
-    sent.push({ url: String(url), auth: init?.headers?.Authorization ?? null, type: init?.headers?.["Content-Type"] ?? null, body });
+  globalThis.fetch = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const body = init?.body instanceof FormData ? Object.fromEntries(init.body.entries()) : JSON.parse(String(init?.body ?? "null"));
+    const headers = init?.headers as Record<string, string> | undefined;
+    sent.push({ url: String(url), auth: headers?.Authorization ?? null, type: headers?.["Content-Type"] ?? null, body });
     const ok = sent.length - 1 !== failAt;
     return new Response(JSON.stringify(ok ? { success: true } : { message: "boom" }), { status: ok ? 200 : 500, headers: { "content-type": "application/json" } });
   }) as typeof fetch;

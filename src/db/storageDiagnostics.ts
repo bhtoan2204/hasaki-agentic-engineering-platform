@@ -1,4 +1,3 @@
-import type pg from "pg";
 import { pool, type Db } from "./pool.ts";
 
 export interface TableStorageStats {
@@ -114,15 +113,6 @@ interface RawIndexRow {
   index_size_bytes: number | string;
 }
 
-function isPgPool(target: unknown): target is pg.Pool {
-  return (
-    typeof target === "object" &&
-    target !== null &&
-    "connect" in target &&
-    typeof (target as { connect: unknown }).connect === "function"
-  );
-}
-
 /**
  * Collects read-only PostgreSQL storage diagnostics without running COUNT(*) across tables.
  *
@@ -136,163 +126,154 @@ export async function getStorageDiagnostics(
   const limit = options.limit !== undefined && options.limit >= 0 ? options.limit : 10;
   const generatedAt = new Date().toISOString();
 
-  // If db is a pool, checkout a single client for all queries and release in finally.
-  let poolClient: pg.PoolClient | undefined;
-  let client: Db = db;
-  if (isPgPool(db)) {
-    poolClient = await db.connect();
-    client = poolClient;
+  // 1. Database size and name
+  const dbRes = await db.query<RawDbRow>(`
+    SELECT
+      current_database() AS database_name,
+      pg_database_size(current_database()) AS database_size_bytes
+  `);
+  const dbRow = dbRes.rows[0] ?? { database_name: "unknown", database_size_bytes: 0 };
+  const dbSizeBytes = Number(dbRow.database_size_bytes ?? 0);
+  const database: DatabaseStorageStats = {
+    name: String(dbRow.database_name),
+    sizeBytes: dbSizeBytes,
+    sizePretty: formatBytes(dbSizeBytes),
+  };
+
+  // 2. Table storage details, estimated row counts and dead tuples (NO COUNT(*))
+  const tableParams: unknown[] = [];
+  let tableQuery = `
+    SELECT
+      n.nspname AS schemaname,
+      c.relname AS tablename,
+      pg_total_relation_size(c.oid) AS total_size_bytes,
+      pg_table_size(c.oid) - toast.bytes AS table_size_bytes,
+      pg_indexes_size(c.oid) AS index_size_bytes,
+      toast.bytes AS toast_size_bytes,
+      GREATEST(0::bigint, COALESCE(s.n_live_tup, CASE WHEN c.reltuples >= 0 THEN ROUND(c.reltuples)::bigint END, 0)) AS estimated_rows,
+      GREATEST(0::bigint, COALESCE(s.n_dead_tup, 0)) AS dead_tuples,
+      s.last_vacuum,
+      s.last_autovacuum,
+      s.last_analyze,
+      s.last_autoanalyze
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+    CROSS JOIN LATERAL (
+      SELECT CASE WHEN c.reltoastrelid = 0 THEN 0::bigint ELSE pg_total_relation_size(c.reltoastrelid) END AS bytes
+    ) toast
+    WHERE c.relkind IN ('r', 'm')
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND n.nspname !~ '^pg_toast'
+  `;
+
+  if (options.schema) {
+    tableParams.push(options.schema);
+    tableQuery += ` AND n.nspname = $${tableParams.length}`;
   }
 
-  try {
-    // 1. Database size and name
-    const dbRes = await client.query<RawDbRow>(`
-      SELECT
-        current_database() AS database_name,
-        pg_database_size(current_database()) AS database_size_bytes
-    `);
-    const dbRow = dbRes.rows[0] ?? { database_name: "unknown", database_size_bytes: 0 };
-    const dbSizeBytes = Number(dbRow.database_size_bytes ?? 0);
-    const database: DatabaseStorageStats = {
-      name: String(dbRow.database_name),
-      sizeBytes: dbSizeBytes,
-      sizePretty: formatBytes(dbSizeBytes),
-    };
+  tableQuery += ` ORDER BY pg_total_relation_size(c.oid) DESC`;
 
-    // 2. Table storage details, estimated row counts and dead tuples (NO COUNT(*))
-    const tableParams: unknown[] = [];
-    let tableQuery = `
-      SELECT
-        n.nspname AS schemaname,
-        c.relname AS tablename,
-        pg_total_relation_size(c.oid) AS total_size_bytes,
-        pg_relation_size(c.oid) AS table_size_bytes,
-        pg_indexes_size(c.oid) AS index_size_bytes,
-        GREATEST(0::bigint, (pg_total_relation_size(c.oid) - pg_indexes_size(c.oid) - pg_relation_size(c.oid))) AS toast_size_bytes,
-        GREATEST(0::bigint, COALESCE(NULLIF(s.n_live_tup, 0), NULLIF(ROUND(c.reltuples)::bigint, -1), 0)) AS estimated_rows,
-        GREATEST(0::bigint, COALESCE(s.n_dead_tup, 0)) AS dead_tuples,
-        s.last_vacuum,
-        s.last_autovacuum,
-        s.last_analyze,
-        s.last_autoanalyze
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
-      WHERE c.relkind IN ('r', 'm')
-        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-        AND n.nspname !~ '^pg_toast'
-    `;
+  const tableRes = await db.query<RawTableRow>(tableQuery, tableParams);
 
-    if (options.schema) {
-      tableParams.push(options.schema);
-      tableQuery += ` AND n.nspname = $${tableParams.length}`;
-    }
-
-    tableQuery += ` ORDER BY pg_total_relation_size(c.oid) DESC`;
-
-    const tableRes = await client.query<RawTableRow>(tableQuery, tableParams);
-
-    const tables: TableStorageStats[] = tableRes.rows.map((r) => {
-      const totalSizeBytes = Number(r.total_size_bytes ?? 0);
-      const tableSizeBytes = Number(r.table_size_bytes ?? 0);
-      const indexSizeBytes = Number(r.index_size_bytes ?? 0);
-      const toastSizeBytes = Number(r.toast_size_bytes ?? 0);
-      const estimatedRows = Math.max(0, Number(r.estimated_rows ?? 0));
-      const deadTuples = Math.max(0, Number(r.dead_tuples ?? 0));
-      return {
-        schema: String(r.schemaname),
-        table: String(r.tablename),
-        tableSizeBytes,
-        tableSizePretty: formatBytes(tableSizeBytes),
-        indexSizeBytes,
-        indexSizePretty: formatBytes(indexSizeBytes),
-        toastSizeBytes,
-        toastSizePretty: formatBytes(toastSizeBytes),
-        totalSizeBytes,
-        totalSizePretty: formatBytes(totalSizeBytes),
-        estimatedRows,
-        deadTuples,
-        deadTupleRatio: computeDeadTupleRatio(estimatedRows, deadTuples),
-        lastVacuum: r.last_vacuum ? new Date(r.last_vacuum).toISOString() : null,
-        lastAutovacuum: r.last_autovacuum ? new Date(r.last_autovacuum).toISOString() : null,
-        lastAnalyze: r.last_analyze ? new Date(r.last_analyze).toISOString() : null,
-        lastAutoanalyze: r.last_autoanalyze ? new Date(r.last_autoanalyze).toISOString() : null,
-      };
-    });
-
-    // 3. Largest individual indexes
-    const indexParams: unknown[] = [];
-    let indexQuery = `
-      SELECT
-        n.nspname AS schemaname,
-        c.relname AS index_name,
-        t.relname AS table_name,
-        pg_relation_size(c.oid) AS index_size_bytes
-      FROM pg_class c
-      JOIN pg_index i ON i.indexrelid = c.oid
-      JOIN pg_class t ON t.oid = i.indrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE c.relkind = 'i'
-        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-        AND n.nspname !~ '^pg_toast'
-    `;
-
-    if (options.schema) {
-      indexParams.push(options.schema);
-      indexQuery += ` AND n.nspname = $${indexParams.length}`;
-    }
-
-    indexParams.push(limit);
-    indexQuery += ` ORDER BY pg_relation_size(c.oid) DESC LIMIT $${indexParams.length}`;
-
-    const indexRes = await client.query<RawIndexRow>(indexQuery, indexParams);
-    const largestIndexes: IndexStorageStats[] = indexRes.rows.map((r) => {
-      const sizeBytes = Number(r.index_size_bytes ?? 0);
-      return {
-        schema: String(r.schemaname),
-        index: String(r.index_name),
-        table: String(r.table_name),
-        sizeBytes,
-        sizePretty: formatBytes(sizeBytes),
-      };
-    });
-
-    // Compute totals
-    const tableSizeBytes = tables.reduce((acc, t) => acc + t.tableSizeBytes, 0);
-    const indexSizeBytes = tables.reduce((acc, t) => acc + t.indexSizeBytes, 0);
-    const toastSizeBytes = tables.reduce((acc, t) => acc + t.toastSizeBytes, 0);
-    const totalRelationSizeBytes = tables.reduce((acc, t) => acc + t.totalSizeBytes, 0);
-    const estimatedRowCount = tables.reduce((acc, t) => acc + t.estimatedRows, 0);
-    const deadTupleCount = tables.reduce((acc, t) => acc + t.deadTuples, 0);
-
-    const totals: StorageTotals = {
+  const tables: TableStorageStats[] = tableRes.rows.map((r) => {
+    const totalSizeBytes = Number(r.total_size_bytes ?? 0);
+    const tableSizeBytes = Number(r.table_size_bytes ?? 0);
+    const indexSizeBytes = Number(r.index_size_bytes ?? 0);
+    const toastSizeBytes = Number(r.toast_size_bytes ?? 0);
+    const estimatedRows = Math.max(0, Number(r.estimated_rows ?? 0));
+    const deadTuples = Math.max(0, Number(r.dead_tuples ?? 0));
+    return {
+      schema: String(r.schemaname),
+      table: String(r.tablename),
       tableSizeBytes,
       tableSizePretty: formatBytes(tableSizeBytes),
       indexSizeBytes,
       indexSizePretty: formatBytes(indexSizeBytes),
       toastSizeBytes,
       toastSizePretty: formatBytes(toastSizeBytes),
-      totalSizeBytes: totalRelationSizeBytes,
-      totalSizePretty: formatBytes(totalRelationSizeBytes),
-      estimatedRowCount,
-      deadTupleCount,
-      deadTupleRatio: computeDeadTupleRatio(estimatedRowCount, deadTupleCount),
-      tableCount: tables.length,
+      totalSizeBytes,
+      totalSizePretty: formatBytes(totalSizeBytes),
+      estimatedRows,
+      deadTuples,
+      deadTupleRatio: computeDeadTupleRatio(estimatedRows, deadTuples),
+      lastVacuum: r.last_vacuum ? new Date(r.last_vacuum).toISOString() : null,
+      lastAutovacuum: r.last_autovacuum ? new Date(r.last_autovacuum).toISOString() : null,
+      lastAnalyze: r.last_analyze ? new Date(r.last_analyze).toISOString() : null,
+      lastAutoanalyze: r.last_autoanalyze ? new Date(r.last_autoanalyze).toISOString() : null,
     };
+  });
 
-    const largestTables = tables.slice(0, limit);
+  // 3. Largest individual indexes
+  const indexParams: unknown[] = [];
+  let indexQuery = `
+    SELECT
+      n.nspname AS schemaname,
+      c.relname AS index_name,
+      t.relname AS table_name,
+      pg_relation_size(c.oid) AS index_size_bytes
+    FROM pg_class c
+    JOIN pg_index i ON i.indexrelid = c.oid
+    JOIN pg_class t ON t.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind = 'i'
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND n.nspname !~ '^pg_toast'
+  `;
 
-    return {
-      database,
-      totals,
-      tables,
-      largestTables,
-      largestIndexes,
-      generatedAt,
-    };
-  } finally {
-    poolClient?.release();
+  if (options.schema) {
+    indexParams.push(options.schema);
+    indexQuery += ` AND n.nspname = $${indexParams.length}`;
   }
+
+  indexParams.push(limit);
+  indexQuery += ` ORDER BY pg_relation_size(c.oid) DESC LIMIT $${indexParams.length}`;
+
+  const indexRes = await db.query<RawIndexRow>(indexQuery, indexParams);
+  const largestIndexes: IndexStorageStats[] = indexRes.rows.map((r) => {
+    const sizeBytes = Number(r.index_size_bytes ?? 0);
+    return {
+      schema: String(r.schemaname),
+      index: String(r.index_name),
+      table: String(r.table_name),
+      sizeBytes,
+      sizePretty: formatBytes(sizeBytes),
+    };
+  });
+
+  // Compute totals
+  const tableSizeBytes = tables.reduce((acc, t) => acc + t.tableSizeBytes, 0);
+  const indexSizeBytes = tables.reduce((acc, t) => acc + t.indexSizeBytes, 0);
+  const toastSizeBytes = tables.reduce((acc, t) => acc + t.toastSizeBytes, 0);
+  const totalRelationSizeBytes = tables.reduce((acc, t) => acc + t.totalSizeBytes, 0);
+  const estimatedRowCount = tables.reduce((acc, t) => acc + t.estimatedRows, 0);
+  const deadTupleCount = tables.reduce((acc, t) => acc + t.deadTuples, 0);
+
+  const totals: StorageTotals = {
+    tableSizeBytes,
+    tableSizePretty: formatBytes(tableSizeBytes),
+    indexSizeBytes,
+    indexSizePretty: formatBytes(indexSizeBytes),
+    toastSizeBytes,
+    toastSizePretty: formatBytes(toastSizeBytes),
+    totalSizeBytes: totalRelationSizeBytes,
+    totalSizePretty: formatBytes(totalRelationSizeBytes),
+    estimatedRowCount,
+    deadTupleCount,
+    deadTupleRatio: computeDeadTupleRatio(estimatedRowCount, deadTupleCount),
+    tableCount: tables.length,
+  };
+
+  const largestTables = tables.slice(0, limit);
+
+  return {
+    database,
+    totals,
+    tables,
+    largestTables,
+    largestIndexes,
+    generatedAt,
+  };
 }
 
 /** Formats storage report into human-readable text output. */

@@ -13,10 +13,10 @@ import {
   query,
   tool,
   createSdkMcpServer,
+  type SDKMessage,
   type SDKUserMessage,
   type HookCallback,
   type CanUseTool,
-  type SdkMcpToolDefinition,
   type AgentDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync } from "node:fs";
@@ -132,7 +132,7 @@ function toolResultText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content))
     return content
-      .map((c: any) =>
+      .map((c: { type?: unknown; text?: unknown } | null | undefined) =>
         c?.type === "text" ? c.text : c?.type === "image" ? "[image]" : JSON.stringify(c),
       )
       .join("\n");
@@ -143,8 +143,8 @@ function toolResultText(content: unknown): string {
  * Persist the conversation as it streams: every assistant block (text, thinking, tool call with full input), every
  * tool result, and the turn summary (cost, turns, duration). Subagent traffic is tagged with parent_tool_use_id.
  */
-async function recordTranscript(ctx: ExecutionContext, msg: any, cwd: string) {
-  const parent = msg.parent_tool_use_id ?? null;
+async function recordTranscript(ctx: ExecutionContext, msg: SDKMessage, cwd: string) {
+  const parent = ("parent_tool_use_id" in msg ? msg.parent_tool_use_id : null) ?? null;
   if (msg.type === "system" && msg.subtype === "init") {
     await ctx.recordSession(msg.session_id, cwd, msg.model ?? config.model);
     await ctx.log(
@@ -204,9 +204,9 @@ function platformServer(
 ) {
   const prose = outputLocale(ctx.run) === "vi" ? "Vietnamese" : "English";
   const env = envFromExecution(ctx, mode, policy, metrics, onSubmit);
-  const call = (name: string) => async (args: any) =>
+  const call = (name: string) => async (args: unknown) =>
     text(await dispatchPlatformTool(name, args, env));
-  const tools: SdkMcpToolDefinition<any>[] = [
+  const tools: NonNullable<Parameters<typeof createSdkMcpServer>[0]["tools"]> = [
     tool(
       "ask_user",
       "Post questions to the developer on the platform. After calling this, END YOUR TURN; answers come back as the next message.",
@@ -310,6 +310,8 @@ function platformServer(
   return createSdkMcpServer({ name: "platform", version: "2.0.0", tools });
 }
 
+type SnapshotContent = { upstream?: unknown; knowledge?: unknown } | null;
+
 /** Find a Claude session that can be resumed safely for this attempt (same step, same upstream context). */
 export async function resumableSession(
   ctx: ExecutionContext,
@@ -323,7 +325,7 @@ export async function resumableSession(
     session_id: string;
     attempt_id: number;
     generation: number;
-    snapshot: any;
+    snapshot: SnapshotContent;
   }>(
     pool,
     `SELECT s.session_id, s.attempt_id, a.generation, cs.content AS snapshot
@@ -337,10 +339,12 @@ export async function resumableSession(
     ],
   );
   if (!candidates.length) return null;
-  const current = await one(pool, "SELECT content FROM context_snapshots WHERE id = $1", [
-    ctx.context.snapshot_id,
-  ]);
-  const sameUpstream = (snap: any) =>
+  const current = await one<{ content: SnapshotContent }>(
+    pool,
+    "SELECT content FROM context_snapshots WHERE id = $1",
+    [ctx.context.snapshot_id],
+  );
+  const sameUpstream = (snap: SnapshotContent) =>
     JSON.stringify(snap?.upstream ?? {}) === JSON.stringify(current?.content?.upstream ?? {});
   // 1. resume after answers: the paused attempt's own session.
   if (resume?.from_attempt_id) {
@@ -359,7 +363,7 @@ export async function resumableSession(
 
 export async function progressNotes(fromAttempt?: number) {
   if (!fromAttempt) return [];
-  const rows = await q<{ data: any }>(
+  const rows = await q<{ data: { note?: unknown } | null }>(
     pool,
     "SELECT data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason = 'progress' ORDER BY id",
     [fromAttempt],
@@ -417,7 +421,8 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
   // Remember the hook's allow so cwd-dependent checks (relative redirects, `cd`) are not re-judged without a cwd.
   const hookAllowed = new Set<string>();
   const callKey = (name: string, input: unknown) => `${name}\u0000${JSON.stringify(input ?? {})}`;
-  const preToolUse: HookCallback = async (input: any) => {
+  const preToolUse: HookCallback = async (input) => {
+    if (input.hook_event_name !== "PreToolUse") return {};
     watch.touch();
     const waiting = await one<{ n: number }>(
       pool,
@@ -454,7 +459,8 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
       },
     };
   };
-  const subagentStart: HookCallback = async (input: any) => {
+  const subagentStart: HookCallback = async (input) => {
+    if (input.hook_event_name !== "SubagentStart") return {};
     metrics.subagents.push({
       type: input.agent_type,
       id: input.agent_id,
@@ -466,7 +472,8 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
     });
     return {};
   };
-  const subagentStop: HookCallback = async (input: any) => {
+  const subagentStop: HookCallback = async (input) => {
+    if (input.hook_event_name !== "SubagentStop") return {};
     const s = metrics.subagents.find((x) => x.id === input.agent_id);
     if (s) s.ended_at = new Date().toISOString();
     await ctx.log("system", `subagent ${input.agent_type} finished`, {

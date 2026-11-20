@@ -28,7 +28,44 @@ function splitRepo(repo: string) {
   return { owner: parts[0], name: parts[1] };
 }
 
-async function gh(token: string, path: string, init: RequestInit = {}) {
+interface GithubPullRequest {
+  number?: number;
+  html_url?: string;
+  title?: string;
+  body?: string | null;
+  state?: string;
+  merged?: boolean;
+  draft?: boolean;
+  head?: { ref?: string; sha?: string };
+  base?: { ref?: string };
+  user?: { login?: string };
+  created_at?: string;
+  updated_at?: string;
+  merged_at?: string | null;
+  merge_commit_sha?: string | null;
+  mergeable?: boolean | null;
+  mergeable_state?: string;
+}
+
+interface GithubCheckRun {
+  id?: number;
+  name?: string;
+  status?: string;
+  conclusion?: string | null;
+  html_url?: string;
+  app?: { slug?: string };
+  output?: { title?: string | null };
+}
+
+interface GithubReview {
+  id?: number;
+  state?: string;
+  body?: string | null;
+  submitted_at?: string;
+  user?: { login?: string; type?: string };
+}
+
+async function gh(token: string, path: string, init: RequestInit = {}): Promise<unknown> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
   headers.set("Accept", "application/vnd.github+json");
@@ -41,7 +78,7 @@ async function gh(token: string, path: string, init: RequestInit = {}) {
     signal: AbortSignal.timeout(30_000),
   });
   const text = await res.text();
-  let body: any = {};
+  let body: unknown = {};
   if (text) {
     try {
       body = JSON.parse(text);
@@ -138,19 +175,19 @@ export async function openGithubPullRequest(
     state: "open",
   });
   const existing = await gh(creds.token, `/repos/${owner}/${name}/pulls?${q}`);
-  const found = Array.isArray(existing) ? existing[0] : null;
+  const found: GithubPullRequest | null = Array.isArray(existing) ? existing[0] : null;
   if (found?.number) {
-    const updated = await gh(creds.token, `/repos/${owner}/${name}/pulls/${found.number}`, {
+    const updated = (await gh(creds.token, `/repos/${owner}/${name}/pulls/${found.number}`, {
       method: "PATCH",
       body: JSON.stringify({ title, body: description }),
-    });
+    })) as GithubPullRequest;
     return {
       url: String(updated.html_url ?? found.html_url),
       created: false,
       note: "Existing PR updated.",
     };
   }
-  const pr = await gh(creds.token, `/repos/${owner}/${name}/pulls`, {
+  const pr = (await gh(creds.token, `/repos/${owner}/${name}/pulls`, {
     method: "POST",
     body: JSON.stringify({
       title,
@@ -159,7 +196,7 @@ export async function openGithubPullRequest(
       body: description,
       draft: opts.draft === true,
     }),
-  });
+  })) as GithubPullRequest;
   return { url: String(pr.html_url), created: true, note: "PR created." };
 }
 
@@ -172,7 +209,7 @@ export async function githubPullRequestState(
   const creds = await resolveGithub();
   if (!creds) return null;
   const { owner, name } = splitRepo(repo);
-  const pr = await gh(creds.token, `/repos/${owner}/${name}/pulls/${id}`);
+  const pr = (await gh(creds.token, `/repos/${owner}/${name}/pulls/${id}`)) as GithubPullRequest;
   if (pr.merged)
     return {
       state: "MERGED",
@@ -193,7 +230,7 @@ export async function getGithubPullRequest(repo: string, url: string) {
   if (!id || !creds)
     throw new Error("GitHub pull request not readable (no credentials or not a PR URL)");
   const { owner, name } = splitRepo(repo);
-  const pr = await gh(creds.token, `/repos/${owner}/${name}/pulls/${id}`);
+  const pr = (await gh(creds.token, `/repos/${owner}/${name}/pulls/${id}`)) as GithubPullRequest;
   return {
     id: Number(pr.number),
     url: String(pr.html_url),
@@ -229,11 +266,11 @@ export async function githubChecks(repo: string, url: string) {
   const creds = (await resolveGithub())!;
   const { owner, name } = splitRepo(repo);
   if (!pr.head_sha) return { pipelines: [], truncated: false };
-  const res = await gh(
+  const res = (await gh(
     creds.token,
     `/repos/${owner}/${name}/commits/${pr.head_sha}/check-runs?per_page=100`,
-  );
-  const runs: any[] = Array.isArray(res.check_runs) ? res.check_runs : [];
+  )) as { check_runs?: unknown; total_count?: number };
+  const runs: GithubCheckRun[] = Array.isArray(res.check_runs) ? res.check_runs : [];
   const jobs = runs.map((r) => ({
     id: Number(r.id),
     name: String(r.name),
@@ -281,13 +318,11 @@ export async function githubReviewDiscussions(repo: string, url: string) {
   const creds = await resolveGithub();
   if (!id || !creds) throw new Error("GitHub reviews not readable");
   const { owner, name } = splitRepo(repo);
-  const reviews: any[] = await gh(
-    creds.token,
-    `/repos/${owner}/${name}/pulls/${id}/reviews?per_page=100`,
-  );
-  const latest = new Map<string, any>();
-  for (const r of Array.isArray(reviews) ? reviews : [])
-    if (r.user?.login && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r.state))
+  const reviews = await gh(creds.token, `/repos/${owner}/${name}/pulls/${id}/reviews?per_page=100`);
+  const reviewList: GithubReview[] = Array.isArray(reviews) ? reviews : [];
+  const latest = new Map<string, GithubReview>();
+  for (const r of reviewList)
+    if (r.user?.login && ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(r.state ?? ""))
       latest.set(r.user.login, r);
   return {
     discussions: [...latest.values()].map((r) => ({

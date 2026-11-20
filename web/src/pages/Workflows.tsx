@@ -75,9 +75,27 @@ export const WF_TYPE_TONE: Record<string, string> = {
 
 type Filter = "all" | "template" | "published" | "draft";
 
+type WorkflowSpec = { name: string; steps?: Array<{ type: string }> };
+type WorkflowDefinition = {
+  name: string;
+  draft_spec: WorkflowSpec | null;
+  versions: Array<{ spec: WorkflowSpec }>;
+};
+type WorkflowSummary = {
+  key: string;
+  name: string;
+  description: string | null;
+  latest_version: number;
+  has_draft: boolean;
+  is_template: boolean;
+  owner_id: number | null;
+  run_count: number | null;
+  updated_at: string;
+};
+
 export function WorkflowsPage() {
   const { t } = useI18n();
-  const { data, error, loading, reload } = useApi<any[]>("/api/workflows");
+  const { data, error, loading, reload } = useApi<WorkflowSummary[]>("/api/workflows");
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
   const [q, setQ] = useState("");
@@ -85,7 +103,7 @@ export function WorkflowsPage() {
   // null = drawer closed; "" = blank workflow; otherwise the key of the workflow being duplicated
   const [creating, setCreating] = useState<string | null>(null);
 
-  const create = async (from?: any) => {
+  const create = async (from?: WorkflowDefinition) => {
     const spec = from
       ? {
           ...(from.draft_spec ?? from.versions[0].spec),
@@ -111,7 +129,7 @@ export function WorkflowsPage() {
       return act(async () => {
         throw new Error(t("wfs.needKey"));
       });
-    create(await api(`/api/workflows/${src}`));
+    create(await api<WorkflowDefinition>(`/api/workflows/${src}`));
   };
 
   const list = useMemo(() => {
@@ -304,15 +322,15 @@ export function WorkflowsPage() {
   );
 }
 
-function WorkflowCard({ w, onDuplicate }: { w: any; onDuplicate: () => void }) {
+function WorkflowCard({ w, onDuplicate }: { w: WorkflowSummary; onDuplicate: () => void }) {
   const { t } = useI18n();
   // The list endpoint carries no step data; read the definition to show its shape (read-only GET).
-  const { data: def } = useApi<any>(
+  const { data: def } = useApi<WorkflowDefinition>(
     `/api/workflows/${encodeURIComponent(w.key)}${w.owner_id ? `?owner=${w.owner_id}` : ""}`,
   );
   const spec = def ? (def.draft_spec ?? def.versions?.[0]?.spec) : null;
-  const steps: any[] = spec?.steps ?? [];
-  const types = [...new Set(steps.map((s) => s.type as string))];
+  const steps = spec?.steps ?? [];
+  const types = [...new Set(steps.map((s) => s.type))];
   const open = () => navigate(`/workflows/${w.key}`);
   return (
     <article

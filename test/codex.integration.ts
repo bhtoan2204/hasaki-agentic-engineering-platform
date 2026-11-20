@@ -44,6 +44,10 @@ import { contractKeys, missingContractKeys } from "../src/agent/contract.ts";
 import { claudeTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
 import { newMetrics } from "../src/agent/claude.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
+import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
+import type { AttemptRow, RunRow, StepRow } from "../src/workflow/types.ts";
+import type { ResolvedContext, StepInput } from "../src/workflow/context.ts";
+import type { AgentMetrics } from "../src/agent/metrics.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-codex.mjs");
 const HOOK = join(import.meta.dirname, "..", "src", "agent", "codex", "hook.ts");
@@ -96,10 +100,19 @@ async function workflow(steps: unknown[]) {
   await definitions.create({ key, spec: { name: key, steps } });
   return key;
 }
-const stepOf = (runId: number, key: string) =>
-  one<any>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, key]);
+const stepOf = async (runId: number, key: string) =>
+  (await one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, key]))!;
+type AttemptWithMetrics = AttemptRow & {
+  metrics: AgentMetrics & {
+    prompt_context: {
+      known_prompt_tokens: number;
+      measurement: string;
+      session_history_tokens: number | null;
+    };
+  };
+};
 const attemptsOf = (runId: number, key: string) =>
-  q<any>(
+  q<AttemptWithMetrics>(
     pool,
     "SELECT a.* FROM workflow_step_attempts a JOIN workflow_steps s ON s.id = a.step_id WHERE a.run_id = $1 AND s.key = $2 ORDER BY a.number",
     [runId, key],
@@ -177,12 +190,15 @@ test("JSONL parser survives split chunks, split UTF-8 characters, bad lines and 
     ]),
   );
   assert.equal(c.errors.length, 1);
-  const msg = c.events[0] as any;
+  const msg = c.events[0];
+  assert.ok("item" in msg);
   assert.equal(msg.item.text, "Xin chào – ✓");
   assert.equal(c.events[1].type, "unknown");
   const tail = p.flush();
   assert.equal(tail.events[0].type, "turn.completed");
-  assert.equal((tail.events[0] as any).usage.input_tokens, 5);
+  const completed = tail.events[0];
+  assert.ok(completed.type === "turn.completed");
+  assert.equal(completed.usage?.input_tokens, 5);
 });
 
 test("error classification separates quota, auth and model failures", () => {
@@ -306,7 +322,7 @@ test("broker: tools are refused until hooks ran; after ask_user, edits and mutat
   let paused = false;
   const calls: string[] = [];
   const policy = new Proxy(coding, {
-    get: (t, k) => (k === "mode" && paused ? "analysis" : (t as any)[k]),
+    get: (t, k) => (k === "mode" && paused ? "analysis" : t[k as keyof PolicyContext]),
   });
   const broker = await startBroker({
     policy,
@@ -396,7 +412,10 @@ test("MCP bridge lists mode-scoped tools and relays calls only through the broke
       PLATFORM_BROKER_TOKEN: broker.token,
     },
   });
-  const replies: any[] = [];
+  const replies: Array<{
+    id: number;
+    result: { tools?: Array<{ name: string }>; content?: Array<{ text: string }>; isError?: boolean };
+  }> = [];
   let buf = "";
   child.stdout.on("data", (b) => {
     buf += b;
@@ -416,13 +435,13 @@ test("MCP bridge lists mode-scoped tools and relays calls only through the broke
   child.kill();
   await broker.close();
   const byId = Object.fromEntries(replies.map((r) => [r.id, r]));
-  const names = byId[2].result.tools.map((t: any) => t.name);
+  const names = byId[2].result.tools!.map((t) => t.name);
   assert.ok(
     names.includes("submit_result") &&
       !names.includes("prepare_branch") &&
       !names.includes("commit_changes"),
   );
-  assert.equal(byId[3].result.content[0].text, "did post_update");
+  assert.equal(byId[3].result.content![0].text, "did post_update");
   assert.equal(byId[4].result.isError, true, "coding-only tool is not offered in analysis");
   assert.deepEqual(seen, ["post_update"]);
 });
@@ -529,28 +548,29 @@ test("probe reports missing CLI, old CLI, logged-out and unsupported model witho
 
 function fakeCtx(signal: AbortSignal) {
   const logs: Array<{ kind: string; content: string }> = [];
-  return {
-    logs,
-    ctx: {
-      run: {
-        id: 0,
-        branch: "t",
-        allowed_repositories: [],
-        selected_repositories: [],
-        output_locale: "en",
-        agent_provider: "codex",
-      },
-      step: { id: 0, type: "agent", config: {}, key: "analyze" },
-      attempt: { id: 0, fencing_token: null },
-      input: { upstream: {} },
-      context: { knowledge: [], disclosure: [] },
-      signal,
-      log: async (kind: string, content: string) => void logs.push({ kind, content }),
-      ask: async () => 0,
-      recordSession: async () => {},
-      recordMetrics: async () => {},
-    } as any,
+  const ctx: Omit<ExecutionContext, "artifact"> = {
+    run: {
+      id: 0,
+      branch: "t",
+      allowed_repositories: [] as string[],
+      selected_repositories: [] as string[],
+      output_locale: "en",
+      agent_provider: "codex",
+    } as RunRow,
+    step: { id: 0, type: "agent", config: {}, key: "analyze" } as StepRow,
+    attempt: { id: 0, fencing_token: null } as AttemptRow,
+    input: { upstream: {} } as StepInput,
+    context: {
+      knowledge: [] as ResolvedContext["knowledge"],
+      disclosure: [] as ResolvedContext["disclosure"],
+    } as ResolvedContext,
+    signal,
+    log: async (kind: string, content: string) => void logs.push({ kind, content }),
+    ask: async () => 0,
+    recordSession: async () => {},
+    recordMetrics: async () => {},
   };
+  return { logs, ctx: ctx as ExecutionContext };
 }
 const turn = (mode: "analysis" | "coding", signal = new AbortController().signal) => {
   const dir = mkdtempSync(join(tmpdir(), "codex-turn-"));
@@ -702,11 +722,15 @@ test("a Codex run completes through MCP submit_result, records codex session/met
   assert.equal(a.metrics.prompt_context.measurement, "character_estimate_not_provider_usage");
   assert.equal(a.metrics.prompt_context.session_history_tokens, null);
   assert.equal(a.metrics.cost_usd, null);
-  assert.equal(a.metrics.tokens.input, 120);
-  const s = await one<any>(pool, "SELECT * FROM agent_sessions WHERE attempt_id = $1", [a.id]);
+  assert.equal(a.metrics.tokens?.input, 120);
+  const s = (await one<{ provider: string; session_id: string }>(
+    pool,
+    "SELECT * FROM agent_sessions WHERE attempt_id = $1",
+    [a.id],
+  ))!;
   assert.equal(s.provider, "codex");
   assert.equal(s.session_id, "th-1");
-  const events = await q<any>(
+  const events = await q<{ content: string }>(
     pool,
     "SELECT content FROM workflow_events WHERE attempt_id = $1 AND kind = 'agent'",
     [a.id],
@@ -745,7 +769,7 @@ test("Codex ask_user pauses the step, blocks edits while waiting, then resumes t
     2,
     "edit denied while waiting for answers",
   );
-  const qs = await q<any>(pool, "SELECT * FROM workflow_questions WHERE run_id = $1", [run.id]);
+  const qs = await q<{ id: number }>(pool, "SELECT * FROM workflow_questions WHERE run_id = $1", [run.id]);
   process.env.FAKE_CODEX_MODE = "ok";
   delete process.env.FAKE_CODEX_THREAD;
   await answerQuestions({ [qs[0].id]: "Không" }, "dev");
@@ -835,7 +859,7 @@ test("no submit_result or output missing contract keys fails the step; retry kee
   await retryStep(run.id, "analyze").catch(() => {});
   await drain();
   atts = await attemptsOf(run.id, "analyze");
-  assert.match(atts.at(-1).error?.message ?? "", /without calling submit_result/);
+  assert.match(atts.at(-1)!.error?.message ?? "", /without calling submit_result/);
   assert.equal((await one(pool, "SELECT count(*)::int AS n FROM workflow_checkpoints WHERE run_id=$1 AND reason='submit_result'", [run.id])).n, 0, "invalid submissions are refused before they are recorded");
   assert.equal((await getRun(run.id)).agent_provider, "codex");
 });
@@ -941,8 +965,8 @@ test("session lookup never crosses provider, step or user", async () => {
     "INSERT INTO agent_sessions (attempt_id, session_id, cwd, model, provider) VALUES ($1, 'claude-sess', '/cwd', '', 'claude'), ($1, 'codex-sess', '/cwd', '', 'codex')",
     [att!.id],
   );
-  const ctx = (step: any, _provider: string) =>
-    ({ step, input: { pending: { feedback: "again" } }, context: { snapshot_id: null } }) as any;
+  const ctx = (step: StepRow, _provider: string) =>
+    ({ step, input: { pending: { feedback: "again" } }, context: { snapshot_id: 0 } }) as ExecutionContext;
   assert.equal(
     (await resumableSession(ctx(stepA, "codex"), "/cwd", "codex"))?.sessionId,
     "codex-sess",
@@ -968,25 +992,34 @@ test("session lookup never crosses provider, step or user", async () => {
 test("auxiliary calls of a Codex run go to Codex, not Claude (ranking, test-failure advisor, completion)", async () => {
   process.env.FAKE_CODEX_MODE = "complete";
   process.env.FAKE_CODEX_TEXT = '[{"repo":"oms-api","score":9,"reasons":["refund flow"]}]';
-  const recorded: any[] = [];
+  const recorded: Array<Record<string, { provider: string; cost_usd: number | null }>> = [];
   const ctx = {
     run: { id: 0, title: "x", agent_provider: "codex", output_locale: "en" },
     input: { upstream: {}, work_item: { title: "refund" } },
     signal: new AbortController().signal,
-    recordMetrics: async (m: any) => void recorded.push(m),
-  } as any;
+    recordMetrics: async (m: Record<string, { provider: string; cost_usd: number | null }>) =>
+      void recorded.push(m),
+  } as ExecutionContext;
   const ranked = await rankRepositoriesWithClaude(
     ctx,
     [],
     [
       {
+        id: 1,
         name: "oms-api",
+        path: "",
+        provider: "bitbucket",
+        remote_slug: "",
         description: "",
         services: [],
+        owners: [],
         tags: [],
         projects: [],
         dependencies: [],
-      } as any,
+        architecture: "",
+        allowed_actions: [],
+        enabled: true,
+      },
     ],
   );
   assert.equal(ranked[0].repo, "oms-api");
@@ -994,7 +1027,16 @@ test("auxiliary calls of a Codex run go to Codex, not Claude (ranking, test-fail
   assert.equal(recorded[0].ranking.cost_usd, null);
   process.env.FAKE_CODEX_TEXT = '{"text":"build failed","suggestion":"fix import"}';
   const ex = await claudeTestFailureAdvisor.explain(
-    { command: "go test", base_sha: "", failures: [] } as any,
+    {
+      command: "go test",
+      base_sha: "",
+      baseline_available: false,
+      results: [],
+      failures: [],
+      counts: { pre_existing: 0, new: 0, environment: 0, insufficient: 0 },
+      all_pre_existing: false,
+      summary: "",
+    },
     "en",
     "codex",
   );
@@ -1032,7 +1074,7 @@ test("coding launch refuses missing contracts and stale approval attempts before
     await drain();
     assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
     const attempts = await attemptsOf(run.id, "implement");
-    assert.match(JSON.stringify(attempts.at(-1).error), /Mandatory execution contract/);
+    assert.match(JSON.stringify(attempts.at(-1)!.error), /Mandatory execution contract/);
     assert.equal(fakeLog().filter(l => l.argv).length, before, "invalid approval must prevent provider launch");
   }
 });
@@ -1050,7 +1092,7 @@ test("coding completion refuses a passing verification with no implementation ch
   execFileSync("git", ["-C", workspace.path, "update-ref", "refs/remotes/origin/main", "HEAD"]);
   await drain();
   assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
-  assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1).error), /IMPLEMENTED requires worker-observed implementation/);
+  assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error), /IMPLEMENTED requires worker-observed implementation/);
 });
 
 test("approved coding submissions cannot complete without a registered worktree", async () => {
@@ -1063,7 +1105,7 @@ test("approved coding submissions cannot complete without a registered worktree"
     await drain();
     const step = await stepOf(run.id, "implement");
     assert.equal(step.status, "FAILED", `${outcome} must not bypass verification without a worktree`);
-    assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1).error), /no worktree/i);
+    assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error), /no worktree/i);
     assert.ok(fakeLog().some(log => log.argv), "the valid contract must reach the provider submission path");
   }
 });
@@ -1088,7 +1130,7 @@ test("repair completion preserves terminal outcomes and verified implementation"
         assert.equal(step.output.verification.repairs, 1);
       } else {
         assert.equal(step.status, "FAILED", `${outcome} from repair must remain terminal`);
-        assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1).error), new RegExp(`Coding outcome ${outcome}`));
+        assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error), new RegExp(`Coding outcome ${outcome}`));
       }
       assert.ok(fakeLog().some(log => log.argv && log.resumeId), "the verification failure must actually invoke repair");
       execFileSync("go", ["test", "."], { cwd: workspace.path, stdio: "pipe" });

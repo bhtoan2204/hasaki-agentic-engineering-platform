@@ -149,7 +149,7 @@ export interface ResultLike {
   regression: boolean | null;
   hard_gates_passed: boolean | null;
   quality_score: number | string | null;
-  data: any;
+  data: { evidence?: Evidence; repetition?: number } | null;
   cost_usd: number | string | null;
   tokens: number | string | null;
   wall_s: number | null;
@@ -288,7 +288,7 @@ export function compareResults(
     warnings.push("Cost increase exceeds configured ratio");
   if (a.cost_known < a.graded || b.cost_known < b.graded)
     warnings.push("Cost comparison is unknown for runs without actual provider usage");
-  const reps = new Map<string, Set<number>>();
+  const reps = new Map<string, Set<number | undefined>>();
   for (const p of pairs) {
     if (p.baseline && p.candidate.correct !== null) {
       const set = reps.get(p.task) ?? new Set();

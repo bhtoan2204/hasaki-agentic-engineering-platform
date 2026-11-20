@@ -1,4 +1,5 @@
 import { test, before, after, afterEach } from "node:test";
+import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -68,7 +69,7 @@ before(async () => {
   });
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  base = `http://127.0.0.1:${(server.address() as any).port}`;
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 afterEach(async () => {
   for (const id of runs.splice(0))
@@ -83,7 +84,7 @@ after(async () => {
   await pool.end();
 });
 async function run(
-  steps: any[],
+  steps: unknown[],
   provider: "claude" | "codex" | "cursor" | "antigravity" = "claude",
 ) {
   const key = `routing-${++seq}`;
@@ -97,7 +98,17 @@ async function run(
   runs.push(r.id);
   return r;
 }
-const agent = (key: string, provider?: string, depends_on: string[] = [], type = "agent") => ({
+const agent = (
+  key: string,
+  provider?: string,
+  depends_on: string[] = [],
+  type = "agent",
+): {
+  key: string;
+  type: string;
+  depends_on: string[];
+  config: { instructions: string; agent?: Record<string, unknown> };
+} => ({
   key,
   type,
   depends_on,
@@ -260,7 +271,7 @@ test("manual retry override never relabels earlier metrics or resumes a foreign 
   assert.ok(second.b);
   assert.equal(second.b.attempt.agent_provider, "codex");
   const ctx = makeContext({ ...second.b, signal: new AbortController().signal });
-  ctx.input.pending = { resume: { from_attempt_id: first.b.attempt.id } } as any;
+  ctx.input.pending = { resume: { from_attempt_id: first.b.attempt.id } };
   assert.equal(await resumableSession(ctx, "/tmp/routing", "codex"), null);
   await finish(second);
   const attempts = await q(
@@ -281,7 +292,7 @@ test("attempt retry policy and execution deadline use pinned step configuration"
     provider: "codex",
     retry: { max_attempts: 2, backoff_seconds: 0 },
     timeout_ms: 1000,
-  } as any;
+  };
   const r = await run([s]);
   registerExecutor("agent", {
     execute: (ctx) =>
@@ -315,7 +326,7 @@ test("custom tools intersect baseline policy and cannot bypass via call_tool ali
   s.config.agent = {
     provider: "codex",
     allowed_tools: ["Read", "platform.get_run_context"],
-  } as any;
+  };
   await run([s]);
   const x = await begin();
   assert.ok(x.b);

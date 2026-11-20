@@ -16,6 +16,7 @@ import {
   compareResults,
   PolicySchema,
   aggregateResults,
+  type ResultLike,
 } from "./scoring.ts";
 import { sandboxIdentity } from "./isolation.ts";
 import { HttpError } from "../http/error.ts";
@@ -124,7 +125,7 @@ export async function createEvaluation(
   if (!row) throw new HttpError(404, "Suite not found");
   const suite = SuiteSchema.parse(row.manifest),
     cases = suite.cases.slice(0, cfg.case_limit);
-  let sandbox: any = null,
+  let sandbox: Awaited<ReturnType<typeof sandboxIdentity>> | null = null,
     blocked: string | null = null;
   try {
     sandbox = await sandboxIdentity();
@@ -164,7 +165,7 @@ export async function createEvaluation(
     const constraints = sha256(
       JSON.stringify({
         suite: row.content_hash,
-        cases: cases.map((c: any) => c.task_id),
+        cases: cases.map((c) => c.task_id),
         repetitions: cfg.repetitions,
         seconds: cfg.max_case_seconds,
         tokens: cfg.max_tokens,
@@ -198,7 +199,7 @@ export async function createEvaluation(
       ],
     );
     const ids = await q(c, "SELECT id,task_id FROM benchmark_cases WHERE suite_id=$1", [row.id]);
-    const tasks: any[] = [];
+    const tasks: Array<{ key: string } & Record<string, unknown>> = [];
     for (let repetition = 1; repetition <= cfg.repetitions; repetition++)
       for (const task of cases) {
         const key = `case_${task.task_id.slice(-3)}_r${repetition}`;
@@ -404,13 +405,20 @@ export async function comparisonDetail(id: number, ownerId: number) {
     evaluationDetail(pair.baseline_id, ownerId),
     evaluationDetail(pair.candidate_id, ownerId),
   ]);
+  type CaseRow = ResultLike & {
+    task_id: string;
+    case_run_id: number | null;
+    definition: { critical?: boolean };
+  };
+  const casesA: CaseRow[] = a.cases,
+    casesB: CaseRow[] = b.cases;
   const critical = new Set<string>(
-    a.cases.filter((c: any) => c.definition.critical).map((c: any) => c.task_id),
+    casesA.filter((c) => c.definition.critical).map((c) => c.task_id),
   );
   const report = compareResults(
-    a.cases.filter((c: any) => c.case_run_id),
-    b.cases.filter((c: any) => c.case_run_id),
-    a.cases.length,
+    casesA.filter((c) => c.case_run_id),
+    casesB.filter((c) => c.case_run_id),
+    casesA.length,
     critical,
     pair.policy,
   );

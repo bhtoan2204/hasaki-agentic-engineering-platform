@@ -18,12 +18,16 @@ function tr(key, params) {
 }
 try {
   if (typeof window !== "undefined") window.tr = tr;
-} catch {}
+} catch {
+  /* ignore: window may be unavailable */
+}
 function setUiLocale(next) {
   locale = next === "en" ? "en" : "vi";
   try {
     localStorage.setItem(UI_KEY, locale);
-  } catch {}
+  } catch {
+    /* ignore: storage unavailable */
+  }
   document.documentElement.lang = locale;
   paintChrome();
   if (!ME) {
@@ -267,7 +271,7 @@ async function render(force = false) {
     $$("[data-reset]").forEach(
       (b) =>
         (b.onclick = async () => {
-          const password = await appDialog.prompt({
+          const password = await window.appDialog.prompt({
             title: tr("auth.newPassword"),
             label: tr("auth.newPassword"),
             required: true,
@@ -332,7 +336,9 @@ async function refreshCount() {
   try {
     const qs = await api("/api/questions");
     $("#qcount").innerHTML = qs.length ? `<span class="count">${qs.length}</span>` : "";
-  } catch {}
+  } catch {
+    /* ignore: badge refresh is best-effort */
+  }
 }
 window.addEventListener("hashchange", () => {
   modalCache = null;
@@ -1173,7 +1179,7 @@ window.A = {
     }),
   runAction: async (id, action) => {
     if (action === "cancel") {
-      const ok = await appDialog.confirm({
+      const ok = await window.appDialog.confirm({
         title: tr("rv.cancelConfirm"),
         description: tr("rv.cancelConfirm"),
         confirmLabel: tr("rv.cancel") || "Cancel run",
@@ -1192,7 +1198,7 @@ window.A = {
   stepAction: async (id, key, action) => {
     let body = {};
     if (action === "reexecute") {
-      const fb = await appDialog.prompt({
+      const fb = await window.appDialog.prompt({
         title: tr("cl.reexecPrompt"),
         description: tr("cl.reexecPrompt"),
         required: false,
@@ -1203,7 +1209,7 @@ window.A = {
       body = fb ? { feedback: fb } : {};
     }
     if (action === "skip") {
-      const ok = await appDialog.confirm({
+      const ok = await window.appDialog.confirm({
         title: tr("si.skipAsk"),
         description: tr("si.skipAsk"),
         confirmLabel: tr("si.skip") || "Skip",
@@ -1383,7 +1389,9 @@ window.A = {
 (async () => {
   try {
     locale = localStorage.getItem(UI_KEY) === "en" ? "en" : "vi";
-  } catch {}
+  } catch {
+    /* ignore: storage unavailable */
+  }
   document.documentElement.lang = locale;
   DICT = await api("/api/ui-messages").catch(() => ({ vi: {}, en: {} }));
   paintChrome();
@@ -1407,7 +1415,7 @@ window.A = {
     <button id="logout" data-key="auth.logout" type="button">${esc(tr("auth.logout"))}</button></nav>`;
   $("#lang").before(account);
   $("#logout").onclick = async () => {
-    const ok = await appDialog.confirm({
+    const ok = await window.appDialog.confirm({
       title: tr("auth.logoutConfirm", { name: ME.username }),
       description: tr("auth.logoutConfirm", { name: ME.username }),
       confirmLabel: tr("auth.logout") || "Log out",

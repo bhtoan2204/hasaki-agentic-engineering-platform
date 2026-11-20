@@ -17,7 +17,7 @@ export interface RecommendationSample {
   cohort: string;
   variant: string;
   category: string;
-  plan: any[];
+  plan: Array<{ provider: string; model?: string | null; reasoning_effort?: string | null }>;
   samples: number;
   successes: number;
   tasks: number;
@@ -126,17 +126,18 @@ export async function createRecommendation(actor: Actor, raw: unknown) {
     if (input[key]) url.searchParams.set(key, input[key]);
   const filters = evaluationFilters(actor, url);
   const evidence = await recommendationEvidence(filters);
-  let decision: any = chooseRecommendation(evidence);
-  if (decision.status === "RECOMMENDED") {
+  const chosen = chooseRecommendation(evidence);
+  let decision: Record<string, unknown> = chosen;
+  if (chosen.status === "RECOMMENDED" && chosen.plan) {
     const readiness = await Promise.all(
-      decision.plan.map(async (agent: any) => {
+      chosen.plan.map(async (agent) => {
         try {
           const a = resolveStepAgent(
             { agent_provider: agent.provider },
             {
               type: "coding_agent",
               config: {
-                agent: { ...agent, allowed_tools: decision.required_tools },
+                agent: { ...agent, allowed_tools: chosen.required_tools },
               },
             },
           )!;

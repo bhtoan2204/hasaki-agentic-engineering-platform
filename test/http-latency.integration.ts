@@ -221,7 +221,7 @@ test("run detail (parallel reads) keeps its shape", async () => {
     "pull_requests",
     "workspaces",
     "checkpoints",
-  ])
-    assert.ok(Array.isArray((d as any)[k]), k);
+  ] as const)
+    assert.ok(Array.isArray(d[k]), k);
   await assert.rejects(runDetail(9_999_999), /not found/);
 });

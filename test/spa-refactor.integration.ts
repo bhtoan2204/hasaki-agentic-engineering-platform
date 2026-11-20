@@ -84,7 +84,7 @@ test("Phase G & H: listRuns and runDetail execute efficiently with the new index
 
 test("Phase C: Frontend data fetching infrastructure supports deduplication and cache invalidation", () => {
   // Simulate the in-memory cache behavior in api.ts
-  const apiCache = new Map<string, { data: any; timestamp: number }>();
+  const apiCache = new Map<string, { data: unknown; timestamp: number }>();
 
   function invalidateCache(prefix?: string) {
     if (!prefix) {

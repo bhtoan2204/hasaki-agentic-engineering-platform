@@ -1,6 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { pool, q, one } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
@@ -33,6 +34,11 @@ import { investigationDetail, startFixFromInvestigation } from "../src/investiga
 import { repositories } from "../src/repos/service.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
 import * as F from "../src/investigation/fixtures.ts";
+import type { LatencyResult, Rejection, TimelineEvent } from "../src/investigation/correlate.ts";
+import type { Hypothesis, RoundState } from "../src/investigation/rounds.ts";
+
+type SearchView = Awaited<ReturnType<typeof investigationSearch>>;
+type SearchEvent = SearchView["events"][number];
 
 process.env.SPLUNK_POLL_MS = "20";
 const GOOD = "good-token-0123456789abcdefghij";
@@ -152,7 +158,7 @@ before(async () => {
     });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  config.splunk.baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
+  config.splunk.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   config.splunk.managementUrl = "";
   config.splunk.allowedIndexes = ["k8s_prod"];
   config.splunk.defaultIndexes = ["k8s_prod"];
@@ -278,7 +284,7 @@ test("job search: absolute window sent as epoch, structured sanitized events, de
   const before = log.filter(
     (l) => l.path === "/services/search/jobs" && l.method === "POST",
   ).length;
-  const r: any = await investigationSearch(
+  const r = await investigationSearch(
     { query: `index=k8s_prod "${F.ORDER}" | sort 0 _time`, ...W },
     { runId, stepKey: "search_logs" },
   );
@@ -288,23 +294,23 @@ test("job search: absolute window sent as epoch, structured sanitized events, de
   assert.equal(job.earliest, String(Date.parse(W.earliest) / 1000));
   assert.equal(job.latest, String(Date.parse(W.latest) / 1000));
   assert.equal(r.window.earliest, "2026-11-10T08:35:00+07:00");
-  assert.match(r.splunk_url, /\/en-US\/app\/search\/search\?q=search\+index%3Dk8s_prod/);
+  assert.match(r.splunk_url!, /\/en-US\/app\/search\/search\?q=search\+index%3Dk8s_prod/);
   const reqEvt = r.events.find(
-    (e: any) => e.ids.request_id?.[0] === "req-7f3a91" && /request/.test(e.excerpt),
-  );
+    (e) => e.ids.request_id?.[0] === "req-7f3a91" && /request/.test(e.excerpt),
+  )!;
   assert.equal(reqEvt.timestamp, F.EXPECTED.request_sent);
   assert.equal(reqEvt.service, "hasakinow-connector");
   assert.equal(reqEvt.index, "k8s_prod");
   assert.doesNotMatch(JSON.stringify(r), /0912345678|Nguyen Van A|sk_live_|abcdef1234567890/);
-  const full: any = await getEvent(reqEvt.event_ref, { runId });
+  const full = await getEvent(reqEvt.event_ref, { runId });
   assert.match(full.raw, /"receiver_phone":"\*\*\*"/);
   assert.equal(full.provenance.search_id, r.search_id);
   // same query + window again in the same run → stored result, no new Splunk job, no budget used
-  const again: any = await investigationSearch(
+  const again = await investigationSearch(
     { query: `index=k8s_prod "${F.ORDER}" | sort 0 _time`, ...W },
     { runId },
   );
-  assert.equal(again.cached, true);
+  assert.equal("cached" in again && again.cached, true);
   assert.equal(again.search_id, r.search_id);
   assert.equal(
     log.filter((l) => l.path === "/services/search/jobs" && l.method === "POST").length,
@@ -321,27 +327,28 @@ test("job search: absolute window sent as epoch, structured sanitized events, de
 test("pagination through the job, empty results, export (v2 then v1 fallback), timeout cancels the job", async () => {
   await setSplunkToken(GOOD);
   const runId = await bareRun();
-  const r: any = await investigationSearch(
+  const r = await investigationSearch(
     { query: `index=k8s_prod MANYROWS`, ...W, max_results: 3 },
     { runId },
   );
   assert.equal(r.result_count, 3);
   assert.equal(r.truncated, true);
-  const page: any = await searchResults(r.search_id, 3, 3, { runId });
+  const page = await searchResults(r.search_id, 3, 3, { runId });
+  assert.ok("returned" in page);
   assert.equal(page.returned, 3);
   assert.equal(page.events[0].excerpt, "row 3");
-  const tail: any = await searchResults(r.search_id, 6, 3, { runId });
+  const tail = await searchResults(r.search_id, 6, 3, { runId });
+  assert.ok("returned" in tail);
   assert.equal(tail.returned, 1);
-  assert.equal(((await searchStatus(r.search_id, { runId })) as any).job.state, "DONE");
+  const status = await searchStatus(r.search_id, { runId });
+  assert.ok("job" in status && typeof status.job === "object");
+  assert.equal(status.job.state, "DONE");
 
-  const empty: any = await investigationSearch(
-    { query: `index=k8s_prod NOTHING`, ...W },
-    { runId },
-  );
+  const empty = await investigationSearch({ query: `index=k8s_prod NOTHING`, ...W }, { runId });
   assert.equal(empty.result_count, 0);
-  assert.match(empty.note, /no events matched/);
+  assert.match(empty.note!, /no events matched/);
 
-  const ex: any = await investigationSearch(
+  const ex = await investigationSearch(
     { query: `index=k8s_prod "${F.ORDER}"`, ...W, mode: "export" },
     { runId },
   );
@@ -354,7 +361,7 @@ test("pagination through the job, empty results, export (v2 then v1 fallback), t
     /\| head 201$/,
     "export is bounded with head",
   );
-  const old: any = await investigationSearch(
+  const old = await investigationSearch(
     { query: `index=k8s_prod OLDSPLUNK`, ...W, mode: "export" },
     { runId },
   );
@@ -395,12 +402,11 @@ test("query budget per run", async () => {
       investigationSearch({ query: `index=k8s_prod NOTHING a3`, ...W }, { runId }),
       /query budget exhausted/,
     );
-    assert.equal(
-      ((await investigationSearch({ query: `index=k8s_prod NOTHING a1`, ...W }, { runId })) as any)
-        .cached,
-      true,
-      "a stored result is still served",
+    const stored = await investigationSearch(
+      { query: `index=k8s_prod NOTHING a1`, ...W },
+      { runId },
     );
+    assert.equal("cached" in stored && stored.cached, true, "a stored result is still served");
   } finally {
     config.splunk.queryBudget = saved;
   }
@@ -409,25 +415,27 @@ test("query budget per run", async () => {
 test("manual mode: not connected → pending search with SPL and link; pasted export is sanitized and served to the agent", async () => {
   await clearSplunkCookie();
   const runId = await bareRun();
-  const r: any = await investigationSearch(
+  const r = await investigationSearch(
     { query: `index=k8s_prod "${F.ORDER}"`, ...W },
     { runId, stepKey: "search_logs" },
   );
+  assert.ok("manual_required" in r && "instructions" in r);
   assert.equal(r.manual_required, true);
   assert.equal(r.status, "manual_pending");
-  assert.match(r.instructions, /Never invent results/);
+  assert.match(String(r.instructions), /Never invent results/);
   // asking again does not create a second pending search
   assert.equal(
-    ((await investigationSearch({ query: `index=k8s_prod "${F.ORDER}"`, ...W }, { runId })) as any)
+    (await investigationSearch({ query: `index=k8s_prod "${F.ORDER}"`, ...W }, { runId }))
       .search_id,
     r.search_id,
   );
   const paste = F.SEARCH_BY_ORDER.map((x) => JSON.stringify({ preview: false, result: x })).join(
     "\n",
   );
-  const done: any = await submitManualResults(runId, { search_id: r.search_id, text: paste });
+  const done = await submitManualResults(runId, { search_id: r.search_id, text: paste });
   assert.equal(done.result_count, F.SEARCH_BY_ORDER.length);
-  const res: any = await searchResults(r.search_id, 0, 50, { runId });
+  const res = await searchResults(r.search_id, 0, 50, { runId });
+  assert.ok("total_stored" in res);
   assert.equal(res.total_stored, F.SEARCH_BY_ORDER.length);
   assert.doesNotMatch(
     JSON.stringify(
@@ -435,11 +443,11 @@ test("manual mode: not connected → pending search with SPL and link; pasted ex
     ),
     /0912345678|sk_live_/,
   );
-  const cached: any = await investigationSearch(
+  const cached = await investigationSearch(
     { query: `index=k8s_prod "${F.ORDER}"`, ...W },
     { runId },
   );
-  assert.equal(cached.cached, true);
+  assert.equal("cached" in cached && cached.cached, true);
   await assert.rejects(
     submitManualResults(runId, { search_id: r.search_id, text: "not results" }),
     /neither JSON|CSV/,
@@ -451,7 +459,8 @@ test("manual mode: not connected → pending search with SPL and link; pasted ex
     { runId, allowedRepositories: [], mode: "analysis" },
   );
   assert.equal(t.ok, true);
-  assert.equal((t.result as any).manual_required, true);
+  const manual = t.result as SearchView;
+  assert.equal("manual_required" in manual && manual.manual_required, true);
   await setSplunkToken(GOOD);
 });
 
@@ -459,7 +468,7 @@ test("access isolation: another run or another user cannot read a search or even
   await setSplunkToken(GOOD);
   const owner = await ensureTestOwner();
   const runA = await bareRun();
-  const r: any = await investigationSearch(
+  const r = await investigationSearch(
     { query: `index=k8s_prod "${F.ORDER}" iso`, ...W },
     { runId: runA },
   );
@@ -482,7 +491,7 @@ test("access isolation: another run or another user cannot read a search or even
     await assert.rejects(searchStatus(r.search_id), /not found/);
   });
   await execution.run({ userId: owner, kind: "user" }, async () => {
-    assert.equal(((await searchStatus(r.search_id)) as any).search_id, r.search_id);
+    assert.equal((await searchStatus(r.search_id)).search_id, r.search_id);
   });
   // personal credentials are per user: user B has no Splunk login of their own
   await execution.run({ userId: Number(other.id), kind: "user" }, async () => {
@@ -536,13 +545,13 @@ test("end to end: Vietnamese request → DAG with scripted agents → refine rou
       stepKey: ctx.step.key,
     });
     if (!r.ok) throw new Error(r.error);
-    return r.result as any;
+    return r.result as SearchView;
   };
-  const labelAll = (res: any, pick: (e: any) => string | null) =>
+  const labelAll = (res: SearchView, pick: (e: SearchEvent) => string | null) =>
     res.events
-      .map((e: any) => ({ evidence_ref: e.event_ref, event_type: pick(e) }))
-      .filter((x: any) => x.event_type);
-  const classify = (e: any) =>
+      .map((e) => ({ evidence_ref: e.event_ref, event_type: pick(e) }))
+      .filter((x) => x.event_type);
+  const classify = (e: SearchEvent) =>
     /outbound shipment created/.test(e.excerpt)
       ? "OUTBOUND_MESSAGE_CREATED"
       : /kafka publish/.test(e.excerpt)
@@ -599,7 +608,7 @@ test("end to end: Vietnamese request → DAG with scripted agents → refine rou
           });
           // interrupted once after searching: the retry must reuse the stored result
           if (n === 1) return { kind: "failed", error: "worker lost (simulated)", retryable: true };
-          assert.equal(r.cached, true, "retry served from the stored search");
+          assert.equal("cached" in r && r.cached, true, "retry served from the stored search");
           // first pass labels only the order-code events: the callback and label generation are still missing
           return {
             kind: "completed",
@@ -617,7 +626,9 @@ test("end to end: Vietnamese request → DAG with scripted agents → refine rou
         case "refine_search": {
           const corr = ctx.input.upstream.correlate.output;
           assert.equal(corr.complete, false);
-          assert.ok(corr.missing.some((m: any) => m.objective === "shipping_label_time"));
+          assert.ok(
+            corr.missing.some((m: { objective: string }) => m.objective === "shipping_label_time"),
+          );
           const shipment = corr.identifiers.shipment_id[0];
           const r = await tool(ctx, "splunk_search", {
             query: `index=k8s_prod "${shipment}"`,
@@ -640,7 +651,7 @@ test("end to end: Vietnamese request → DAG with scripted agents → refine rou
         }
         case "analyze_findings": {
           const tl = ctx.input.upstream.timeline.output.timeline;
-          const cb = tl.find((t: any) => t.event_type === "PARTNER_CALLBACK_RECEIVED");
+          const cb = tl.find((t: TimelineEvent) => t.event_type === "PARTNER_CALLBACK_RECEIVED");
           return {
             kind: "completed",
             output: {
@@ -711,17 +722,17 @@ test("end to end: Vietnamese request → DAG with scripted agents → refine rou
   const tl = steps.timeline.output;
   assert.equal(tl.complete, true);
   assert.deepEqual(
-    tl.rejected.map((x: any) => x.evidence_ref),
+    tl.rejected.map((x: Rejection) => x.evidence_ref),
     ["S424242:0"],
     "fabricated reference rejected",
   );
   const lat = steps.latency.output.latencies;
   assert.equal(
-    lat.find((l: any) => l.key === "partner_sync_response").latency_ms,
+    lat.find((l: LatencyResult) => l.key === "partner_sync_response").latency_ms,
     F.EXPECTED.sync_latency_ms,
   );
   assert.equal(
-    lat.find((l: any) => l.key === "partner_callback").latency_ms,
+    lat.find((l: LatencyResult) => l.key === "partner_callback").latency_ms,
     F.EXPECTED.callback_latency_ms,
   );
   const rep = steps.report.output;
@@ -729,7 +740,7 @@ test("end to end: Vietnamese request → DAG with scripted agents → refine rou
   assert.equal(rep.summary.outbound_at, F.EXPECTED.request_sent);
   assert.equal(rep.summary.shipping_label.at, F.EXPECTED.label_generated);
   assert.deepEqual(
-    rep.findings.map((f: any) => f.classification),
+    rep.findings.map((f: { classification: string }) => f.classification),
     ["inferred", "unknown"],
     "claims capped by evidence",
   );
@@ -742,20 +753,20 @@ test("end to end: Vietnamese request → DAG with scripted agents → refine rou
     [run.id],
   );
   assert.equal(art.name, "Bao-cao-dieu-tra.md");
-  const searches = await q(
+  const searches = await q<{ step_key: string; status: string }>(
     pool,
     "SELECT step_key, status FROM splunk_searches WHERE run_id = $1 ORDER BY id",
     [run.id],
   );
   assert.deepEqual(
-    searches.map((s: any) => s.step_key),
+    searches.map((s) => s.step_key),
     ["search_logs", "refine_search"],
     "the interrupted step did not search twice",
   );
   const detail = await investigationDetail(run.id);
   assert.equal(detail.searches.length, 2);
   assert.equal(detail.report.status, "complete");
-  assert.ok(detail.searches[0].events.every((e: any) => !/0912345678/.test(e.raw)));
+  assert.ok(detail.searches[0].events.every((e) => !/0912345678/.test(e.raw)));
 
   // re-executing the search step keeps the stored searches (no new Splunk job for the same query)
   const jobsBefore = sidSeq;
@@ -797,7 +808,9 @@ test("continue to fix: hands the findings to Bug Investigation (same owner, loca
   assert.equal(fix.inputs.investigation_run_id, Number(inv.id));
   assert.equal(fix.inputs.investigation.status, "complete");
   assert.ok(
-    fix.inputs.investigation.timeline.some((t: any) => t.event_type === "PARTNER_REQUEST_SENT"),
+    fix.inputs.investigation.timeline.some(
+      (t: TimelineEvent) => t.event_type === "PARTNER_REQUEST_SENT",
+    ),
   );
   assert.doesNotMatch(
     JSON.stringify(fix.inputs),
@@ -811,7 +824,7 @@ test("continue to fix: hands the findings to Bug Investigation (same owner, loca
   );
   // the fix run's agents can re-read the investigation's evidence; an unrelated run cannot
   const ref = fix.inputs.investigation.timeline[0].evidence_ref;
-  assert.equal(((await getEvent(ref, { runId: r.run_id })) as any).event_ref, ref);
+  assert.equal((await getEvent(ref, { runId: r.run_id })).event_ref, ref);
   const other = await bareRun();
   await assert.rejects(getEvent(ref, { runId: other }), /not found/);
   // an investigation without a report cannot be handed over
@@ -858,22 +871,22 @@ test("QC (no Splunk): Argo CD log lines are stored as run evidence with refs, re
       },
     ],
   };
-  const r: any = await storeExternalSearch(input, { runId, stepKey: "search_logs" });
+  const r = await storeExternalSearch(input, { runId, stepKey: "search_logs" });
   assert.equal(r.environment, "qc");
   assert.equal(r.mode, "argocd");
   assert.equal(r.splunk_url, undefined, "QC has no Splunk link");
   assert.equal(r.events.length, 2);
-  const ref = r.events[0].event_ref ?? r.events[0].ref;
+  const ref = r.events[0].event_ref;
   assert.match(ref, new RegExp(`^S${r.search_id}:0$`));
-  const ev: any = await getEvent(ref, { runId });
+  const ev = await getEvent(ref, { runId });
   assert.match(JSON.stringify(ev), new RegExp(F.ORDER));
   // the same query moments later reuses the stored lines (no second search against the budget)
-  const again: any = await storeExternalSearch(input, { runId, stepKey: "search_logs" });
+  const again = await storeExternalSearch(input, { runId, stepKey: "search_logs" });
   assert.equal(again.search_id, r.search_id);
-  assert.equal(again.cached, true);
+  assert.equal("cached" in again && again.cached, true);
   // the investigation panel lists it with the run's environment and no Splunk link
-  const inv: any = await investigationDetail(runId);
-  const s = inv.searches.find((x: any) => x.id === r.search_id);
+  const inv = await investigationDetail(runId);
+  const s = inv.searches.find((x) => x.id === r.search_id)!;
   assert.equal(s.splunk_url, null);
   assert.equal(s.mode, "argocd");
 });
@@ -893,11 +906,11 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
         stepKey: ctx.step.key,
       });
       if (!r.ok) throw new Error(r.error);
-      return r.result as any;
+      return r.result as SearchView;
     };
-    const label = (res: any) =>
+    const label = (res: SearchView) =>
       res.events
-        .map((e: any) => ({
+        .map((e) => ({
           evidence_ref: e.event_ref,
           event_type: /hasakinow request/.test(e.excerpt)
             ? "PARTNER_REQUEST_SENT"
@@ -911,7 +924,7 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
                     ? "SHIPPING_LABEL_URL_GENERATED"
                     : null,
         }))
-        .filter((x: any) => x.event_type);
+        .filter((x) => x.event_type);
     registerExecutor("agent", {
       async execute(ctx: ExecutionContext): Promise<ExecResult> {
         calls[ctx.step.key] = (calls[ctx.step.key] ?? 0) + 1;
@@ -943,7 +956,7 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
             kind: "completed",
             output: {
               searches: [r.search_id],
-              events: label(r).filter((e: any) => e.event_type !== "SHIPPING_LABEL_URL_GENERATED"),
+              events: label(r).filter((e) => e.event_type !== "SHIPPING_LABEL_URL_GENERATED"),
               missing: [],
             },
           };
@@ -979,7 +992,7 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
         }
         if (ctx.step.key === "analyze_findings") {
           const tl = ctx.input.upstream.timeline.output.timeline;
-          const cb = tl.find((t: any) => t.event_type === "PARTNER_CALLBACK_RECEIVED");
+          const cb = tl.find((t: TimelineEvent) => t.event_type === "PARTNER_CALLBACK_RECEIVED");
           return {
             kind: "completed",
             output: {
@@ -1038,7 +1051,7 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
     };
     await settle();
     assert.equal((await getRun(run.id)).status, "COMPLETED");
-    const rounds = await q<{ data: any }>(
+    const rounds = await q<{ data: RoundState }>(
       pool,
       "SELECT data FROM workflow_artifacts WHERE run_id = $1 AND kind = 'investigation_round' ORDER BY id",
       [run.id],
@@ -1051,15 +1064,15 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
     assert.equal(calls.refine_search, rounds.length, "one refine search per round, bounded");
     const last = rounds.at(-1)!.data;
     assert.ok(
-      ["no_progress", "max_rounds", "no_remaining_actions"].includes(last.stop_reason),
-      last.stop_reason,
+      ["no_progress", "max_rounds", "no_remaining_actions"].includes(last.stop_reason!),
+      last.stop_reason!,
     );
     assert.equal(
       last.outcome,
       "PROBABLE",
       "deployed commit not backed by a stored record: never CONFIRMED",
     );
-    const h = Object.fromEntries(last.hypotheses.map((x: any) => [x.id, x]));
+    const h = Object.fromEntries(last.hypotheses.map((x: Hypothesis) => [x.id, x]));
     assert.equal(h.H1.status, "SUPPORTED");
     assert.equal(
       h.H2.status,
@@ -1070,7 +1083,7 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
     assert.equal(last.impact.state_money, "UNKNOWN");
     const tl = (await getRun(run.id)).steps.find((s) => s.key === "timeline")!.output;
     assert.ok(
-      tl.timeline.some((t: any) => t.event_type === "PARTNER_CALLBACK_RECEIVED"),
+      tl.timeline.some((t: TimelineEvent) => t.event_type === "PARTNER_CALLBACK_RECEIVED"),
       "labels of round 1 survive later rounds",
     );
     const hashes = await q(
@@ -1097,7 +1110,7 @@ test("iterative rounds: bounded evidence loop on the DAG — planned next action
     const jobs = sidSeq;
     await reexecuteStep(run.id, "report", {});
     await settle();
-    const after = await q<{ data: any }>(
+    const after = await q<{ data: RoundState }>(
       pool,
       "SELECT data FROM workflow_artifacts WHERE run_id = $1 AND kind = 'investigation_round' ORDER BY id",
       [run.id],

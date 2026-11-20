@@ -17,7 +17,7 @@
 import { config } from "../config.ts";
 import { pool, q, one, json, type Db } from "../db/pool.ts";
 import { gitProviderFor, registeredGitProviders, workspacesOf } from "../git/provider.ts";
-import { repositoryBaseBranch, repositoryReference } from "../repos/service.ts";
+import { repositoryBaseBranch, repositoryReference, type RepositoryRow } from "../repos/service.ts";
 import { collectScopeState, TEST_FILE } from "../agent/scopeGuard.ts";
 import { costTotalsForRuns } from "../report/cost.ts";
 
@@ -53,6 +53,37 @@ export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 /** Listed so reports can say so explicitly: no recorded signal identifies these reliably. */
 export const UNDETECTABLE_CATEGORIES = ["invalid_external_api_assumption"];
 
+interface StepOutput {
+  [key: string]: unknown;
+  commits?: Record<string, string> | null;
+  passed?: boolean | null;
+  decision?: unknown;
+  tested_heads?: Record<string, string> | null;
+  results?: unknown;
+  verification?: {
+    passed?: boolean | null;
+    needs_review?: boolean;
+    status?: string;
+    repairs?: number;
+  } | null;
+  verdict?: string | null;
+  verified_heads?: Record<string, string> | null;
+  scope_check?: {
+    unauthorized_repos?: string[];
+    out_of_scope_files?: string[];
+    unsupported_assumptions?: unknown[];
+  } | null;
+  unsupported_assumptions?: unknown[];
+  claims?: unknown;
+  approved_scope?: { required_tests?: unknown } | null;
+  evidence_validation?: { downgraded?: number } | null;
+  root_cause_assessment?: { status?: string } | null;
+}
+
+interface AttemptMetrics {
+  tool_repeats?: { calls: number; duplicate_calls: number; repeated_file_reads: number } | null;
+}
+
 /** Everything the derivation needs, loaded from the run's own records. */
 export interface OutcomeFacts {
   run: {
@@ -69,8 +100,13 @@ export interface OutcomeFacts {
     type: string;
     status: string;
     independent: boolean;
-    output: any;
-    attempts: Array<{ status: string; output: any; error: string | null; metrics: any }>;
+    output: StepOutput;
+    attempts: Array<{
+      status: string;
+      output: StepOutput | null;
+      error: string | null;
+      metrics: AttemptMetrics | null;
+    }>;
   }>;
   final_heads: Record<string, string>;
   changed_files: Record<string, string[]>;
@@ -132,15 +168,15 @@ export function deriveOutcome(f: OutcomeFacts) {
       .filter((s) => s.status === "COMPLETED")
       .map((s) => ({
         step: s.key,
-        passed: s.output.passed === true && !s.output.decision,
-        heads: s.output.tested_heads,
+        passed: s.output?.passed === true && !s.output.decision,
+        heads: s.output?.tested_heads,
       })),
     ...coding
       .filter((s) => s.output?.verification && s.output.verification.passed !== null)
       .map((s) => ({
         step: s.key,
-        passed: s.output.verification.passed === true,
-        heads: s.output.tested_heads,
+        passed: s.output?.verification?.passed === true,
+        heads: s.output?.tested_heads,
       })),
   ];
   const unverified = coding.filter(
@@ -160,7 +196,7 @@ export function deriveOutcome(f: OutcomeFacts) {
           testRecords.length
             ? "test records are not bound to the final commits"
             : unverified.length
-              ? `tests not verified in ${unverified.map((s) => s.key).join(", ")} (verification ${unverified.map((s) => s.output.verification.status).join(", ")})`
+              ? `tests not verified in ${unverified.map((s) => s.key).join(", ")} (verification ${unverified.map((s) => s.output?.verification?.status).join(", ")})`
               : "no test step ran",
         );
 
@@ -235,13 +271,13 @@ export function deriveOutcome(f: OutcomeFacts) {
   const scopeChecks = coding
     .flatMap((s) => [s.output?.scope_check, ...s.attempts.map((a) => a.output?.scope_check)])
     .filter(Boolean);
-  const unauthorized = [...new Set(scopeChecks.flatMap((c: any) => c.unauthorized_repos ?? []))];
+  const unauthorized = [...new Set(scopeChecks.flatMap((c) => c?.unauthorized_repos ?? []))];
   if (unauthorized.length)
     add(
       "wrong_repository",
       `changed repositories outside the approved scope: ${unauthorized.join(", ")}`,
     );
-  const oos = [...new Set(scopeChecks.flatMap((c: any) => c.out_of_scope_files ?? []))];
+  const oos = [...new Set(scopeChecks.flatMap((c) => c?.out_of_scope_files ?? []))];
   if (oos.length)
     add(
       "out_of_scope_change",
@@ -249,13 +285,16 @@ export function deriveOutcome(f: OutcomeFacts) {
     );
   const assumptions = f.steps
     .flatMap((s) => [s.output, ...s.attempts.map((a) => a.output)])
-    .flatMap((o: any) => [
+    .flatMap((o) => [
       ...(o?.scope_check?.unsupported_assumptions ?? []),
       ...(o?.unsupported_assumptions ?? []),
     ]);
   const contradicted = f.steps
     .flatMap((s) => (Array.isArray(s.output?.claims) ? s.output.claims : []))
-    .filter((c: any) => c?.verification_status === "contradicted");
+    .filter(
+      (c: { verification_status?: string; claim?: unknown } | null) =>
+        c?.verification_status === "contradicted",
+    );
   if (assumptions.length || contradicted.length)
     add(
       "incorrect_business_assumption",
@@ -271,7 +310,7 @@ export function deriveOutcome(f: OutcomeFacts) {
   const requiredTests =
     f.steps
       .map((s) => s.output?.approved_scope?.required_tests)
-      .find((t) => Array.isArray(t) && t.length) ?? [];
+      .find((t): t is unknown[] => Array.isArray(t) && t.length > 0) ?? [];
   const changedTests = Object.values(f.changed_files)
     .flat()
     .filter((p) => TEST_FILE.test(p));
@@ -320,9 +359,9 @@ export function deriveOutcome(f: OutcomeFacts) {
     );
   const rep = f.steps
     .flatMap((s) => s.attempts.map((a) => a.metrics?.tool_repeats))
-    .filter(Boolean)
+    .filter((r) => r != null)
     .reduce(
-      (acc: any, r: any) => ({
+      (acc, r) => ({
         calls: acc.calls + r.calls,
         dup: acc.dup + r.duplicate_calls,
         reread: acc.reread + r.repeated_file_reads,
@@ -387,18 +426,25 @@ export async function collectOutcomeFacts(
   runId: number,
   db: Db = pool,
 ): Promise<OutcomeFacts | null> {
-  const run = await one<any>(
+  const run = await one<OutcomeFacts["run"]>(
     db,
     "SELECT id, status, definition_key, profile, agent_provider, work_item_id, policy_versions FROM workflow_runs WHERE id = $1",
     [runId],
   );
   if (!run) return null;
-  const steps = await q<any>(
+  const steps = await q<{
+    id: number;
+    key: string;
+    type: string;
+    status: string;
+    output: StepOutput;
+    independent: boolean | null;
+  }>(
     db,
     "SELECT id, key, type, status, output, config->>'independent' = 'true' AS independent FROM workflow_steps WHERE run_id = $1 ORDER BY position",
     [runId],
   );
-  const attempts = await q<any>(
+  const attempts = await q<OutcomeFacts["steps"][number]["attempts"][number] & { step_id: number }>(
     db,
     "SELECT step_id, status, output, error, metrics FROM workflow_step_attempts WHERE run_id = $1 ORDER BY id",
     [runId],
@@ -406,7 +452,7 @@ export async function collectOutcomeFacts(
   const coding = steps.filter((s) => s.type === "coding_agent" && s.output?.commits);
   const final_heads: Record<string, string> = Object.assign(
     {},
-    ...coding.map((s) => s.output.commits),
+    ...coding.map((s) => s.output?.commits),
   );
   let changed_files: Record<string, string[]> = {};
   try {
@@ -425,13 +471,13 @@ export async function collectOutcomeFacts(
   } catch {
     /* worktrees may be gone: the test-file check then simply does not fire */
   }
-  const prs = await q<any>(
+  const prs = await q<OutcomeFacts["pull_requests"][number]>(
     db,
     "SELECT repo, url, created, state, merged_at FROM pull_requests WHERE run_id = $1 ORDER BY id",
     [runId],
   );
   const production = run.work_item_id
-    ? await q<any>(
+    ? await q<OutcomeFacts["production"][number]>(
         db,
         `SELECT g.fingerprint, g.lifecycle_status,
                 (SELECT max(e.created_at) FROM prod_error_lifecycle_events e WHERE e.fingerprint = g.fingerprint AND e.action = 'resolve') AS resolved_at,
@@ -440,18 +486,20 @@ export async function collectOutcomeFacts(
         [run.work_item_id],
       ).catch(() => [])
     : [];
-  const handoffs = await q<any>(db, "SELECT status FROM provider_handoffs WHERE run_id = $1", [
-    runId,
-  ]).catch(() => []);
+  const handoffs = await q<{ status: string }>(
+    db,
+    "SELECT status FROM provider_handoffs WHERE run_id = $1",
+    [runId],
+  ).catch(() => []);
   const cost = (await costTotalsForRuns([runId]).catch(() => new Map())).get(runId);
-  const baseline = await one<any>(
+  const baseline = await one<{ median: number | string | null; samples: number }>(
     db,
     `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY t) AS median, count(*)::int AS samples FROM (
        SELECT sum(coalesce(input_tokens,0) + coalesce(output_tokens,0)) AS t FROM execution_attempt_telemetry x JOIN workflow_runs r ON r.id = x.run_id
         WHERE r.definition_key = $1 AND r.id <> $2 AND r.status IN ('COMPLETED','FAILED') GROUP BY x.run_id ORDER BY x.run_id DESC LIMIT 50) s`,
     [run.definition_key, runId],
   ).catch(() => null);
-  const human = await one<any>(
+  const human = await one<OutcomeFacts["human"]>(
     db,
     `SELECT (SELECT count(*)::int FROM workflow_questions WHERE run_id = $1 AND status = 'answered') AS answers,
             (SELECT count(*)::int FROM workflow_steps WHERE run_id = $1 AND approval->>'granted' = 'true') AS approvals,
@@ -475,7 +523,7 @@ export async function collectOutcomeFacts(
       ...p,
       merged_at: p.merged_at ? new Date(p.merged_at).toISOString() : null,
     })),
-    production: production.map((p: any) => ({
+    production: production.map((p) => ({
       ...p,
       resolved_at: p.resolved_at ? new Date(p.resolved_at).toISOString() : null,
     })),
@@ -505,7 +553,13 @@ export async function collectOutcomeFacts(
 export async function syncPullRequestStates(opts: { runId?: number; limit?: number } = {}) {
   if (!registeredGitProviders().some((host) => gitProviderFor(host).pullRequestState))
     return { checked: 0, updated: 0, errors: ["the git provider cannot report PR states"] };
-  const rows = await q<any>(
+  const rows = await q<{
+    id: number;
+    repo: string;
+    url: string;
+    run_id: number | null;
+    state: string | null;
+  }>(
     pool,
     `SELECT id, repo, url, run_id, state FROM pull_requests
       WHERE (state IS NULL OR state = 'OPEN') AND ($1::bigint IS NULL OR run_id = $1) ORDER BY state_checked_at NULLS FIRST, id LIMIT $2`,
@@ -516,7 +570,9 @@ export async function syncPullRequestStates(opts: { runId?: number; limit?: numb
   const runs = new Set<number>();
   for (const r of rows) {
     try {
-      const reg = await one<any>(pool, "SELECT * FROM repositories WHERE name = $1", [r.repo]);
+      const reg = await one<RepositoryRow>(pool, "SELECT * FROM repositories WHERE name = $1", [
+        r.repo,
+      ]);
       const provider = gitProviderFor(reg?.provider);
       if (!provider.pullRequestState) continue;
       const st = await provider.pullRequestState({
@@ -558,6 +614,10 @@ export async function recordRunOutcome(runId: number, db: Db = pool) {
 }
 
 export async function savedRunOutcome(runId: number, db: Db = pool) {
-  const row = await one<{ outcome: RunOutcome | null }>(db, "SELECT outcome FROM workflow_runs WHERE id = $1", [runId]);
+  const row = await one<{ outcome: RunOutcome | null }>(
+    db,
+    "SELECT outcome FROM workflow_runs WHERE id = $1",
+    [runId],
+  );
   return row?.outcome;
 }

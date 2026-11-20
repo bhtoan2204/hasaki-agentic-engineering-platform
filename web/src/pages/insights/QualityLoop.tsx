@@ -4,6 +4,46 @@ import { useI18n } from "../../i18n/index.tsx";
 import { act, ErrorBox, SkeletonRows } from "../../ui.tsx";
 import "../../components/Cost.css";
 
+type QualityPatterns = {
+  runs: number;
+  window_days: number;
+  verified_levels?: Record<string, number>;
+  cost_per_verified_task: number | null;
+  patterns: Array<{
+    category: string;
+    examples: string[];
+    runs: number;
+    rate: number;
+    distinct_tasks: number;
+    suggested?: { title?: string } | null;
+  }>;
+  by_policy_version: Array<{
+    policy_key: string;
+    versions: unknown;
+    runs: number;
+    tests_passed_rate: number | null;
+    review_passed_rate: number | null;
+    failure_rate: number | null;
+    avg_repairs: number | null;
+  }>;
+};
+type ProviderPerformance = {
+  min_samples: number;
+  groups?: Array<{
+    provider: string;
+    step_type: string;
+    attempts: number;
+    sample_ok: boolean;
+    success_rate: number | null;
+    p50_ms: number | null;
+    p95_ms: number | null;
+    cost_per_successful_completion: number | null;
+    unknown_cost_rate: number | null;
+    verification_pass_rate: number | null;
+    review_pass_rate: number | null;
+  }>;
+};
+
 /**
  * The feedback loop in one card: verified outcome levels → repeated failure categories → suggested improvement →
  * human review (proposals page) → policy versions compared. Reads /api/quality/patterns; proposals are created only on
@@ -11,8 +51,8 @@ import "../../components/Cost.css";
  */
 export function QualityLoop() {
   const { t } = useI18n();
-  const { data, error, loading, reload } = useApi<any>("/api/quality/patterns?days=30");
-  const { data: perf } = useApi<any>("/api/quality/providers?days=30");
+  const { data, error, loading, reload } = useApi<QualityPatterns>("/api/quality/patterns?days=30");
+  const { data: perf } = useApi<ProviderPerformance>("/api/quality/providers?days=30");
   if (loading && !data)
     return (
       <div className="cost-card">
@@ -40,7 +80,7 @@ export function QualityLoop() {
           className="ghost"
           onClick={() =>
             void act(async () => {
-              const r = await api<any>("/api/quality/proposals", { days: data.window_days });
+              const r = await api<unknown>("/api/quality/proposals", { days: data.window_days });
               reload();
               return r;
             }, t("ql.proposed"))
@@ -76,7 +116,7 @@ export function QualityLoop() {
               </tr>
             </thead>
             <tbody>
-              {data.patterns.map((p: any) => (
+              {data.patterns.map((p) => (
                 <tr key={p.category} title={p.examples.join("\n")}>
                   <td>{t(`ql.cat.${p.category}`)}</td>
                   <td>
@@ -92,7 +132,7 @@ export function QualityLoop() {
           <p className="muted small">{t("ql.none")}</p>
         )}
       </div>
-      {perf?.groups?.length > 0 && (
+      {!!perf?.groups?.length && (
         <div className="cost-section">
           <div className="cost-h">{t("ql.providers")}</div>
           <table className="cost-table">
@@ -109,7 +149,7 @@ export function QualityLoop() {
               </tr>
             </thead>
             <tbody>
-              {perf.groups.map((g: any) => (
+              {perf.groups.map((g) => (
                 <tr key={`${g.provider}|${g.step_type}`} className={g.sample_ok ? "" : "muted"}>
                   <td>{g.provider}</td>
                   <td>{g.step_type}</td>
@@ -120,7 +160,7 @@ export function QualityLoop() {
                   <td>{g.success_rate ?? "—"}%</td>
                   <td>
                     {g.p50_ms != null
-                      ? `${Math.round(g.p50_ms / 1000)}s / ${Math.round(g.p95_ms / 1000)}s`
+                      ? `${Math.round(g.p50_ms / 1000)}s / ${Math.round((g.p95_ms ?? 0) / 1000)}s`
                       : "—"}
                   </td>
                   <td>
@@ -155,7 +195,7 @@ export function QualityLoop() {
               </tr>
             </thead>
             <tbody>
-              {data.by_policy_version.map((v: any) => (
+              {data.by_policy_version.map((v) => (
                 <tr key={v.policy_key} title={JSON.stringify(v.versions)}>
                   <td className="mono small">{v.policy_key}</td>
                   <td>{v.runs}</td>

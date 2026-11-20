@@ -99,7 +99,7 @@ export function stableJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
   return `{${Object.keys(v as object)
     .sort()
-    .map((k) => `${JSON.stringify(k)}:${stableJson((v as any)[k])}`)
+    .map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`)
     .join(",")}}`;
 }
 
@@ -119,8 +119,8 @@ export function noteToolUse(m: AgentMetrics, name: string, input: unknown, now =
   const sig = `${name}:${stableJson(input)}`;
   if (st.sigs.has(sig)) r.duplicate_calls++;
   else if (st.sigs.size < 5000) st.sigs.add(sig);
-  const file =
-    typeof (input as any)?.file_path === "string" ? String((input as any).file_path) : null;
+  const filePath = (input as { file_path?: unknown } | null | undefined)?.file_path;
+  const file = typeof filePath === "string" ? String(filePath) : null;
   if (file && FILE_TOOLS.has(name)) {
     if (!st.firstTouch.has(file) && st.firstTouch.size < 1000) st.firstTouch.set(file, now - st.t0);
     if (name === "Read") {
@@ -143,8 +143,41 @@ export function firstUsefulLocationMs(m: AgentMetrics, changed: string[]): numbe
   return best;
 }
 
+interface MetricsContentBlock {
+  type: string;
+  name?: string;
+  input?: unknown;
+  is_error?: boolean | null;
+}
+
+/** The fields of an SDK message the metrics read. */
+interface MetricsMessage {
+  type: string;
+  subtype?: string;
+  uuid?: string;
+  model?: unknown;
+  parent_tool_use_id?: string | null;
+  compact_metadata?: { trigger?: string; pre_tokens?: unknown };
+  message?:
+    | string
+    | {
+        id?: unknown;
+        usage?: {
+          input_tokens?: unknown;
+          cache_read_input_tokens?: unknown;
+          cache_creation_input_tokens?: unknown;
+        } | null;
+        content?: string | readonly MetricsContentBlock[];
+      };
+  num_turns?: number;
+  duration_ms?: number;
+  usage?: Record<string, unknown> | null;
+  total_cost_usd?: unknown;
+}
+
 /** Fold one SDK message into the metrics (pure; unit-tested). */
-export function accumulateMetrics(m: AgentMetrics, msg: any) {
+export function accumulateMetrics(m: AgentMetrics, msg: MetricsMessage) {
+  const body = typeof msg.message === "object" ? msg.message : undefined;
   // SDK UUIDs identify replayed events; identical un-IDed events may be legitimate separate sessions.
   if (msg.uuid) {
     const seen = seenMessages.get(m) ?? new Set<string>();
@@ -169,7 +202,7 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
     m.sessions++;
     if (typeof msg.model === "string" && msg.model) m.model = msg.model;
   } else if (msg.type === "assistant") {
-    const usage = msg.message?.usage;
+    const usage = body?.usage;
     // Subagents have their own context; only the main session's calls measure its occupancy.
     if (usage && !msg.parent_tool_use_id) {
       const occupied = [
@@ -192,18 +225,19 @@ export function accumulateMetrics(m: AgentMetrics, msg: any) {
       // Every content block of one API message repeats that message's usage: count each message id once.
       const perMessage = streamedUsage.get(m) ?? new Map<string, number>();
       streamedUsage.set(m, perMessage);
-      perMessage.set(String(msg.message?.id ?? msg.uuid ?? perMessage.size), sum);
+      perMessage.set(String(body?.id ?? msg.uuid ?? perMessage.size), sum);
       const total = [...perMessage.values()].reduce((n, v) => n + v, 0);
       liveRuntime.getStore()!.observe(total, null, m);
     }
-    for (const b of msg.message?.content ?? [])
+    const content = body?.content;
+    for (const b of typeof content === "string" ? [] : (content ?? []))
       if (b.type === "tool_use") {
-        m.tool_calls[b.name] = (m.tool_calls[b.name] ?? 0) + 1;
-        noteToolUse(m, b.name, b.input);
+        const name = String(b.name);
+        m.tool_calls[name] = (m.tool_calls[name] ?? 0) + 1;
+        noteToolUse(m, name, b.input);
       }
-  } else if (msg.type === "user" && Array.isArray(msg.message?.content)) {
-    for (const b of msg.message.content)
-      if (b.type === "tool_result" && b.is_error) m.tool_errors++;
+  } else if (msg.type === "user" && Array.isArray(body?.content)) {
+    for (const b of body.content) if (b.type === "tool_result" && b.is_error) m.tool_errors++;
   } else if (msg.type === "result") {
     m.turns += msg.num_turns ?? 0;
     m.duration_ms += msg.duration_ms ?? 0;

@@ -190,7 +190,7 @@ function parseClock(f: string): { h: number; mi: number; s: number; approximate:
   if (!m) m = f.match(/\b(\d{1,2})h(\d{2})?(?:m(\d{2})?)?\s*(am|pm|sang|chieu|toi)?\b/);
   if (!m) {
     const g = f.match(/\b(\d{1,2})\s*gio(?:\s*(\d{1,2})(?:\s*phut)?)?\s*(sang|chieu|toi)?/);
-    if (g) m = [g[0], g[1], g[2] ?? "0", undefined as any, g[3]] as any;
+    if (g) m = [g[0], g[1], g[2] ?? "0", "", g[3]];
   }
   if (!m) return null;
   let h = +m[1];

@@ -9,6 +9,7 @@ import type { Actor } from "../src/authz/access.ts";
 import type { AgentProvider } from "../src/agent/provider.ts";
 import type { CompletionRunner } from "../src/agent/complete.ts";
 import { settleBackground } from "../src/workflow/background.ts";
+import { HttpError } from "../src/http/error.ts";
 
 after(async () => {
   setChatProviders(undefined);
@@ -122,7 +123,9 @@ test("chat: one active turn; cancel stops; regenerate supersedes", async () => {
   // Second message while active → 409
   await assert.rejects(
     () => chat.postMessage(a, c.id, { content: "lần 2", client_message_id: "cancel-2" }),
-    (e: any) => e?.status === 409 || /already in progress/i.test(String(e?.message ?? e)),
+    (e: unknown) =>
+      (e instanceof HttpError && e.status === 409) ||
+      /already in progress/i.test(String(e instanceof Error ? e.message : e)),
   );
 
   const cancel = await chat.cancelTurn(a, msg.turn.id);
@@ -160,7 +163,7 @@ test("chat: one active turn; cancel stops; regenerate supersedes", async () => {
   const live = after.messages.filter((m) => m.role === "assistant" && !m.withheld);
   // Original assistant of the superseded turn is marked superseded and not in historyFor,
   // but listMessages still returns it with superseded=true.
-  const superseded = after.messages.filter((m) => (m as any).superseded);
+  const superseded = after.messages.filter((m) => m.superseded);
   assert.ok(live.some((m) => m.content.includes("regenerate")));
   assert.ok(superseded.length >= 1 || live.length >= 1);
 });

@@ -1,3 +1,4 @@
+import type { WorkItemRow } from "../workitems/repository.ts";
 import { needsReplayReconciliation, planContinuation, planReplay } from "./replay.ts";
 import { continuationEvidence, latestWaitCheckpoint, readExecutionCheckpoint, saveExecutionPause, validateContinuation } from "./checkpoints.ts";
 import { reapExpiredLeases as reapExpiredJobs } from "./recovery.ts";
@@ -128,6 +129,7 @@ import {
   classifyComplexity,
   classifyWithFallback,
   type ProfileChange,
+  type ComplexityDecision,
   type ProfileChoice,
   type ProfileDecision,
 } from "./profiles.ts";
@@ -204,14 +206,20 @@ export interface StartRunInput {
   autonomy?: unknown;
 }
 
+type WorkItemPayload = NonNullable<Parameters<typeof parseAiSuggest>[0]> & {
+  risk?: string | null;
+  note?: string | null;
+};
+type ResolvedWorkItem = Omit<WorkItemRow, "payload"> & { payload: WorkItemPayload | null };
+
 export interface ResolvedRunGraph {
   dv: { id: number; key: string; version: number; spec: WorkflowSpec };
-  wi: any | null;
+  wi: ResolvedWorkItem | null;
   inputs: Record<string, unknown>;
   allowed: string[];
   selected: string[];
   reusedRepositories: boolean;
-  decision: ProfileDecision;
+  decision: ProfileDecision & { complexity: ComplexityDecision };
   changes: ProfileChange[];
   graph: WorkflowSpec;
   reportAdded: boolean;
@@ -225,7 +233,7 @@ export interface ResolvedRunGraph {
  */
 export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<ResolvedRunGraph> {
   const wi = input.workItemId
-    ? await one(c, "SELECT * FROM work_items WHERE id = $1", [input.workItemId])
+    ? await one<ResolvedWorkItem>(c, "SELECT * FROM work_items WHERE id = $1", [input.workItemId])
     : null;
   if (input.workItemId && !wi)
     throw new EngineError(`work item ${input.workItemId} not found`, 404);
@@ -389,7 +397,7 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
   const graph = withCleanupStep(reported);
   return {
     dv,
-    wi,
+    wi: wi ?? null,
     inputs,
     allowed,
     selected,
@@ -464,7 +472,7 @@ export async function startRun(input: StartRunInput) {
       inputs,
       input.agentProvider != null,
       r.decision.profile,
-      (r.decision as any).complexity?.class ?? null,
+      r.decision.complexity?.class ?? null,
     );
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
     try {
@@ -649,7 +657,7 @@ export async function setRunBranches(runId: number, branches: unknown, by: strin
         `worktree already prepared for ${touched.join(", ")}: its branch cannot change in this run`,
         409,
       );
-    const inputs = { ...(run.inputs ?? {}) } as Record<string, any>;
+    const inputs: Record<string, unknown> = { ...(run.inputs ?? {}) };
     if (next) Object.assign(inputs, { branches: next, branches_source: `set by ${by}` });
     else {
       delete inputs.branches;
@@ -937,7 +945,7 @@ export async function reexecuteStep(
         400,
       );
     // A retry or feedback without a skill choice keeps the skills pinned for the current re-execution.
-    const current = await one<{ pending_input: any }>(
+    const current = await one<{ pending_input: { reexecute?: { skills?: unknown } | null } | null }>(
       c,
       "SELECT pending_input FROM workflow_steps WHERE run_id = $1 AND key = $2",
       [runId, stepKey],
@@ -1121,7 +1129,7 @@ export async function sendFeedback(
       rediscover && discovery ? { rediscover: { id, feedback: message } } : null;
     for (const t of targets) {
       locked = await lockRun(c, runId);
-      const prev = await one<{ pending_input: any }>(
+      const prev = await one<{ pending_input: { reexecute?: { skills?: unknown } | null } | null }>(
         c,
         "SELECT pending_input FROM workflow_steps WHERE run_id = $1 AND key = $2",
         [runId, t],
@@ -1494,7 +1502,10 @@ export async function approveStep(
       // (e.g. a HIGH-risk state change on an unconfirmed root cause) needs an explicit, recorded acknowledgement.
       const scope = s.approval?.request?.scope;
       const acknowledged = Boolean(
-        opts.data && typeof opts.data === "object" && (opts.data as any).acknowledge_risk === true,
+        opts.data &&
+          typeof opts.data === "object" &&
+          "acknowledge_risk" in opts.data &&
+          opts.data.acknowledge_risk === true,
       );
       if (scope && s.approval?.request?.requires_risk_acknowledgement && !acknowledged)
         throw new EngineError(
@@ -1627,8 +1638,8 @@ async function healthyProviderSwitch(jobId: number) {
   try {
     const preview = await one<{
       type: string;
-      config: Record<string, any>;
-      agent_override: Record<string, any> | null;
+      config: Record<string, unknown> & { delegation?: { enabled?: unknown } | null };
+      agent_override: Record<string, unknown> | null;
       agent_provider: string | null;
       profile: string | null;
       agent_configuration: RunRow["agent_configuration"];
@@ -1694,7 +1705,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
     ]))!;
     const runnable =
       !["PAUSED", "CANCELED", "PENDING"].includes(run.status) ||
-      (run.status === "PAUSED" && (j as any).force === true);
+      (run.status === "PAUSED" && j.force === true);
     if (
       step.generation !== j.generation ||
       !["READY", "RETRYING"].includes(step.status) ||
@@ -1720,25 +1731,33 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
     // checkout still does not name the files a step may edit, so an empty file list stays queued.
     const consumers = ["agent", "coding_agent", "command", "git_pull_request"];
     const writers = ["coding_agent", "command", "git_pull_request"];
+    type ScopeConfig = {
+      isolated_workspace?: unknown;
+      max_concurrent_subtasks?: unknown;
+      scope?: { owned_files?: string[]; repositories?: string[] } | null;
+      subtask?: { owned_files?: string[]; target_repos?: string[] } | null;
+      owned_files?: string[];
+      target_repos?: string[];
+    };
     const isolatedCoding = (
       type: string,
-      config: Record<string, any> | null | undefined,
+      config: ScopeConfig | null | undefined,
       subtaskId: string | null | undefined,
     ) =>
       type === "coding_agent" &&
       config?.isolated_workspace === true &&
       typeof subtaskId === "string" &&
       /^[a-z0-9][a-z0-9_-]*$/.test(subtaskId);
-    const filesOf = (config: Record<string, any> | null | undefined): string[] =>
+    const filesOf = (config: ScopeConfig | null | undefined): string[] =>
       config?.scope?.owned_files ?? config?.subtask?.owned_files ?? config?.owned_files ?? [];
-    const reposOf = (config: Record<string, any> | null | undefined): string[] =>
+    const reposOf = (config: ScopeConfig | null | undefined): string[] =>
       config?.scope?.repositories ?? config?.subtask?.target_repos ?? config?.target_repos ?? [];
     if (consumers.includes(step.type)) {
       const active = await q<{
         id: number;
         step_id: number;
         step_type: string;
-        config: Record<string, any>;
+        config: ScopeConfig;
         subtask_id: string | null;
       }>(
         c,
@@ -1757,11 +1776,7 @@ export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAt
           const isWriter = writers.includes(step.type);
           conflict = active.some((a) => isWriter || writers.includes(a.step_type));
         } else {
-          const maxConcurrent = Number(
-            (run as any).config?.max_concurrent_subtasks ??
-              step.config?.max_concurrent_subtasks ??
-              4,
-          );
+          const maxConcurrent = Number(step.config?.max_concurrent_subtasks ?? 4);
           if (active.length >= maxConcurrent) {
             conflict = true;
           } else {
@@ -2044,8 +2059,12 @@ async function applyResult(
       break;
     }
     case "completed": {
-      const out: any = result.output ?? {};
-      if (Array.isArray(out?.selected_repositories))
+      const out = result.output ?? {};
+      if (
+        typeof out === "object" &&
+        "selected_repositories" in out &&
+        Array.isArray(out.selected_repositories)
+      )
         await setSelectedRepositories(c, run, out.selected_repositories);
       await closeAttempt("COMPLETED", out);
       await setStepStatus(c, step, "COMPLETED", {
@@ -2091,6 +2110,9 @@ async function applyResult(
           : {},
         `${open} question(s)`);
       await closeJob("done");
+      const diagnosisSummary = (
+        result.output as { diagnosis?: { summary?: string } | null } | null | undefined
+      )?.diagnosis?.summary;
       afterCommit(() =>
         background(`notify run ${run.id}`, () => {
           const en = outputLocale(run) === "en";
@@ -2104,8 +2126,8 @@ async function applyResult(
               stepKey: step.key,
               stepName: step.name,
               status: "WAITING_INPUT",
-              detail: (result.output as any)?.diagnosis?.summary
-                ? `${(result.output as any).diagnosis.summary} — ${en ? "choose how to proceed" : "chọn cách xử lý"}`
+              detail: diagnosisSummary
+                ? `${diagnosisSummary} — ${en ? "choose how to proceed" : "chọn cách xử lý"}`
                 : en
                   ? `${open} question(s) to answer`
                   : `${open} câu hỏi cần trả lời`,
@@ -2121,12 +2143,12 @@ async function applyResult(
       break;
     }
     case "waiting_approval": {
-      const gate = await evaluateGate(c, run, step, await stepsOf(c, run.id), result.request as any);
+      const gate = await evaluateGate(c, run, step, await stepsOf(c, run.id), result.request);
       if (gate?.enforced) {
         step.approval = machineApproval(gate);
         await q(c, "UPDATE workflow_steps SET approval = $2 WHERE id = $1", [step.id, json(step.approval)]);
         await runEvents.add(c, run.id, "system", `${step.key} auto-approved (${gate.mode}): ${gate.reasons.join("; ")}`, step.id);
-        return applyResult(c, run, step, attempt, jobId, { kind: "completed", output: machineApprovalOutput(gate, result.request as any) }, afterCommit);
+        return applyResult(c, run, step, attempt, jobId, { kind: "completed", output: machineApprovalOutput(gate, result.request) }, afterCommit);
       }
       const request = gate ? { ...(result.request as object), autonomy: gate } : result.request;
       await closeAttempt("WAITING_APPROVAL", request);
@@ -2149,7 +2171,7 @@ async function applyResult(
               stepName: step.name,
               status: "WAITING_APPROVAL",
               detail: String(
-                (result.request as any)?.message ??
+                result.request?.message ??
                   (step.type === "task_result_report"
                     ? en
                       ? "review the task result report"
@@ -2621,8 +2643,13 @@ export async function prepareProviderPause(
   );
   const supported =
     failure &&
-    PAUSABLE_FAILURES.includes(failure as any) &&
-    ((result.kind === "failed" && !!(result.details as any)?.provider_error) || reported?.reported);
+    PAUSABLE_FAILURES.includes(failure) &&
+    ((result.kind === "failed" &&
+      typeof result.details === "object" &&
+      result.details !== null &&
+      "provider_error" in result.details &&
+      !!result.details.provider_error) ||
+      reported?.reported);
   if (
     !requested &&
     (policy.mode === "disabled" ||
@@ -2664,7 +2691,7 @@ async function persistProviderPause(
   job: JobRow,
   result: ExecResult,
   p: PreparedHandoff,
-  request: any,
+  request: { reason: string } | null | undefined,
   afterCommit: AfterCommit,
 ) {
   const reason =

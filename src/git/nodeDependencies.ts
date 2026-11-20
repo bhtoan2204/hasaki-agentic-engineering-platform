@@ -320,13 +320,20 @@ async function yarnLocked(workspace: string) {
   return !lockMatchesManifest(npmLock, manifest);
 }
 
-function lockMatchesManifest(lock: any, manifest: any) {
+type PackageDependencies = Partial<
+  Record<"dependencies" | "devDependencies" | "optionalDependencies", Record<string, string>>
+>;
+
+function lockMatchesManifest(
+  lock: { packages?: Record<string, PackageDependencies> } | null,
+  manifest: PackageDependencies,
+) {
   const root = lock?.packages?.[""];
   if (!root) return false;
   const same = (a: Record<string, string> = {}, b: Record<string, string> = {}) =>
     Object.keys(a).length === Object.keys(b).length &&
     Object.entries(a).every(([k, v]) => b[k] === v);
-  return ["dependencies", "devDependencies", "optionalDependencies"].every((key) =>
+  return (["dependencies", "devDependencies", "optionalDependencies"] as const).every((key) =>
     same(manifest[key], root[key]),
   );
 }

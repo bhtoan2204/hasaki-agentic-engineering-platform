@@ -5,7 +5,7 @@ import { pool } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { RECOMMENDATION_VERSION, recommendationDetail } from "./recommendations.ts";
 import { providerEnabled } from "../agent/provider.ts";
-import { resolveStepAgent } from "../agent/stepAgent.ts";
+import { resolveStepAgent, type StepAgentConfig } from "../agent/stepAgent.ts";
 import { handoffReadiness } from "../agent/handoff.ts";
 import type { WorkflowSpec } from "../workflow/types.ts";
 const Policy = z
@@ -73,7 +73,7 @@ export async function applyOptimizationDefaults(
 ) {
   const category = typeof inputs.task_category === "string" ? inputs.task_category : null;
   const graph = structuredClone(spec);
-  const decisions: any[] = [];
+  const decisions: Array<Record<string, unknown>> = [];
   if (!category || explicitProvider) return { graph, decisions };
   const policies = await q(
     db,
@@ -81,11 +81,14 @@ export async function applyOptimizationDefaults(
     [owner, category],
   );
   for (const step of graph.steps) {
-    const original = step.config as Record<string, any>;
+    const original = step.config as Record<string, unknown> & {
+      agent?: StepAgentConfig;
+      delegation?: { enabled?: boolean };
+    };
     if (original.agent?.provider || original.model || original.codex_model) continue;
     const p = policies.find((p) => p.step_type === step.type);
     if (!p) continue;
-    const provenance: any = {
+    const provenance: Record<string, unknown> = {
       policy_id: p.id,
       recommendation_id: p.recommendation_id,
       recommendation_version: p.version,

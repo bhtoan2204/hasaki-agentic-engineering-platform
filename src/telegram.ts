@@ -120,7 +120,7 @@ async function postMessage(message: Record<string, unknown>, chatId = config.tel
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) {
-      const body: any = await res.json().catch(() => ({}));
+      const body: { description?: unknown } | null = await res.json().catch(() => ({}));
       console.error(
         `telegram sendMessage failed: HTTP ${res.status} ${String(body?.description ?? "")
           .split(botToken)

@@ -80,6 +80,12 @@ export interface Classification {
   pre_existing: Array<{ package: string; tests: string[]; build_errors: string[] }>;
 }
 
+/** Outcome of comparing a failed run with the base branch: the classification, or a note why it was not compared. */
+export interface BaselineComparison extends Partial<Classification> {
+  base_sha?: string;
+  note?: string;
+}
+
 /** Compare branch failures against the same packages on the base branch. */
 export function classify(branch: GoTestReport, base: GoTestReport): Classification {
   const out: Classification = { regressions: [], pre_existing: [] };
@@ -158,8 +164,10 @@ export async function goBaseline(
     const hit =
       baselineCache.get(`${repoKey}@${sha}:${p}`) ??
       (persisted.has(p) ? { [p]: persisted.get(p)! } : undefined);
-    if (hit) (Object.assign(report, hit), cached.push(p));
-    else todo.push(p);
+    if (hit) {
+      Object.assign(report, hit);
+      cached.push(p);
+    } else todo.push(p);
   }
   if (todo.length) {
     const dir = join(

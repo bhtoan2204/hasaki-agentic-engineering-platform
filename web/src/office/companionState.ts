@@ -1,4 +1,4 @@
-import type { AgentView, OfficeSnapshot, StepLite } from "./types.ts";
+import type { AgentView, AttemptLite, OfficeSnapshot, RunSummaryLite, StepLite } from "./types.ts";
 
 export const COMPANION_STATES = [
   "IDLE",
@@ -46,33 +46,41 @@ const STATUS_WEIGHT: Record<string, number> = {
 };
 
 /** Human gates and active runs take precedence over history. No state is synthesized from elapsed time. */
-export function prioritizeCompanionRuns(runs: any[]) {
+export function prioritizeCompanionRuns<T extends Omit<RunSummaryLite, "title">>(runs: T[]) {
   return (
     [...runs].sort((a, b) => {
-      const weight = (r: any) => {
-        const stepWeights = (r.steps ?? []).map((s: any) => STATUS_WEIGHT[s.status] ?? 20);
+      const weight = (r: T) => {
+        const stepWeights = (r.steps ?? []).map((s) => STATUS_WEIGHT[s.status] ?? 20);
         return Math.min(STATUS_WEIGHT[r.status] ?? 20, ...stepWeights);
       };
-      const timestamp = (r: any) => Date.parse(String(r.updated_at ?? r.created_at ?? "")) || 0;
+      const timestamp = (r: T) => Date.parse(String(r.updated_at ?? r.created_at ?? "")) || 0;
       return weight(a) - weight(b) || timestamp(b) - timestamp(a) || Number(b.id) - Number(a.id);
     })[0] ?? null
   );
 }
 
-function isHandoff(step: any) {
+function isHandoff(step: StepLite) {
   return !!(
     step?.handoff ||
     step?.pending_input?.provider_handoff ||
     step?.input?.pending?.provider_handoff
   );
 }
-function providerFailureCategory(attempt: any) {
+interface CompanionAttempt extends Partial<Pick<AttemptLite, "finished_at" | "metrics" | "error">> {
+  provider?: string | null;
+  model?: string | null;
+  normalized_failure_category?: string | null;
+  failure_category?: string | null;
+}
+
+function providerFailureCategory(attempt: CompanionAttempt | null) {
+  const error = attempt?.error;
   return (
     String(
       attempt?.normalized_failure_category ??
         attempt?.failure_category ??
         attempt?.metrics?.normalized_failure_category ??
-        attempt?.error?.failure_category ??
+        (typeof error === "object" ? error?.failure_category : undefined) ??
         "",
     ).toUpperCase() || null
   );
@@ -83,7 +91,7 @@ export function companionActivity(
   run: OfficeSnapshot["run"],
   step: StepLite | null,
   agent: AgentView | null,
-  attempt: any,
+  attempt: CompanionAttempt | null,
   now: number,
   pendingQuestion = false,
 ): CompanionActivity {
@@ -91,10 +99,10 @@ export function companionActivity(
   const provider =
     attempt?.provider ??
     attempt?.metrics?.provider ??
-    (step as any)?.agent?.provider ??
-    (run as any)?.agent_provider ??
+    step?.agent?.provider ??
+    run?.agent_provider ??
     null;
-  const model = attempt?.model ?? attempt?.metrics?.model ?? (step as any)?.agent?.model ?? null;
+  const model = attempt?.model ?? attempt?.metrics?.model ?? step?.agent?.model ?? null;
   const failureCategory = providerFailureCategory(attempt);
   const common = {
     run,

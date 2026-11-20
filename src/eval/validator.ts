@@ -147,11 +147,11 @@ if (tsc.status !== 0) {
         checks,
         diagnostic: "Isolated TypeScript build/typecheck failed",
       };
-    if ((e as any).killed)
+    if ((e as { killed?: boolean }).killed)
       throw Object.assign(new Error("Validation timeout"), {
         name: "EvaluationTimeout",
       });
-    const stdout = String((e as any).stdout ?? "").trim();
+    const stdout = String((e as { stdout?: string }).stdout ?? "").trim();
     try {
       const parsed = JSON.parse(stdout);
       if (Array.isArray(parsed.checks))
@@ -162,12 +162,16 @@ if (tsc.status !== 0) {
           checks: parsed.checks as typeof checks,
           diagnostic: "Required or hidden assertions failed",
         };
-    } catch {}
+    } catch {
+      /* ignore: stdout is not a validator result */
+    }
     return {
       syntax,
       security,
       checks: [{ name: "hidden:validator", passed: false }],
-      diagnostic: (e as any).killed ? "Validation timeout" : "Validation process failed",
+      diagnostic: (e as { killed?: boolean }).killed
+        ? "Validation timeout"
+        : "Validation process failed",
     };
   }
 }

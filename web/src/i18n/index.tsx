@@ -29,7 +29,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = locale;
     try {
       writeUiLocale((k, v) => localStorage.setItem(k, v), locale);
-    } catch {}
+    } catch {
+      /* ignore: storage unavailable */
+    }
   }, [locale]);
   const value = useMemo<Ctx>(
     () => ({

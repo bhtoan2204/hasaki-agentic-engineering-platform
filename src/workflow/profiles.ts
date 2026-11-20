@@ -254,7 +254,7 @@ export function classifyComplexity(
       reasons: [`set by the user: ${o}`],
       disclaimer,
     };
-  const sig = d.signals as any;
+  const sig = d.signals;
   if (sig.high_risk_term || sig.declared_risk === "high")
     return {
       class: "HIGH_RISK",

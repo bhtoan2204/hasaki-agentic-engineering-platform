@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -99,7 +99,9 @@ test("bootstrap script migrates an empty database, preserves existing admin, and
     for (let i = 0; i < 80; i++) {
       try {
         ready = (await fetch(base + "/api/health")).ok;
-      } catch {}
+      } catch {
+        /* ignore: server not listening yet */
+      }
       if (ready) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -116,12 +118,21 @@ test("cookie policy supports localhost and enforces production Secure; malformed
   try {
     delete process.env.COOKIE_SECURE;
     delete process.env.NODE_ENV;
-    assert.equal(cookieSecure({ headers: { host: "localhost:4545" }, socket: {} } as any), false);
-    assert.equal(cookieSecure({ headers: { host: "app.example.com" }, socket: {} } as any), true);
+    assert.equal(
+      cookieSecure({ headers: { host: "localhost:4545" }, socket: {} } as IncomingMessage),
+      false,
+    );
+    assert.equal(
+      cookieSecure({ headers: { host: "app.example.com" }, socket: {} } as IncomingMessage),
+      true,
+    );
     process.env.COOKIE_SECURE = "0";
     process.env.NODE_ENV = "production";
-    assert.equal(cookieSecure({ headers: { host: "localhost" }, socket: {} } as any), true);
-    assert.equal(readCookie({ headers: { cookie: "sid=%invalid" } } as any), null);
+    assert.equal(
+      cookieSecure({ headers: { host: "localhost" }, socket: {} } as IncomingMessage),
+      true,
+    );
+    assert.equal(readCookie({ headers: { cookie: "sid=%invalid" } } as IncomingMessage), null);
   } finally {
     if (prev === undefined) delete process.env.COOKIE_SECURE;
     else process.env.COOKIE_SECURE = prev;

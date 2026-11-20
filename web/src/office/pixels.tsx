@@ -226,8 +226,10 @@ function buildBody(): Grid {
     [10, 2],
   ])
     put(c, BX + x, BY + y, "C");
-  for (const y of [1, 2, 3, 4])
-    (put(c, BX + 7, BY + y, "R"), put(c, BX + 8, BY + y, y % 2 ? "B" : "R"));
+  for (const y of [1, 2, 3, 4]) {
+    put(c, BX + 7, BY + y, "R");
+    put(c, BX + 8, BY + y, y % 2 ? "B" : "R");
+  }
   const o = outline(c);
   // Hasaki-style chest emblem (stylised pixel "H"; the real logo is used on signage — see web/src/brand)
   const logo = ["whwhw", "whhhw", "whwhw"];

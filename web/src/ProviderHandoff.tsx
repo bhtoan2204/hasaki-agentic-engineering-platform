@@ -1,9 +1,33 @@
-import { HandoffPreview } from "./HandoffPreview.tsx";
+import { HandoffPreview, type Handoff } from "./HandoffPreview.tsx";
 import { useState, useEffect } from "react";
 import { useApi } from "./api.ts";
 import { ModelSelect, type CatalogModel } from "./ModelSelect.tsx";
 import { useI18n } from "./i18n/index.tsx";
 import { Field, time } from "./ui.tsx";
+
+interface HandoffStep {
+  key: string;
+  status: string;
+  current_attempt_id?: number | null;
+}
+
+interface HandoffAttempt {
+  id: number;
+  number: number;
+  status: string;
+  started_at?: string | null;
+  executor_stopped_at?: string | null;
+  agent_provider?: string | null;
+  agent_model?: string | null;
+  metrics?: { provider?: string; model?: string } | null;
+}
+
+interface ProviderOption {
+  provider: string;
+  ok: boolean;
+  error?: string;
+  models?: CatalogModel[];
+}
 
 /** Server-owned checkpoints; selecting a provider never starts execution before explicit confirmation. */
 export function ProviderHandoff({
@@ -16,10 +40,10 @@ export function ProviderHandoff({
 }: {
   active?: boolean;
   runId: number;
-  step: any;
-  attempts: any[];
-  handoffs?: any[];
-  action: (path: string, body?: any) => Promise<any>;
+  step: HandoffStep;
+  attempts: HandoffAttempt[];
+  handoffs?: Handoff[];
+  action: (path: string, body?: Record<string, unknown>) => Promise<unknown>;
 }) {
   const { t } = useI18n();
   const [provider, setProvider] = useState("codex"),
@@ -35,7 +59,7 @@ export function ProviderHandoff({
     data: options,
     error,
     reload,
-  } = useApi<any[]>(
+  } = useApi<ProviderOption[]>(
     show || pending ? `/api/runs/${runId}/steps/${step.key}/handoff-providers` : null,
   );
   const target = options?.find((p) => p.provider === provider);
@@ -48,7 +72,7 @@ export function ProviderHandoff({
     const next = healthy.find((p) => p !== current.original_provider) ?? healthy[0];
     if (next && next !== provider) setProvider(next);
   }, [options, providerTouched, provider, current, healthy]);
-  const send = async (path: string, body: any) => {
+  const send = async (path: string, body: Record<string, unknown>) => {
     setBusy(true);
     try {
       await action(path, body);
@@ -182,7 +206,7 @@ export function ProviderHandoff({
               <ModelSelect
                 ariaLabel={t("handoff.targetModel")}
                 value={model}
-                models={(target?.models ?? []) as CatalogModel[]}
+                models={target?.models ?? []}
                 emptyLabel={t("handoff.accountDefault")}
                 onChange={(next) => {
                   setModel(next);

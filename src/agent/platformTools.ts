@@ -22,7 +22,8 @@ import {
 import { redactContextText } from "../context/redact.ts";
 import { safeDiagnostics } from "./telemetry.ts";
 import { z } from "zod";
-import { execFile } from "node:child_process";
+import type { AttemptRow, RunRow, StepRow } from "../workflow/types.ts";
+import { execFile, type ExecFileException } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { config, codeIntelligenceEnabled } from "../config.ts";
@@ -86,7 +87,7 @@ export interface PlatformToolEnv {
     version: number;
     content: string;
     category: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
   }>;
   disclosure: Array<{ key: string; disclosure?: string }>;
   upstream: Record<string, { output?: unknown; status?: string; attempt_id?: number | null }>;
@@ -163,12 +164,15 @@ async function openQuestions(attemptId: number): Promise<number> {
 
 const activeContextReads = new Map<number, number>();
 
+type ToolArgs = Record<string, unknown>;
+
 export async function dispatchPlatformTool(
   name: string,
-  args: any,
+  args: unknown,
   env: PlatformToolEnv,
 ): Promise<string> {
   const started = performance.now();
+  const call = args as { name?: unknown; arguments?: unknown } | null | undefined;
   try {
     await validateToolBinding(env);
   } catch (error) {
@@ -179,10 +183,10 @@ export async function dispatchPlatformTool(
     { ...execution.getStore(), userId: Number(env.ownerId), runId: env.runId, kind: "run" },
     async () => {
       const nativeName =
-        name === "call_tool" && String(args?.name ?? "").startsWith("platform.")
-          ? String(args.name)
+        name === "call_tool" && String(call?.name ?? "").startsWith("platform.")
+          ? String(call?.name)
           : name;
-      const nativeArgs = nativeName !== name ? (args.arguments ?? {}) : args;
+      const nativeArgs = nativeName !== name ? (call?.arguments ?? {}) : args;
       const native =
         nativeName.startsWith("platform.") || !["search_knowledge"].includes(nativeName)
           ? contextTool(nativeName)
@@ -192,12 +196,12 @@ export async function dispatchPlatformTool(
       const readOnly =
         native?.readOnly ??
         (name === "call_tool"
-          ? describeToolSafe(String(args?.name ?? ""))?.read_only === true
+          ? describeToolSafe(String(call?.name ?? ""))?.read_only === true
           : !MUTATING.has(name) && name !== "ask_user" && name !== "post_update");
       try {
         const target =
           native?.logicalName ??
-          (name === "call_tool" ? `integration:${String(args?.name ?? "")}` : `platform.${name}`);
+          (name === "call_tool" ? `integration:${String(call?.name ?? "")}` : `platform.${name}`);
         const experiment = execution.getStore()?.evaluation;
         if (!env.contextPreparation && experiment?.contextMode) {
           const control = [
@@ -222,13 +226,14 @@ export async function dispatchPlatformTool(
           env = { ...env, knowledge: await visibleSnapshotKnowledge(env) };
         if (JSON.stringify(args ?? {}).length > 128000)
           throw new Error("Tool arguments exceed 128000 characters");
+        let ownedArgs: ToolArgs = {};
         if (!native) {
           const legacy = legacyInputs[name];
           if (!legacy)
             throw new Error(
               "Unknown tool; starting arbitrary workflows is not a supported capability",
             );
-          args = legacy.parse(args ?? {});
+          ownedArgs = legacy.parse(args ?? {});
         }
         if (native) {
           const parsed = native.input.safeParse(nativeArgs ?? {});
@@ -280,7 +285,7 @@ export async function dispatchPlatformTool(
           if (nativeName.startsWith("platform."))
             throw new Error("Unsupported platform capability");
           if (["call_tool", "list_tools"].includes(name)) await loadPersonalIntegrations();
-          result = await dispatchOwned(name, args, env);
+          result = await dispatchOwned(name, ownedArgs, env);
         }
         if (result.startsWith("ERROR:")) status = "denied";
       } catch (error) {
@@ -312,7 +317,7 @@ function redactToolText(text: string) {
   return redactContextText(text);
 }
 
-async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Promise<string> {
+async function dispatchOwned(name: string, args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const live = await attemptIsLive(env.attemptId, env.fencingToken);
   if (!live.ok) return `ERROR: refused ${name}: ${live.reason}`;
   if (MUTATING.has(name) && (await openQuestions(env.attemptId)) > 0)
@@ -358,12 +363,14 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
     case "read_step_output":
       return readStepOutput(args, env);
     case "read_artifact":
-      return readArtifact(args, env);
+      return readArtifact(args as Parameters<typeof readArtifact>[0], env);
     case "list_tools":
       return JSON.stringify(
         [
           ...listOwnedTools(args?.query),
-          ...listTools(args?.query, { mode: env.mode }),
+          ...listTools(typeof args.query === "string" ? args.query : undefined, {
+            mode: env.mode,
+          }),
           ...CONTEXT_TOOLS.map((t) => ({
             name: t.logicalName,
             summary: t.description,
@@ -400,13 +407,13 @@ async function dispatchOwned(name: string, args: any, env: PlatformToolEnv): Pro
         return (e as Error).message;
       }
     case "call_tool":
-      return callIntegration(args, env);
+      return callIntegration(args as Parameters<typeof callIntegration>[0], env);
     default:
       return `ERROR: unknown platform tool ${name}`;
   }
 }
 
-async function askUser(args: any, env: PlatformToolEnv): Promise<string> {
+async function askUser(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const questions = z
     .array(
       z.object({
@@ -426,7 +433,7 @@ async function askUser(args: any, env: PlatformToolEnv): Promise<string> {
   return "Questions posted. Stop now and end your turn without further tool calls.";
 }
 
-async function postUpdate(args: any, env: PlatformToolEnv): Promise<string> {
+async function postUpdate(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const message = String(args?.message ?? "");
   await env.log("agent", message);
   await q(
@@ -437,7 +444,7 @@ async function postUpdate(args: any, env: PlatformToolEnv): Promise<string> {
   return "ok";
 }
 
-async function submitResult(args: any, env: PlatformToolEnv): Promise<string> {
+async function submitResult(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   if (env.submittedThisTurn)
     return "ERROR: submit_result was already recorded in this turn; end your turn now";
   const output = (args?.output ?? {}) as Record<string, unknown>;
@@ -478,7 +485,7 @@ async function isolationFor(
   return { isolated, subtaskId };
 }
 
-async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
+async function prepareBranch(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const repo = String(args?.repo ?? "");
   if (env.policy?.micro && !env.selected.includes(repo)) {
     env.policy.micro.exhausted = true;
@@ -595,7 +602,7 @@ async function prepareBranch(args: any, env: PlatformToolEnv): Promise<string> {
  * worktree only (never a primary checkout), optional paths must stay inside that worktree, and repository git hooks
  * are disabled (no code from the repository runs outside the sandbox).
  */
-async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
+async function commitChanges(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   if (env.mode !== "coding") return "ERROR: commit_changes is only available in coding steps";
   const repo = String(args?.repo ?? "");
   const message = String(args?.message ?? "")
@@ -643,12 +650,13 @@ async function commitChanges(args: any, env: PlatformToolEnv): Promise<string> {
       commit: head.split(" ")[0],
     });
     return `Committed ${head} on ${w.branch} in ${w.path}\nFiles:\n${staged}`;
-  } catch (e: any) {
-    return `ERROR: git commit failed: ${String(e?.stderr || e?.message || e).slice(0, 1000)}`;
+  } catch (e) {
+    const err = e as ExecFileException;
+    return `ERROR: git commit failed: ${String(err?.stderr || err?.message || e).slice(0, 1000)}`;
   }
 }
 
-async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
+async function readKnowledge(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const key = String(args?.key ?? "");
   const k = env.knowledge.find((x) => x.key === key);
   if (!k)
@@ -676,7 +684,7 @@ async function readKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
   return `# ${k.title} (${k.key} v${k.version})\n\n${notice}${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
 }
 
-async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string> {
+async function searchKnowledge(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const query = String(args?.query ?? "");
   const limit = Number(args?.limit ?? 8);
   if (query.length < 2) return "query must be at least 2 characters";
@@ -691,7 +699,7 @@ async function searchKnowledge(args: any, env: PlatformToolEnv): Promise<string>
       key: x.k.key,
       title: x.k.title,
       category: x.k.category,
-      description: String((x.k.metadata as any)?.description ?? "").slice(0, 300),
+      description: String(x.k.metadata?.description ?? "").slice(0, 300),
       score: x.score,
       already_in_prompt: tier.get(x.k.key) === "inline",
     }));
@@ -761,7 +769,7 @@ export async function citedEvidenceLogs(runId: number, upstream: unknown): Promi
     .join("\n\n");
 }
 
-async function readStepOutput(args: any, env: PlatformToolEnv): Promise<string> {
+async function readStepOutput(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const stepKey = String(args?.step_key ?? "");
   if (env.independent) {
     const u = env.upstream[stepKey];
@@ -784,7 +792,10 @@ async function readStepOutput(args: any, env: PlatformToolEnv): Promise<string> 
     : `No completed upstream step "${stepKey}". Available: ${Object.keys(env.upstream).join(", ")}`;
 }
 
-async function callIntegration(args: any, env: PlatformToolEnv): Promise<string> {
+async function callIntegration(
+  args: { name: string; arguments?: Record<string, unknown> },
+  env: PlatformToolEnv,
+): Promise<string> {
   const toolName = String(args?.name ?? "");
   if (env.independent && toolName === "run.step_history")
     return readStepOutput({ step_key: args?.arguments?.step_key }, env);
@@ -886,11 +897,13 @@ export async function envFromDatabase(
   ids: { runId: number; stepId: number; attemptId: number },
   onSubmit?: (o: Record<string, unknown>) => void,
 ): Promise<PlatformToolEnv> {
-  const attempt = await one<any>(pool, "SELECT * FROM workflow_step_attempts WHERE id = $1", [
-    ids.attemptId,
-  ]);
-  const step = await one<any>(pool, "SELECT * FROM workflow_steps WHERE id = $1", [ids.stepId]);
-  const run = await one<any>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [ids.runId]);
+  const attempt = await one<AttemptRow>(
+    pool,
+    "SELECT * FROM workflow_step_attempts WHERE id = $1",
+    [ids.attemptId],
+  );
+  const step = await one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE id = $1", [ids.stepId]);
+  const run = await one<RunRow>(pool, "SELECT * FROM workflow_runs WHERE id = $1", [ids.runId]);
   if (
     !attempt ||
     !step ||
@@ -902,9 +915,12 @@ export async function envFromDatabase(
   )
     throw new Error("bridge attempt not found or assigned to another instance");
   const snap = attempt.context_snapshot_id
-    ? await one<any>(pool, "SELECT content FROM context_snapshots WHERE id = $1", [
-        attempt.context_snapshot_id,
-      ])
+    ? await one<{
+        content: {
+          knowledge?: PlatformToolEnv["knowledge"];
+          prompt_plan?: { knowledge?: PlatformToolEnv["disclosure"] };
+        } | null;
+      }>(pool, "SELECT content FROM context_snapshots WHERE id = $1", [attempt.context_snapshot_id])
     : null;
   const content = snap?.content ?? {};
   const input = attempt.input ?? {};
@@ -916,7 +932,7 @@ export async function envFromDatabase(
   const { runEvents } = await import("../workflow/events.ts");
   return {
     runId: run.id,
-    snapshotId: attempt.context_snapshot_id,
+    snapshotId: attempt.context_snapshot_id ?? undefined,
     independent: step.config?.independent === true,
     ownerId: run.owner_id ?? null,
     stepId: step.id,
@@ -1037,7 +1053,7 @@ function listOwnedTools(query: unknown) {
     }));
 }
 
-const legacyInputs: Record<string, z.ZodType> = {
+const legacyInputs: Record<string, z.ZodType<ToolArgs>> = {
   ask_user: z.strictObject({
     questions: z
       .array(

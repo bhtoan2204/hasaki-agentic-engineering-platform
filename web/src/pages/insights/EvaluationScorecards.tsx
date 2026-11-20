@@ -1,8 +1,19 @@
 import { useI18n } from "../../i18n/index.tsx";
 import { Empty } from "../../ui.tsx";
 import { Panel, fmt } from "../analytics/shared.tsx";
-import { EvaluationTable } from "./EvaluationTable.tsx";
-function EvaluationQualityPlot({ rows, cost = false }: { rows?: any[]; cost?: boolean }) {
+import {
+  EvaluationTable,
+  type EvaluationAnalytics,
+  type EvaluationCohortRow,
+  type EvaluationColumn,
+} from "./EvaluationTable.tsx";
+function EvaluationQualityPlot({
+  rows,
+  cost = false,
+}: {
+  rows?: EvaluationCohortRow[];
+  cost?: boolean;
+}) {
   const { t } = useI18n();
   const points = (rows ?? []).filter(
     (r) =>
@@ -61,7 +72,13 @@ function EvaluationQualityPlot({ rows, cost = false }: { rows?: any[]; cost?: bo
     </svg>
   );
 }
-export function EvaluationScorecards({ data, common }: { data: any; common: any[] }) {
+export function EvaluationScorecards({
+  data,
+  common,
+}: {
+  data: EvaluationAnalytics;
+  common: Array<EvaluationColumn<EvaluationCohortRow>>;
+}) {
   const { t } = useI18n();
   return (
     <>

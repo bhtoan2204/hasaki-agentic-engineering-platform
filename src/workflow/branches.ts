@@ -82,7 +82,7 @@ export const WORK_ITEM_BRANCH_SOURCE = "work item description";
  * of the work item stacks instead: the run's own branch is cut from X (`parent`), so X is never written by two runs.
  */
 export function branchFor(
-  run: { branch: string; inputs?: Record<string, any> | null },
+  run: { branch: string; inputs?: Record<string, unknown> | null },
   repo: string,
 ): { branch: string; existing: boolean; parent?: string } {
   const m = (run.inputs?.branches ?? null) as BranchMap | null;

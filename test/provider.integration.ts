@@ -13,6 +13,8 @@ import { cursorToolDecision } from "../src/agent/cursor/policyWatch.ts";
 import { cursorAgentTurn, cursorCapabilities } from "../src/agent/cursor/run.ts";
 import { attemptIsLive, dispatchPlatformTool } from "../src/agent/platformTools.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
+import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
+import type { AttemptRow, RunRow, StepRow } from "../src/workflow/types.ts";
 import { nodeModulesReady, recordDependencies } from "../src/git/provider.ts";
 
 before(async () => {
@@ -172,26 +174,24 @@ process.exit(0);
 
 function fakeCtx(signal: AbortSignal) {
   const logs: string[] = [];
-  return {
-    logs,
-    ctx: {
-      run: {
-        id: 0,
-        branch: "t",
-        allowed_repositories: [],
-        selected_repositories: [],
-        output_locale: "en",
-      },
-      step: { id: 0, type: "agent", config: {}, key: "analyze" },
-      attempt: { id: 0, fencing_token: null },
-      signal,
-      log: async (_k: string, content: string) => {
-        logs.push(content);
-      },
-      recordSession: async () => {},
-      recordMetrics: async () => {},
-    } as any,
+  const ctx: Omit<ExecutionContext, "input" | "context" | "artifact" | "ask"> = {
+    run: {
+      id: 0,
+      branch: "t",
+      allowed_repositories: [] as string[],
+      selected_repositories: [] as string[],
+      output_locale: "en",
+    } as RunRow,
+    step: { id: 0, type: "agent", config: {}, key: "analyze" } as StepRow,
+    attempt: { id: 0, fencing_token: null } as AttemptRow,
+    signal,
+    log: async (_k: string, content: string) => {
+      logs.push(content);
+    },
+    recordSession: async () => {},
+    recordMetrics: async () => {},
   };
+  return { logs, ctx: ctx as ExecutionContext };
 }
 
 test("missing CLI capability is reported and does not pretend to be Claude", async () => {
@@ -299,11 +299,19 @@ test("node_modules counts as installed only after the worker signed a complete i
   const ws = mkdtempSync(join(tmpdir(), "node-modules-ready-"));
   assert.equal(await nodeModulesReady(ws), false);
   mkdirSync(join(ws, "node_modules", "zod"), { recursive: true });
-  assert.equal(await nodeModulesReady(ws), false, "a partial install has packages but no worker evidence");
+  assert.equal(
+    await nodeModulesReady(ws),
+    false,
+    "a partial install has packages but no worker evidence",
+  );
   writeFileSync(join(ws, "node_modules", ".package-lock.json"), "{}");
   writeFileSync(join(ws, "package.json"), "{}");
   writeFileSync(join(ws, "node_modules", ".platform-ready"), "forged");
-  assert.equal(await nodeModulesReady(ws), false, "markers inside the workspace cannot prove current dependency state");
+  assert.equal(
+    await nodeModulesReady(ws),
+    false,
+    "markers inside the workspace cannot prove current dependency state",
+  );
   assert.equal(await recordDependencies(ws), true);
   assert.equal(await nodeModulesReady(ws), true);
   writeFileSync(join(ws, "package-lock.json"), "changed");
