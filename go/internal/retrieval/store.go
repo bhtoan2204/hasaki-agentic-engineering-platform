@@ -97,6 +97,18 @@ func (s store) dequeue(ctx context.Context, c claim) error {
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error { return dequeue(ctx, tx, c) })
 }
 
+// retag points the source's existing state for the claim's model at a newer version with the same content hash.
+func (s store) retag(ctx context.Context, c claim, model string, version int, hash string) error {
+	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			UPDATE retrieval.sources SET source_version = $3, updated_at = now()
+			 WHERE source_id = $1 AND model = $2 AND content_hash = $4`, c.sourceID, model, version, hash); err != nil {
+			return err
+		}
+		return dequeue(ctx, tx, c)
+	})
+}
+
 // invalidate drops every model's rows for a source that is no longer eligible.
 func (s store) invalidate(ctx context.Context, c claim) error {
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {

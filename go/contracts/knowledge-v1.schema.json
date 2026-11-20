@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "knowledge-v1",
+  "title": "Internal knowledge scan API v1 (TypeScript platform ↔ platform-go)",
+  "description": "POST /internal/v1/knowledge/scan (KNOWLEDGE_IMPORT_ENGINE=go, ADR 0007): read-only discovery of repository knowledge in repositories TypeScript selected. Roots must lie inside platform-go's trusted roots (PLATFORM_TRUSTED_ROOTS). Scope, applicability, governance and publication stay in TypeScript.",
+  "$defs": {
+    "Limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_file_bytes", "max_entries", "max_total_bytes", "deadline_ms", "max_chars"],
+      "properties": {
+        "max_file_bytes": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "max_entries": { "type": "integer", "minimum": 1, "maximum": 200000 },
+        "max_total_bytes": { "type": "integer", "minimum": 1, "maximum": 4294967296 },
+        "deadline_ms": { "type": "integer", "minimum": 1, "maximum": 600000 },
+        "max_chars": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+      }
+    },
+    "ScanRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "repositories", "user_skills_dir", "limits"],
+      "properties": {
+        "version": { "const": "knowledge-scan-1", "description": "Discovery rules version; another one answers 409" },
+        "repositories": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "root", "self"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^/]+$" },
+              "root": { "type": "string", "pattern": "^/", "description": "Absolute, clean; real path inside the trusted roots; holds .git" },
+              "self": { "type": "boolean", "description": "This installation's own checkout (docs/architecture is imported too)" }
+            }
+          }
+        },
+        "user_skills_dir": { "type": ["string", "null"] },
+        "limits": { "$ref": "#/$defs/Limits" }
+      }
+    },
+    "Target": {
+      "description": "Where a candidate applies; TypeScript resolves it (assembleCandidates)",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "repo"], "properties": { "kind": { "enum": ["repository", "wiki_siblings", "wiki_projects"] }, "repo": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "repos"], "properties": { "kind": { "const": "repositories" }, "repos": { "type": "array", "minItems": 1, "items": { "type": "string" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": { "kind": { "const": "user_skill" }, "name": { "type": "string" } } }
+      ]
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "category", "title", "content", "metadata", "source", "target"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "category": { "enum": ["repository_convention", "coding_standard", "agent_skill", "architecture_guideline", "domain_knowledge"] },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "metadata": { "type": "object", "required": ["load", "description"], "properties": { "load": { "enum": ["inline", "on_demand"] }, "description": { "type": "string" } } },
+        "source": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repo", "path", "sha256"],
+            "properties": { "repo": { "type": "string" }, "path": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+          }
+        },
+        "target": { "$ref": "#/$defs/Target" }
+      }
+    },
+    "ScanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidates", "skipped", "scanned", "incomplete", "metrics"],
+      "properties": {
+        "candidates": { "type": "array", "items": { "$ref": "#/$defs/Candidate" } },
+        "skipped": {
+          "type": "array",
+          "items": { "type": "object", "additionalProperties": false, "required": ["path", "reason"], "properties": { "path": { "type": "string" }, "reason": { "type": "string" } } }
+        },
+        "scanned": { "type": "array", "items": { "type": "string" }, "description": "Repositories scanned completely: the only ones retirement may consider" },
+        "incomplete": { "type": "array", "items": { "type": "string" }, "description": "Scan stopped early (budget, deadline, root gone): never a reason to retire" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["files_read", "bytes_read", "entries", "took_ms"],
+          "properties": { "files_read": { "type": "integer" }, "bytes_read": { "type": "integer" }, "entries": { "type": "integer" }, "took_ms": { "type": "integer" } }
+        }
+      }
+    },
+    "Error": {
+      "description": "400 invalid_request, 409 version_mismatch, 503 unavailable (no trusted roots configured, scan failed), 504 timeout",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "code"],
+      "properties": { "error": { "type": "string" }, "code": { "enum": ["invalid_request", "version_mismatch", "unavailable", "timeout"] } }
+    }
+  }
+}

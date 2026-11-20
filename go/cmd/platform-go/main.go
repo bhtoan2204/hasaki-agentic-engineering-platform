@@ -17,6 +17,7 @@ import (
 
 	"claude-task-platform/go/internal/analytics"
 	"claude-task-platform/go/internal/codeintelligence"
+	"claude-task-platform/go/internal/knowledge"
 	"claude-task-platform/go/internal/platform"
 	"claude-task-platform/go/internal/proderrors"
 	"claude-task-platform/go/internal/retrieval"
@@ -81,8 +82,12 @@ func run(log *slog.Logger) error {
 	mux.Handle("/internal/", platform.RequireBearer(cfg.Token, platform.WithDeadline(cfg.RequestTimeoutMax, internal)))
 	// Indexing jobs run for minutes: bounded by the caller's own job timeout instead of the short request deadline.
 	indexing := http.NewServeMux()
-	codeintelligence.Routes(indexing, codeintelligence.NewIndexer(db, cfg.IndexParseWorkers, cfg.IndexJobs), log)
+	codeintelligence.Routes(indexing, codeintelligence.NewIndexer(db, cfg.IndexParseWorkers, cfg.IndexJobs).WithTrustedRoots(cfg.TrustedRoots), log)
 	mux.Handle("/internal/v1/code-intelligence/", platform.RequireBearer(cfg.Token, indexing))
+	// Knowledge scans (ADR 0007): read-only, inside the trusted roots, two at a time, bounded by their own deadline.
+	scansMux := http.NewServeMux()
+	knowledge.Routes(scansMux, knowledge.NewScanner(cfg.TrustedRoots, 2), log)
+	mux.Handle("/internal/v1/knowledge/", platform.RequireBearer(cfg.Token, scansMux))
 	// Dashboards outlast the short retrieval deadline but are bounded by their own. They run on a separate read-only
 	// pool of ANALYTICS_MAX_CONCURRENT connections, so expensive dashboards never take a connection from retrieval
 	// or indexing (the shared pool keeps DATABASE_POOL_MAX).

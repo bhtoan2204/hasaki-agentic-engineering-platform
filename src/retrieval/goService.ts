@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { config } from "../config.ts";
 
 const goDir = resolve(import.meta.dirname, "../../go");
@@ -17,6 +18,23 @@ export function newestGoSource(dir = goDir): number {
       newest = Math.max(newest, statSync(path).mtimeMs);
   }
   return newest;
+}
+
+/** The directories platform-go may read below: this server's repositories, data directory and user skills. */
+export function platformTrustedRoots() {
+  return [
+    config.reposRoot,
+    config.dataDir,
+    process.env.CLAUDE_USER_SKILLS_DIR ?? join(homedir(), ".claude", "skills"),
+  ]
+    .map((p) => {
+      try {
+        return realpathSync(p);
+      } catch {
+        return p;
+      }
+    })
+    .join(delimiter);
 }
 
 /**
@@ -95,6 +113,8 @@ export function startGoService() {
           PROD_ERRORS_ENGINE: config.prodErrors.engine,
           PLATFORM_INTERNAL_URL: `http://127.0.0.1:${config.port}`,
           PLATFORM_GO_EXIT_ON_STDIN_EOF: "true",
+          // Code search and knowledge scans read only below these (ADR 0006, 0007), whatever a request names.
+          PLATFORM_TRUSTED_ROOTS: platformTrustedRoots(),
         },
         // The open stdin pipe is the liveness link: platform-go exits when this process dies.
         stdio: ["pipe", "inherit", "inherit"],

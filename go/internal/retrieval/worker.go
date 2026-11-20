@@ -191,8 +191,13 @@ func (w *Worker) process(ctx context.Context, c claim) (indexResult, error) {
 		if err != nil {
 			return res, err
 		}
-		if found && cur.version == res.version && cur.hash == res.hash && cur.status != "failed" {
-			return res, st.dequeue(ctx, c)
+		if found && cur.hash == res.hash && cur.status != "failed" {
+			if cur.version == res.version {
+				return res, st.dequeue(ctx, c)
+			}
+			// A new version with the same embedded text (title, description, content), e.g. a re-import that only
+			// changed the source path: the vectors stay valid, they move to the new version without re-embedding.
+			return res, st.retag(ctx, c, w.svc.model, res.version, res.hash)
 		}
 	}
 	switch {

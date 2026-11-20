@@ -21,6 +21,7 @@ module that has not moved. Phase 1 is semantic retrieval ([ADR 0001](adr/0001-go
 | Semantic retrieval | **1 (this change)** | New capability, CPU/IO-bound, no workflow state | pgvector, embedding model |
 | Code intelligence indexing (`src/codeIntelligence/indexer.ts`) | **2 (done, flag `CODE_INTELLIGENCE_ENGINE=go`)** | Long CPU-bound parsing on the event loop; already queue-driven and owns its schema. [ADR 0002](adr/0002-go-code-intelligence-indexing.md) | Parity: 6,554 files / 27 repositories identical |
 | Code search, dependency traversal, exact search, code context (`src/codeIntelligence/search.ts`) | **2 (done, flag `CODE_SEARCH_ENGINE=go`)** | Per-repository freshness, sequential loops and ~17 searches per code context; TypeScript keeps authorization and scope resolution. [ADR 0006](adr/0006-go-code-search.md) | Parity suite on identical repositories and worktrees (`test/code-search-go.integration.ts`) |
+| Knowledge ingestion (`src/knowledge/importer.ts`) | **2 (done: publication path on both engines; scan behind `KNOWLEDGE_IMPORT_ENGINE=go`)** | The cost was the registry comparison (4–5 statements per candidate), not the filesystem; the scan moved to Go for CPU and event-loop time. Governance, scope and publication stay in TypeScript. [ADR 0007](adr/0007-go-knowledge-scan.md) | Parity suite (`test/knowledge-import-go.integration.ts`), text golden |
 | Observability/analytics aggregation (`src/api/analytics`) | **2 (done, flag `ANALYTICS_ENGINE=go`)** | Read-heavy SQL, no write coupling; the cost was PostgreSQL, so the move is the SQL fixed and consolidated, off the Node pool. [ADR 0003](adr/0003-go-analytics.md) | Parity suite on identical data (`test/analytics-go.integration.ts`) |
 | Background workers without run coupling (prod-error scans, PR lifecycle sync, intake polling) | **3: prod-error scans done (flag `PROD_ERRORS_ENGINE=go`)**; PR lifecycle and intake stay | Scans: durable jobs with leases and fencing, providers through the TypeScript gateway. [ADR 0004](adr/0004-go-background-workers.md). PR lifecycle and intake are coupled to authorization and workflow decisions | Per-worker ownership of its tables; idempotency tests |
 | Process supervision and resource limits (bubblewrap, process trees) | **3 (done, flag `PROCESS_SUPERVISION_ENGINE=go`)** | Per-process launcher: delegated cgroup leaf, `cgroup.kill`, limits, host-wide admission; providers keep their protocols. [ADR 0005](adr/0005-go-process-supervision.md) | Isolation regression suite (`go test ./internal/supervise`, `test/process-supervision.integration.ts`) |
@@ -131,3 +132,25 @@ Checks: `go test ./internal/codeintelligence/` (validation, collation, contract)
 overlay snapshots, path/symlink/ref refusal, revocation, redaction, fallback, timeout) in CI; both fail without Go.
 Remaining before the exit criteria: two weeks of daily use with the flag on; lazy scope resolution for exact search;
 then removing the TypeScript search engine.
+
+## Phase 2 status: knowledge ingestion
+
+[ADR 0007](adr/0007-go-knowledge-scan.md). Profiling showed the filesystem scan at 0.5% of an import; the database
+comparison was the cost. Fixed in TypeScript for both engines (one batched registry read with contents compared by
+hash, writes without read-back, serialized publications), plus one set of safe scan rules (symlinks, size and entry
+budgets, incomplete scans never retire). The scan itself runs in platform-go with `KNOWLEDGE_IMPORT_ENGINE=go`, inside
+trusted roots configured by the server.
+
+| Measure (`npm run bench:knowledge-import`, p50) | 5 repositories | 30 repositories |
+|---|---|---|
+| unchanged re-import | 2.9 s → 0.15 s (−95%) | 19.0 s → 0.49 s (−97%) |
+| 1% / 10% modified | −93% / −80% | −96% / −84% |
+| cold import | −41% | −47% |
+| SQL statements, unchanged | 1,103 → 10 | 6,339 → 17 |
+| scan, Go vs TypeScript | 24 → 21 ms | 140 → 95 ms (−32%), Node CPU −78% |
+
+Also in this phase (ADR 0007 §9): code search validates request roots against platform-go's trusted roots, raises
+401/403 instead of falling back, and authorizes exact-search scopes lazily with the sequential semantics; the
+supervision budget reserves memory for the host's services and never overcommits across classes. Remaining before the
+exit criteria: two weeks with `KNOWLEDGE_IMPORT_ENGINE=go` in daily use; the Go scan stays opt-in unless it shows a
+latency benefit on real repositories.

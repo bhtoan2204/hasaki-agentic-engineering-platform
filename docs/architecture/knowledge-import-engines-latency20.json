@@ -1,0 +1,535 @@
+{
+  "generated_at": "2026-11-20T21:40:15.485Z",
+  "db_latency_ms_each_way": 20,
+  "iterations": 3,
+  "fixture": "283 documents in 5 repositories (every fifth a wiki) + 5 user skills",
+  "runs": {
+    "typescript": {
+      "1": {
+        "scan_only": {
+          "p50_ms": 12.7,
+          "p95_ms": 17.4,
+          "p99_ms": 17.4,
+          "sql_statements": 0,
+          "bytes_read": 66487,
+          "node_cpu_ms": 16.7,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6,
+          "concurrent_probe_p95_ms": 51.4,
+          "new_versions": 0,
+          "embedding_jobs": 0
+        },
+        "cold": {
+          "p50_ms": 11270.7,
+          "p95_ms": 11408.9,
+          "p99_ms": 11408.9,
+          "sql_statements": 430,
+          "bytes_read": 347831.5,
+          "node_cpu_ms": 1198.1,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6.2,
+          "concurrent_probe_p95_ms": 44.7,
+          "new_versions": 43,
+          "embedding_jobs": 43,
+          "report": {
+            "created": 43,
+            "updated": 0,
+            "unchanged": 0,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "unchanged": {
+          "p50_ms": 263.8,
+          "p95_ms": 276.7,
+          "p99_ms": 276.7,
+          "sql_statements": 8.7,
+          "bytes_read": 169411.3,
+          "node_cpu_ms": 43.3,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 11.1,
+          "concurrent_probe_p95_ms": 47,
+          "new_versions": 0,
+          "embedding_jobs": 0,
+          "report": {
+            "created": 0,
+            "updated": 0,
+            "unchanged": 43,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_1pct": {
+          "p50_ms": 312.8,
+          "p95_ms": 875.7,
+          "p99_ms": 875.7,
+          "sql_statements": 16,
+          "bytes_read": 178704.7,
+          "node_cpu_ms": 71.4,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8,
+          "concurrent_probe_p95_ms": 47.1,
+          "new_versions": 0.7,
+          "embedding_jobs": 0.7,
+          "modified_files": 0.3,
+          "report": {
+            "created": 1,
+            "updated": 1,
+            "unchanged": 42,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_10pct": {
+          "p50_ms": 1516,
+          "p95_ms": 1518.5,
+          "p99_ms": 1518.5,
+          "sql_statements": 55,
+          "bytes_read": 206155,
+          "node_cpu_ms": 142.6,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6.4,
+          "concurrent_probe_p95_ms": 44.2,
+          "new_versions": 4,
+          "embedding_jobs": 4,
+          "modified_files": 4,
+          "report": {
+            "created": 0,
+            "updated": 4,
+            "unchanged": 40,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_100pct": {
+          "p50_ms": 11853,
+          "p95_ms": 11892.6,
+          "p99_ms": 11892.6,
+          "sql_statements": 453.7,
+          "bytes_read": 543769.7,
+          "node_cpu_ms": 838,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.9,
+          "new_versions": 39,
+          "embedding_jobs": 39,
+          "modified_files": 39,
+          "report": {
+            "created": 0,
+            "updated": 39,
+            "unchanged": 5,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "documents": 39,
+        "node_peak_rss_mb": 126.2
+      },
+      "5": {
+        "scan_only": {
+          "p50_ms": 35.2,
+          "p95_ms": 66.4,
+          "p99_ms": 66.4,
+          "sql_statements": 0,
+          "bytes_read": 457010,
+          "node_cpu_ms": 49.6,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 5.8,
+          "concurrent_probe_p95_ms": 80.6,
+          "new_versions": 0,
+          "embedding_jobs": 0
+        },
+        "cold": {
+          "p50_ms": 63488.6,
+          "p95_ms": 63736,
+          "p99_ms": 63736,
+          "sql_statements": 2448,
+          "bytes_read": 2156485,
+          "node_cpu_ms": 4288.5,
+          "go_cpu_ms": 5,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.8,
+          "new_versions": 249,
+          "embedding_jobs": 249,
+          "report": {
+            "created": 249,
+            "updated": 0,
+            "unchanged": 0,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "unchanged": {
+          "p50_ms": 382.6,
+          "p95_ms": 397,
+          "p99_ms": 397,
+          "sql_statements": 10.3,
+          "bytes_read": 1098810,
+          "node_cpu_ms": 91,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 10.2,
+          "concurrent_probe_p95_ms": 52.2,
+          "new_versions": 0,
+          "embedding_jobs": 0,
+          "report": {
+            "created": 0,
+            "updated": 0,
+            "unchanged": 249,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_1pct": {
+          "p50_ms": 971.2,
+          "p95_ms": 5197.4,
+          "p99_ms": 5197.4,
+          "sql_statements": 86.3,
+          "bytes_read": 1174257.7,
+          "node_cpu_ms": 217.2,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 7.7,
+          "concurrent_probe_p95_ms": 47,
+          "new_versions": 6.7,
+          "embedding_jobs": 6.7,
+          "modified_files": 2,
+          "report": {
+            "created": 10,
+            "updated": 1,
+            "unchanged": 243,
+            "retired": 5,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_10pct": {
+          "p50_ms": 11568.7,
+          "p95_ms": 16598.1,
+          "p99_ms": 16598.1,
+          "sql_statements": 505,
+          "bytes_read": 1568686,
+          "node_cpu_ms": 896.1,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.7,
+          "new_versions": 43,
+          "embedding_jobs": 43,
+          "modified_files": 27.7,
+          "report": {
+            "created": 22,
+            "updated": 28,
+            "unchanged": 221,
+            "retired": 5,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_100pct": {
+          "p50_ms": 82082.4,
+          "p95_ms": 82092.5,
+          "p99_ms": 82092.5,
+          "sql_statements": 3159.3,
+          "bytes_read": 4032614.3,
+          "node_cpu_ms": 5071.9,
+          "go_cpu_ms": 3.3,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.6,
+          "new_versions": 276,
+          "embedding_jobs": 276,
+          "modified_files": 278,
+          "report": {
+            "created": 0,
+            "updated": 276,
+            "unchanged": 5,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "documents": 278,
+        "node_peak_rss_mb": 151.6
+      }
+    },
+    "go": {
+      "1": {
+        "scan_only": {
+          "p50_ms": 23.3,
+          "p95_ms": 24.6,
+          "p99_ms": 24.6,
+          "sql_statements": 0,
+          "bytes_read": 151607,
+          "node_cpu_ms": 23.5,
+          "go_cpu_ms": 10,
+          "event_loop_p99_ms": 10.3,
+          "concurrent_probe_p95_ms": 50.3,
+          "new_versions": 0,
+          "embedding_jobs": 0
+        },
+        "cold": {
+          "p50_ms": 11203.8,
+          "p95_ms": 11235.4,
+          "p99_ms": 11235.4,
+          "sql_statements": 429,
+          "bytes_read": 433080.5,
+          "node_cpu_ms": 993.6,
+          "go_cpu_ms": 10,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 44.4,
+          "new_versions": 43,
+          "embedding_jobs": 43,
+          "report": {
+            "created": 43,
+            "updated": 0,
+            "unchanged": 0,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "unchanged": {
+          "p50_ms": 319.6,
+          "p95_ms": 324.2,
+          "p99_ms": 324.2,
+          "sql_statements": 9.3,
+          "bytes_read": 254770.7,
+          "node_cpu_ms": 40.1,
+          "go_cpu_ms": 13.3,
+          "event_loop_p99_ms": 6.4,
+          "concurrent_probe_p95_ms": 43.7,
+          "new_versions": 0,
+          "embedding_jobs": 0,
+          "report": {
+            "created": 0,
+            "updated": 0,
+            "unchanged": 43,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_1pct": {
+          "p50_ms": 317.9,
+          "p95_ms": 322.4,
+          "p99_ms": 322.4,
+          "sql_statements": 9.3,
+          "bytes_read": 254759.3,
+          "node_cpu_ms": 46.9,
+          "go_cpu_ms": 3.3,
+          "event_loop_p99_ms": 6.2,
+          "concurrent_probe_p95_ms": 42.8,
+          "new_versions": 0,
+          "embedding_jobs": 0,
+          "modified_files": 0,
+          "report": {
+            "created": 0,
+            "updated": 0,
+            "unchanged": 43,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_10pct": {
+          "p50_ms": 1504.7,
+          "p95_ms": 1505.9,
+          "p99_ms": 1505.9,
+          "sql_statements": 51.3,
+          "bytes_read": 288767.7,
+          "node_cpu_ms": 121.2,
+          "go_cpu_ms": 13.3,
+          "event_loop_p99_ms": 6.2,
+          "concurrent_probe_p95_ms": 44.1,
+          "new_versions": 3.7,
+          "embedding_jobs": 3.7,
+          "modified_files": 3.7,
+          "report": {
+            "created": 0,
+            "updated": 3,
+            "unchanged": 40,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_100pct": {
+          "p50_ms": 11589.3,
+          "p95_ms": 11624.1,
+          "p99_ms": 11624.1,
+          "sql_statements": 443,
+          "bytes_read": 613178.3,
+          "node_cpu_ms": 816.5,
+          "go_cpu_ms": 13.3,
+          "event_loop_p99_ms": 6.2,
+          "concurrent_probe_p95_ms": 43.8,
+          "new_versions": 38,
+          "embedding_jobs": 38,
+          "modified_files": 39,
+          "report": {
+            "created": 0,
+            "updated": 38,
+            "unchanged": 5,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "documents": 39,
+        "node_peak_rss_mb": 163.4
+      },
+      "5": {
+        "scan_only": {
+          "p50_ms": 21.4,
+          "p95_ms": 28.7,
+          "p99_ms": 28.7,
+          "sql_statements": 0,
+          "bytes_read": 1009690.7,
+          "node_cpu_ms": 8.5,
+          "go_cpu_ms": 23.3,
+          "event_loop_p99_ms": 6.2,
+          "concurrent_probe_p95_ms": 44.1,
+          "new_versions": 0,
+          "embedding_jobs": 0
+        },
+        "cold": {
+          "p50_ms": 63404,
+          "p95_ms": 63433.8,
+          "p99_ms": 63433.8,
+          "sql_statements": 2443,
+          "bytes_read": 2703591,
+          "node_cpu_ms": 3950.1,
+          "go_cpu_ms": 30,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.7,
+          "new_versions": 249,
+          "embedding_jobs": 249,
+          "report": {
+            "created": 249,
+            "updated": 0,
+            "unchanged": 0,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "unchanged": {
+          "p50_ms": 356.6,
+          "p95_ms": 427.3,
+          "p99_ms": 427.3,
+          "sql_statements": 10.7,
+          "bytes_read": 1650744.3,
+          "node_cpu_ms": 55.7,
+          "go_cpu_ms": 30,
+          "event_loop_p99_ms": 8.1,
+          "concurrent_probe_p95_ms": 44.2,
+          "new_versions": 0,
+          "embedding_jobs": 0,
+          "report": {
+            "created": 0,
+            "updated": 0,
+            "unchanged": 249,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_1pct": {
+          "p50_ms": 1259.1,
+          "p95_ms": 1276.5,
+          "p99_ms": 1276.5,
+          "sql_statements": 44.3,
+          "bytes_read": 1680843,
+          "node_cpu_ms": 139.9,
+          "go_cpu_ms": 26.7,
+          "event_loop_p99_ms": 6.3,
+          "concurrent_probe_p95_ms": 43.7,
+          "new_versions": 3,
+          "embedding_jobs": 3,
+          "modified_files": 3,
+          "report": {
+            "created": 0,
+            "updated": 3,
+            "unchanged": 246,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_10pct": {
+          "p50_ms": 12512.5,
+          "p95_ms": 14736.4,
+          "p99_ms": 14736.4,
+          "sql_statements": 452.7,
+          "bytes_read": 2109202.3,
+          "node_cpu_ms": 832.6,
+          "go_cpu_ms": 33.3,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.7,
+          "new_versions": 39.3,
+          "embedding_jobs": 39.3,
+          "modified_files": 27.3,
+          "report": {
+            "created": 22,
+            "updated": 23,
+            "unchanged": 221,
+            "retired": 5,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_100pct": {
+          "p50_ms": 79672.9,
+          "p95_ms": 79676,
+          "p99_ms": 79676,
+          "sql_statements": 3067,
+          "bytes_read": 4575442.7,
+          "node_cpu_ms": 4928.5,
+          "go_cpu_ms": 30,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.7,
+          "new_versions": 268,
+          "embedding_jobs": 268,
+          "modified_files": 278,
+          "report": {
+            "created": 0,
+            "updated": 268,
+            "unchanged": 5,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "documents": 278,
+        "node_peak_rss_mb": 163.4
+      }
+    }
+  },
+  "identical_reports": true,
+  "p50_improvement_pct": {
+    "1": {
+      "scan_only": -83.5,
+      "cold": 0.6,
+      "unchanged": -21.2,
+      "modified_1pct": -1.6,
+      "modified_10pct": 0.7,
+      "modified_100pct": 2.2
+    },
+    "5": {
+      "scan_only": 39.2,
+      "cold": 0.1,
+      "unchanged": 6.8,
+      "modified_1pct": -29.6,
+      "modified_10pct": -8.2,
+      "modified_100pct": 2.9
+    }
+  },
+  "platform_go": {
+    "cpu": 730,
+    "hwm": 29.55859375
+  }
+}

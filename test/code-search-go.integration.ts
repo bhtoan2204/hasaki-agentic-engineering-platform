@@ -198,6 +198,44 @@ if (!goToolchain()) {
     }
   });
 
+  test("exact search authorizes lazily with the sequential semantics: an unauthorized repository raises only when reached", async () => {
+    await repositories.upsert("cs-beta", { projects: ["CS"], allowed_actions: [] } as never);
+    try {
+      for (const e of ["typescript", "go"] as const) {
+        config.codeIntelligence.searchEngine = e;
+        // sharedHelper occurs once per repository: limit 2 reaches cs-beta, limit 1 is filled by cs-alpha.
+        await assert.rejects(
+          search.searchCodeExact("sharedHelper", scope(), 2),
+          /unavailable or unauthorized/,
+          e,
+        );
+        const hits = await search.searchCodeExact("sharedHelper", scope(), 1);
+        assert.equal(hits.length, 1, e);
+        assert.ok(
+          hits.every((h) => h.repository === "cs-alpha"),
+          e,
+        );
+      }
+    } finally {
+      await repositories.upsert("cs-beta", {
+        projects: ["CS"],
+        allowed_actions: ["read", "write"],
+      } as never);
+    }
+  });
+
+  test("a refused credential is raised, never answered by fallback", async () => {
+    config.codeIntelligence.searchEngine = "go";
+    const token = process.env.RETRIEVAL_INTERNAL_TOKEN;
+    process.env.RETRIEVAL_INTERNAL_TOKEN = "y".repeat(64);
+    try {
+      await assert.rejects(search.searchSymbols("searchSymbols", scope(), 30), /refused \(401\)/);
+      await assert.rejects(search.searchCodeExact("searchSymbols", scope(), 5), /refused \(401\)/);
+    } finally {
+      process.env.RETRIEVAL_INTERNAL_TOKEN = token;
+    }
+  });
+
   test("the internal API refuses paths, refs and scopes TypeScript would never send", async () => {
     const real = (await import("node:fs")).realpathSync;
     const base = {
@@ -258,6 +296,11 @@ if (!goToolchain()) {
       ],
       ["bad pattern", { ...base, pattern: "a\nb", repositories: [repo({})] }],
       ["unknown field", { ...base, extra: 1, repositories: [repo({})] }],
+      // ADR 0007 §9: request roots only narrow platform-go's own trusted roots.
+      [
+        "allowed root outside the trusted roots",
+        { ...base, allowed_roots: [real(join(config.reposRoot, ".."))], repositories: [repo({})] },
+      ],
     ] as const) {
       const res = await retrievalService("/internal/v1/code-intelligence/search", body, 5000);
       assert.equal(res.status, 400, why);

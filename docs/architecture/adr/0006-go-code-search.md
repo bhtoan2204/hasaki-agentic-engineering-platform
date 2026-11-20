@@ -57,6 +57,14 @@ is enforced by TypeScript before the call (the revoked repository arrives as `un
 no tenant or instance mixing: `instance_id` and run ids come from the authorized scope, and the snapshot lookup keys
 on repository id + identity.
 
+Amended by [ADR 0007](0007-go-knowledge-scan.md) §9: the allowed roots of a request must themselves lie inside
+platform-go's **trusted roots** (`PLATFORM_TRUSTED_ROOTS`, set by the supervising server from its own `REPOS_ROOT`,
+data directory and user skills directory), so a request can only narrow where platform-go reads; without trusted roots
+the endpoint answers 503 and TypeScript searches. Exact search authorizes repositories **lazily**, four at a time in
+scope order, and stops when the limit is filled; a repository the sequential loop would reach that fails
+authorization raises its `localScope` error there (the first Go implementation authorized the whole scope up front
+and silently skipped refused repositories).
+
 ### Freshness: never stale evidence
 
 The semantics of `fresh()` are kept per repository: base identity `base:<commit>`, overlay identity
@@ -91,7 +99,7 @@ defaults were reviewed in the same change (memory-aware, fail closed; see ADR 00
 |---|---|
 | flag `typescript`, no `RETRIEVAL_INTERNAL_TOKEN` | TypeScript engine |
 | platform-go unreachable, timeout, 5xx, 409 (other parser version), invalid response | TypeScript engine, counted in `goSearchStats.fallbacks` |
-| 400 (a scope or input TypeScript should never produce) | error raised, no fallback |
+| 400 (a scope or input TypeScript should never produce), 401/403 (refused credential, ADR 0007 §9) | error raised, no fallback |
 | unauthorized repository | refused by `authorize` before either engine |
 
 The fallback re-runs the TypeScript engine with its own freshness checks, so it can be slow but never stale and

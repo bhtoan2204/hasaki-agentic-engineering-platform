@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { config } from "../../src/config.ts";
+import { platformTrustedRoots } from "../../src/retrieval/goService.ts";
 
 export const goToolchain = () => spawnSync("go", ["version"]).status === 0;
 
@@ -49,6 +50,7 @@ export async function startPlatformGo(env: Record<string, string> = {}) {
       RETRIEVAL_INTERNAL_TOKEN: token,
       WORKER_ENABLED: "false",
       PLATFORM_GO_EXIT_ON_STDIN_EOF: "true",
+      PLATFORM_TRUSTED_ROOTS: platformTrustedRoots(),
       ...env,
     },
     stdio: ["pipe", "ignore", "inherit"],

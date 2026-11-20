@@ -83,7 +83,8 @@ jobs:
           for i in $(seq 20); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 0.5; done
       - run: go vet ./...
       - run: go test -race ./internal/supervise/ ./internal/worker/
-      - run: go test -race -run 'Search|Locale|QueryTerms|SortHits|Contract' ./internal/codeintelligence/
+      - run: go test -race -run 'Search|Locale|QueryTerms|SortHits|Contract|AllowedRoots' ./internal/codeintelligence/
+      - run: go test -race ./internal/knowledge/ ./internal/jsstr/
       - run: go test ./...
       - run: go build -trimpath -o bin/platform-go ./cmd/platform-go
 
@@ -141,8 +142,8 @@ jobs:
           key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
       - if: steps.modules.outputs.cache-hit != 'true'
         run: npm ci --no-audit --no-fund
-      # test/analytics-go.integration.ts, test/code-intelligence-go.integration.ts and test/code-search-go.integration.ts
-      # (search parity between engines, mandatory) build and run platform-go
+      # test/analytics-go.integration.ts, test/code-intelligence-go.integration.ts, test/code-search-go.integration.ts and
+      # test/knowledge-import-go.integration.ts (engine parity, mandatory) build and run platform-go
       # against the test cluster; they fail (never skip) without a Go toolchain.
       - uses: actions/setup-go@v5
         with:

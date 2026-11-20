@@ -7,7 +7,7 @@
  *
  * Fallback: an unreachable, overloaded or outdated platform-go (network error, timeout, 5xx, 409 version) answers
  * through the TypeScript engine — same authorization, same freshness checks, so never stale. A 400 (a scope or input
- * this module should never have produced) is raised.
+ * this module should never have produced) and a refused credential (401/403) are raised, never answered by fallback.
  */
 import { realpath } from "node:fs/promises";
 import { config } from "../config.ts";
@@ -26,11 +26,13 @@ interface SearchScope {
 
 export const goSearchStats = { calls: 0, fallbacks: {} as Record<string, number> };
 
-/** Resolve the authorized scope once: one workspace lookup, localScope per repository (at most four at once). */
-async function resolveScope(scope: SearchScope, provision: boolean) {
-  const inRun = scope.runId
-    ? new Set((await workspacesOf(scope.runId)).map((w) => w.repo))
-    : new Set<string>();
+/** Repositories of the scope's run that have a workspace (one lookup per call). */
+const runRepos = async (scope: SearchScope) =>
+  scope.runId ? new Set((await workspacesOf(scope.runId)).map((w) => w.repo)) : new Set<string>();
+
+/** Resolve the authorized scope once: localScope per repository (at most four at once), in scope order. */
+async function resolveScope(scope: SearchScope, provision: boolean, inRun?: Set<string>) {
+  inRun ??= await runRepos(scope);
   const out = new Array<
     { ok: true; repo: GoRepository } | { ok: false; name: string; error: string }
   >(scope.repositories.length);
@@ -131,7 +133,21 @@ export async function goSearch<H, E>(
     return null;
   };
   if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallback("missing_token");
-  const resolved = await resolveScope(scope, provision);
+  return call<H, E>(op, scope, await resolveScope(scope, provision), query, fallback);
+}
+
+const fallbackTo = (reason: string) => {
+  goSearchStats.fallbacks[reason] = (goSearchStats.fallbacks[reason] ?? 0) + 1;
+  return null;
+};
+
+async function call<H, E>(
+  op: Op,
+  scope: SearchScope,
+  resolved: Awaited<ReturnType<typeof resolveScope>>,
+  query: Query,
+  fallback: (reason: string) => null = fallbackTo,
+): Promise<GoSearchResponse<H, E> | null> {
   const roots = await Promise.all(
     [config.reposRoot, config.dataDir].map((p) => realpath(p).catch(() => p)),
   );
@@ -146,8 +162,9 @@ export async function goSearch<H, E>(
     return fallback((e as Error).name === "TimeoutError" ? "timeout" : "unreachable");
   }
   const body = await res.json().catch(() => undefined);
-  if (res.status === 400)
-    throw new Error(`code search request refused: ${body?.error ?? "invalid"}`);
+  // A refused request or credential is a defect or a misconfiguration: falling back would hide it (ADR 0007 §9).
+  if (res.status === 400 || res.status === 401 || res.status === 403)
+    throw new Error(`code search request refused (${res.status}): ${body?.error ?? "invalid"}`);
   if (!res.ok) return fallback(res.status === 409 ? "version_mismatch" : `http_${res.status}`);
   if (!body || typeof body !== "object") return fallback("invalid_response");
   goSearchStats.calls++;
@@ -156,4 +173,40 @@ export async function goSearch<H, E>(
     for (const e of body.enqueue ?? [])
       await enqueue(e.repository, e.run_id ?? undefined).catch(() => {});
   return body as GoSearchResponse<H, E>;
+}
+
+/**
+ * searchCodeExact through platform-go with the sequential loop's semantics: repositories are authorized four at a
+ * time in scope order and searched only until the limit is filled; a repository the loop would have reached and
+ * that fails authorization raises its error there, as localScope does in the TypeScript loop. Returns null when the
+ * TypeScript engine must answer (the whole call: partial results are dropped, the search is read-only).
+ */
+export async function goExactSearch<H extends { repository: string }>(
+  scope: SearchScope,
+  provision: boolean,
+  query: { pattern: string; limit: number; any_file: boolean },
+): Promise<H[] | null> {
+  if (config.codeIntelligence.searchEngine !== "go") return null;
+  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallbackTo("missing_token");
+  const inRun = await runRepos(scope);
+  const hits: H[] = [];
+  for (let i = 0; i < scope.repositories.length && hits.length < query.limit; i += 4) {
+    const names = scope.repositories.slice(i, i + 4);
+    const resolved = await resolveScope({ ...scope, repositories: names }, provision, inRun);
+    const res = resolved.repositories.length
+      ? await call<H, never>("exact", scope, resolved, {
+          ...query,
+          limit: query.limit - hits.length,
+        })
+      : { hits: [] as H[] };
+    if (!res) return null;
+    for (const name of names) {
+      const refused = resolved.unavailable.find((u) => u.name === name);
+      if (refused) throw new Error(refused.error);
+      for (const h of res.hits ?? [])
+        if (h.repository === name && hits.length < query.limit) hits.push(h);
+      if (hits.length >= query.limit) break;
+    }
+  }
+  return hits;
 }

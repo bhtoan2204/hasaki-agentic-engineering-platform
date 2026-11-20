@@ -107,7 +107,11 @@ export const SSH_HOST_KEY =
   /^(ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa|sk-ssh-ed25519@openssh\.com) ([A-Za-z0-9+/]+={0,3})(?:\s.*)?$/;
 
 export interface Config {
-  knowledge: { ponytail: { enabled: boolean; mapChars: number } };
+  knowledge: {
+    ponytail: { enabled: boolean; mapChars: number };
+    /** Repository knowledge scan: typescript (default) | go (platform-go, ADR 0007). Governance stays in TypeScript. */
+    importEngine: "typescript" | "go";
+  };
   /** Semantic re-ranking by the Go retrieval service (ADR 0001); the token comes only from RETRIEVAL_INTERNAL_TOKEN. */
   retrieval: {
     semantic: {
@@ -576,12 +580,56 @@ export interface Config {
   };
 }
 
-const HOST_MEMORY_MB = Math.floor(totalmem() / 1048576);
-const AGENT_MEMORY_MB = 4096;
-const VERIFY_MEMORY_MB = Math.min(6144, Math.floor(HOST_MEMORY_MB / 2));
+const isLoopback = (url: string | undefined, fallback: string) => {
+  try {
+    const u = new URL(url || fallback);
+    // A Unix socket (?host=/path or an empty host) is local too.
+    return (
+      ["localhost", "127.0.0.1", "[::1]", ""].includes(u.hostname) ||
+      (u.searchParams.get("host") ?? "").startsWith("/")
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Host-wide memory budget of supervised processes (ADR 0005, reviewed in ADR 0007): the services this host runs keep
+ * their share (Node 1 GiB, platform-go 512 MiB, a local PostgreSQL 1 GiB, a local Ollama embedding model 2 GiB); of
+ * the rest, one agent or one verification command may take at most a third, and slots are counted so that the limits
+ * of every slot of both classes together never exceed it — a full host cannot be overcommitted by its own caps.
+ */
+export function supervisionBudget(hostMb: number, cpus: number, env: NodeJS.ProcessEnv) {
+  const reserved =
+    1024 +
+    512 +
+    (isLoopback(env.DATABASE_URL, "postgres://localhost") ? 1024 : 0) +
+    (env.RETRIEVAL_SEMANTIC_ENABLED === "true" &&
+    (env.EMBEDDING_PROVIDER ?? "ollama") === "ollama" &&
+    isLoopback(env.EMBEDDING_URL, "http://127.0.0.1:11434")
+      ? 2048
+      : 0);
+  const workloadMb = Math.max(2048, hostMb - reserved);
+  const agentMb = Math.min(4096, Math.floor(workloadMb / 3));
+  const verifyMb = Math.min(6144, Math.floor(workloadMb / 3));
+  const verification = Math.max(
+    1,
+    Math.min(Math.floor(cpus / 4), Math.floor(workloadMb / (2 * verifyMb))),
+  );
+  const agent = Math.max(
+    1,
+    Math.min(Math.floor(cpus / 2), Math.floor((workloadMb - verification * verifyMb) / agentMb)),
+  );
+  return { reservedMb: reserved, workloadMb, agentMb, verifyMb, slots: { agent, verification } };
+}
+const BUDGET = supervisionBudget(
+  Math.floor(totalmem() / 1048576),
+  availableParallelism(),
+  process.env,
+);
 
 const defaults: Config = {
-  knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
+  knowledge: { ponytail: { enabled: false, mapChars: 2000 }, importEngine: "typescript" },
   retrieval: {
     semantic: {
       enabled: false,
@@ -771,31 +819,16 @@ const defaults: Config = {
   },
   supervision: {
     engine: "typescript",
-    // Budgeted against this host: each class's limits summed over its slots stay within physical memory (a cap is
-    // not a reservation, and the memory-pressure gate defers starts when the host is actually short). Agents get the
-    // sandbox's 4 GiB; verification (builds, test databases) the smaller of 6 GiB and half the RAM.
+    // Budgeted against this host (supervisionBudget): the services keep their share, and the limits of all slots of
+    // both classes together stay within the rest. A cap is not a reservation; the memory-pressure gate also defers
+    // starts when the host is actually short (and refuses them past the admission timeout).
     limits: {
-      agent: { memoryMb: AGENT_MEMORY_MB, pids: 4096 },
-      verification: { memoryMb: VERIFY_MEMORY_MB, pids: 8192, fileSizeMb: 4096 },
+      agent: { memoryMb: BUDGET.agentMb, pids: 4096 },
+      verification: { memoryMb: BUDGET.verifyMb, pids: 8192, fileSizeMb: 4096 },
     },
-    // Verification never exceeds the in-process VERIFY_MAX_CONCURRENT default; host-wide, it also bounds other
-    // instances. Both are capped by memory: 15 GiB / 16 CPUs gives 3 agents and 2 verification commands at once.
-    slots: {
-      agent: Math.max(
-        1,
-        Math.min(
-          Math.floor(availableParallelism() / 2),
-          Math.floor(HOST_MEMORY_MB / AGENT_MEMORY_MB),
-        ),
-      ),
-      verification: Math.max(
-        1,
-        Math.min(
-          Math.floor(availableParallelism() / 4),
-          Math.floor(HOST_MEMORY_MB / VERIFY_MEMORY_MB),
-        ),
-      ),
-    },
+    // e.g. 15.5 GiB / 16 CPUs with a remote database and a local Ollama: 12 GiB for workloads → 2 agents and 1
+    // verification command at once, 4 GiB each.
+    slots: { ...BUDGET.slots },
     psiMemory: 40,
     psiCpu: 0,
     admissionTimeoutMs: 10 * 60_000,
@@ -864,6 +897,7 @@ function load(): Config {
     ...fromFile,
     knowledge: {
       ponytail: { ...defaults.knowledge.ponytail, ...(fromFile.knowledge?.ponytail ?? {}) },
+      importEngine: fromFile.knowledge?.importEngine ?? defaults.knowledge.importEngine,
     },
     retrieval: {
       semantic: { ...defaults.retrieval.semantic, ...(fromFile.retrieval?.semantic ?? {}) },
@@ -989,6 +1023,11 @@ function load(): Config {
       .CODE_SEARCH_ENGINE as CodeIntelligenceConfig["searchEngine"];
   if (!["typescript", "go"].includes(cfg.codeIntelligence.searchEngine))
     throw new Error("CODE_SEARCH_ENGINE must be typescript or go");
+  if (process.env.KNOWLEDGE_IMPORT_ENGINE)
+    cfg.knowledge.importEngine = process.env
+      .KNOWLEDGE_IMPORT_ENGINE as Config["knowledge"]["importEngine"];
+  if (!["typescript", "go"].includes(cfg.knowledge.importEngine))
+    throw new Error("KNOWLEDGE_IMPORT_ENGINE must be typescript or go");
   if (process.env.PROD_ERRORS_ENGINE)
     cfg.prodErrors.engine = process.env.PROD_ERRORS_ENGINE as Config["prodErrors"]["engine"];
   if (!["typescript", "go"].includes(cfg.prodErrors.engine))

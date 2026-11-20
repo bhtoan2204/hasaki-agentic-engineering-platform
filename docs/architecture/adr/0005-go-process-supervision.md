@@ -74,14 +74,17 @@ Pressure wait past the deadline (amended with [ADR 0006](0006-go-code-search.md)
 now returns an error and the slot is released: a host whose pressure never drops runs nothing new (fail closed,
 `TestPressureTimeoutRefusesTheCommand`).
 
-Defaults (`config.supervision`, reviewed with ADR 0006 so that a full set of slots fits the host's memory instead of
-overcommitting it): agents 4 GiB / 4,096 tasks; verification `min(6 GiB, RAM/2)` / 8,192 tasks / 4 GiB file size.
-Host-wide slots are bounded by CPUs **and** by memory: agents `max(1, min(CPUs/2, RAM/4 GiB))`, verification
-`max(1, min(CPUs/4, RAM/verification limit))` (16 CPUs / 15 GiB WSL2: 3 agent and 2 verification slots, 24 GiB in the
-worst case instead of the former 8 + 4 slots × 8 GiB = 96 GiB). The previous `max(2, …)` floor could admit two 8 GiB
-agents on an 8 GiB machine. Every value stays overridable in `config.supervision`. They only apply with the Go engine;
-WSL2's VM otherwise lets one runaway build take half the host's memory. Code search (ADR 0006) runs inside
-platform-go with its own bound (4 concurrent searches × 4 subprocesses), not in these slots.
+Defaults (`config.supervision`, `supervisionBudget()` in `src/config.ts`; reviewed with ADR 0006 and again with
+[ADR 0007](0007-go-knowledge-scan.md)): the services of the host keep their memory first — Node 1 GiB, platform-go
+512 MiB, a local PostgreSQL 1 GiB, a local Ollama embedding model 2 GiB (each only when it runs on this host). Of the
+rest, an agent may use at most `min(4 GiB, ⅓)` and a verification command `min(6 GiB, ⅓)`, and the slots are counted so
+that the limits of every slot of both classes together never exceed it: verification `max(1, min(CPUs/4, rest /
+2 × limit))`, agents `max(1, min(CPUs/2, (rest − verification slots × limit) / limit))`. On the 16-CPU / 15.5 GiB
+development host (15,870 MiB) with a remote database and a local Ollama this is 2 agents and 1 verification command
+at 4.0 GiB each (12,285 of 12,286 MiB), instead of 3 × 4 GiB + 2 × 6 GiB = 24 GiB before. `test/supervision-budget.test.ts` checks
+the invariant across host sizes. Every value stays overridable in `config.supervision`. They only apply with the Go
+engine; WSL2's VM otherwise lets one runaway build take half the host's memory. Code search and knowledge scans run
+inside platform-go with their own bounds (4 searches × 4 subprocesses, 2 scans), not in these slots.
 
 ### TypeScript adapter
 

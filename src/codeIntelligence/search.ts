@@ -8,7 +8,7 @@ import { redactSecrets } from "../integrations/redact.ts";
 import { effectiveSql, snapshot, type Snapshot } from "./store.ts";
 import { baseCommit, changes, git, readSource, eligible, safePath, hash } from "./git.ts";
 import { localScope, enqueue } from "./indexer.ts";
-import { goSearch } from "./goSearch.ts";
+import { goExactSearch, goSearch } from "./goSearch.ts";
 const exec = promisify(execFile);
 export interface SearchScope {
   repositories: string[];
@@ -366,12 +366,12 @@ export async function searchCodeExact(
   authorize(scope);
   if (!pattern || pattern.length > 256 || pattern.includes("\n"))
     throw new Error("Invalid exact search pattern");
-  const viaGo = await goSearch<Hit, never>("exact", scope, scope.provision !== false, {
+  const viaGo = await goExactSearch<Hit>(scope, scope.provision !== false, {
     pattern,
     limit,
     any_file: !!opts.anyFile,
   });
-  if (viaGo) return viaGo.hits ?? [];
+  if (viaGo) return viaGo;
   const hits: Hit[] = [];
   for (const name of scope.repositories) {
     const run = await scopeRun(name, scope);

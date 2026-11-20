@@ -122,6 +122,30 @@ func TestUnchangedContentIsNotReembedded(t *testing.T) {
 	}
 }
 
+func TestNewVersionWithSameTextIsNotReembedded(t *testing.T) {
+	f := newFixture(t, needDB(t), "m1")
+	u := f.addUser(t, "alice")
+	id := f.addItem(t, item{key: "a", content: "refunds are approved by finance"})
+	f.drain(t)
+	texts := f.fake.Texts.Load()
+	// A re-import that only changed metadata (e.g. the source path): same title, description and content.
+	f.addVersion(t, id, 2, item{content: "refunds are approved by finance"})
+	f.drain(t)
+	if f.fake.Texts.Load() != texts {
+		t.Fatal("identical text was embedded again")
+	}
+	if n := f.count(t, "SELECT count(*) FROM retrieval.sources WHERE source_version = 2 AND status = 'indexed'"); n != 1 {
+		t.Fatalf("state not moved to version 2: %d", n)
+	}
+	if !f.http.status().VectorExtension {
+		return // search needs pgvector
+	}
+	resp := f.http.search(searchBody(u, "who approves refunds", ""))
+	if len(resp.Results) != 1 || resp.Results[0].Version != 2 {
+		t.Fatalf("results = %+v", resp.Results)
+	}
+}
+
 func TestNewVersionReindexes(t *testing.T) {
 	f := newFixture(t, needDB(t), "m1")
 	u := f.addUser(t, "alice")

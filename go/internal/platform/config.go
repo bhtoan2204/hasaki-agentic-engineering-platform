@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -35,8 +37,12 @@ type Config struct {
 	ProdScanWorkers   int
 	ProdScanPoll      time.Duration
 	OTLPEndpointIsSet bool
-	remoteAuthorized  bool
-	allowNonLoopback  bool
+	// TrustedRoots (PLATFORM_TRUSTED_ROOTS, ":"-separated, real paths): the only directories code search and the
+	// knowledge scan may read below, whatever a request names. Set by the supervising platform from its own
+	// configuration (repositories root, data directory, user skills directory). Empty: those endpoints refuse.
+	TrustedRoots     []string
+	remoteAuthorized bool
+	allowNonLoopback bool
 }
 
 // ModelID identifies an embedding space: vectors are only comparable within one model id.
@@ -100,6 +106,7 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		ProdScanWorkers:        num("PROD_SCAN_WORKERS", 1, 1, 4),
 		ProdScanPoll:           time.Duration(num("PROD_SCAN_POLL_MS", 60000, 1000, 600000)) * time.Millisecond,
 		OTLPEndpointIsSet:      getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "",
+		TrustedRoots:           trustedRoots(getenv("PLATFORM_TRUSTED_ROOTS")),
 		remoteAuthorized:       getenv("EMBEDDING_REMOTE_AUTHORIZED") == "true",
 		allowNonLoopback:       flag("PLATFORM_GO_ALLOW_NONLOOPBACK", false),
 	}
@@ -151,4 +158,33 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// trustedRoots parses PLATFORM_TRUSTED_ROOTS: absolute paths, cleaned. They are resolved when checked (Inside), so a
+// root created after startup (e.g. ~/.claude/skills) is trusted as soon as it exists.
+func trustedRoots(v string) []string {
+	var out []string
+	for _, p := range filepath.SplitList(v) {
+		if filepath.IsAbs(p) && filepath.Clean(p) != "/" {
+			out = append(out, filepath.Clean(p))
+		}
+	}
+	return out
+}
+
+// Inside reports whether the real path p is one of roots or lies below one; each root is compared by its real path
+// (its configured path when it does not exist).
+func Inside(p string, roots []string) bool {
+	for _, r := range roots {
+		if real, err := filepath.EvalSymlinks(r); err == nil {
+			r = real
+		}
+		if r == "/" {
+			continue
+		}
+		if p == r || strings.HasPrefix(p, r+"/") {
+			return true
+		}
+	}
+	return false
 }

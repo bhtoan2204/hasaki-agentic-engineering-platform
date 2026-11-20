@@ -1,11 +1,42 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { config } from "../config.ts";
+import { pool, q } from "../db/pool.ts";
 import { isSelfRepository } from "../platform/selfDevelopment.ts";
 import { repositories, repoPath, type RepositoryRow } from "../repos/service.ts";
 import { knowledge, type KnowledgeInput } from "./service.ts";
+import type {
+  Discovery,
+  DiscoveredCandidate,
+  DiscoveryRepository,
+  ImportCandidate,
+  ImportReport,
+  ScopeTarget,
+} from "./importTypes.ts";
+import { MAX_CHARS, SCAN_LIMITS } from "./importTypes.ts";
+import { goKnowledgeScan } from "./goKnowledge.ts";
+
+export { MAX_CHARS, SCAN_LIMITS } from "./importTypes.ts";
+export type {
+  Discovery,
+  DiscoveredCandidate,
+  DiscoveryRepository,
+  ImportCandidate,
+  ImportReport,
+  ScopeTarget,
+} from "./importTypes.ts";
 import { hashOf } from "../workflow/definitions.ts";
 import { createProposal } from "./proposals.ts";
 
@@ -26,7 +57,6 @@ import { createProposal } from "./proposals.ts";
  * files are never written by the platform.
  */
 
-export const MAX_CHARS = 60_000;
 const SECRET_ASSIGNMENT =
   /\b[\w-]*(password|passwd|secret|api[_-]?key|token|client[_-]?secret)[\w-]*\s*[:=]\s*["']?(?!<|\$\{|\{\{|xxx|\.\.\.|your|example|changeme)([A-Za-z0-9/+_\-.]{12,})/gi;
 /** `secret = payment_client.ecom_global.secret`: a reference to a field/config path, not a value. */
@@ -73,30 +103,7 @@ const WIKI_SKIP = [
   /authoring\.md$/i,
 ];
 
-export interface ImportCandidate extends KnowledgeInput {
-  source: { repo: string; path: string; sha256: string }[];
-}
-export interface ImportReport {
-  candidates: Array<{
-    key: string;
-    title: string;
-    category: string;
-    scope: string;
-    repos: string[];
-    chars: number;
-    action: "create" | "update" | "unchanged" | "retire" | "registry_newer" | "conflict";
-    proposal_id?: number;
-  }>;
-  skipped: Array<{ path: string; reason: string }>;
-  created: number;
-  updated: number;
-  unchanged: number;
-  retired: number;
-  /** Evolved in the registry, repository file changed too: a proposal was opened instead of overwriting. */
-  conflicts: number;
-}
-
-const slug = (s: string) =>
+export const slug = (s: string) =>
   s
     .toLowerCase()
     .replace(/[^a-z0-9_.-]+/g, "-")
@@ -146,11 +153,20 @@ export function looksSecret(text: string) {
   return false;
 }
 
-function firstHeading(text: string) {
+export function firstHeading(text: string) {
   return text.match(/^#\s+(.+)$/m)?.[1]?.trim();
 }
-function firstParagraph(text: string) {
-  return (
+/**
+ * s.slice(0, n), except that a cut inside a surrogate pair ends in U+FFFD instead of a lone surrogate (which is what
+ * PostgreSQL stores for text, and what JSONB metadata would refuse). platform-go cuts the same way (jsstr.SliceUTF16).
+ */
+export function sliceUnits(s: string, n: number) {
+  const t = s.slice(0, n);
+  const last = t.charCodeAt(t.length - 1);
+  return s.length > n && last >= 0xd800 && last <= 0xdbff ? t.slice(0, -1) + "\ufffd" : t;
+}
+export function firstParagraph(text: string) {
+  const p = (
     text
       .replace(/^---[\s\S]*?---/, "")
       .split(/\n\s*\n/)
@@ -162,43 +178,157 @@ function firstParagraph(text: string) {
           !p.startsWith("```") &&
           !/^this file provides guidance to claude/i.test(p),
       ) ?? ""
-  )
-    .replace(/\s+/g, " ")
-    .slice(0, 300);
+  ).replace(/\s+/g, " ");
+  return sliceUnits(p, 300);
 }
 
-function walk(dir: string, depth = 4): string[] {
-  if (!existsSync(dir) || depth < 0) return [];
-  const out: string[] = [];
-  for (const e of readdirSync(dir)) {
-    if (e === "node_modules" || e === ".git" || e === "vendor") continue;
-    const p = join(dir, e);
-    const st = statSync(p);
-    if (st.isDirectory()) out.push(...walk(p, depth - 1));
-    else out.push(p);
+/** One scan's shared budget (all repositories). */
+export interface ScanBudget {
+  bytes: number;
+  deadline: number;
+}
+export const newBudget = (): ScanBudget => ({
+  bytes: 0,
+  deadline: Date.now() + SCAN_LIMITS.deadlineMs,
+});
+
+/**
+ * Files of one source root, read safely: symlinks are followed only when their target stays inside the root, each
+ * file is opened without following a final symlink and its descriptor re-checked (a path swapped after the check
+ * cannot escape), reads are bounded before allocation. Directory entries come in byte order (as readdir returns them).
+ */
+export class SourceTree {
+  readonly root: string;
+  readonly label: string;
+  readonly skipped: ImportReport["skipped"];
+  readonly budget: ScanBudget;
+  readonly real: string;
+  incomplete = false;
+  private entries = 0;
+  constructor(root: string, label: string, skipped: ImportReport["skipped"], budget: ScanBudget) {
+    this.root = root;
+    this.label = label;
+    this.skipped = skipped;
+    this.budget = budget;
+    this.real = realpathSync(root);
   }
-  return out;
-}
+  private inside(p: string) {
+    return p === this.real || p.startsWith(this.real + "/");
+  }
+  private shown(file: string) {
+    return `${this.label}/${relative(this.root, file)}`;
+  }
+  private exhausted() {
+    if (this.budget.bytes > SCAN_LIMITS.maxTotalBytes || Date.now() > this.budget.deadline)
+      this.incomplete = true;
+    return this.incomplete;
+  }
+  /** Real path of `p` when it exists and stays inside the root. */
+  private resolve(p: string): string | null {
+    try {
+      const real = realpathSync(p);
+      return this.inside(real) ? real : null;
+    } catch {
+      return null;
+    }
+  }
 
-/** Read a source file for import: excluded paths, credentials and empty files are skipped (and reported). */
-function readChecked(
-  root: string,
-  label: string,
-  file: string,
-  skipped: ImportReport["skipped"],
-): string | null {
-  const rel = relative(root, file);
-  const shown = `${label}/${rel}`;
-  if (SKIP_PATH.some((re) => re.test(rel)))
-    return (skipped.push({ path: shown, reason: "path excluded (env/secret/task plan)" }), null);
-  if (!statSync(file).isFile()) return null;
-  const text = readFileSync(file, "utf8");
-  if (!text.trim()) return null;
-  if (looksSecret(text))
-    return (skipped.push({ path: shown, reason: "looks like it contains credentials" }), null);
-  if (text.length > MAX_CHARS)
-    skipped.push({ path: shown, reason: `truncated to ${MAX_CHARS} chars` });
-  return text.slice(0, MAX_CHARS);
+  walk(dir: string, depth = 4): string[] {
+    if (depth < 0 || this.exhausted()) return [];
+    let list;
+    try {
+      list = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const out: string[] = [];
+    for (const e of list) {
+      if (e.name === "node_modules" || e.name === ".git" || e.name === "vendor") continue;
+      if (++this.entries > SCAN_LIMITS.maxEntries || this.exhausted()) {
+        this.incomplete = true;
+        break;
+      }
+      const p = join(dir, e.name);
+      let isDir = e.isDirectory();
+      if (e.isSymbolicLink()) {
+        const target = this.resolve(p);
+        if (!target) {
+          if (existsSync(p))
+            this.skipped.push({ path: this.shown(p), reason: "symlink outside the repository" });
+          continue;
+        }
+        isDir = statSync(target).isDirectory();
+      }
+      if (isDir) out.push(...this.walk(p, depth - 1));
+      else out.push(p);
+    }
+    return out;
+  }
+
+  /** The file's text (UTF-8) when it is a regular file inside the root within the size bound; else null (reported). */
+  readRaw(file: string): string | null {
+    if (this.exhausted()) {
+      this.skipped.push({
+        path: this.shown(file),
+        reason: "scan stopped: time or size budget exhausted",
+      });
+      return null;
+    }
+    const real = this.resolve(file);
+    if (!real) {
+      if (existsSync(file))
+        this.skipped.push({ path: this.shown(file), reason: "symlink outside the repository" });
+      return null;
+    }
+    let fd: number;
+    try {
+      fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    } catch {
+      return null;
+    }
+    try {
+      const st = fstatSync(fd);
+      // The descriptor, not the path: a component swapped for a symlink after resolve() is caught here.
+      if (!st.isFile() || !this.inside(realpathSync(`/proc/self/fd/${fd}`))) return null;
+      const buf = Buffer.alloc(Math.min(st.size, SCAN_LIMITS.maxFileBytes) + 1);
+      let n = 0;
+      for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0;) n += r;
+      if (n > SCAN_LIMITS.maxFileBytes) {
+        this.skipped.push({
+          path: this.shown(file),
+          reason: `larger than ${SCAN_LIMITS.maxFileBytes} bytes`,
+        });
+        return null;
+      }
+      this.budget.bytes += n;
+      return buf.toString("utf8", 0, n);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /** Read a source file for import: excluded paths, credentials and empty files are skipped (and reported). */
+  read(file: string): string | null {
+    const rel = relative(this.root, file);
+    if (SKIP_PATH.some((re) => re.test(rel)))
+      return (
+        this.skipped.push({
+          path: this.shown(file),
+          reason: "path excluded (env/secret/task plan)",
+        }),
+        null
+      );
+    const text = this.readRaw(file);
+    if (text === null || !text.trim()) return null;
+    if (looksSecret(text))
+      return (
+        this.skipped.push({ path: this.shown(file), reason: "looks like it contains credentials" }),
+        null
+      );
+    if (text.length > MAX_CHARS)
+      this.skipped.push({ path: this.shown(file), reason: `truncated to ${MAX_CHARS} chars` });
+    return sliceUnits(text, MAX_CHARS);
+  }
 }
 
 // ---------------------------------------------------------------- scope derivation
@@ -276,15 +406,16 @@ const COMPANION_FILE = /\.(md|txt|py|sh|ts|js|mjs|json|ya?ml|go|sql)$/i;
 
 /** Supporting files next to a skill's main file (reference/, references/, scripts/, …), sorted by path. */
 function readSkillCompanions(
+  tree: SourceTree,
   skillDir: string,
   mainFile: string,
-  read: (file: string) => string | null,
 ): SkillCompanion[] {
-  return walk(skillDir, 3)
+  return tree
+    .walk(skillDir, 3)
     .filter((f) => f !== mainFile && COMPANION_FILE.test(f))
     .sort()
     .flatMap((f) => {
-      const text = read(f);
+      const text = tree.read(f);
       return text ? [{ rel: relative(skillDir, f).split(/[\\/]/).join("/"), text }] : [];
     });
 }
@@ -334,7 +465,7 @@ export function skillCandidates(s: {
       applicability: s.applicability,
       metadata: {
         load: "on_demand",
-        description: (fields.description || firstParagraph(body)).slice(0, 600),
+        description: sliceUnits(fields.description || firstParagraph(body), 600),
         ...(s.companions.length
           ? { companions: s.companions.map((c) => companionKey(c.rel)) }
           : {}),
@@ -356,114 +487,94 @@ export function skillCandidates(s: {
         load: "on_demand",
         parent_skill: s.key,
         skill_file: c.rel,
-        description: (/\.md$/i.test(c.rel)
-          ? firstHeading(c.text) || firstParagraph(c.text)
-          : `${c.rel} of skill ${fields.name || s.name}`
-        ).slice(0, 300),
+        description: sliceUnits(
+          /\.md$/i.test(c.rel)
+            ? firstHeading(c.text) || firstParagraph(c.text)
+            : `${c.rel} of skill ${fields.name || s.name}`,
+          300,
+        ),
       },
       source: src(c.rel, c.text),
     })),
   ];
 }
 
-/** Scan every enabled repository on disk and build import candidates (no DB writes). */
-export async function scanRepositories(): Promise<{
-  candidates: ImportCandidate[];
-  skipped: ImportReport["skipped"];
-  scanned: string[];
-}> {
-  const all = await repositories.list();
-  const repos = all.filter((r) => r.enabled && existsSync(join(repoPath(r), ".git")));
+// ---------------------------------------------------------------- discovery (engine) and assembly (policy)
+// Discovery reads the sources and builds every candidate except where it applies: each carries a scope target that
+// assembleCandidates() resolves against the registry (scope, applicability, the enable policy of user skills). The
+// TypeScript engine below and platform-go (KNOWLEDGE_IMPORT_ENGINE=go, go/internal/knowledge) produce the same
+// Discovery for the same files; scope, applicability and governance never leave TypeScript.
+
+const retarget = (c: ImportCandidate, target: ScopeTarget): DiscoveredCandidate => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { scope_type, scope_ref, applicability, ...rest } = c;
+  return { ...rest, target };
+};
+
+/** The TypeScript discovery engine: synchronous reads on this process, through SourceTree. */
+export function discoverKnowledge(
+  repos: DiscoveryRepository[],
+  userDir: string | null,
+  budget: ScanBudget = newBudget(),
+): Discovery {
   const skipped: ImportReport["skipped"] = [];
-  const out: ImportCandidate[] = [];
+  const out: DiscoveredCandidate[] = [];
+  const incomplete: string[] = [];
   const skills = new Map<
     string,
-    {
-      name: string;
-      text: string;
-      companions: SkillCompanion[];
-      repos: RepositoryRow[];
-      paths: string[];
-    }
+    { name: string; text: string; companions: SkillCompanion[]; repos: string[]; paths: string[] }
   >(); // by name+hash
 
-  const read = (r: RepositoryRow, file: string): string | null =>
-    readChecked(repoPath(r), r.name, file, skipped);
-
   for (const r of repos) {
-    const root = repoPath(r);
+    const root = r.root;
+    let tree: SourceTree;
+    try {
+      tree = new SourceTree(root, r.name, skipped, budget);
+    } catch {
+      incomplete.push(r.name); // gone since it was selected: never a reason to retire its items
+      continue;
+    }
+    const read = (file: string) => tree.read(file);
     const src = (file: string, text: string) => ({
       repo: r.name,
       path: relative(root, file),
       sha256: sha(text),
     });
     const isWiki = /wiki/i.test(r.name);
-    // Code repositories a wiki documents: same group folder (e.g. payment-src/*) OR a project in common in the registry.
-    // The project test also covers platform-managed checkouts, whose path is empty (e.g. a repository registered by URL).
-    const group = r.path.includes("/") ? r.path.split("/")[0] : "";
-    const wikiProjects = new Set(r.projects ?? []);
-    const siblings = isWiki
-      ? all
-          .filter(
-            (x) =>
-              x.enabled &&
-              x.name !== r.name &&
-              !/wiki/i.test(x.name) &&
-              ((group && x.path.split("/")[0] === group) ||
-                (x.projects ?? []).some((p) => wikiProjects.has(p))),
-          )
-          .map((x) => x.name)
-          .sort()
-      : [];
+    const here: ScopeTarget = { kind: "repository", repo: r.name };
 
     // 1. Agent instructions / conventions: inlined for that repository (identical copies, e.g. AGENTS.md = CLAUDE.md, once).
     const seenText = new Set<string>();
     for (const f of ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"]) {
       const file = join(root, f);
       if (!existsSync(file)) continue;
-      const text = read(r, file);
+      const text = read(file);
       if (!text || seenText.has(sha(text))) continue;
       seenText.add(sha(text));
       out.push({
         key: slug(`${r.name}.${f.replace(/\.md$/i, "")}`),
         category: "repository_convention",
-        scope_type: "REPOSITORY",
-        scope_ref: r.name,
         title: `${r.name}: ${f}`,
         content: text,
         metadata: { load: "inline", description: firstParagraph(text) },
         source: [src(file, text)],
+        target: here,
       });
     }
-    for (const file of walk(join(root, "docs"), 1).filter(
-      (f) => /convention/i.test(basename(f)) && f.endsWith(".md"),
-    )) {
-      const text = read(r, file);
+    for (const file of tree
+      .walk(join(root, "docs"), 1)
+      .filter((f) => /convention/i.test(basename(f)) && f.endsWith(".md"))) {
+      const text = read(file);
       if (!text) continue;
-      if (isWiki) {
-        // Nobody codes in the wiki itself: inline the conventions for the code repositories it documents.
-        const target = scopeForRepositories(siblings.length ? siblings : [r.name], all);
-        out.push({
-          key: slug(`${r.name}.${basename(file, ".md")}`),
-          category: "repository_convention",
-          ...target.scope,
-          title: `${r.name}: ${firstHeading(text) ?? basename(file)}`,
-          content: text,
-          applicability: target.applicability,
-          metadata: { load: "inline", description: firstParagraph(text) },
-          source: [src(file, text)],
-        });
-        continue;
-      }
       out.push({
         key: slug(`${r.name}.${basename(file, ".md")}`),
         category: "repository_convention",
-        scope_type: "REPOSITORY",
-        scope_ref: r.name,
         title: `${r.name}: ${firstHeading(text) ?? basename(file)}`,
         content: text,
         metadata: { load: "inline", description: firstParagraph(text) },
         source: [src(file, text)],
+        // Nobody codes in the wiki itself: inline the conventions for the code repositories it documents.
+        target: isWiki ? { kind: "wiki_siblings", repo: r.name } : here,
       });
     }
 
@@ -471,36 +582,39 @@ export async function scanRepositories(): Promise<{
     const seenInRepo = new Set<string>();
     for (const base of [".claude/skills", ".agents/skills"]) {
       const dir = join(root, base);
-      if (!existsSync(dir)) continue;
-      for (const name of readdirSync(dir)) {
+      let names: string[];
+      try {
+        names = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
         if (seenInRepo.has(name)) continue;
         const file = ["SKILL.md", `${name}.md`].map((f) => join(dir, name, f)).find(existsSync);
         if (!file) continue;
-        const text = read(r, file);
+        const text = read(file);
         if (!text) continue;
         seenInRepo.add(name);
-        const companions = readSkillCompanions(join(dir, name), file, (f) => read(r, f));
+        const companions = readSkillCompanions(tree, join(dir, name), file);
         const id = `${name}:${sha(text)}:${sha(JSON.stringify(companions))}`;
         const e =
           skills.get(id) ??
           skills.set(id, { name, text, companions, repos: [], paths: [] }).get(id)!;
-        e.repos.push(r);
-        e.paths.push(`${r.name}/${relative(root, file)}`);
+        e.repos.push(r.name);
+        e.paths.push(relative(root, file));
       }
     }
 
     // 3. Cursor rules: coding standards for that repository, on demand.
-    for (const file of walk(join(root, ".cursor", "rules"), 1).filter(
-      (f) => f.endsWith(".mdc") || f.endsWith(".md"),
-    )) {
-      const text = read(r, file);
+    for (const file of tree
+      .walk(join(root, ".cursor", "rules"), 1)
+      .filter((f) => f.endsWith(".mdc") || f.endsWith(".md"))) {
+      const text = read(file);
       if (!text) continue;
       const { fields, body } = frontmatter(text);
       out.push({
         key: slug(`${r.name}.rule.${basename(file).replace(/\.mdc?$/, "")}`),
         category: "coding_standard",
-        scope_type: "REPOSITORY",
-        scope_ref: r.name,
         title: `${r.name}: ${firstHeading(body) ?? basename(file)}`,
         content: body.trim(),
         metadata: {
@@ -509,21 +623,22 @@ export async function scanRepositories(): Promise<{
           globs: fields.globs ?? null,
         },
         source: [src(file, text)],
+        target: here,
       });
     }
 
     // This installation's own checkout: architecture and integration notes are not a wiki, so the wiki pass
     // never sees them. Keep them on demand for the platform repository only.
-    if (await isSelfRepository(r)) {
-      for (const file of walk(join(root, "docs"), 3)) {
+    if (r.self) {
+      for (const file of tree.walk(join(root, "docs"), 3)) {
         if (!file.endsWith(".md") || /convention/i.test(basename(file))) continue;
-        const rel = relative(root, file).replaceAll("\\", "/");
+        const rel = relative(root, file);
         const platformDoc =
           rel.startsWith("docs/architecture/") ||
           rel.startsWith("docs/integrations/") ||
           rel === "docs/frontend/ui-quality-standards.md";
         if (!platformDoc) continue;
-        const text = read(r, file);
+        const text = read(file);
         if (!text) continue;
         const category = rel.startsWith("docs/architecture/")
           ? "architecture_guideline"
@@ -533,66 +648,57 @@ export async function scanRepositories(): Promise<{
         out.push({
           key: slug(`${r.name}.${rel.replace(/\.md$/, "").replace(/\//g, ".")}`),
           category,
-          scope_type: "REPOSITORY",
-          scope_ref: r.name,
           title: `${r.name}: ${firstHeading(text) ?? basename(file)}`,
           content: text,
           metadata: { load: "on_demand", description: firstParagraph(text) },
           source: [src(file, text)],
+          target: here,
         });
       }
     }
 
-    // 4. Wiki repositories: architecture + partner/domain docs for the whole project, on demand.
+    // 4. Wiki repositories: architecture + partner/domain docs for the whole project, on demand. Paths are tested
+    // relative to the repository (an absolute test matched every file of a checkout below some ".../docs/...").
     if (isWiki) {
-      const projects = [
-        ...new Set(
-          all
-            .filter((x) => x.path.split("/")[0] === r.path.split("/")[0] && x.path)
-            .flatMap((x) => x.projects)
-            .concat(r.projects),
-        ),
-      ];
-      for (const file of walk(root, 4).filter(
-        (f) =>
-          f.endsWith(".md") &&
-          (/\/docs\//.test(f) || WIKI_EXTRA.some((re) => re.test(relative(root, f)))),
-      )) {
+      for (const file of tree.walk(root, 4)) {
         const rel = relative(root, file);
+        if (
+          !rel.endsWith(".md") ||
+          !(/(^|\/)docs\//.test(rel) || WIKI_EXTRA.some((re) => re.test(rel)))
+        )
+          continue;
         if (WIKI_SKIP.some((re) => re.test(rel))) continue;
         if (
-          /\/docs\//.test(file) &&
+          /(^|\/)docs\//.test(rel) &&
           /convention/i.test(basename(file)) &&
           relative(join(root, "docs"), file).split("/").length <= 2
         )
           continue; // imported above as a convention
-        const text = read(r, file);
+        const text = read(file);
         if (!text) continue;
         out.push({
           key: slug(`${r.name}.${rel.replace(/^\./, "").replace(/\.md$/, "").replace(/\//g, ".")}`),
           category: /architecture/i.test(rel) ? "architecture_guideline" : "domain_knowledge",
-          ...scopeForProjects(projects).scope,
           title: `${r.name}: ${firstHeading(text) ?? rel}`,
           content: text,
-          applicability: scopeForProjects(projects).applicability,
           metadata: { load: "on_demand", description: firstParagraph(text) },
           source: [src(file, text)],
+          target: { kind: "wiki_projects", repo: r.name },
         });
       }
     }
+    if (tree.incomplete) incomplete.push(r.name);
   }
 
   // User-level skills (~/.claude/skills): previously auto-loaded by Claude Code; now imported once into the registry
-  // (agent steps no longer load Claude Code settings layers). Copies of repository skills are skipped; workflow/meta
-  // skills that act on their own (push, open PRs, delegate to other tools) are imported disabled.
+  // (agent steps no longer load Claude Code settings layers). Copies of repository skills are skipped.
   const repoSkillHashes = new Set([...skills.values()].map((s) => sha(s.text)));
   const userSkillHashes = new Set<string>();
-  const userDir = process.env.CLAUDE_USER_SKILLS_DIR ?? join(homedir(), ".claude", "skills");
-  if (existsSync(userDir)) {
+  if (userDir && existsSync(userDir)) {
+    const tree = new SourceTree(userDir, "~/.claude/skills", skipped, budget);
     for (const name of readdirSync(userDir)) {
-      const file = join(userDir, name, "SKILL.md");
-      if (!existsSync(file) || !statSync(file).isFile()) continue;
-      const text = readFileSync(file, "utf8");
+      const text = tree.readRaw(join(userDir, name, "SKILL.md"));
+      if (text === null) continue;
       // Same content as a repository skill: keep the repository item, but it was available everywhere via ~/.claude,
       // so it must not shrink to the repositories that happen to contain a copy (widened below).
       if (repoSkillHashes.has(sha(text))) {
@@ -607,28 +713,18 @@ export async function scanRepositories(): Promise<{
         continue;
       }
       const { fields, body } = frontmatter(text);
-      const unattendedUnsafe = USER_SKILLS_DISABLED.includes(name);
-      const target = scopeForUserSkill(name, all);
       out.push({
         key: slug(`user.skill.${name}`),
         category: "agent_skill",
-        ...target.scope,
-        applicability: target.applicability,
         title: `Skill: ${fields.name || name}`,
-        content: body.trim().slice(0, MAX_CHARS),
-        enabled: !unattendedUnsafe,
+        content: sliceUnits(body.trim(), MAX_CHARS),
         metadata: {
           load: "on_demand",
-          description: (fields.description || firstParagraph(body)).slice(0, 600),
+          description: sliceUnits(fields.description || firstParagraph(body), 600),
           origin: "user",
-          ...(unattendedUnsafe
-            ? {
-                disabled_reason:
-                  "interactive/workflow skill: acts on its own (push, PR, delegation) — enable deliberately",
-              }
-            : {}),
         },
         source: [{ repo: "~/.claude", path: `skills/${name}/SKILL.md`, sha256: sha(text) }],
+        target: { kind: "user_skill", name },
       });
     }
   }
@@ -638,33 +734,174 @@ export async function scanRepositories(): Promise<{
   for (const s of skills.values()) byName.set(s.name, (byName.get(s.name) ?? 0) + 1);
   for (const s of skills.values()) {
     const variants = byName.get(s.name)!;
-    const repoNames = s.repos.map((r) => r.name);
-    const orgWide = userSkillHashes.has(sha(s.text));
     // Also in ~/.claude (available everywhere before): widened to its project, or the organization if generic.
-    const target = orgWide ? scopeForUserSkill(s.name, all) : scopeForRepositories(repoNames, all);
+    const target: ScopeTarget = userSkillHashes.has(sha(s.text))
+      ? { kind: "user_skill", name: s.name }
+      : { kind: "repositories", repos: s.repos };
     out.push(
       ...skillCandidates({
-        key: slug(variants > 1 ? `skill.${s.name}.${repoNames[0]}` : `skill.${s.name}`),
+        key: slug(variants > 1 ? `skill.${s.name}.${s.repos[0]}` : `skill.${s.name}`),
         name: s.name,
         text: s.text,
         companions: s.companions,
-        titleSuffix: variants > 1 ? ` (${repoNames.join(", ")})` : "",
-        scope: target.scope,
-        applicability: target.applicability,
-        sources: s.repos.map((r, i) => {
-          const path = s.paths[i].slice(r.name.length + 1);
-          return { repo: r.name, dir: dirname(path), mainFile: basename(path) };
-        }),
-      }),
+        titleSuffix: variants > 1 ? ` (${s.repos.join(", ")})` : "",
+        scope: { scope_type: "GLOBAL" },
+        applicability: {},
+        sources: s.repos.map((repo, i) => ({
+          repo,
+          dir: dirname(s.paths[i]),
+          mainFile: basename(s.paths[i]),
+        })),
+      }).map((c) => retarget(c, target)),
     );
   }
-  return { candidates: out, skipped, scanned: repos.map((r) => r.name) };
+  return {
+    candidates: out,
+    skipped,
+    scanned: repos.map((r) => r.name).filter((n) => !incomplete.includes(n)),
+    incomplete,
+  };
+}
+
+/** The user-level skills directory imported with the repositories. */
+export const userSkillsDir = () =>
+  process.env.CLAUDE_USER_SKILLS_DIR ?? join(homedir(), ".claude", "skills");
+
+const UNATTENDED_UNSAFE_REASON =
+  "interactive/workflow skill: acts on its own (push, PR, delegation) — enable deliberately";
+
+/**
+ * Policy over a discovery (TypeScript only): where each candidate applies, from the registry's repositories and
+ * projects, and which user-level skills are imported disabled (USER_SKILLS_DISABLED).
+ */
+export function assembleCandidates(d: Discovery, all: RepositoryRow[]): ImportCandidate[] {
+  const wikiSiblings = (name: string) => {
+    const r = all.find((x) => x.name === name)!;
+    // Code repositories a wiki documents: same group folder (e.g. payment-src/*) OR a project in common in the registry.
+    // The project test also covers platform-managed checkouts, whose path is empty (e.g. a repository registered by URL).
+    const group = r.path.includes("/") ? r.path.split("/")[0] : "";
+    const wikiProjects = new Set(r.projects ?? []);
+    return all
+      .filter(
+        (x) =>
+          x.enabled &&
+          x.name !== r.name &&
+          !/wiki/i.test(x.name) &&
+          ((group && x.path.split("/")[0] === group) ||
+            (x.projects ?? []).some((p) => wikiProjects.has(p))),
+      )
+      .map((x) => x.name)
+      .sort();
+  };
+  const wikiProjects = (name: string) => {
+    const r = all.find((x) => x.name === name)!;
+    return [
+      ...new Set(
+        all
+          .filter((x) => x.path.split("/")[0] === r.path.split("/")[0] && x.path)
+          .flatMap((x) => x.projects)
+          .concat(r.projects),
+      ),
+    ];
+  };
+  return d.candidates.map(({ target, ...c }): ImportCandidate => {
+    switch (target.kind) {
+      case "repository":
+        return { ...c, scope_type: "REPOSITORY", scope_ref: target.repo };
+      case "repositories": {
+        const t = scopeForRepositories(target.repos, all);
+        return { ...c, ...t.scope, applicability: t.applicability };
+      }
+      case "wiki_siblings": {
+        const siblings = wikiSiblings(target.repo);
+        const t = scopeForRepositories(siblings.length ? siblings : [target.repo], all);
+        return { ...c, ...t.scope, applicability: t.applicability };
+      }
+      case "wiki_projects": {
+        const t = scopeForProjects(wikiProjects(target.repo));
+        return { ...c, ...t.scope, applicability: t.applicability };
+      }
+      case "user_skill": {
+        const t = scopeForUserSkill(target.name, all);
+        // Interactive/meta skills of ~/.claude act on their own (push, open PRs, delegate): imported disabled.
+        if (c.metadata?.origin !== "user")
+          return { ...c, ...t.scope, applicability: t.applicability };
+        const unsafe = USER_SKILLS_DISABLED.includes(target.name);
+        return {
+          ...c,
+          ...t.scope,
+          applicability: t.applicability,
+          enabled: !unsafe,
+          metadata: {
+            ...c.metadata,
+            ...(unsafe ? { disabled_reason: UNATTENDED_UNSAFE_REASON } : {}),
+          },
+        };
+      }
+    }
+  });
+}
+
+/** Repositories to scan: enabled ones checked out on this server (TypeScript decides; the engines only read). */
+async function scanTargets() {
+  const all = await repositories.list();
+  const repos: DiscoveryRepository[] = [];
+  for (const r of all.filter((x) => x.enabled && existsSync(join(repoPath(x), ".git"))))
+    repos.push({ name: r.name, root: repoPath(r), self: await isSelfRepository(r) });
+  return { all, repos };
+}
+
+/** Scan every enabled repository on disk and build import candidates (no DB writes). */
+export async function scanRepositories(): Promise<{
+  candidates: ImportCandidate[];
+  skipped: ImportReport["skipped"];
+  scanned: string[];
+  incomplete: string[];
+}> {
+  const { all, repos } = await scanTargets();
+  const d =
+    (await goKnowledgeScan(repos, userSkillsDir())) ?? discoverKnowledge(repos, userSkillsDir());
+  return {
+    candidates: assembleCandidates(d, all),
+    skipped: d.skipped,
+    scanned: d.scanned,
+    incomplete: d.incomplete,
+  };
+}
+
+const IMPORT_LOCK = 727_007; // pg_advisory_lock key: one knowledge import publishes at a time, across instances
+
+/**
+ * Publications are serialized (a second import waits, then finds the first one's items unchanged): candidates are
+ * compared with the registry once, before writing. In this process by a queue; across instances by an advisory lock
+ * held on a second connection (skipped with a one-connection pool, which it would deadlock). Dry runs only read.
+ */
+let importQueue: Promise<unknown> = Promise.resolve();
+export function serializedImport<T>(dryRun: boolean | undefined, fn: () => Promise<T>) {
+  if (dryRun) return fn();
+  const run = importQueue.then(async () => {
+    if (config.database.poolMax < 2) return fn();
+    const c = await pool.connect();
+    try {
+      await c.query("SELECT pg_advisory_lock($1)", [IMPORT_LOCK]);
+      return await fn();
+    } finally {
+      await c.query("SELECT pg_advisory_unlock($1)", [IMPORT_LOCK]).catch(() => {});
+      c.release();
+    }
+  });
+  importQueue = run.catch(() => {});
+  return run;
 }
 
 /** Create/update registry items from the scan. Unchanged files create no new version. */
-export async function importFromRepositories(
+export function importFromRepositories(
   opts: { dryRun?: boolean; only?: string } = {},
 ): Promise<ImportReport> {
+  return serializedImport(opts.dryRun, () => importFromRepositoriesNow(opts));
+}
+
+async function importFromRepositoriesNow(opts: { dryRun?: boolean; only?: string }) {
   const scan = await scanRepositories();
   const { skipped, scanned } = scan;
   // `only`: import just the items whose key starts with this prefix; nothing else is touched (no retirement pass).
@@ -679,6 +916,7 @@ export async function importFromRepositories(
     unchanged: 0,
     retired: 0,
     conflicts: 0,
+    ...(scan.incomplete.length ? { incomplete: scan.incomplete } : {}),
   };
   // Repositories without a description get the opening paragraph of their CLAUDE.md (improves discovery ranking).
   if (!opts.dryRun && !opts.only)
@@ -704,22 +942,39 @@ export async function importFromRepositories(
   if (opts.only) return report;
   const produced = new Set(candidates.map((c) => c.key));
   const scannedSet = new Set(scanned);
-  for (const it of await knowledge.list()) {
-    if (!it.enabled || produced.has(it.key) || !it.metadata?.imported_from_repository) continue;
-    const sources: { repo: string; path: string }[] = it.metadata.source ?? [];
-    if (!sources.length || !sources.every((s) => scannedSet.has(s.repo))) continue;
+  // Summary listing (no contents); the contents of the few items retired are read once, for the report's `chars`.
+  const retiring = (await knowledge.list({ summary: true })).filter((it) => {
+    if (!it.enabled || produced.has(it.key) || !it.metadata?.imported_from_repository) return false;
+    const sources: { repo: string }[] = it.metadata.source ?? [];
+    return sources.length > 0 && sources.every((s) => scannedSet.has(s.repo));
+  });
+  const contents = retiring.length
+    ? new Map(
+        (
+          await q<{ key: string; content: string }>(
+            pool,
+            `SELECT i.key, v.content FROM knowledge_items i
+               JOIN knowledge_versions v ON v.item_id = i.id AND v.version = i.current_version
+              WHERE i.owner_id IS NULL AND i.key = ANY($1::text[])`,
+            [retiring.map((it) => it.key)],
+          )
+        ).map((r) => [r.key, r.content]),
+      )
+    : new Map<string, string>();
+  for (const it of retiring) {
+    const sources: { repo: string; path: string }[] = it.metadata.source;
     report.candidates.push({
       key: it.key,
       title: it.title,
       category: it.category,
       scope: `${it.scope_type}${it.scope_ref ? ":" + it.scope_ref : ""}`,
       repos: [...new Set(sources.map((s) => s.repo))],
-      chars: (it.content ?? "").length,
+      chars: (contents.get(it.key) ?? "").length,
       action: "retire",
     });
     report.retired++;
     if (opts.dryRun) continue;
-    await knowledge.update(it.key, {
+    await knowledge.updateWithoutReload(it.key, {
       enabled: false,
       metadata: {
         ...it.metadata,
@@ -751,14 +1006,14 @@ export async function importSkillDirectory(opts: {
   const mainFile = ["SKILL.md", `${name}.md`].map((f) => join(dir, f)).find(existsSync);
   if (!mainFile) throw new Error(`${dir} has no SKILL.md`);
   const skipped: ImportReport["skipped"] = [];
-  const read = (f: string) => readChecked(dir, name, f, skipped);
-  const text = read(mainFile);
+  const tree = new SourceTree(dir, name, skipped, newBudget());
+  const text = tree.read(mainFile);
   if (!text) throw new Error(`${mainFile} was skipped: ${skipped.map((s) => s.reason).join("; ")}`);
   const candidates = skillCandidates({
     key: slug(`skill.${name}`),
     name,
     text,
-    companions: readSkillCompanions(dir, mainFile, read),
+    companions: readSkillCompanions(tree, dir, mainFile),
     ...scopeForRepositories([repo.name], await repositories.list()),
     sources: [{ repo: repo.name, dir: `.claude/skills/${name}`, mainFile: basename(mainFile) }],
   });
@@ -773,11 +1028,13 @@ export async function importSkillDirectory(opts: {
     retired: 0,
     conflicts: 0,
   };
-  await applyCandidates(candidates, report, {
-    dryRun: opts.dryRun,
-    owned: false,
-    createdBy: opts.createdBy ?? "local skill import",
-  });
+  await serializedImport(opts.dryRun, () =>
+    applyCandidates(candidates, report, {
+      dryRun: opts.dryRun,
+      owned: false,
+      createdBy: opts.createdBy ?? "local skill import",
+    }),
+  );
   return report;
 }
 
@@ -798,7 +1055,8 @@ export async function importLocalCheckout(opts: {
   if (!existsSync(root) || !statSync(root).isDirectory())
     throw new Error(`${root} is not a directory`);
   const skipped: ImportReport["skipped"] = [];
-  const read = (f: string) => readChecked(root, repo.name, f, skipped);
+  const tree = new SourceTree(root, repo.name, skipped, newBudget());
+  const read = (f: string) => tree.read(f);
   const src = (file: string, text: string) => ({
     repo: repo.name,
     path: relative(root, file).replaceAll("\\", "/"),
@@ -827,7 +1085,8 @@ export async function importLocalCheckout(opts: {
       source: [src(file, text)],
     });
   }
-  for (const file of walk(join(root, "docs"), 4)
+  for (const file of tree
+    .walk(join(root, "docs"), 4)
     .filter((f) => /\.md$|\/llms\.txt$/i.test(f))
     .sort()) {
     const text = read(file);
@@ -857,15 +1116,21 @@ export async function importLocalCheckout(opts: {
     retired: 0,
     conflicts: 0,
   };
-  await applyCandidates(candidates, report, {
-    dryRun: opts.dryRun,
-    owned: false,
-    createdBy: opts.createdBy ?? "local checkout import",
-  });
+  await serializedImport(opts.dryRun, () =>
+    applyCandidates(candidates, report, {
+      dryRun: opts.dryRun,
+      owned: false,
+      createdBy: opts.createdBy ?? "local checkout import",
+    }),
+  );
   return report;
 }
 
-/** Create / update registry items from candidates. `owned`: mark them import-owned (eligible for retirement). */
+/**
+ * Create / update registry items from candidates. `owned`: mark them import-owned (eligible for retirement). The
+ * registry state of every candidate is read in one statement (contents compared by hash); only changed items are
+ * written, each in its own transaction as before (row lock, new version, audit).
+ */
 async function applyCandidates(
   candidates: ImportCandidate[],
   report: ImportReport,
@@ -873,6 +1138,7 @@ async function applyCandidates(
 ) {
   // Deleted by an admin (knowledge_deletions): never re-created while the source file still exists.
   const deleted = await knowledge.deletedKeys();
+  const current = await knowledge.latestShared(candidates.map((c) => c.key));
   for (const c of candidates) {
     const parent = c.metadata?.parent_skill as string | undefined;
     if (deleted.has(c.key) || (parent && deleted.has(parent))) {
@@ -890,9 +1156,10 @@ async function applyCandidates(
       source,
       ...(opts.owned ? { imported_from_repository: true } : {}),
     };
-    const existing = await knowledge.get(c.key);
-    const evolution = existing?.versions[0]?.metadata?.evolution;
-    if (existing && evolution && existing.versions[0].content !== c.content) {
+    const existing = current.get(c.key);
+    const sameContent = existing?.content_sha256 === sha(c.content);
+    const evolution = existing?.metadata?.evolution;
+    if (existing && evolution && !sameContent) {
       const fileUnchanged = hashOf(evolution.base_source ?? null) === hashOf(source);
       const row: ImportReport["candidates"][number] = {
         key: c.key,
@@ -936,13 +1203,12 @@ async function applyCandidates(
       continue;
     }
     let action: "create" | "update" | "unchanged" = "create";
-    const wasRetired =
-      !!existing && !existing.enabled && !!existing.versions[0]?.metadata?.retired_reason;
+    const wasRetired = !!existing && !existing.enabled && !!existing.metadata?.retired_reason;
     if (existing) {
-      const v = existing.versions[0];
+      const v = existing;
       // JSONB reorders keys, so compare canonical hashes rather than JSON strings.
       const same =
-        v.content === c.content &&
+        sameContent &&
         hashOf(v.applicability ?? {}) === hashOf(c.applicability ?? {}) &&
         hashOf(v.metadata?.source ?? null) === hashOf(source) &&
         // Parser fixes (e.g. folded YAML descriptions) change these without touching the file.
@@ -966,14 +1232,14 @@ async function applyCandidates(
     report[action === "create" ? "created" : action === "update" ? "updated" : "unchanged"]++;
     if (opts.dryRun || action === "unchanged") continue;
     if (action === "create")
-      await knowledge.create({
+      await knowledge.createWithoutReload({
         ...item,
         metadata,
         created_by: opts.createdBy,
         change_note: `imported from ${source.map((s) => `${s.repo}/${s.path}`).join(", ")}`,
       });
     else
-      await knowledge.update(c.key, {
+      await knowledge.updateWithoutReload(c.key, {
         content: c.content,
         applicability: c.applicability ?? {},
         metadata,

@@ -65,6 +65,12 @@ func NewIndexer(db *pgxpool.Pool, workers, jobs int) *Indexer {
 	return &Indexer{searcher: NewSearcher(db, 4), db: db, workers: workers, jobs: make(chan struct{}, max(1, jobs))}
 }
 
+// WithTrustedRoots sets the roots code search may read below (platform.Config.TrustedRoots).
+func (ix *Indexer) WithTrustedRoots(roots []string) *Indexer {
+	ix.searcher.Roots = roots
+	return ix
+}
+
 // ErrVersion means TypeScript asked for an index version this extractor does not produce.
 var ErrVersion = errors.New("extractor version mismatch")
 

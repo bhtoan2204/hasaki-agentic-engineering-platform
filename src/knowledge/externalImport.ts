@@ -3,7 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { one, pool, q, withTx, json } from "../db/pool.ts";
 import { hashOf } from "../workflow/definitions.ts";
-import { looksSecret, skillCandidates, type ImportCandidate } from "./importer.ts";
+import {
+  looksSecret,
+  serializedImport,
+  skillCandidates,
+  type ImportCandidate,
+} from "./importer.ts";
 import { scanSkillText } from "./external.ts";
 import { knowledge } from "./service.ts";
 
@@ -167,13 +172,21 @@ export interface ExternalApplyReport {
 }
 
 /** Create/update the shared items (new version only on change) and record supersession of replaced skills. */
-export async function applyExternalSkills(
+export function applyExternalSkills(
   plan: ExternalPlan,
   opts: { dryRun?: boolean; by?: string } = {},
+): Promise<ExternalApplyReport> {
+  return serializedImport(opts.dryRun, () => applyExternalSkillsNow(plan, opts));
+}
+
+async function applyExternalSkillsNow(
+  plan: ExternalPlan,
+  opts: { dryRun?: boolean; by?: string },
 ): Promise<ExternalApplyReport> {
   const by = opts.by ?? "external skill import";
   const report: ExternalApplyReport = { rows: [], superseded: [] };
   const deleted = await knowledge.deletedKeys();
+  const current = await knowledge.latestShared(plan.candidates.map((c) => c.key));
   for (const c of plan.candidates) {
     const parent = c.metadata?.parent_skill as string | undefined;
     if (deleted.has(c.key) || (parent && deleted.has(parent))) {
@@ -182,13 +195,12 @@ export async function applyExternalSkills(
     }
     const { source, ...item } = c;
     const metadata = { ...item.metadata, source };
-    const existing = await knowledge.get(c.key);
-    const v = existing?.versions[0];
+    const existing = current.get(c.key);
     const same =
-      !!v &&
-      v.content === c.content &&
-      hashOf(v.applicability ?? {}) === hashOf(c.applicability ?? {}) &&
-      hashOf(v.metadata ?? {}) === hashOf(metadata) &&
+      !!existing &&
+      existing.content_sha256 === sha(c.content) &&
+      hashOf(existing.applicability ?? {}) === hashOf(c.applicability ?? {}) &&
+      hashOf(existing.metadata ?? {}) === hashOf(metadata) &&
       existing.scope_type === c.scope_type &&
       existing.title === c.title &&
       (c.conflict_key === undefined || existing.conflict_key === c.conflict_key);
@@ -198,14 +210,14 @@ export async function applyExternalSkills(
     const origin = c.metadata?.origin as ExternalManifestSkill["origin"];
     const note = `third-party skill ${origin.repo}@${String(origin.commit).slice(0, 7)}`;
     if (action === "create")
-      await knowledge.create({
+      await knowledge.createWithoutReload({
         ...item,
         metadata,
         created_by: by,
         change_note: `imported ${note}`,
       });
     else
-      await knowledge.update(c.key, {
+      await knowledge.updateWithoutReload(c.key, {
         title: c.title,
         conflict_key: c.conflict_key,
         content: c.content,

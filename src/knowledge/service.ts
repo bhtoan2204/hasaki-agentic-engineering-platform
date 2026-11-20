@@ -27,6 +27,24 @@ export interface KnowledgeInput {
   forceVersion?: boolean;
 }
 
+/** knowledge.latestShared: an item and its latest version, content as a hash. */
+export interface LatestShared {
+  id: number;
+  key: string;
+  category: string;
+  scope_type: string;
+  scope_ref: string;
+  title: string;
+  conflict_key: string | null;
+  enabled: boolean;
+  owner_id: number | null;
+  version: number;
+  applicability: Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metadata: Record<string, any>;
+  content_sha256: string;
+}
+
 function check(x: Partial<KnowledgeInput>) {
   if (x.category && !(CATEGORIES as readonly string[]).includes(x.category))
     throw new Error(`unknown category ${x.category}`);
@@ -148,6 +166,15 @@ export const knowledge = {
 
   /** `db`: run inside the caller's transaction (proposal approval), else a new one. */
   async create(x: KnowledgeInput, db?: Db) {
+    const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
+    return run(async (c) => {
+      await knowledge.createWithoutReload(x, c);
+      return knowledge.get(x.key, c, x.ownerId ?? null);
+    });
+  },
+
+  /** create() without reading the item back (importers: 5 statements fewer per write). */
+  async createWithoutReload(x: KnowledgeInput, db?: Db): Promise<void> {
     check(x);
     const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
     return run(async (c) => {
@@ -189,7 +216,6 @@ export const knowledge = {
       );
       // Creating a deleted shared key again is an explicit decision: the importer/seeds may produce it again too.
       if (x.ownerId == null) await q(c, "DELETE FROM knowledge_deletions WHERE key = $1", [x.key]);
-      return knowledge.get(x.key, c, x.ownerId ?? null);
     });
   },
 
@@ -198,6 +224,20 @@ export const knowledge = {
    * item attribute changes (scope, enabled, priority...) are recorded in the audit log.
    */
   async update(key: string, x: Partial<KnowledgeInput>, ownerId: number | null = null, db?: Db) {
+    const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
+    return run(async (c) => {
+      await knowledge.updateWithoutReload(key, x, ownerId, c);
+      return knowledge.get(key, c, ownerId);
+    });
+  },
+
+  /** update() without reading the item back (importers). */
+  async updateWithoutReload(
+    key: string,
+    x: Partial<KnowledgeInput>,
+    ownerId: number | null = null,
+    db?: Db,
+  ): Promise<void> {
     check(x);
     const run = <T>(fn: (c: Db) => Promise<T>) => (db ? fn(db) : withTx(fn));
     return run(async (c) => {
@@ -291,7 +331,6 @@ export const knowledge = {
           json(Object.fromEntries(attrs.map((k) => [k, { from: item[k], to: x[k] }]))),
         ]);
       }
-      return knowledge.get(key, c, ownerId);
     });
   },
 
@@ -342,7 +381,27 @@ export const knowledge = {
     });
   },
 
-  /** Keys of deleted shared items (tombstones): the importer and the seeds skip them. */
+  /**
+   * Shared items of these keys with their latest version, in one statement (importers: compare before writing).
+   * The content itself stays in the database: `content_sha256` is the SHA-256 of its UTF-8 text, which the
+   * importers compare with the candidate's.
+   */
+  async latestShared(keys: string[], db: Db = pool): Promise<Map<string, LatestShared>> {
+    if (!keys.length) return new Map();
+    const rows = await q<LatestShared>(
+      db,
+      `SELECT i.id, i.key, i.category, i.scope_type, i.scope_ref, i.title, i.conflict_key, i.enabled, i.owner_id,
+              v.version, v.applicability, v.metadata,
+              encode(sha256(convert_to(v.content, 'UTF8')), 'hex') AS content_sha256
+         FROM knowledge_items i
+         JOIN LATERAL (SELECT * FROM knowledge_versions WHERE item_id = i.id ORDER BY version DESC LIMIT 1) v ON true
+        WHERE i.key = ANY($1::text[]) AND i.owner_id IS NULL`,
+      [[...new Set(keys)]],
+    );
+    return new Map(rows.map((r) => [r.key, r]));
+  },
+
+  /** Keys of deleted shared items (tombstones): the importers and the seeds skip them. */
   async deletedKeys(db: Db = pool): Promise<Set<string>> {
     return new Set(
       (await q<{ key: string }>(db, "SELECT key FROM knowledge_deletions")).map((r) => r.key),

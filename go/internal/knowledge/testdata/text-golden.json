@@ -1,0 +1,486 @@
+{
+  "texts": [
+    {
+      "text": "",
+      "frontmatter": {
+        "fields": {},
+        "body": ""
+      },
+      "heading": null,
+      "paragraph": ""
+    },
+    {
+      "text": "plain",
+      "frontmatter": {
+        "fields": {},
+        "body": "plain"
+      },
+      "heading": null,
+      "paragraph": "plain"
+    },
+    {
+      "text": "# Title\n\nFirst paragraph\nwraps.\n\nSecond.",
+      "frontmatter": {
+        "fields": {},
+        "body": "# Title\n\nFirst paragraph\nwraps.\n\nSecond."
+      },
+      "heading": "Title",
+      "paragraph": "First paragraph wraps."
+    },
+    {
+      "text": "#\n\n  Heading after blank lines\nbody",
+      "frontmatter": {
+        "fields": {},
+        "body": "#\n\n  Heading after blank lines\nbody"
+      },
+      "heading": "Heading after blank lines",
+      "paragraph": "Heading after blank lines body"
+    },
+    {
+      "text": "intro\n# Late heading  \n",
+      "frontmatter": {
+        "fields": {},
+        "body": "intro\n# Late heading  \n"
+      },
+      "heading": "Late heading",
+      "paragraph": "intro # Late heading"
+    },
+    {
+      "text": "#   \n",
+      "frontmatter": {
+        "fields": {},
+        "body": "#   \n"
+      },
+      "heading": "",
+      "paragraph": ""
+    },
+    {
+      "text": "# \t",
+      "frontmatter": {
+        "fields": {},
+        "body": "# \t"
+      },
+      "heading": "",
+      "paragraph": ""
+    },
+    {
+      "text": "# x",
+      "frontmatter": {
+        "fields": {},
+        "body": "# x"
+      },
+      "heading": "x",
+      "paragraph": ""
+    },
+    {
+      "text": "x # after LS\nz",
+      "frontmatter": {
+        "fields": {},
+        "body": "x # after LS\nz"
+      },
+      "heading": "after LS",
+      "paragraph": "x # after LS z"
+    },
+    {
+      "text": "x\r# after CR",
+      "frontmatter": {
+        "fields": {},
+        "body": "x\r# after CR"
+      },
+      "heading": "after CR",
+      "paragraph": "x # after CR"
+    },
+    {
+      "text": "##Not a heading\n# Real",
+      "frontmatter": {
+        "fields": {},
+        "body": "##Not a heading\n# Real"
+      },
+      "heading": "Real",
+      "paragraph": ""
+    },
+    {
+      "text": "---\nname: a\ndescription: >-\n  folded line one\n  line two\n---\n# Body\n\ntext",
+      "frontmatter": {
+        "fields": {
+          "name": "a",
+          "description": "folded line one line two"
+        },
+        "body": "# Body\n\ntext"
+      },
+      "heading": "Body",
+      "paragraph": "text"
+    },
+    {
+      "text": "---\r\nname: crlf\r\ndescription: |\r\n  literal\r\n  kept\r\n---\r\nbody",
+      "frontmatter": {
+        "fields": {
+          "name": "crlf",
+          "description": "literal\nkept"
+        },
+        "body": "body"
+      },
+      "heading": null,
+      "paragraph": "body"
+    },
+    {
+      "text": "---\nname: 'quoted'\nother: \"x\"\nlone: \"\nsingle: '\nempty:\n  continued\n\n  more\n---\nB",
+      "frontmatter": {
+        "fields": {
+          "name": "quoted",
+          "other": "x",
+          "lone": "",
+          "single": "",
+          "empty": "continued more"
+        },
+        "body": "B"
+      },
+      "heading": null,
+      "paragraph": "B"
+    },
+    {
+      "text": "---\nkey with space: v\n9bad: x\n_ok-key :  spaced value  \nk:v w\n---body",
+      "frontmatter": {
+        "fields": {
+          "_ok-key": "spaced value"
+        },
+        "body": "body"
+      },
+      "heading": null,
+      "paragraph": "body"
+    },
+    {
+      "text": "---\n---\nno header",
+      "frontmatter": {
+        "fields": {},
+        "body": "---\n---\nno header"
+      },
+      "heading": null,
+      "paragraph": "no header"
+    },
+    {
+      "text": "---\nname: x\n---",
+      "frontmatter": {
+        "fields": {
+          "name": "x"
+        },
+        "body": ""
+      },
+      "heading": null,
+      "paragraph": ""
+    },
+    {
+      "text": "---\nname: x\n----more\n",
+      "frontmatter": {
+        "fields": {
+          "name": "x"
+        },
+        "body": "-more\n"
+      },
+      "heading": null,
+      "paragraph": "-more"
+    },
+    {
+      "text": "---\nfront: 1\n---\n\nThis file provides guidance to Claude Code.\n\nReal paragraph.",
+      "frontmatter": {
+        "fields": {
+          "front": "1"
+        },
+        "body": "\nThis file provides guidance to Claude Code.\n\nReal paragraph."
+      },
+      "heading": null,
+      "paragraph": "Real paragraph."
+    },
+    {
+      "text": "```\ncode\n```\n\n- list item\n \n\nAfter nbsp",
+      "frontmatter": {
+        "fields": {},
+        "body": "```\ncode\n```\n\n- list item\n \n\nAfter nbsp"
+      },
+      "heading": null,
+      "paragraph": "- list item"
+    },
+    {
+      "text": "a\n \t\n \nb\n\n\nc",
+      "frontmatter": {
+        "fields": {},
+        "body": "a\n \t\n \nb\n\n\nc"
+      },
+      "heading": null,
+      "paragraph": "a"
+    },
+    {
+      "text": "a\n \nb",
+      "frontmatter": {
+        "fields": {},
+        "body": "a\n \nb"
+      },
+      "heading": null,
+      "paragraph": "a"
+    },
+    {
+      "text": "﻿  BOM paragraph  ﻿",
+      "frontmatter": {
+        "fields": {},
+        "body": "﻿  BOM paragraph  ﻿"
+      },
+      "heading": null,
+      "paragraph": "BOM paragraph"
+    },
+    {
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx😀tail",
+      "frontmatter": {
+        "fields": {},
+        "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx😀tail"
+      },
+      "heading": null,
+      "paragraph": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx�"
+    },
+    {
+      "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy😀tail",
+      "frontmatter": {
+        "fields": {},
+        "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy😀tail"
+      },
+      "heading": null,
+      "paragraph": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy😀"
+    },
+    {
+      "text": "wordnext",
+      "frontmatter": {
+        "fields": {},
+        "body": "wordnext"
+      },
+      "heading": null,
+      "paragraph": "wordnext"
+    },
+    {
+      "text": "THIS FILE PROVIDES GUIDANCE TO CLAUDE\n\nkept",
+      "frontmatter": {
+        "fields": {},
+        "body": "THIS FILE PROVIDES GUIDANCE TO CLAUDE\n\nkept"
+      },
+      "heading": null,
+      "paragraph": "kept"
+    },
+    {
+      "text": "thiſ file provides guidance to claude\n\nkept?",
+      "frontmatter": {
+        "fields": {},
+        "body": "thiſ file provides guidance to claude\n\nkept?"
+      },
+      "heading": null,
+      "paragraph": "thiſ file provides guidance to claude"
+    }
+  ],
+  "secrets": [
+    {
+      "text": "password=hunter2-secret-value",
+      "secret": true
+    },
+    {
+      "text": "password = \"abcdefghijklmnop\"",
+      "secret": true
+    },
+    {
+      "text": "DB_PASSWORD=Sup3rS3cretValue123",
+      "secret": true
+    },
+    {
+      "text": "secret = payment_client.ecom_global.secret",
+      "secret": false
+    },
+    {
+      "text": "token: ${TOKEN_FROM_ENV_VAR}",
+      "secret": false
+    },
+    {
+      "text": "api_key: <your-api-key-here>",
+      "secret": false
+    },
+    {
+      "text": "apiKey = YOUR_API_KEY_123456",
+      "secret": false
+    },
+    {
+      "text": "client-secret: example-value-123456",
+      "secret": false
+    },
+    {
+      "text": "token=xxxxxxxxxxxxxxxxxxxxxxxx",
+      "secret": false
+    },
+    {
+      "text": "the token is short=abc",
+      "secret": false
+    },
+    {
+      "text": "https://www.paypal.com/checkoutnow?token=EC-5Y366741JN879735H",
+      "secret": false
+    },
+    {
+      "text": "https://www.PAYPAL.com/checkoutnow?token=EC-5Y366741JN879735H then password=realsecretvalue1",
+      "secret": true
+    },
+    {
+      "text": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+      "secret": true
+    },
+    {
+      "text": "-----BEGIN RSA PRIVATE KEY-----",
+      "secret": true
+    },
+    {
+      "text": "AKIAIOSFODNN7EXAMPLE",
+      "secret": true
+    },
+    {
+      "text": "sk_live_abcdefghijklmnop1234",
+      "secret": true
+    },
+    {
+      "text": "my-token-name: '...elided...'",
+      "secret": false
+    },
+    {
+      "text": "passwordless login: enabled-by-default-for-all",
+      "secret": false
+    },
+    {
+      "text": "pass word=abcdefghijklmnop",
+      "secret": false
+    },
+    {
+      "text": "token = abcdefghijklmnopq",
+      "secret": true
+    },
+    {
+      "text": "x-password:= abcdefghijklmnop",
+      "secret": false
+    },
+    {
+      "text": "tokenizer=configuration.value.path",
+      "secret": false
+    },
+    {
+      "text": "token = \"'abcdefghijklmnop'\"",
+      "secret": false
+    },
+    {
+      "text": "TOKEN=AbCdEfGhIjKlMnOp",
+      "secret": true
+    },
+    {
+      "text": "paſsword=abcdefghijklmnop",
+      "secret": false
+    },
+    {
+      "text": "--password=abcdefghijklmnop",
+      "secret": true
+    },
+    {
+      "text": "x-token: abcdefghijklmnopq",
+      "secret": true
+    },
+    {
+      "text": "my_password_hash = 'zzzzzzzzzzzzzzzz'",
+      "secret": true
+    },
+    {
+      "text": "token=short token2=abcdefghijklmnop",
+      "secret": true
+    },
+    {
+      "text": "secret = a.b.c.d.e.f.g secret=realvalue12345",
+      "secret": true
+    },
+    {
+      "text": "secret = config.value.path then secret=another.path.value",
+      "secret": false
+    },
+    {
+      "text": "pre-ApiKey-suf\t=\t\"abcdefghijklmnop\"",
+      "secret": true
+    },
+    {
+      "text": "tokens:\n  - token=${A}\n  - token=Abcdefghijklmnop9",
+      "secret": true
+    },
+    {
+      "text": "9token=abcdefghijklmnop",
+      "secret": true
+    },
+    {
+      "text": "_token=abcdefghijklmnop",
+      "secret": true
+    },
+    {
+      "text": "é-token=abcdefghijklmnop",
+      "secret": true
+    }
+  ],
+  "slugs": [
+    {
+      "in": "Repo.CLAUDE",
+      "out": "repo.claude"
+    },
+    {
+      "in": "skill.İstanbul",
+      "out": "skill.i-stanbul"
+    },
+    {
+      "in": "skill.Kelvin",
+      "out": "skill.kelvin"
+    },
+    {
+      "in": "--Leading--",
+      "out": "leading"
+    },
+    {
+      "in": "a-$b",
+      "out": "a--b"
+    },
+    {
+      "in": "x..y__z",
+      "out": "x..y__z"
+    },
+    {
+      "in": "trailing---",
+      "out": "trailing"
+    },
+    {
+      "in": "ünïcödé",
+      "out": "n-c-d"
+    },
+    {
+      "in": "skill.name.repo/sub dir",
+      "out": "skill.name.repo-sub-dir"
+    },
+    {
+      "in": "😀emoji",
+      "out": "emoji"
+    }
+  ],
+  "slices": [
+    {
+      "in": "ab😀cd",
+      "n": 3,
+      "out": "ab�"
+    },
+    {
+      "in": "ab😀cd",
+      "n": 4,
+      "out": "ab😀"
+    },
+    {
+      "in": "ab😀cd",
+      "n": 2,
+      "out": "ab"
+    },
+    {
+      "in": "abc",
+      "n": 10,
+      "out": "abc"
+    }
+  ]
+}

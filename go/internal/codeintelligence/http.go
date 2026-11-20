@@ -94,9 +94,13 @@ func routeSearch(mux *http.ServeMux, s *Searcher, log *slog.Logger) {
 			platform.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 			return
 		}
-		if err := ValidateSearch(&req); err != nil {
+		if err := ValidateSearch(&req, s.Roots); err != nil {
 			if errors.Is(err, ErrVersion) {
 				platform.WriteError(w, http.StatusConflict, "version_mismatch", err.Error())
+				return
+			}
+			if errors.Is(err, ErrUnconfigured) {
+				platform.WriteError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
 				return
 			}
 			platform.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())

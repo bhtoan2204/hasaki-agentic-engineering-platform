@@ -101,6 +101,19 @@ After an intended extraction change, update both extractors and regenerate `test
 (`node src/cli/codeIndexParity.ts files go/internal/codeintelligence/testdata/parity/src <golden>`).
 Engine benchmark: `npm run bench:code-index -- <checkout>...` (isolated local database).
 
+## Knowledge scan parity
+
+`go/internal/knowledge` reproduces the importer's text rules (JavaScript semantics): `testdata/text-golden.json` is what
+the TypeScript functions compute on edge cases. After an intended change to a rule in `src/knowledge/importer.ts`,
+port it, bump `KNOWLEDGE_SCAN_VERSION` / `ScanVersion` together and regenerate the golden:
+
+```sh
+node --disable-warning=ExperimentalWarning --import ./test/env.ts test/fixtures/knowledgeTextGolden.ts
+```
+
+`test/knowledge-import-go.integration.ts` compares both engines end to end (discovery, reports, registry, embedding
+eligibility). Engine benchmark: `npm run bench:knowledge-import` (isolated local database).
+
 ## Docker
 
 ```sh
@@ -111,7 +124,9 @@ Debian bookworm-slim image (CGO binary, git for indexing), non-root, `GOMEMLIMIT
 `127.0.0.1:4646` only. Indexing receives absolute paths: compose mounts `~/src` and `~/.claude-task-platform`
 read-only at the same paths. Compose sets
 `DATABASE_URL` to the `postgres` service (image `pgvector/pgvector:pg17`) and `EMBEDDING_URL` to the `ollama`
-service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`).
+service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`). Code search and knowledge scans in the
+container need `PLATFORM_TRUSTED_ROOTS` in `.env` (the mounted paths, e.g. `/home/<user>/src:/home/<user>/.claude-task-platform`);
+without it they answer 503 and the TypeScript engines serve those requests.
 
 ## Environment
 
@@ -122,6 +137,7 @@ service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`).
 | `DATABASE_POOL_MAX` | `4` | 1–16 |
 | `RETRIEVAL_INTERNAL_TOKEN` | required | ≥ 32 characters; `Authorization: Bearer` on `/internal/*` |
 | `REQUEST_TIMEOUT_MAX_MS` | `2000` | request deadline = min(`X-Request-Timeout-Ms`, this) |
+| `PLATFORM_TRUSTED_ROOTS` | empty | `:`-separated directories code search and knowledge scans may read below (ADR 0006, 0007); set by the supervising server; empty → those endpoints answer 503 |
 | `EMBEDDING_PROVIDER` | `ollama` | `ollama` or `openai` (any OpenAI-compatible `/v1/embeddings`) |
 | `EMBEDDING_URL` | `http://127.0.0.1:11434` | `https://api.openai.com` for `openai` |
 | `EMBEDDING_MODEL` | `bge-m3` | |

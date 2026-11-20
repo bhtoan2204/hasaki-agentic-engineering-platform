@@ -2,6 +2,7 @@ package codeintelligence
 
 import (
 	"bufio"
+	"claude-task-platform/go/internal/platform"
 	"context"
 	"encoding/json"
 	"errors"
@@ -169,14 +170,21 @@ func queryTerms(text string) []string {
 type Searcher struct {
 	DB    *pgxpool.Pool
 	Slots chan struct{}
+	// Roots: the trusted roots of this process's configuration (PLATFORM_TRUSTED_ROOTS). A request's allowed_roots
+	// must lie inside them, so a request can only narrow where platform-go reads, never widen it.
+	Roots []string
 }
 
 func NewSearcher(db *pgxpool.Pool, concurrent int) *Searcher {
 	return &Searcher{DB: db, Slots: make(chan struct{}, max(1, concurrent))}
 }
 
-// ValidateSearch rejects anything TypeScript would never send: arbitrary paths, refs or oversized inputs.
-func ValidateSearch(r *SearchRequest) error {
+// ErrUnconfigured: no trusted roots configured; the caller answers through its own engine.
+var ErrUnconfigured = errors.New("no trusted roots configured (PLATFORM_TRUSTED_ROOTS)")
+
+// ValidateSearch rejects anything TypeScript would never send: arbitrary paths, refs or oversized inputs, and roots
+// outside `trusted` (server-side configuration, not the request).
+func ValidateSearch(r *SearchRequest, trusted []string) error {
 	if !strings.HasPrefix(r.ParserVersion, ExtractorVersion+"/") {
 		return ErrVersion
 	}
@@ -197,9 +205,15 @@ func ValidateSearch(r *SearchRequest) error {
 		return errors.New("limits are required")
 	}
 	seen := map[string]bool{}
+	if len(trusted) == 0 {
+		return ErrUnconfigured
+	}
 	for _, root := range r.AllowedRoots {
 		if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" {
 			return errors.New("invalid allowed root")
+		}
+		if real, err := filepath.EvalSymlinks(root); err != nil || real != root || !platform.Inside(root, trusted) {
+			return errors.New("allowed root outside the trusted roots")
 		}
 	}
 	for _, repo := range r.Repositories {

@@ -2,6 +2,7 @@ package codeintelligence
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -102,7 +103,7 @@ func validSearch(t *testing.T) (*SearchRequest, string) {
 
 func TestValidateSearchRefusesWhatTypeScriptNeverSends(t *testing.T) {
 	req, repos := validSearch(t)
-	if err := ValidateSearch(req); err != nil {
+	if err := ValidateSearch(req, []string{filepath.Dir(repos)}); err != nil {
 		t.Fatalf("valid request refused: %v", err)
 	}
 	outside, _ := filepath.EvalSymlinks(t.TempDir())
@@ -143,19 +144,19 @@ func TestValidateSearchRefusesWhatTypeScriptNeverSends(t *testing.T) {
 		r.AllowedRoots = []string{repos}
 		r.Repositories[0].Root, r.Repositories[0].Primary = filepath.Join(repos, "a"), filepath.Join(repos, "a")
 		mutate(r)
-		if err := ValidateSearch(r); err == nil {
+		if err := ValidateSearch(r, []string{filepath.Dir(repos)}); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
 }
 
 func TestSearchContract(t *testing.T) {
-	req, _ := validSearch(t)
+	req, repos := validSearch(t)
 	body, _ := json.Marshal(req)
 	assertContract(t, "SearchRequest", body)
 
 	mux := http.NewServeMux()
-	Routes(mux, NewIndexer(nil, 1, 1), slog.New(slog.DiscardHandler))
+	Routes(mux, NewIndexer(nil, 1, 1).WithTrustedRoots([]string{filepath.Dir(repos)}), slog.New(slog.DiscardHandler))
 	post := func(body string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest("POST", "/internal/v1/code-intelligence/search", strings.NewReader(body)))
@@ -192,4 +193,35 @@ func TestSearchContract(t *testing.T) {
 		Body:        ptr("a/x.ts:1-2 commit=c base\n"),
 	})
 	assertContract(t, "SearchResponse", resp)
+}
+
+// §9 (ADR 0007): the request's allowed_roots only narrow the server's trusted roots; without trusted roots the
+// endpoint is unavailable (the TypeScript engine answers), never open.
+func TestAllowedRootsMustLieInsideTheTrustedRoots(t *testing.T) {
+	req, repos := validSearch(t)
+	if err := ValidateSearch(req, nil); !errors.Is(err, ErrUnconfigured) {
+		t.Fatalf("no trusted roots: %v", err)
+	}
+	elsewhere, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := ValidateSearch(req, []string{elsewhere}); err == nil {
+		t.Fatal("allowed root outside the trusted roots accepted")
+	}
+	// The request widening its own allowed roots to "/"-like parents of the trusted root is refused too.
+	wide := *req
+	wide.AllowedRoots = []string{filepath.Dir(filepath.Dir(repos))}
+	if err := ValidateSearch(&wide, []string{filepath.Dir(repos)}); err == nil {
+		t.Fatal("allowed root wider than the trusted root accepted")
+	}
+	if err := ValidateSearch(req, []string{repos}); err != nil {
+		t.Fatalf("allowed root equal to a trusted root refused: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	Routes(mux, NewIndexer(nil, 1, 1), slog.New(slog.DiscardHandler))
+	b, _ := json.Marshal(req)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", "/internal/v1/code-intelligence/search", strings.NewReader(string(b))))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured trusted roots: status %d", w.Code)
+	}
 }

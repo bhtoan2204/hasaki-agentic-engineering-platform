@@ -1,0 +1,135 @@
+{
+  "generated_at": "2026-11-20T21:57:04.436Z",
+  "db_latency_ms_each_way": 20,
+  "iterations": 3,
+  "fixture": "44 documents in 1 repositories (every fifth a wiki) + 5 user skills",
+  "runs": {
+    "typescript": {
+      "1": {
+        "scan_only": {
+          "p50_ms": 9.4,
+          "p95_ms": 22.5,
+          "p99_ms": 22.5,
+          "sql_statements": 0,
+          "bytes_read": 64571,
+          "node_cpu_ms": 15.7,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6,
+          "concurrent_probe_p95_ms": 52.1,
+          "new_versions": 0,
+          "embedding_jobs": 0
+        },
+        "cold": {
+          "p50_ms": 20057.5,
+          "p95_ms": 20249.5,
+          "p99_ms": 20249.5,
+          "sql_statements": 775,
+          "bytes_read": 855521,
+          "node_cpu_ms": 1608.7,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.8,
+          "new_versions": 43,
+          "embedding_jobs": 43,
+          "report": {
+            "created": 43,
+            "updated": 0,
+            "unchanged": 0,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "unchanged": {
+          "p50_ms": 7390.2,
+          "p95_ms": 7391,
+          "p99_ms": 7391,
+          "sql_statements": 284,
+          "bytes_read": 577881.3,
+          "node_cpu_ms": 485.8,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6.1,
+          "concurrent_probe_p95_ms": 43.5,
+          "new_versions": 0,
+          "embedding_jobs": 0,
+          "report": {
+            "created": 0,
+            "updated": 0,
+            "unchanged": 43,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_1pct": {
+          "p50_ms": 7569.4,
+          "p95_ms": 8374.8,
+          "p99_ms": 8374.8,
+          "sql_statements": 301,
+          "bytes_read": 618743.3,
+          "node_cpu_ms": 510.4,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6,
+          "concurrent_probe_p95_ms": 43.4,
+          "new_versions": 0.7,
+          "embedding_jobs": 0.7,
+          "modified_files": 0.3,
+          "report": {
+            "created": 1,
+            "updated": 1,
+            "unchanged": 42,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_10pct": {
+          "p50_ms": 9365.7,
+          "p95_ms": 9403.7,
+          "p99_ms": 9403.7,
+          "sql_statements": 362,
+          "bytes_read": 696810,
+          "node_cpu_ms": 562.8,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6,
+          "concurrent_probe_p95_ms": 43.3,
+          "new_versions": 4,
+          "embedding_jobs": 4,
+          "modified_files": 4,
+          "report": {
+            "created": 0,
+            "updated": 4,
+            "unchanged": 40,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "modified_100pct": {
+          "p50_ms": 25530.4,
+          "p95_ms": 25633.2,
+          "p99_ms": 25633.2,
+          "sql_statements": 989.7,
+          "bytes_read": 1842242,
+          "node_cpu_ms": 1414.8,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6,
+          "concurrent_probe_p95_ms": 43.1,
+          "new_versions": 39,
+          "embedding_jobs": 39,
+          "modified_files": 39,
+          "report": {
+            "created": 0,
+            "updated": 39,
+            "unchanged": 5,
+            "retired": 0,
+            "conflicts": 0,
+            "skipped": 0
+          }
+        },
+        "documents": 39,
+        "node_peak_rss_mb": 118.3
+      }
+    }
+  }
+}
