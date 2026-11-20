@@ -25,8 +25,8 @@ type Admission struct {
 }
 
 // Acquire returns the held slot (close it to release) and how long it waited. It gives up when ctx ends (canceled
-// before the command started) or Timeout passes; a pressure wait that times out still runs the command (the slot is
-// the hard bound, pressure only defers).
+// before the command started) or when Timeout passes — waiting for a slot or for the host's pressure to drop alike:
+// the command is then refused (admission_timeout), never started on an overloaded host (fail closed, ADR 0005).
 func (a Admission) Acquire(ctx context.Context) (*os.File, time.Duration, error) {
 	start := time.Now()
 	if a.Slots <= 0 {
@@ -63,12 +63,19 @@ func (a Admission) Acquire(ctx context.Context) (*os.File, time.Duration, error)
 	}
 }
 
+// pressure reads the host's PSI (a variable so tests can simulate an overloaded host).
+var pressure = SystemPressure
+
 func (a Admission) waitPressure(ctx context.Context, deadline time.Time) error {
 	for {
-		cpu, mem, _ := SystemPressure()
+		cpu, mem, _ := pressure()
 		over := (a.MaxMemoryPressure > 0 && mem > a.MaxMemoryPressure) || (a.MaxCPUPressure > 0 && cpu > a.MaxCPUPressure)
-		if !over || (a.Timeout > 0 && time.Now().After(deadline)) {
+		if !over {
 			return nil
+		}
+		if a.Timeout > 0 && time.Now().After(deadline) {
+			return fmt.Errorf("host pressure stayed above the admission threshold for %s (cpu %.1f%%, memory %.1f%%)",
+				a.Timeout, cpu, mem)
 		}
 		select {
 		case <-ctx.Done():

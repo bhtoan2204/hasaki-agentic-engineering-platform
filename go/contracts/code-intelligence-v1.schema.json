@@ -81,13 +81,148 @@
       }
     },
     "Error": {
-      "description": "400 invalid_request, 409 version_mismatch | lease_lost, 422 index_failed (message is one of the TypeScript indexer's categories)",
+      "description": "400 invalid_request, 409 version_mismatch | lease_lost, 422 index_failed (message is one of the TypeScript indexer's categories); search: 504 timeout, 503 unavailable",
       "type": "object",
       "additionalProperties": false,
       "required": ["error", "code"],
       "properties": {
         "error": { "type": "string" },
-        "code": { "enum": ["invalid_request", "version_mismatch", "lease_lost", "index_failed"] }
+        "code": { "enum": ["invalid_request", "version_mismatch", "lease_lost", "index_failed", "timeout", "unavailable"] }
+      }
+    },
+    "Provenance": {
+      "description": "Snapshot that produced a hit: id null for live (unindexed) evidence; generation empty for base snapshots",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "commit", "generation", "run_id"],
+      "properties": {
+        "id": { "type": ["integer", "null"] },
+        "commit": { "type": "string" },
+        "generation": { "type": "string" },
+        "run_id": { "type": ["integer", "null"] }
+      }
+    },
+    "SearchRepository": {
+      "description": "A checkout TypeScript already authorized (registration, read permission, run ownership, worktree identity). Paths are canonical (no symlink), inside allowed_roots, and hold a .git; Go re-checks all of it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "repository_id", "root", "primary", "default_branch", "run_id"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "repository_id": { "type": "integer", "minimum": 1 },
+        "root": { "type": "string" },
+        "primary": { "type": "string" },
+        "default_branch": { "type": "string", "pattern": "^[A-Za-z0-9._/-]{1,200}$" },
+        "run_id": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "SearchRequest": {
+      "description": "POST /internal/v1/code-intelligence/search (CODE_SEARCH_ENGINE=go, ADR 0006). Repositories keep the caller's scope order.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "repositories", "unavailable", "allowed_roots", "instance_id", "parser_version", "context_chars", "limits"],
+      "properties": {
+        "op": { "enum": ["symbols", "dependencies", "exact", "context"] },
+        "text": { "type": "string", "maxLength": 8000 },
+        "symbol": { "type": "string", "maxLength": 512 },
+        "pattern": { "type": "string", "maxLength": 256, "description": "exact only: fixed string, no newline or NUL" },
+        "limit": { "type": "integer", "minimum": 0, "maximum": 200 },
+        "depth": { "type": "integer", "maximum": 3 },
+        "direction": { "enum": ["", "in", "out"] },
+        "any_file": { "type": "boolean" },
+        "repositories": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/SearchRepository" } },
+        "unavailable": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "error"],
+            "properties": { "name": { "type": "string" }, "error": { "type": "string" } }
+          }
+        },
+        "allowed_roots": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "instance_id": { "type": "string", "minLength": 1 },
+        "parser_version": { "type": "string" },
+        "context_chars": { "type": "integer", "minimum": 0, "maximum": 200000 },
+        "limits": { "$ref": "#/$defs/Limits" }
+      }
+    },
+    "SearchHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "file_path", "line_range", "match_type", "confidence", "snapshot"],
+      "properties": {
+        "repository": { "type": "string" },
+        "file_path": { "type": "string" },
+        "line_range": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "match_type": { "type": "string" },
+        "confidence": { "type": "number" },
+        "snapshot": { "$ref": "#/$defs/Provenance" },
+        "symbol_name": { "type": "string" },
+        "qualified_name": { "type": "string" },
+        "signature": { "type": "string" },
+        "snippet": { "type": "string" },
+        "content_hash": { "type": "string" }
+      }
+    },
+    "SearchEdge": {
+      "description": "A relation row; candidate_definitions only on unresolved (candidate) edges",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "extraction_id", "file_path", "source_name", "target_name", "relation_type", "resolution", "line", "content_hash", "repository", "snapshot", "line_range", "match_type", "confidence", "depth"],
+      "properties": {
+        "id": { "type": "integer" },
+        "extraction_id": { "type": "integer" },
+        "file_path": { "type": "string" },
+        "source_name": { "type": "string" },
+        "target_name": { "type": "string" },
+        "relation_type": { "type": "string" },
+        "resolution": { "type": "string" },
+        "line": { "type": "integer" },
+        "content_hash": { "type": "string" },
+        "repository": { "type": "string" },
+        "snapshot": { "$ref": "#/$defs/Provenance" },
+        "line_range": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "match_type": { "type": "string" },
+        "confidence": { "type": "number" },
+        "depth": { "type": "integer" },
+        "candidate_definitions": { "type": "array", "items": { "$ref": "#/$defs/SearchHit" } }
+      }
+    },
+    "SearchResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fallback_count", "unavailable", "enqueue", "metrics"],
+      "properties": {
+        "hits": { "type": "array", "items": { "$ref": "#/$defs/SearchHit" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/SearchEdge" } },
+        "fallback_count": { "type": "integer" },
+        "unavailable": { "type": ["array", "null"], "items": { "type": "string" } },
+        "enqueue": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repository", "run_id"],
+            "properties": { "repository": { "type": "string" }, "run_id": { "type": ["integer", "null"] } }
+          }
+        },
+        "body": { "type": "string" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["statements", "git_processes", "rg_processes", "source_reads", "source_bytes", "freshness_checks", "took_ms"],
+          "properties": {
+            "statements": { "type": "integer" },
+            "git_processes": { "type": "integer" },
+            "rg_processes": { "type": "integer" },
+            "source_reads": { "type": "integer" },
+            "source_bytes": { "type": "integer" },
+            "freshness_checks": { "type": "integer" },
+            "took_ms": { "type": "integer" }
+          }
+        }
       }
     }
   }

@@ -1,0 +1,602 @@
+{
+  "generated_at": "2026-11-20T19:25:49.406Z",
+  "db_latency_ms_each_way": 0,
+  "iterations": 5,
+  "repository": "this platform's src/ (\u2248360 TypeScript files) per repository",
+  "runs": {
+    "typescript": {
+      "1": {
+        "searchSymbols": {
+          "cold_ms": 318.3,
+          "p50_ms": 295.4,
+          "p95_ms": 323.9,
+          "p99_ms": 323.9,
+          "sql_statements": 16,
+          "git_subprocesses": 38,
+          "rg_subprocesses": 1,
+          "bytes_read": 0,
+          "node_cpu_ms": 83.2,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8
+        },
+        "findDependencies": {
+          "cold_ms": 248.6,
+          "p50_ms": 255.4,
+          "p95_ms": 305.3,
+          "p99_ms": 305.3,
+          "sql_statements": 14,
+          "git_subprocesses": 32,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 71.1,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.3
+        },
+        "findReferences": {
+          "cold_ms": 123.3,
+          "p50_ms": 117.8,
+          "p95_ms": 140.2,
+          "p99_ms": 140.2,
+          "sql_statements": 7,
+          "git_subprocesses": 16,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 36.9,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.1
+        },
+        "searchCodeExact": {
+          "cold_ms": 72.7,
+          "p50_ms": 71.1,
+          "p95_ms": 77.8,
+          "p99_ms": 77.8,
+          "sql_statements": 0,
+          "git_subprocesses": 12,
+          "rg_subprocesses": 1,
+          "bytes_read": 0,
+          "node_cpu_ms": 40,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 7.7
+        },
+        "buildCodeContext": {
+          "cold_ms": 3219.7,
+          "p50_ms": 3329.7,
+          "p95_ms": 3406.7,
+          "p99_ms": 3406.7,
+          "sql_statements": 168,
+          "git_subprocesses": 456,
+          "rg_subprocesses": 2,
+          "bytes_read": 0,
+          "node_cpu_ms": 998,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.3
+        }
+      },
+      "5": {
+        "searchSymbols": {
+          "cold_ms": 1508.2,
+          "p50_ms": 1509.3,
+          "p95_ms": 1607,
+          "p99_ms": 1607,
+          "sql_statements": 80,
+          "git_subprocesses": 190,
+          "rg_subprocesses": 5,
+          "bytes_read": 0,
+          "node_cpu_ms": 390.9,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.2
+        },
+        "findDependencies": {
+          "cold_ms": 719.6,
+          "p50_ms": 654,
+          "p95_ms": 778.1,
+          "p99_ms": 778.1,
+          "sql_statements": 41,
+          "git_subprocesses": 96,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 201.3,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.1
+        },
+        "findReferences": {
+          "cold_ms": 582.3,
+          "p50_ms": 594.2,
+          "p95_ms": 648.4,
+          "p99_ms": 648.4,
+          "sql_statements": 35,
+          "git_subprocesses": 80,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 167.8,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 9.2
+        },
+        "searchCodeExact": {
+          "cold_ms": 186.7,
+          "p50_ms": 180.9,
+          "p95_ms": 193.5,
+          "p99_ms": 193.5,
+          "sql_statements": 0,
+          "git_subprocesses": 24,
+          "rg_subprocesses": 2,
+          "bytes_read": 0,
+          "node_cpu_ms": 90,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 7.1
+        },
+        "buildCodeContext": {
+          "cold_ms": 14936,
+          "p50_ms": 14798.8,
+          "p95_ms": 15371.3,
+          "p99_ms": 15371.3,
+          "sql_statements": 814.2,
+          "git_subprocesses": 2050,
+          "rg_subprocesses": 10,
+          "bytes_read": 0,
+          "node_cpu_ms": 4193.8,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.2
+        }
+      },
+      "15": {
+        "searchSymbols": {
+          "cold_ms": 4405.3,
+          "p50_ms": 4377,
+          "p95_ms": 4421.5,
+          "p99_ms": 4421.5,
+          "sql_statements": 240,
+          "git_subprocesses": 570,
+          "rg_subprocesses": 15,
+          "bytes_read": 0,
+          "node_cpu_ms": 1091.6,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 7.7
+        },
+        "findDependencies": {
+          "cold_ms": 1715.7,
+          "p50_ms": 1736.7,
+          "p95_ms": 1823,
+          "p99_ms": 1823,
+          "sql_statements": 111,
+          "git_subprocesses": 256,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 488.2,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 7.7
+        },
+        "findReferences": {
+          "cold_ms": 562.5,
+          "p50_ms": 553.7,
+          "p95_ms": 560.5,
+          "p99_ms": 560.5,
+          "sql_statements": 36,
+          "git_subprocesses": 96,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 179.6,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 7.6
+        },
+        "searchCodeExact": {
+          "cold_ms": 169.2,
+          "p50_ms": 174.7,
+          "p95_ms": 179.7,
+          "p99_ms": 179.7,
+          "sql_statements": 0,
+          "git_subprocesses": 24,
+          "rg_subprocesses": 2,
+          "bytes_read": 0,
+          "node_cpu_ms": 83.2,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 6.7
+        },
+        "buildCodeContext": {
+          "cold_ms": 33656.1,
+          "p50_ms": 34703.6,
+          "p95_ms": 35361.6,
+          "p99_ms": 35361.6,
+          "sql_statements": 1977.6,
+          "git_subprocesses": 5020,
+          "rg_subprocesses": 30,
+          "bytes_read": 0,
+          "node_cpu_ms": 10128.5,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.3
+        }
+      },
+      "30": {
+        "searchSymbols": {
+          "cold_ms": 8973.2,
+          "p50_ms": 8919.1,
+          "p95_ms": 9238.8,
+          "p99_ms": 9238.8,
+          "sql_statements": 480.2,
+          "git_subprocesses": 1140,
+          "rg_subprocesses": 30,
+          "bytes_read": 0,
+          "node_cpu_ms": 2276.3,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 7.9
+        },
+        "findDependencies": {
+          "cold_ms": 3292,
+          "p50_ms": 3362.4,
+          "p95_ms": 3379.8,
+          "p99_ms": 3379.8,
+          "sql_statements": 213,
+          "git_subprocesses": 488,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 928.8,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.4
+        },
+        "findReferences": {
+          "cold_ms": 557.7,
+          "p50_ms": 565.1,
+          "p95_ms": 600.9,
+          "p99_ms": 600.9,
+          "sql_statements": 36,
+          "git_subprocesses": 96,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 191.6,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8
+        },
+        "searchCodeExact": {
+          "cold_ms": 181.4,
+          "p50_ms": 175.2,
+          "p95_ms": 201.8,
+          "p99_ms": 201.8,
+          "sql_statements": 0,
+          "git_subprocesses": 24,
+          "rg_subprocesses": 2,
+          "bytes_read": 0,
+          "node_cpu_ms": 88.8,
+          "go_cpu_ms": 0,
+          "event_loop_p99_ms": 8.1
+        },
+        "buildCodeContext": {
+          "cold_ms": 53776.9,
+          "p50_ms": 53477.7,
+          "p95_ms": 54053.1,
+          "p99_ms": 54053.1,
+          "sql_statements": 3025,
+          "git_subprocesses": 7892,
+          "rg_subprocesses": 60,
+          "bytes_read": 0,
+          "node_cpu_ms": 15719,
+          "go_cpu_ms": 4,
+          "event_loop_p99_ms": 8
+        }
+      }
+    },
+    "go": {
+      "1": {
+        "searchSymbols": {
+          "cold_ms": 274.3,
+          "p50_ms": 250.9,
+          "p95_ms": 273.8,
+          "p99_ms": 273.8,
+          "sql_statements": 16,
+          "git_subprocesses": 31,
+          "rg_subprocesses": 1,
+          "bytes_read": 0,
+          "node_cpu_ms": 33.8,
+          "go_cpu_ms": 26,
+          "event_loop_p99_ms": 8.3
+        },
+        "findDependencies": {
+          "cold_ms": 118.1,
+          "p50_ms": 116,
+          "p95_ms": 178.4,
+          "p99_ms": 178.4,
+          "sql_statements": 8,
+          "git_subprocesses": 6,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 9.7,
+          "go_cpu_ms": 10,
+          "event_loop_p99_ms": 6
+        },
+        "findReferences": {
+          "cold_ms": 60.8,
+          "p50_ms": 61.3,
+          "p95_ms": 71.3,
+          "p99_ms": 71.3,
+          "sql_statements": 5,
+          "git_subprocesses": 6,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 8.6,
+          "go_cpu_ms": 4,
+          "event_loop_p99_ms": 8.3
+        },
+        "searchCodeExact": {
+          "cold_ms": 67.9,
+          "p50_ms": 65.6,
+          "p95_ms": 68.6,
+          "p99_ms": 68.6,
+          "sql_statements": 0,
+          "git_subprocesses": 9,
+          "rg_subprocesses": 1,
+          "bytes_read": 0,
+          "node_cpu_ms": 7.2,
+          "go_cpu_ms": 8,
+          "event_loop_p99_ms": 8.2
+        },
+        "buildCodeContext": {
+          "cold_ms": 867.8,
+          "p50_ms": 862.9,
+          "p95_ms": 911.4,
+          "p99_ms": 911.4,
+          "sql_statements": 78,
+          "git_subprocesses": 35,
+          "rg_subprocesses": 2,
+          "bytes_read": 0,
+          "node_cpu_ms": 53.4,
+          "go_cpu_ms": 64,
+          "event_loop_p99_ms": 6
+        }
+      },
+      "5": {
+        "searchSymbols": {
+          "cold_ms": 620.6,
+          "p50_ms": 625.9,
+          "p95_ms": 641.5,
+          "p99_ms": 641.5,
+          "sql_statements": 16,
+          "git_subprocesses": 155,
+          "rg_subprocesses": 5,
+          "bytes_read": 0,
+          "node_cpu_ms": 89.4,
+          "go_cpu_ms": 112,
+          "event_loop_p99_ms": 12.9
+        },
+        "findDependencies": {
+          "cold_ms": 194.8,
+          "p50_ms": 176,
+          "p95_ms": 187.8,
+          "p99_ms": 187.8,
+          "sql_statements": 6,
+          "git_subprocesses": 30,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 22.2,
+          "go_cpu_ms": 32,
+          "event_loop_p99_ms": 10.7
+        },
+        "findReferences": {
+          "cold_ms": 220.4,
+          "p50_ms": 153.5,
+          "p95_ms": 193,
+          "p99_ms": 193,
+          "sql_statements": 5,
+          "git_subprocesses": 30,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 21.6,
+          "go_cpu_ms": 20,
+          "event_loop_p99_ms": 12.8
+        },
+        "searchCodeExact": {
+          "cold_ms": 87.2,
+          "p50_ms": 80.8,
+          "p95_ms": 85.1,
+          "p99_ms": 85.1,
+          "sql_statements": 0,
+          "git_subprocesses": 38,
+          "rg_subprocesses": 4,
+          "bytes_read": 0,
+          "node_cpu_ms": 19.6,
+          "go_cpu_ms": 34,
+          "event_loop_p99_ms": 13
+        },
+        "buildCodeContext": {
+          "cold_ms": 2749.9,
+          "p50_ms": 2755.2,
+          "p95_ms": 2853.7,
+          "p99_ms": 2853.7,
+          "sql_statements": 76,
+          "git_subprocesses": 165,
+          "rg_subprocesses": 10,
+          "bytes_read": 0,
+          "node_cpu_ms": 110.3,
+          "go_cpu_ms": 176,
+          "event_loop_p99_ms": 6.1
+        }
+      },
+      "15": {
+        "searchSymbols": {
+          "cold_ms": 1451.6,
+          "p50_ms": 1437.1,
+          "p95_ms": 1445.1,
+          "p99_ms": 1445.1,
+          "sql_statements": 16,
+          "git_subprocesses": 465,
+          "rg_subprocesses": 15,
+          "bytes_read": 0,
+          "node_cpu_ms": 231.9,
+          "go_cpu_ms": 274,
+          "event_loop_p99_ms": 11.1
+        },
+        "findDependencies": {
+          "cold_ms": 366,
+          "p50_ms": 351.5,
+          "p95_ms": 381,
+          "p99_ms": 381,
+          "sql_statements": 6,
+          "git_subprocesses": 90,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 52.8,
+          "go_cpu_ms": 68,
+          "event_loop_p99_ms": 10.4
+        },
+        "findReferences": {
+          "cold_ms": 192.6,
+          "p50_ms": 188.4,
+          "p95_ms": 207.3,
+          "p99_ms": 207.3,
+          "sql_statements": 3,
+          "git_subprocesses": 90,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 50.1,
+          "go_cpu_ms": 68,
+          "event_loop_p99_ms": 10.8
+        },
+        "searchCodeExact": {
+          "cold_ms": 128.1,
+          "p50_ms": 126.5,
+          "p95_ms": 131.1,
+          "p99_ms": 131.1,
+          "sql_statements": 0,
+          "git_subprocesses": 58,
+          "rg_subprocesses": 4,
+          "bytes_read": 0,
+          "node_cpu_ms": 50.5,
+          "go_cpu_ms": 34,
+          "event_loop_p99_ms": 12.5
+        },
+        "buildCodeContext": {
+          "cold_ms": 4641.7,
+          "p50_ms": 4621.6,
+          "p95_ms": 4698.4,
+          "p99_ms": 4698.4,
+          "sql_statements": 64.2,
+          "git_subprocesses": 486.4,
+          "rg_subprocesses": 30,
+          "bytes_read": 0,
+          "node_cpu_ms": 202.6,
+          "go_cpu_ms": 422,
+          "event_loop_p99_ms": 7.7
+        }
+      },
+      "30": {
+        "searchSymbols": {
+          "cold_ms": 2323.2,
+          "p50_ms": 2311.2,
+          "p95_ms": 2344.3,
+          "p99_ms": 2344.3,
+          "sql_statements": 16,
+          "git_subprocesses": 930,
+          "rg_subprocesses": 30,
+          "bytes_read": 0,
+          "node_cpu_ms": 409,
+          "go_cpu_ms": 520,
+          "event_loop_p99_ms": 10.4
+        },
+        "findDependencies": {
+          "cold_ms": 600.3,
+          "p50_ms": 626.3,
+          "p95_ms": 691.7,
+          "p99_ms": 691.7,
+          "sql_statements": 6,
+          "git_subprocesses": 180,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 114.7,
+          "go_cpu_ms": 114,
+          "event_loop_p99_ms": 9.9
+        },
+        "findReferences": {
+          "cold_ms": 294.3,
+          "p50_ms": 313.5,
+          "p95_ms": 316.9,
+          "p99_ms": 316.9,
+          "sql_statements": 3,
+          "git_subprocesses": 180,
+          "rg_subprocesses": 0,
+          "bytes_read": 0,
+          "node_cpu_ms": 101.1,
+          "go_cpu_ms": 124,
+          "event_loop_p99_ms": 10.7
+        },
+        "searchCodeExact": {
+          "cold_ms": 191.8,
+          "p50_ms": 187.6,
+          "p95_ms": 190.4,
+          "p99_ms": 190.4,
+          "sql_statements": 0,
+          "git_subprocesses": 88,
+          "rg_subprocesses": 4,
+          "bytes_read": 0,
+          "node_cpu_ms": 96.5,
+          "go_cpu_ms": 36,
+          "event_loop_p99_ms": 10.9
+        },
+        "buildCodeContext": {
+          "cold_ms": 5480,
+          "p50_ms": 5506.5,
+          "p95_ms": 5670.5,
+          "p99_ms": 5670.5,
+          "sql_statements": 54.2,
+          "git_subprocesses": 966.4,
+          "rg_subprocesses": 60,
+          "bytes_read": 0,
+          "node_cpu_ms": 363.3,
+          "go_cpu_ms": 748,
+          "event_loop_p99_ms": 8.3
+        }
+      }
+    }
+  },
+  "quality": {
+    "identical_results": true,
+    "identical_per_query": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "hits_per_query": [
+      30,
+      30,
+      30,
+      0,
+      100,
+      8000
+    ]
+  },
+  "p50_improvement_pct": {
+    "1": {
+      "searchSymbols": 15.1,
+      "findDependencies": 54.6,
+      "findReferences": 48.0,
+      "searchCodeExact": 7.7,
+      "buildCodeContext": 74.1
+    },
+    "5": {
+      "searchSymbols": 58.5,
+      "findDependencies": 73.1,
+      "findReferences": 74.2,
+      "searchCodeExact": 55.3,
+      "buildCodeContext": 81.4
+    },
+    "15": {
+      "searchSymbols": 67.2,
+      "findDependencies": 79.8,
+      "findReferences": 66.0,
+      "searchCodeExact": 27.6,
+      "buildCodeContext": 86.7
+    },
+    "30": {
+      "searchSymbols": 74.1,
+      "findDependencies": 81.4,
+      "findReferences": 44.5,
+      "searchCodeExact": -7.1,
+      "buildCodeContext": 89.7
+    }
+  },
+  "platform_go": {
+    "cpu": 26650,
+    "hwm": 180.89453125
+  },
+  "note": "runs.go re-measured after exact search stopped at the limit like the sequential loop (same host, same fixtures); runs.typescript and quality are from the two-engine run (quality covers symbols, dependencies and context, unaffected)."
+}

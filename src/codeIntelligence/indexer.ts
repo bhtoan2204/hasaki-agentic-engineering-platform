@@ -234,6 +234,21 @@ export async function indexRepository(
 }
 
 /** The code-intelligence-v1 IndexRequest (go/contracts/code-intelligence-v1.schema.json). */
+/** Indexing limits as platform-go reads them (indexing and search requests). */
+export function goLimits() {
+  const ci = config.codeIntelligence;
+  return {
+    max_file_bytes: ci.maxFileBytes,
+    max_symbols: ci.maxSymbols,
+    max_files: ci.maxFiles,
+    max_scan_bytes: ci.maxScanBytes,
+    timeout_ms: ci.timeoutMs,
+    excludes: ci.excludes,
+    include_generated: ci.includeGenerated,
+    include_dependencies: ci.includeDependencies,
+  };
+}
+
 export function goIndexRequest(
   repositoryId: number,
   primary: string,
@@ -242,7 +257,6 @@ export function goIndexRequest(
   runId: number | undefined,
   fence: { id: number; token: number } | undefined,
 ) {
-  const ci = config.codeIntelligence;
   return {
     repository_id: repositoryId,
     primary,
@@ -254,16 +268,7 @@ export function goIndexRequest(
     fence: fence
       ? { ...fence, instance_id: config.instanceId, instance_session: instanceSession }
       : null,
-    limits: {
-      max_file_bytes: ci.maxFileBytes,
-      max_symbols: ci.maxSymbols,
-      max_files: ci.maxFiles,
-      max_scan_bytes: ci.maxScanBytes,
-      timeout_ms: ci.timeoutMs,
-      excludes: ci.excludes,
-      include_generated: ci.includeGenerated,
-      include_dependencies: ci.includeDependencies,
-    },
+    limits: goLimits(),
   };
 }
 

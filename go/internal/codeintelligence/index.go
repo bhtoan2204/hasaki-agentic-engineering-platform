@@ -51,9 +51,10 @@ type Response struct {
 
 // Indexer runs jobs with a bounded number of parse workers each, and at most `jobs` jobs at a time.
 type Indexer struct {
-	db      *pgxpool.Pool
-	workers int
-	jobs    chan struct{}
+	db       *pgxpool.Pool
+	workers  int
+	jobs     chan struct{}
+	searcher *Searcher
 }
 
 // NewIndexer leaves CPU for the API and the embedding worker: by default half the cores, at most four.
@@ -61,7 +62,7 @@ func NewIndexer(db *pgxpool.Pool, workers, jobs int) *Indexer {
 	if workers <= 0 {
 		workers = max(1, min(4, runtime.NumCPU()/2))
 	}
-	return &Indexer{db: db, workers: workers, jobs: make(chan struct{}, max(1, jobs))}
+	return &Indexer{searcher: NewSearcher(db, 4), db: db, workers: workers, jobs: make(chan struct{}, max(1, jobs))}
 }
 
 // ErrVersion means TypeScript asked for an index version this extractor does not produce.

@@ -1,4 +1,4 @@
-import { availableParallelism } from "node:os";
+import { availableParallelism, totalmem } from "node:os";
 import { execution } from "./auth/execution.ts";
 import { isOwned } from "./platform/operatorState.ts";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
@@ -27,6 +27,12 @@ export interface CodeIntelligenceConfig {
    * index version, so switching back needs no reindex). The queue, leases and authorization stay here either way.
    */
   engine: "typescript" | "go";
+  /**
+   * Which implementation answers searches, dependency/reference lookups and code context (ADR 0006): "typescript"
+   * (in-process) or "go" (platform-go, one request per call). Authorization and scope resolution stay here either way.
+   * Set by CODE_SEARCH_ENGINE.
+   */
+  searchEngine: "typescript" | "go";
   weights: {
     exact: number;
     qualified: number;
@@ -570,6 +576,10 @@ export interface Config {
   };
 }
 
+const HOST_MEMORY_MB = Math.floor(totalmem() / 1048576);
+const AGENT_MEMORY_MB = 4096;
+const VERIFY_MEMORY_MB = Math.min(6144, Math.floor(HOST_MEMORY_MB / 2));
+
 const defaults: Config = {
   knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
   retrieval: {
@@ -597,6 +607,7 @@ const defaults: Config = {
     excludes: [],
     sqlDialect: "postgresql",
     engine: "typescript",
+    searchEngine: "typescript",
     weights: {
       exact: 2,
       qualified: 2,
@@ -760,16 +771,30 @@ const defaults: Config = {
   },
   supervision: {
     engine: "typescript",
-    // Conservative: large enough for real builds and agents, small enough that one runaway process cannot take
-    // the whole WSL VM (its default is half the host's memory).
+    // Budgeted against this host: each class's limits summed over its slots stay within physical memory (a cap is
+    // not a reservation, and the memory-pressure gate defers starts when the host is actually short). Agents get the
+    // sandbox's 4 GiB; verification (builds, test databases) the smaller of 6 GiB and half the RAM.
     limits: {
-      agent: { memoryMb: 8192, pids: 4096 },
-      verification: { memoryMb: 8192, pids: 8192, fileSizeMb: 4096 },
+      agent: { memoryMb: AGENT_MEMORY_MB, pids: 4096 },
+      verification: { memoryMb: VERIFY_MEMORY_MB, pids: 8192, fileSizeMb: 4096 },
     },
-    // Verification matches the in-process VERIFY_MAX_CONCURRENT default; host-wide, it also bounds other instances.
+    // Verification never exceeds the in-process VERIFY_MAX_CONCURRENT default; host-wide, it also bounds other
+    // instances. Both are capped by memory: 15 GiB / 16 CPUs gives 3 agents and 2 verification commands at once.
     slots: {
-      agent: Math.max(2, Math.floor(availableParallelism() / 2)),
-      verification: Math.max(1, Math.floor(availableParallelism() / 4)),
+      agent: Math.max(
+        1,
+        Math.min(
+          Math.floor(availableParallelism() / 2),
+          Math.floor(HOST_MEMORY_MB / AGENT_MEMORY_MB),
+        ),
+      ),
+      verification: Math.max(
+        1,
+        Math.min(
+          Math.floor(availableParallelism() / 4),
+          Math.floor(HOST_MEMORY_MB / VERIFY_MEMORY_MB),
+        ),
+      ),
     },
     psiMemory: 40,
     psiCpu: 0,
@@ -959,6 +984,11 @@ function load(): Config {
     "analytics.maxFallbackConcurrency",
     cfg.analytics.maxFallbackConcurrency,
   );
+  if (process.env.CODE_SEARCH_ENGINE)
+    cfg.codeIntelligence.searchEngine = process.env
+      .CODE_SEARCH_ENGINE as CodeIntelligenceConfig["searchEngine"];
+  if (!["typescript", "go"].includes(cfg.codeIntelligence.searchEngine))
+    throw new Error("CODE_SEARCH_ENGINE must be typescript or go");
   if (process.env.PROD_ERRORS_ENGINE)
     cfg.prodErrors.engine = process.env.PROD_ERRORS_ENGINE as Config["prodErrors"]["engine"];
   if (!["typescript", "go"].includes(cfg.prodErrors.engine))

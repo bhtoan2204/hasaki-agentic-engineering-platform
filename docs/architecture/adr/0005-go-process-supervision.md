@@ -69,9 +69,19 @@ default; CPU pressure gating is off by default), bounded by the admission timeou
 (`admission_timeout`) rather than running it. A launcher stopped while waiting ends without starting the command.
 No adaptive scheduler, no host configuration changes.
 
-Defaults (`config.supervision`): agents 8 GiB / 4,096 tasks and `max(2, CPUs/2)` host-wide slots; verification
-8 GiB / 8,192 tasks / 4 GiB file size and `max(1, CPUs/4)` slots (the existing `VERIFY_MAX_CONCURRENT` default). They
-only apply with the Go engine; WSL2's VM otherwise lets one runaway build take half the host's memory.
+Pressure wait past the deadline (amended with [ADR 0006](0006-go-code-search.md)): the first implementation of
+`waitPressure()` gave up waiting and *admitted* the command when the deadline passed, contrary to the text above. It
+now returns an error and the slot is released: a host whose pressure never drops runs nothing new (fail closed,
+`TestPressureTimeoutRefusesTheCommand`).
+
+Defaults (`config.supervision`, reviewed with ADR 0006 so that a full set of slots fits the host's memory instead of
+overcommitting it): agents 4 GiB / 4,096 tasks; verification `min(6 GiB, RAM/2)` / 8,192 tasks / 4 GiB file size.
+Host-wide slots are bounded by CPUs **and** by memory: agents `max(1, min(CPUs/2, RAM/4 GiB))`, verification
+`max(1, min(CPUs/4, RAM/verification limit))` (16 CPUs / 15 GiB WSL2: 3 agent and 2 verification slots, 24 GiB in the
+worst case instead of the former 8 + 4 slots × 8 GiB = 96 GiB). The previous `max(2, …)` floor could admit two 8 GiB
+agents on an 8 GiB machine. Every value stays overridable in `config.supervision`. They only apply with the Go engine;
+WSL2's VM otherwise lets one runaway build take half the host's memory. Code search (ADR 0006) runs inside
+platform-go with its own bound (4 concurrent searches × 4 subprocesses), not in these slots.
 
 ### TypeScript adapter
 

@@ -5,6 +5,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { config } from "../src/config.ts";
 import { goIndexRequest } from "../src/codeIntelligence/indexer.ts";
 import { parserVersion } from "../src/codeIntelligence/parser.ts";
+import { goSearchRequest } from "../src/codeIntelligence/goSearch.ts";
 
 const schema = JSON.parse(
   readFileSync(
@@ -39,5 +40,57 @@ test("the request carries this platform's index version, which Go must reproduce
   assert.equal(
     goIndexRequest(1, "/r", "/r", "b".repeat(40), undefined, undefined).limits.max_symbols,
     config.codeIntelligence.maxSymbols,
+  );
+});
+
+test("CODE_SEARCH_ENGINE=go sends code-intelligence-v1 SearchRequests for every operation", () => {
+  const resolved = {
+    repositories: [
+      {
+        name: "a",
+        repository_id: 1,
+        root: "/repos/a",
+        primary: "/repos/a",
+        default_branch: "main",
+        run_id: null,
+      },
+      {
+        name: "b",
+        repository_id: 2,
+        root: "/data/wt/b",
+        primary: "/repos/b",
+        default_branch: "dev",
+        run_id: 4,
+      },
+    ],
+    unavailable: [{ name: "c", error: "Repository unavailable or unauthorized" }],
+  };
+  const roots = ["/repos", "/data"];
+  validate(
+    "SearchRequest",
+    goSearchRequest("symbols", { text: "searchSymbols", limit: 30 }, resolved, roots),
+  );
+  validate(
+    "SearchRequest",
+    goSearchRequest(
+      "dependencies",
+      { symbol: "fresh", depth: 2, direction: "in" },
+      resolved,
+      roots,
+    ),
+  );
+  validate(
+    "SearchRequest",
+    goSearchRequest("exact", { pattern: "fresh(", limit: 20, any_file: true }, resolved, roots),
+  );
+  validate(
+    "SearchRequest",
+    goSearchRequest("context", { text: "buildCodeContext" }, resolved, roots),
+  );
+  assert.ok(
+    !ajv.validate(
+      "code-intelligence-v1#/$defs/SearchRequest",
+      goSearchRequest("exact", { limit: 999 }, resolved, roots),
+    ),
   );
 });

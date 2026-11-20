@@ -8,6 +8,7 @@ import { redactSecrets } from "../integrations/redact.ts";
 import { effectiveSql, snapshot, type Snapshot } from "./store.ts";
 import { baseCommit, changes, git, readSource, eligible, safePath, hash } from "./git.ts";
 import { localScope, enqueue } from "./indexer.ts";
+import { goSearch } from "./goSearch.ts";
 const exec = promisify(execFile);
 export interface SearchScope {
   repositories: string[];
@@ -91,6 +92,14 @@ async function scopeRun(name: string, scope: SearchScope) {
   if (!scope.runId) return undefined;
   return (await workspacesOf(scope.runId)).some((w) => w.repo === name) ? scope.runId : undefined;
 }
+/** Ranking of search hits (both engines): confidence, qualified first, then repository, path and line. */
+const byRank = (a: Hit, b: Hit) =>
+  b.confidence - a.confidence ||
+  Number(b.match_type === "qualified") - Number(a.match_type === "qualified") ||
+  a.repository.localeCompare(b.repository) ||
+  a.file_path.localeCompare(b.file_path) ||
+  a.line_range[0] - b.line_range[0];
+
 /** Only published and freshly validated snapshot mappings are queried. Failure is a live-search fallback. */
 export async function searchSymbols(
   text: string,
@@ -104,6 +113,16 @@ export async function searchSymbols(
   let fallback_count = 0;
   if (!codeIntelligenceEnabled() || !terms.length)
     return { hits, fallback_count, search_latency: Date.now() - start };
+  const viaGo = await goSearch<Hit, never>("symbols", scope, scope.provision === true, {
+    text,
+    limit,
+  });
+  if (viaGo)
+    return {
+      hits: (viaGo.hits ?? []).sort(byRank).slice(0, limit),
+      fallback_count: viaGo.fallback_count,
+      search_latency: Date.now() - start,
+    };
   for (const repo of scope.repositories) {
     try {
       const run = await scopeRun(repo, scope);
@@ -197,16 +216,7 @@ export async function searchSymbols(
     }
   }
   return {
-    hits: hits
-      .sort(
-        (a, b) =>
-          b.confidence - a.confidence ||
-          Number(b.match_type === "qualified") - Number(a.match_type === "qualified") ||
-          a.repository.localeCompare(b.repository) ||
-          a.file_path.localeCompare(b.file_path) ||
-          a.line_range[0] - b.line_range[0],
-      )
-      .slice(0, limit),
+    hits: hits.sort(byRank).slice(0, limit),
     fallback_count,
     search_latency: Date.now() - start,
   };
@@ -233,6 +243,21 @@ export async function findDependencies(
 ) {
   authorize(scope);
   if (!codeIntelligenceEnabled()) return [];
+  const viaGo = await goSearch<never, DependencyEdge>(
+    "dependencies",
+    scope,
+    scope.provision === true,
+    {
+      symbol,
+      depth,
+      direction,
+    },
+  );
+  if (viaGo) {
+    for (const u of viaGo.unavailable)
+      if (report && !report.unavailable.includes(u)) report.unavailable.push(u);
+    return viaGo.edges ?? [];
+  }
   const result: DependencyEdge[] = [];
   let frontier = [symbol];
   const seen = new Set<string>();
@@ -341,6 +366,12 @@ export async function searchCodeExact(
   authorize(scope);
   if (!pattern || pattern.length > 256 || pattern.includes("\n"))
     throw new Error("Invalid exact search pattern");
+  const viaGo = await goSearch<Hit, never>("exact", scope, scope.provision !== false, {
+    pattern,
+    limit,
+    any_file: !!opts.anyFile,
+  });
+  if (viaGo) return viaGo.hits ?? [];
   const hits: Hit[] = [];
   for (const name of scope.repositories) {
     const run = await scopeRun(name, scope);
@@ -492,6 +523,24 @@ export async function hybridRank(
 }
 export async function buildCodeContext(text: string, scope: SearchScope) {
   const start = Date.now();
+  if (codeIntelligenceEnabled() && queryTerms(text).length) {
+    authorize(scope);
+    const viaGo = await goSearch<Hit, never>("context", scope, scope.provision === true, { text });
+    if (viaGo) {
+      const body = viaGo.body ?? "";
+      return {
+        body,
+        hits: viaGo.hits ?? [],
+        metrics: {
+          search_latency: viaGo.metrics.took_ms ?? 0,
+          context_latency: Date.now() - start,
+          retrieved_context_size: body.length,
+          retrieved_context_tokens: Math.ceil(body.length / 4),
+          fallback_count: viaGo.fallback_count,
+        },
+      };
+    }
+  }
   const result = await searchSymbols(text, scope, 25);
   const parts: string[] = [];
   const localRoots = new Map<string, ReturnType<typeof localScope>>();

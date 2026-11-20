@@ -20,6 +20,7 @@ module that has not moved. Phase 1 is semantic retrieval ([ADR 0001](adr/0001-go
 |---|---|---|---|
 | Semantic retrieval | **1 (this change)** | New capability, CPU/IO-bound, no workflow state | pgvector, embedding model |
 | Code intelligence indexing (`src/codeIntelligence/indexer.ts`) | **2 (done, flag `CODE_INTELLIGENCE_ENGINE=go`)** | Long CPU-bound parsing on the event loop; already queue-driven and owns its schema. [ADR 0002](adr/0002-go-code-intelligence-indexing.md) | Parity: 6,554 files / 27 repositories identical |
+| Code search, dependency traversal, exact search, code context (`src/codeIntelligence/search.ts`) | **2 (done, flag `CODE_SEARCH_ENGINE=go`)** | Per-repository freshness, sequential loops and ~17 searches per code context; TypeScript keeps authorization and scope resolution. [ADR 0006](adr/0006-go-code-search.md) | Parity suite on identical repositories and worktrees (`test/code-search-go.integration.ts`) |
 | Observability/analytics aggregation (`src/api/analytics`) | **2 (done, flag `ANALYTICS_ENGINE=go`)** | Read-heavy SQL, no write coupling; the cost was PostgreSQL, so the move is the SQL fixed and consolidated, off the Node pool. [ADR 0003](adr/0003-go-analytics.md) | Parity suite on identical data (`test/analytics-go.integration.ts`) |
 | Background workers without run coupling (prod-error scans, PR lifecycle sync, intake polling) | **3: prod-error scans done (flag `PROD_ERRORS_ENGINE=go`)**; PR lifecycle and intake stay | Scans: durable jobs with leases and fencing, providers through the TypeScript gateway. [ADR 0004](adr/0004-go-background-workers.md). PR lifecycle and intake are coupled to authorization and workflow decisions | Per-worker ownership of its tables; idempotency tests |
 | Process supervision and resource limits (bubblewrap, process trees) | **3 (done, flag `PROCESS_SUPERVISION_ENGINE=go`)** | Per-process launcher: delegated cgroup leaf, `cgroup.kill`, limits, host-wide admission; providers keep their protocols. [ADR 0005](adr/0005-go-process-supervision.md) | Isolation regression suite (`go test ./internal/supervise`, `test/process-supervision.integration.ts`) |
@@ -108,3 +109,25 @@ runs in a systemd scope and a PID namespace).
 The gain is correctness (no surviving descendants, no PID confusion, limits, host-wide admission), not speed; the Go
 engine costs a systemd scope per process. Default stays `typescript` until daily use; enforced isolation should use
 `go`.
+
+## Phase 2 status: code search
+
+Implemented behind `CODE_SEARCH_ENGINE=go` ([ADR 0006](adr/0006-go-code-search.md)), completing the code intelligence
+migration. TypeScript authorizes the scope and resolves every repository and worktree once per call; platform-go
+re-validates the paths, memoizes freshness per request, batches the SQL across snapshots, runs repositories four at a
+time, streams ripgrep and reads sources with one `git cat-file --batch`. Results are identical to the TypeScript
+engine; unavailable, slow or outdated platform-go falls back to it.
+
+| Measure (`npm run bench:code-search`, p50) | 5 repositories | 30 repositories |
+|---|---|---|
+| `buildCodeContext` (3 queries) | 14.8 s → 2.8 s (−81%) | 53.5 s → 5.5 s (−90%) |
+| `searchSymbols` (4 queries) | −59% | −74% |
+| `findDependencies`, `findReferences` | −73%, −74% | −81%, −45% |
+| `searchCodeExact` (limit 20) | −55% | +7% (scope resolution of all 30 repositories) |
+| SQL statements per `buildCodeContext` | 814 → 76 | 3,025 → 54 |
+
+Checks: `go test ./internal/codeintelligence/` (validation, collation, contract) and
+`test/code-search-go.integration.ts` (the whole code intelligence suite on the Go engine, engine parity on base and
+overlay snapshots, path/symlink/ref refusal, revocation, redaction, fallback, timeout) in CI; both fail without Go.
+Remaining before the exit criteria: two weeks of daily use with the flag on; lazy scope resolution for exact search;
+then removing the TypeScript search engine.

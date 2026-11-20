@@ -19,6 +19,7 @@ const maxJobDuration = time.Hour
 // Routes registers POST /internal/v1/code-intelligence/index. It runs outside the short internal request deadline:
 // the caller's X-Request-Timeout-Ms (its job timeout) bounds the job, and a disconnect cancels it.
 func Routes(mux *http.ServeMux, ix *Indexer, log *slog.Logger) {
+	routeSearch(mux, ix.searcher, log)
 	mux.HandleFunc("POST /internal/v1/code-intelligence/index", func(w http.ResponseWriter, r *http.Request) {
 		timeout := maxJobDuration
 		if ms, err := strconv.Atoi(r.Header.Get("X-Request-Timeout-Ms")); err == nil && ms > 0 {
@@ -67,4 +68,52 @@ func publicMessage(err error) string {
 		}
 	}
 	return "Indexing failed; check local parser/database/Git availability"
+}
+
+// maxSearch bounds one search request whatever the caller asks.
+const maxSearch = 60 * time.Second
+
+// routeSearch registers POST /internal/v1/code-intelligence/search (contract code-intelligence-v1 SearchRequest):
+// min(X-Request-Timeout-Ms, 60 s) bounds it, a disconnect cancels it (Git and ripgrep included).
+func routeSearch(mux *http.ServeMux, s *Searcher, log *slog.Logger) {
+	if s == nil {
+		return
+	}
+	mux.HandleFunc("POST /internal/v1/code-intelligence/search", func(w http.ResponseWriter, r *http.Request) {
+		timeout := maxSearch
+		if ms, err := strconv.Atoi(r.Header.Get("X-Request-Timeout-Ms")); err == nil && ms > 0 {
+			timeout = min(timeout, time.Duration(ms)*time.Millisecond)
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + 5*time.Second))
+		var req SearchRequest
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			platform.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+			return
+		}
+		if err := ValidateSearch(&req); err != nil {
+			if errors.Is(err, ErrVersion) {
+				platform.WriteError(w, http.StatusConflict, "version_mismatch", err.Error())
+				return
+			}
+			platform.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		res, err := s.Search(ctx, &req)
+		switch {
+		case err == nil:
+			platform.WriteJSON(w, http.StatusOK, res)
+		case errors.Is(err, context.DeadlineExceeded):
+			platform.WriteError(w, http.StatusGatewayTimeout, "timeout", "code search exceeded its deadline")
+		case r.Context().Err() != nil:
+			return // caller gone
+		default:
+			// Paths and SQL stay in the log; the caller falls back to its own engine.
+			log.Warn("code search failed", "op", req.Op, "error", err)
+			platform.WriteError(w, http.StatusServiceUnavailable, "unavailable", "code search failed")
+		}
+	})
 }
