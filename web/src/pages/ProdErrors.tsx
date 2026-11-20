@@ -476,6 +476,7 @@ function GroupRow({
           {g.service}
         </span>
         <span className="pe-sig mono" title={g.signature}>
+          {g.level === "SLOW" && <span className="pe-slow">{t("pe.slow")}</span>}
           {g.signature}
         </span>
         <span className="pe-num" title={t("pe.todayCount")}>

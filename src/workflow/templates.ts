@@ -486,7 +486,8 @@ const INVESTIGATION_RULES =
   "(read-only queries) may confirm what the logs show. " +
   "Production sources are parse_request.observability (splunk, signoz or both); use only those. " +
   "SigNoz (call_tool signoz_*): start with signoz_aggregate_logs (errors grouped by service.name, time_series=true for spikes) or parse_request.signoz_queries, " +
-  "then narrow with signoz_search_logs / signoz_search_traces on a concrete identifier, service or trace_id, follow failing or slow requests with signoz_get_trace, and check latency/throughput/error rate with signoz_query_metrics; " +
+  "then narrow with signoz_search_logs / signoz_search_traces on a concrete identifier, service or trace_id, follow failing or slow requests with signoz_get_trace (by trace_id or request_id), and check latency/throughput/error rate with signoz_query_metrics; " +
+  "a request id seen in logs or a span (request.id) links both: search the other source with it. For a slow request read signoz_get_trace `gaps` (time with no child span = uninstrumented work) and inspect the code between the `after` and `before` spans; " +
   "always pass earliest/latest from parse_request.time and keep windows small. SigNoz rows are stored as events with event_refs exactly like Splunk events. " +
   "No telemetry for a service or window is NOT evidence that it is healthy: report it as missing evidence. Keep confirmed findings (an event you saw) apart from hypotheses. " +
   "Splunk: search logs only with call_tool name=splunk_search. Always pass earliest/latest (start from parse_request.time) and name the index from parse_request.indexes. " +

@@ -508,6 +508,8 @@ export interface Config {
     /** Default scan times (HH:MM, local); editable on the page. */
     schedule: string[];
     timeoutSeconds: number;
+    /** A request (root span) slower than this is counted in a SigNoz latency group; 0 disables latency groups. */
+    slowThresholdMs: number;
   };
   jira: {
     /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
@@ -731,6 +733,7 @@ const defaults: Config = {
     timezone: "Asia/Ho_Chi_Minh",
     schedule: ["09:00", "14:00", "17:00"],
     timeoutSeconds: 1800,
+    slowThresholdMs: 1000,
   },
   learning: {
     detectChanges: true,
@@ -857,6 +860,8 @@ function load(): Config {
     throw new Error("slop.mode must be disabled, advisory or enforcement");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
+  if (process.env.PROD_SLOW_THRESHOLD_MS)
+    cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)
     cfg.ignoredRepositories = process.env.IGNORE_REPOSITORIES.split(",")
       .map((x) => x.trim())

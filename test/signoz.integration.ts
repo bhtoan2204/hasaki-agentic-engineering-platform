@@ -108,6 +108,8 @@ before(async () => {
       if (mode === "flaky" && flakyLeft-- > 0) return json(503, { status: "error", error: { code: "unavailable", message: "busy" } });
       if (![GOOD, FORBID, OLD].includes(key)) return json(401, { status: "error", error: { type: "unauthenticated", code: "unauthenticated", message: "invalid key", errors: [], suggestions: [] } });
       if (req.url === "/api/v1/service_accounts/me") return json(200, { status: "success", data: { id: "sa" } });
+      if (req.url?.startsWith("/api/v1/fields/keys"))
+        return json(200, { status: "success", data: { keys: { "request.id": [{ name: "request.id" }], "http.request.method": [{ name: "http.request.method" }] } } });
       if (key === OLD) return json(404, { status: "error", error: { code: "not_found", message: "not found" } });
       if (key === FORBID) return json(403, { status: "error", error: { type: "forbidden", code: "authz_forbidden", message: "no logs:read", errors: [], suggestions: [] } });
       if (mode === "big") return json(200, { pad: "x".repeat(config.signoz.maxResponseBytes + 10) });

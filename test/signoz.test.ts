@@ -15,8 +15,10 @@ import {
   resolveWindow,
   SignozError,
   traceById,
+  traceGaps,
   tracesSearch,
 } from "../src/integrations/signoz.ts";
+import { idFieldOf } from "../src/investigation/events.ts";
 
 const W = { start: 1_000_000, end: 1_900_000 };
 type QuerySpec = Record<string, unknown> & {
@@ -102,6 +104,38 @@ test("request builders produce the documented v5 query_range bodies", () => {
   assert.throws(() => metricsQuery(W, { metric: "bad metric!" }, {}), SignozError);
   assert.equal(specOf(listServicesQuery(W)).groupBy[0].name, "service.name");
   for (const b of [logs, agg, trace, m]) assert.deepEqual([b.start, b.end], [W.start, W.end]);
+});
+
+test("spans carry tree fields and request ids; request_id filters every request id attribute", () => {
+  const spec = specOf(tracesSearch(W, {}, 10, 0, false, ["request.id", "request_id"]));
+  const fields = (spec.selectFields as Array<{ name: string }>).map((f) => f.name);
+  for (const f of ["span_id", "parent_span_id", "duration_nano", "has_error", "request.id", "request_id"]) assert.ok(fields.includes(f), f);
+  assert.equal(
+    filterExpression("traces", { request_id: "4d67'x" }, ["request.id", "request_id"]),
+    "(request.id = '4d67\\'x' OR request_id = '4d67\\'x')",
+  );
+  assert.throws(() => filterExpression("traces", { request_id: "r1" }), SignozError);
+  assert.equal(idFieldOf("request.id"), "request_id");
+  assert.equal(idFieldOf("attributes.request_id"), "request_id");
+});
+
+test("trace gaps: time inside a span with no child running, attributed to the siblings around it", () => {
+  const span = (id: string, parent: string, startMs: number, durMs: number) => ({
+    timestamp: new Date(Date.UTC(2026, 10, 20, 6, 59, 33) + startMs).toISOString().replace("Z", "123456Z"),
+    data: { span_id: id, parent_span_id: parent, duration_nano: durMs * 1e6 },
+  });
+  // gateway → CancelOrder (2050 ms): writes until 38 ms, nothing for ~2 s, reads from 2040 ms.
+  const rows = [
+    span("root", "", 0, 2057),
+    span("rpc", "root", 1, 2050),
+    span("del", "rpc", 30, 8),
+    span("get", "rpc", 2040, 1),
+    span("create", "rpc", 2045, 4),
+  ];
+  const gaps = traceGaps(rows, ["r0", "r1", "r2", "r3", "r4"]);
+  assert.equal(gaps.length, 1);
+  assert.deepEqual({ ...gaps[0], gap_ms: Math.round(gaps[0].gap_ms) }, { in: "r1", after: "r2", before: "r3", gap_ms: 2002, at_ms: 38, share: 0.98 });
+  assert.deepEqual(traceGaps([span("a", "", 0, 10), span("b", "a", 1, 8)], ["x", "y"]), [], "short gaps are ignored");
 });
 
 test("responses parse into compact, deduplicated structures", () => {

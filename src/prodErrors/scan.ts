@@ -8,6 +8,9 @@ import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/sp
 import {
   signozEnabled,
   signozErrorSpanGroups,
+  signozSlowRequestGroups,
+  signozTraceGaps,
+  type SlowRequestGroup,
   signozStatus,
   type SpanErrorGroup,
 } from "../integrations/signoz.ts";
@@ -52,6 +55,7 @@ export interface GroupRow {
     sources?: ScanSource[];
     /** The only source of this group had no data for the comparison window. */
     no_baseline?: boolean;
+    slow?: SlowDetail;
   };
   day: string;
   today_count: number;
@@ -272,6 +276,9 @@ export function assess(g: {
     // new/spiking money-related errors go up one level; critical only with real volume
     if (changed && g.today >= 5) s = Math.max(s, Math.min(g.today >= 50 ? 4 : 3, s + 1));
   }
+  // Slowness alone is never an incident: one slow request is low, a new slow endpoint medium, only a spike is high.
+  if (g.level === "SLOW")
+    s = reasons.some((r) => r.startsWith("up|")) ? 3 : changed && g.today >= 5 ? 2 : 1;
   const severity = SEV[s];
   return {
     severity,
@@ -315,6 +322,7 @@ export function toGroups(rows: Partial<SourceRow>[], day: string) {
         sources:
           Array.isArray(r.sources) && r.sources.length ? (r.sources as ScanSource[]) : undefined,
         no_baseline: r.no_baseline || undefined,
+        slow: r.slow,
       },
       hourly: (Array.isArray(r.analytics_hourly)
         ? r.analytics_hourly
@@ -360,6 +368,22 @@ const spanMessage = (g: { name: string; code: string; status: string }) =>
   `${g.name}${g.code ? ` [${g.code}]` : ""}${g.status ? `: ${g.status}` : ""}`;
 
 /** One group as a result row of the SPL `stats` stage; SigNoz rows are built in the same shape. */
+/** Latency group: request statistics and where the slowest sample request spent untraced time. */
+export interface SlowDetail {
+  threshold_ms: number;
+  total: number;
+  p50_ms: number;
+  p95_ms: number;
+  max_ms?: number;
+  gaps?: Array<{
+    in: string;
+    after: string | null;
+    before: string | null;
+    gap_ms: number;
+    share: number;
+  }>;
+}
+
 export interface SourceRow {
   ns: string;
   svc: string;
@@ -380,6 +404,7 @@ export interface SourceRow {
   no_baseline?: boolean;
   analytics_hourly?: string | string[];
   sources?: ScanSource[];
+  slow?: SlowDetail;
 }
 
 /**
@@ -446,6 +471,63 @@ export function signozRows(
 }
 
 /**
+ * SigNoz latency groups → result rows with level SLOW (one per entry span). The slowest sample of each group gives its
+ * trace id, request id and maximum duration (exported for tests).
+ */
+export function signozSlowRows(
+  today: SlowRequestGroup[],
+  baseline: SlowRequestGroup[],
+  samples: Array<{ timestamp: string; data: Record<string, unknown> }>,
+  thresholdMs: number,
+) {
+  // Entry spans differing only in ids (/order/123, /order/456) share one signature: one group, counts added up.
+  const sigOf = (name: string) => redactPii(signatureOf(name));
+  const keyOf = (g: { ns: string; service: string; name: string }) =>
+    [g.ns, g.service, sigOf(g.name)].join("\u0000");
+  const before = new Map<string, number>();
+  for (const g of baseline) before.set(keyOf(g), (before.get(keyOf(g)) ?? 0) + g.slow);
+  const merged = new Map<string, SlowRequestGroup>();
+  for (const g of today) {
+    const prev = merged.get(keyOf(g));
+    const busiest = !prev || g.total > prev.total ? g : prev;
+    merged.set(keyOf(g), {
+      ...busiest,
+      slow: (prev?.slow ?? 0) + g.slow,
+      total: (prev?.total ?? 0) + g.total,
+    });
+  }
+  return [...merged.values()].slice(0, 300).map((g): SourceRow => {
+    const s = samples.find(
+      (x) =>
+        text(x.data["service.name"]) === g.service &&
+        sigOf(String(x.data.name ?? "")) === sigOf(g.name),
+    )?.data;
+    const max = s ? Math.round(Number(s.duration_nano ?? 0) / 1e6) : undefined;
+    const reqId = s && text(s["request.id"] ?? s.request_id);
+    return {
+      ns: g.ns,
+      svc: g.service,
+      lv: "SLOW",
+      sig: sigOf(g.name),
+      caller: masked(text(g.name)),
+      today: g.slow,
+      yesterday: before.get(keyOf(g)) ?? 0,
+      sample: `${g.slow}/${g.total} request > ${thresholdMs}ms · p50 ${g.p50_ms}ms · p95 ${g.p95_ms}ms${max ? ` · chậm nhất ${max}ms` : ""}`,
+      trace_id: s && text(s.trace_id),
+      request_id: reqId,
+      sources: ["signoz"],
+      slow: {
+        threshold_ms: thresholdMs,
+        total: g.total,
+        p50_ms: g.p50_ms,
+        p95_ms: g.p95_ms,
+        max_ms: max,
+      },
+    };
+  });
+}
+
+/**
  * Splunk and SigNoz result rows → one row per group. Both sources usually hold the same cluster logs, so a group
  * seen by both keeps the larger count instead of the sum (exported for tests).
  */
@@ -475,8 +557,13 @@ export function mergeSourceRows(...sources: Array<{ source: ScanSource; rows: So
         ...prev,
         today: Math.max(num(prev.today), num(r.today)),
         yesterday: Math.max(num(prev.yesterday), num(r.yesterday)),
-        first: Math.min(...finite(prev.first, r.first)) || prev.first || r.first,
-        last: Math.max(...finite(prev.last, r.last), 0) || prev.last || r.last,
+        // Rows without times (latency groups) must not turn into ±Infinity.
+        first: finite(prev.first, r.first).length
+          ? Math.min(...finite(prev.first, r.first))
+          : (prev.first ?? r.first),
+        last: finite(prev.last, r.last).length
+          ? Math.max(...finite(prev.last, r.last))
+          : (prev.last ?? r.last),
         sources: [...new Set([...prev.sources, source])],
         no_baseline: (prev.no_baseline && r.no_baseline) || undefined,
         analytics_hourly: [...hours].map(([h, n]) => `${h}:${n}`),
@@ -515,6 +602,38 @@ export function startScan(trigger: "manual" | "schedule", opts: ScanOptions = {}
     .catch((e) => console.error("prod error scan:", (e as Error).message))
     .finally(() => (running = null));
   return { started: true, running: true };
+}
+
+/** Latency groups for the scan; the slowest few get their untraced gaps. Failures only add a note. */
+async function slowRows(w: ScanWindow, ns: string[], hasBaseline: boolean, notes: string[]) {
+  const threshold = config.prodErrors.slowThresholdMs;
+  if (!threshold) return [];
+  try {
+    const win = { start: w.start * 1000, end: w.end * 1000 };
+    const slow = await signozSlowRequestGroups(
+      win,
+      { start: w.baseStart * 1000, end: w.baseEnd * 1000 },
+      ns,
+      threshold,
+    );
+    const rows = signozSlowRows(slow.today, slow.yesterday, slow.samples, threshold);
+    if (!hasBaseline) for (const r of rows) r.no_baseline = true;
+    for (const r of rows.sort((a, b) => Number(b.today) - Number(a.today)).slice(0, 5))
+      if (r.trace_id && r.slow)
+        r.slow.gaps = (await signozTraceGaps(win, r.trace_id).catch(() => []))
+          .slice(0, 3)
+          .map((g) => ({
+            in: masked(g.in) ?? "",
+            after: g.after && (masked(g.after) ?? null),
+            before: g.before && (masked(g.before) ?? null),
+            gap_ms: g.gap_ms,
+            share: g.share,
+          }));
+    return rows;
+  } catch (e) {
+    notes.push(`SigNoz (request chậm): ${(e as Error).message}`);
+    return [];
+  }
 }
 
 export async function runScan(
@@ -579,7 +698,10 @@ export async function runScan(
             notes.push(
               "SigNoz: chưa có trace của kỳ so sánh (hôm qua cùng khung giờ), các nhóm chỉ từ SigNoz không được đánh giá mới/tăng",
             );
-          return signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline);
+          return {
+            errors: signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline),
+            slow: await slowRows(w, ns, spans.hasBaseline, notes),
+          };
         })().catch((e) => {
           notes.push(`SigNoz: ${(e as Error).message}`);
           return null;
@@ -619,7 +741,12 @@ export async function runScan(
     const groups = toGroups(
       mergeSourceRows(
         ...(r ? [{ source: "splunk" as const, rows: r.results as unknown as SourceRow[] }] : []),
-        ...(signozResult ? [{ source: "signoz" as const, rows: signozResult }] : []),
+        ...(signozResult
+          ? [
+              { source: "signoz" as const, rows: signozResult.errors },
+              { source: "signoz" as const, rows: signozResult.slow },
+            ]
+          : []),
       ),
       w.day,
     );
@@ -1069,6 +1196,38 @@ export function describeGroup(g: GroupRow) {
         })
       : "?";
   const spl = `index=${indexOf(g.namespace)} kubernetes.namespace_name="${g.namespace}" kubernetes.container_name="${g.service}"${g.caller ? ` "${g.caller}"` : ""}`;
+  if (g.level === "SLOW" && d.slow) {
+    const sl = d.slow;
+    const gap = (x: NonNullable<typeof sl.gaps>[number]) =>
+      `- ${x.gap_ms}ms (${Math.round(x.share * 100)}% thời gian) trong \`${x.in}\`, sau \`${x.after ?? "đầu span"}\`, trước \`${x.before ?? "cuối span"}\``;
+    return [
+      `Request chậm trên production phát hiện từ SigNoz (quét ngày ${g.day}).`,
+      "",
+      `- Namespace / service: \`${g.namespace}\` / \`${g.service}\``,
+      `- Endpoint (span gốc): \`${g.caller}\``,
+      `- Hôm nay: ${g.today_count}/${sl.total} request chậm hơn ${sl.threshold_ms}ms (lần gần nhất ${t(g.last_at)}); hôm qua cùng khung giờ: ${d.no_baseline ? "chưa có dữ liệu" : `${g.yesterday_count} request`}`,
+      `- Độ trễ: p50 ${sl.p50_ms}ms, p95 ${sl.p95_ms}ms${sl.max_ms ? `, chậm nhất ${sl.max_ms}ms` : ""}`,
+      `- Đánh giá: **${g.severity}**${g.reasons.length ? ` — ${g.reasons.join("; ")}` : ""}`,
+      d.trace_id ? `\ntrace_id request chậm nhất: \`${d.trace_id}\`` : "",
+      d.request_id
+        ? `request_id: \`${d.request_id}\` (log cùng request: \`index=${indexOf(g.namespace)} "${d.request_id}"\`)`
+        : "",
+      sl.gaps?.length
+        ? `\nThời gian không có span con nào chạy trong trace đó (code không được trace: gọi ngoài chưa instrument, lock, sleep, CPU):\n${sl.gaps.map(gap).join("\n")}`
+        : "",
+      "",
+      `Xem trace bằng \`signoz_get_trace\` (chỉ đọc)${d.trace_id ? ` với trace_id \`${d.trace_id}\`` : ""}${d.request_id ? ` hoặc request_id \`${d.request_id}\`` : ""}; trường \`gaps\` chỉ ra khoảng thời gian không có span. Tìm thêm request chậm cùng endpoint bằng \`signoz_search_traces\`, và log cùng request trên Splunk bằng request_id.`,
+      "",
+      "Yêu cầu:",
+      `1. Tìm đoạn code gây chậm${img.repo ? ` trong repo \`${img.repo}\`` : ""}: đọc code nằm giữa span \`after\` và \`before\` của khoảng trống lớn nhất.`,
+      "2. Xác định có phải luôn chậm hay chỉ thỉnh thoảng (phụ thuộc dữ liệu, lock, đối tác), và ảnh hưởng tới người dùng / đơn hàng.",
+      "3. Nếu đoạn chậm chưa có span, đề xuất thêm instrumentation để lần sau thấy rõ.",
+      "4. Đề xuất fix và cách đo lại sau khi sửa.",
+    ]
+      .filter((l) => l !== "")
+      .join("\n")
+      .replace(/\n(Thời gian không|Xem trace|Yêu cầu)/g, "\n\n$1");
+  }
   const traceOnly = !!d.sources?.length && !d.sources.includes("splunk");
   return [
     `Lỗi production phát hiện từ ${(d.sources ?? ["splunk"]).map((s) => (s === "signoz" ? "SigNoz" : "Splunk")).join(" và ")} (quét ngày ${g.day}).`,

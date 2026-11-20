@@ -61,14 +61,10 @@ for (const f of ID_FIELDS) {
   BY_ALIAS.set(f.replace(/[^a-z0-9]/g, ""), f);
   for (const a of ALIASES[f]) BY_ALIAS.set(a, f);
 }
+const aliasKey = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
+/** The whole name first (OpenTelemetry `request.id`), then its last dotted segment (`attributes.request_id`). */
 export const idFieldOf = (key: string): IdField | undefined =>
-  BY_ALIAS.get(
-    key
-      .split(".")
-      .pop()!
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, ""),
-  );
+  BY_ALIAS.get(aliasKey(key)) ?? BY_ALIAS.get(aliasKey(key.split(".").pop()!));
 
 /** Values that are not identifiers even when a field is named like one. */
 const JUNK = /^(null|nil|none|undefined|true|false|0|-|n\/a|""|\[\]|\{\})$/i;

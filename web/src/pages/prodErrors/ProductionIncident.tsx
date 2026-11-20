@@ -5,6 +5,47 @@ import { EmptyState, ErrorBox } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { DataTable, dateCell, fmt, Panel, type Row } from "../analytics/shared.tsx";
 
+interface Slow {
+  threshold_ms: number;
+  total: number;
+  p50_ms: number;
+  p95_ms: number;
+  max_ms?: number;
+  gaps?: Array<{ in: string; after: string | null; before: string | null; gap_ms: number; share: number }>;
+}
+
+function SlowDetail({ slow, detail }: { slow: Slow; detail: { trace_id?: string; request_id?: string } }) {
+  const { t } = useI18n();
+  const edge = t("an.slowGapEdge");
+  return (
+    <div className="an-incident-slow">
+      <p>
+        <b>{t("an.slowLatency")}:</b> p50 {fmt(slow.p50_ms)}ms · p95 {fmt(slow.p95_ms)}ms
+        {slow.max_ms ? ` · max ${fmt(slow.max_ms)}ms` : ""} · &gt; {fmt(slow.threshold_ms)}ms
+      </p>
+      {(detail.trace_id || detail.request_id) && (
+        <p>
+          <b>{t("an.slowSample")}:</b> {detail.trace_id && <code>trace_id {detail.trace_id}</code>}{" "}
+          {detail.request_id && <code>request_id {detail.request_id}</code>}
+        </p>
+      )}
+      {!!slow.gaps?.length && (
+        <>
+          <b>{t("an.slowGaps")}</b>
+          <ul>
+            {slow.gaps.map((x, i) => (
+              <li key={i}>
+                <b>{fmt(Math.round(x.gap_ms))}ms</b> ({Math.round(x.share * 100)}%){" "}
+                {t("an.slowGapAt", { span: x.in, after: x.after ?? edge, before: x.before ?? edge })}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function ProductionIncident({ fingerprint, query }: { fingerprint: string; query: string }) {
   const { t } = useI18n();
   const params = new URLSearchParams(query);
@@ -85,6 +126,7 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
               <pre>{g.detail.stack}</pre>
             </details>
           )}
+          {g.detail?.slow && <SlowDetail slow={g.detail.slow} detail={g.detail} />}
         </div>
         <DataTable
           rows={rows}

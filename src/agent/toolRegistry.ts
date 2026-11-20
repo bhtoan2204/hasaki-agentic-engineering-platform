@@ -1082,8 +1082,9 @@ export function registerBuiltinTools() {
     description:
       "Read-only. " +
       filterHelp +
-      "`operation` = span name, `has_error`, `status_code` (response_status_code), `trace_id`/`span_id`. Each span is stored as an event " +
-      "with service, operation, duration_ms and status; follow one with signoz_get_trace. `limit` default 100 (max 1000), `offset` pages.",
+      "`operation` = span name, `has_error`, `status_code` (response_status_code), `trace_id`/`span_id`, `request_id` (the request id " +
+      "attribute, e.g. request.id, shared with the logs of the same request). Each span is stored as an event " +
+      "with service, operation, duration_ms, status and ids; follow one with signoz_get_trace. `limit` default 100 (max 1000), `offset` pages.",
     input: z.object({
       ...signozWindow,
       ...signozFilters,
@@ -1098,6 +1099,10 @@ export function registerBuiltinTools() {
         .string()
         .regex(/^[\w-]{1,64}$/)
         .optional(),
+      request_id: z
+        .string()
+        .regex(/^[\w.:-]{1,128}$/)
+        .optional(),
       limit: z.number().int().min(1).optional(),
       offset: z.number().int().min(0).optional(),
     }),
@@ -1106,11 +1111,27 @@ export function registerBuiltinTools() {
   registerIntegrationTool({
     ...signozBase,
     name: "signoz_get_trace",
-    summary: "SigNoz: every span of one trace in time order (failed spans, slow downstream calls).",
+    summary:
+      "SigNoz: every span of one trace in time order, with untraced time gaps (failed spans, slow or uninstrumented work).",
     description:
-      "Read-only. Spans with the given trace_id (window default: last 24 hours; pass earliest/latest around the incident for older traces). " +
-      "Spans are stored as events with refs.",
-    input: z.object({ trace_id: z.string().regex(/^[\w-]{1,64}$/), ...signozWindow }),
+      "Read-only. Spans of the trace with `trace_id`, or of the trace a `request_id` belongs to (window default: last 24 hours; pass " +
+      "earliest/latest around the incident for older traces). Spans are stored as events with refs. `gaps` lists time inside a span " +
+      "when none of its child spans ran (uninstrumented code: an untraced call, a lock, a sleep, CPU): `in` = parent span ref, " +
+      "`after`/`before` = the sibling spans around the gap (null = parent start/end), `gap_ms`, `at_ms` from trace start, `share` " +
+      "of the parent. For a slow request with gaps, read the code between `after` and `before` in that service.",
+    input: z
+      .object({
+        trace_id: z
+          .string()
+          .regex(/^[\w-]{1,64}$/)
+          .optional(),
+        request_id: z
+          .string()
+          .regex(/^[\w.:-]{1,128}$/)
+          .optional(),
+        ...signozWindow,
+      })
+      .refine((a) => !!(a.trace_id || a.request_id), "pass trace_id or request_id"),
     handler: async (args, ctx) => shield(await getTrace(args, scopeOf(ctx)), "events"),
   });
   registerIntegrationTool({

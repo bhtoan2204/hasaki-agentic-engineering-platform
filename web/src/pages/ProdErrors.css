@@ -144,6 +144,21 @@
   min-width: 0;
 }
 
+.pe-slow {
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  color: var(--st-wait);
+  background: var(--st-wait-bg);
+}
+
+.an-incident-slow ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
 .pe-num {
   text-align: right;
   font-variant-numeric: tabular-nums;

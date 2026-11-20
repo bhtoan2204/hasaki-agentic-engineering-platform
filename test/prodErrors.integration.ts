@@ -505,8 +505,13 @@ test("runScan: scans SigNoz error traces when Splunk is not connected and marks 
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
       const body = raw ? JSON.parse(raw) : {};
+      if (!raw) return (res.writeHead(200, { "content-type": "application/json" }), res.end('{"status":"success","data":{"keys":{}}}'));
       queries.push(body);
       const spec = body.compositeQuery?.queries?.[0]?.spec ?? {};
+      if (/parent_span_id = ''/.test(spec.filter?.expression ?? "")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ status: "success", data: { type: body.requestType, data: { results: [] } } }));
+      }
       const keys: string[] = (spec.groupBy ?? []).map((g: { name: string }) => g.name);
       const series = groups.map(([labels, counts]) => ({
         labels: keys.map((name, i) => ({ key: { name }, value: labels[i] })),
@@ -546,11 +551,13 @@ test("runScan: scans SigNoz error traces when Splunk is not connected and marks 
     queries.length = 0; // drop the connection test of saveSignoz
     const r = await runScan("manual", new Date(nowMs), { preset: "1h" });
     assert.deepEqual(r, { ok: true, groups: 1 });
+    const slow = queries.filter((b) => /parent_span_id = ''/.test(b.compositeQuery.queries[0].spec.filter.expression));
     assert.deepEqual(
-      queries.map((b) => b.requestType),
+      queries.filter((b) => !slow.includes(b)).map((b) => b.requestType),
       ["scalar", "time_series", "scalar", "scalar", "raw"],
       "window counts, hourly points, baseline counts, baseline span check, newest trace samples",
     );
+    assert.deepEqual(slow.map((b) => b.requestType), ["scalar", "scalar", "raw"], "slow requests: window, baseline, slowest samples");
     for (const b of queries) {
       assert.equal(b.compositeQuery.queries[0].spec.signal, "traces");
       assert.match(b.compositeQuery.queries[0].spec.filter.expression, /deployment\.environment = 'payment-prod'/);

@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeSourceRows, signatureOf, signozRows, toGroups } from "../src/prodErrors/scan.ts";
-import type { SpanErrorGroup } from "../src/integrations/signoz.ts";
+import {
+  describeGroup,
+  mergeSourceRows,
+  signatureOf,
+  signozRows,
+  signozSlowRows,
+  toGroups,
+  type GroupRow,
+} from "../src/prodErrors/scan.ts";
+import type { SlowRequestGroup, SpanErrorGroup } from "../src/integrations/signoz.ts";
 
 const at = (iso: string) => ({ iso, epoch: Math.floor(Date.parse(iso) / 1000) });
 const T1 = at("2026-11-18T03:10:00Z");
@@ -181,4 +189,81 @@ test("each source keeps its own 300 largest groups, so busy logs cannot push tra
     Math.min(...merged.filter((r) => r.svc === "oms-api").map((r) => Number(r.today))),
     1050,
   );
+});
+
+test("slow requests become SLOW groups per entry span with stats, the slowest sample's ids, and bounded severity", () => {
+  const g = (name: string, slow: number, total: number): SlowRequestGroup => ({
+    ns: "oms-prod",
+    service: "oms-gateway",
+    name,
+    slow,
+    total,
+    p50_ms: 2043,
+    p95_ms: 2061,
+  });
+  const samples = [
+    {
+      timestamp: "2026-11-20T06:59:33.726460929Z",
+      data: {
+        "service.name": "oms-gateway",
+        name: "/api/v1/oms/order/cancel",
+        duration_nano: 2066000000,
+        trace_id: "1e97b753",
+        "request.id": "9404ee2e",
+      },
+    },
+  ];
+  const rows = signozSlowRows([g("/api/v1/oms/order/cancel", 15, 15), g("/wms/stock", 1, 900)], [g("/wms/stock", 1, 900)], samples, 1000);
+  const [cancel, stock] = toGroups(rows, "2026-11-20");
+  assert.equal(cancel.level, "SLOW");
+  assert.equal(cancel.signature, "/api/<n>/oms/order/cancel");
+  assert.equal(cancel.today_count, 15);
+  assert.equal(cancel.detail.trace_id, "1e97b753");
+  assert.equal(cancel.detail.request_id, "9404ee2e");
+  assert.deepEqual(cancel.detail.slow, { threshold_ms: 1000, total: 15, p50_ms: 2043, p95_ms: 2061, max_ms: 2066 });
+  assert.match(cancel.sample, /15\/15 request > 1000ms · p50 2043ms · p95 2061ms · chậm nhất 2066ms/);
+  assert.equal(cancel.severity, "medium", "a new slow endpoint is medium, never an alert by itself");
+  assert.equal(stock.severity, "low", "slowness that was there yesterday stays low");
+  const spike = toGroups(signozSlowRows([g("/x", 300, 400)], [g("/x", 20, 400)], [], 1000), "d")[0];
+  assert.equal(spike.severity, "high", "only a spike of slow requests reaches high (notified)");
+  assert.equal(toGroups(signozSlowRows([g("/y", 2, 9)], [], [], 1000), "d")[0].severity, "low");
+});
+
+test("a SLOW group is described for investigation with its latency, ids and untraced gaps", () => {
+  const [group] = toGroups(
+    signozSlowRows(
+      [{ ns: "oms-prod", service: "oms-gateway", name: "/api/v1/oms/order/cancel", slow: 15, total: 15, p50_ms: 2043, p95_ms: 2061 }],
+      [],
+      [],
+      1000,
+    ),
+    "2026-11-20",
+  );
+  group.detail.trace_id = "1e97b753";
+  group.detail.slow!.gaps = [{ in: "oms-api oms.OMS/CancelOrder", after: "oms-api del", before: "oms-api get", gap_ms: 2000.7, share: 0.97 }];
+  const text = describeGroup({ ...group, status: "open", work_item_id: null, notified_day: null, first_seen_at: "" } as GroupRow);
+  assert.match(text, /Request chậm/);
+  assert.match(text, /15\/15 request chậm hơn 1000ms/);
+  assert.match(text, /2000.7ms \(97% thời gian\) trong `oms-api oms.OMS\/CancelOrder`, sau `oms-api del`, trước `oms-api get`/);
+  assert.match(text, /signoz_get_trace/);
+});
+
+test("slow entry spans differing only in ids are one group, and merging rows without times never yields an invalid date", () => {
+  const g = (name: string, slow: number, total: number): SlowRequestGroup => ({
+    ns: "oms-prod",
+    service: "oms-gateway",
+    name,
+    slow,
+    total,
+    p50_ms: 10,
+    p95_ms: 2000,
+  });
+  const rows = signozSlowRows([g("/api/v1/order/123", 3, 5), g("/api/v1/order/456", 2, 9)], [g("/api/v1/order/7", 4, 4)], [], 1000);
+  assert.equal(rows.length, 1);
+  const [one] = toGroups(mergeSourceRows({ source: "signoz", rows }, { source: "signoz", rows }), "d");
+  assert.equal(one.signature, "/api/<n>/order/<n>");
+  assert.equal(one.today_count, 5);
+  assert.equal(one.yesterday_count, 4);
+  assert.equal(one.first_at, null);
+  assert.equal(one.last_at, null);
 });

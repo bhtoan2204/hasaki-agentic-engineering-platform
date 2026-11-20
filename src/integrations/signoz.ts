@@ -337,6 +337,8 @@ export interface Filters {
   operation?: string;
   trace_id?: string;
   span_id?: string;
+  /** Matched against every span attribute that holds a request id (discovered per SigNoz instance). */
+  request_id?: string;
   has_error?: boolean;
   status_code?: string | number;
   expression?: string;
@@ -354,7 +356,7 @@ export function checkExpression(expr: string) {
   return e;
 }
 
-export function filterExpression(signal: "logs" | "traces" | "metrics", f: Filters) {
+export function filterExpression(signal: "logs" | "traces" | "metrics", f: Filters, requestIdKeys: string[] = []) {
   const parts: string[] = [];
   if (f.service) parts.push(`service.name = ${quote(f.service)}`);
   if (f.environment) parts.push(`deployment.environment = ${quote(f.environment)}`);
@@ -362,6 +364,11 @@ export function filterExpression(signal: "logs" | "traces" | "metrics", f: Filte
   if (f.operation && signal === "traces") parts.push(`name = ${quote(f.operation)}`);
   if (f.trace_id) parts.push(`trace_id = ${quote(f.trace_id)}`);
   if (f.span_id) parts.push(`span_id = ${quote(f.span_id)}`);
+  if (f.request_id) {
+    if (!requestIdKeys.length)
+      throw new SignozError("invalid_query", "no request id attribute is recorded on spans in this SigNoz");
+    parts.push(`(${requestIdKeys.map((k) => `${k} = ${quote(f.request_id!)}`).join(" OR ")})`);
+  }
   if (f.has_error !== undefined && signal === "traces") parts.push(`has_error = ${f.has_error}`);
   if (f.status_code !== undefined && signal === "traces") parts.push(`response_status_code = ${quote(f.status_code)}`);
   if (f.expression?.trim()) parts.push(`(${checkExpression(f.expression)})`);
@@ -435,18 +442,31 @@ export function logsAggregate(
   });
 }
 
-export function tracesSearch(w: Window, f: Filters, limit?: number, offset = 0, ascending = false) {
+/** Span fields an investigation needs: the defaults lack parent_span_id, has_error and status_message. */
+export const TRACE_FIELDS = [
+  "span_id",
+  "parent_span_id",
+  "name",
+  "duration_nano",
+  "service.name",
+  "response_status_code",
+  "has_error",
+  "status_message",
+];
+
+export function tracesSearch(w: Window, f: Filters, limit?: number, offset = 0, ascending = false, requestIdKeys: string[] = []) {
   return envelope(w, "raw", {
     signal: "traces",
-    ...withFilter(filterExpression("traces", f)),
+    selectFields: [...TRACE_FIELDS, ...requestIdKeys].map((name) => ({ name })),
+    ...withFilter(filterExpression("traces", f, requestIdKeys)),
     order: [{ key: { name: "timestamp" }, direction: ascending ? "asc" : "desc" }],
     limit: clampLimit(limit),
     offset,
   });
 }
 
-export const traceById = (w: Window, traceId: string) =>
-  tracesSearch(w, { trace_id: traceId }, config.signoz.maxLimit, 0, true);
+export const traceById = (w: Window, traceId: string, requestIdKeys: string[] = []) =>
+  tracesSearch(w, { trace_id: traceId }, config.signoz.maxLimit, 0, true, requestIdKeys);
 
 export function metricsQuery(
   w: Window,
@@ -618,15 +638,101 @@ function toEvent(row: { timestamp: string; data: Record<string, unknown> }, sign
   };
 }
 
-async function rawQuery(body: ReturnType<typeof envelope>, signal: "logs" | "traces", scope: SearchScope, abort?: AbortSignal) {
+const requestIdKeyCache = new Map<string, { keys: string[]; at: number }>();
+
+/** Span attributes holding a request id on this SigNoz (e.g. request.id, request_id); cached for an hour. */
+async function requestIdKeys(): Promise<string[]> {
+  const cfg = current();
+  const hit = requestIdKeyCache.get(cfg.baseUrl);
+  if (hit && Date.now() - hit.at < 3_600_000) return hit.keys;
+  let keys: string[] = [];
+  try {
+    const json = (await call(cfg, "GET", "/api/v1/fields/keys?signal=traces&searchText=request&limit=50")) as {
+      data?: { keys?: Record<string, unknown> };
+    };
+    keys = Object.keys(json.data?.keys ?? {})
+      .filter((k) => /(^|[._])request[._]?id$/i.test(k))
+      .sort();
+  } catch {
+    // Without discovery spans still load; only the request id fields and filter are missing.
+  }
+  requestIdKeyCache.set(cfg.baseUrl, { keys, at: Date.now() });
+  return keys;
+}
+
+type Span = { ref: string; id: string; parent: string; start: number; end: number };
+
+/** Nanosecond-precision RFC 3339 timestamp → epoch milliseconds with a fractional part. */
+const epochMs = (iso: string) => {
+  const frac = /\.(\d+)/.exec(iso)?.[1] ?? "0";
+  return Date.parse(iso.replace(/\.\d+/, "")) + Number(`0.${frac}`) * 1000;
+};
+
+/**
+ * Time inside a span during which none of its child spans ran: uninstrumented work (an untraced call, a lock or
+ * sleep, CPU). Only gaps of at least max(minMs, minShare of the parent) count; largest first.
+ */
+export function traceGaps(rows: Array<{ timestamp: string; data: Record<string, unknown> }>, refs: string[], minMs = 50, minShare = 0.1) {
+  const spans: Span[] = rows.map((r, i) => {
+    const start = epochMs(r.timestamp);
+    return {
+      ref: refs[i],
+      id: String(r.data.span_id ?? ""),
+      parent: String(r.data.parent_span_id ?? ""),
+      start,
+      end: start + Number(r.data.duration_nano ?? 0) / 1e6,
+    };
+  });
+  const t0 = Math.min(...spans.map((x) => x.start));
+  const children = new Map<string, Span[]>();
+  for (const x of spans) if (x.parent) children.set(x.parent, [...(children.get(x.parent) ?? []), x]);
+  const gaps: Array<{ in: string; after: string | null; before: string | null; gap_ms: number; at_ms: number; share: number }> = [];
+  for (const p of spans) {
+    const kids = (children.get(p.id) ?? []).sort((a, b) => a.start - b.start);
+    if (!kids.length) continue;
+    const threshold = Math.max(minMs, (p.end - p.start) * minShare);
+    let cursor = p.start;
+    let prev: Span | null = null;
+    const add = (from: number, to: number, before: Span | null) => {
+      if (to - from >= threshold)
+        gaps.push({
+          in: p.ref,
+          after: prev?.ref ?? null,
+          before: before?.ref ?? null,
+          gap_ms: Math.round((to - from) * 10) / 10,
+          at_ms: Math.round((from - t0) * 10) / 10,
+          share: Math.round(((to - from) / (p.end - p.start)) * 100) / 100,
+        });
+    };
+    for (const k of kids) {
+      add(cursor, k.start, k);
+      if (k.end > cursor) {
+        cursor = k.end;
+        prev = k;
+      }
+    }
+    add(cursor, p.end, null);
+  }
+  return gaps.sort((a, b) => b.gap_ms - a.gap_ms).slice(0, 10);
+}
+
+async function rawQuery(
+  body: ReturnType<typeof envelope>,
+  signal: "logs" | "traces",
+  scope: SearchScope,
+  abort?: AbortSignal,
+  analyze?: (rows: Array<{ timestamp: string; data: Record<string, unknown> }>, refs: string[]) => Record<string, unknown>,
+) {
   const json = await run(body, scope, abort);
   const { rows, nextCursor } = parseRaw(json);
   const spec = body.compositeQuery.queries[0].spec as { limit: number; offset: number };
   const stored = await record(body, rows.map((r) => toEvent(r, signal)), scope, rows.length ? undefined : EMPTY);
+  const refs = ((stored as { events?: Array<{ event_ref: string }> }).events ?? []).map((e) => e.event_ref);
   return {
     provider: "signoz",
     signal,
     ...stored,
+    ...(analyze && rows.length ? analyze(rows, refs) : {}),
     ...(rows.length >= spec.limit || nextCursor ? { next_offset: spec.offset + rows.length } : {}),
   };
 }
@@ -636,13 +742,32 @@ export const searchLogs = (
   scope: SearchScope,
 ) => rawQuery(logsSearch(resolveWindow(a), a, a.limit, a.offset ?? 0), "logs", scope);
 
-export const searchTraces = (
+export const searchTraces = async (
   a: Filters & { since_minutes?: number; earliest?: string; latest?: string; limit?: number; offset?: number },
   scope: SearchScope,
-) => rawQuery(tracesSearch(resolveWindow(a), a, a.limit, a.offset ?? 0), "traces", scope);
+) => rawQuery(tracesSearch(resolveWindow(a), a, a.limit, a.offset ?? 0, false, await requestIdKeys()), "traces", scope);
 
-export const getTrace = (a: { trace_id: string; since_minutes?: number; earliest?: string; latest?: string }, scope: SearchScope) =>
-  rawQuery(traceById(resolveWindow(a, 24 * 60), a.trace_id), "traces", scope);
+/** Every span of one trace (by trace_id, or the trace a request_id belongs to) with its untraced gaps. */
+export async function getTrace(
+  a: { trace_id?: string; request_id?: string; since_minutes?: number; earliest?: string; latest?: string },
+  scope: SearchScope,
+) {
+  const w = resolveWindow(a, 24 * 60);
+  const keys = await requestIdKeys();
+  let traceId = a.trace_id;
+  let others: string[] = [];
+  if (!traceId) {
+    if (!a.request_id) throw new SignozError("invalid_query", "pass trace_id or request_id");
+    const found = parseRaw(await run(tracesSearch(w, { request_id: a.request_id }, 20, 0, false, keys), scope)).rows;
+    const ids = [...new Set(found.map((r) => String(r.data.trace_id ?? "")).filter(Boolean))];
+    if (!ids.length) throw new SignozError("invalid_query", `no span carries request id ${a.request_id} in this window`);
+    [traceId, ...others] = ids;
+  }
+  const result = await rawQuery(traceById(w, traceId, keys), "traces", scope, undefined, (rows, refs) => ({
+    gaps: traceGaps(rows, refs),
+  }));
+  return { ...result, trace_id: traceId, ...(others.length ? { other_trace_ids: others } : {}) };
+}
 
 async function inline(body: ReturnType<typeof envelope>, scope: SearchScope, parse: (json: unknown) => { empty: boolean } & Record<string, unknown>) {
   const json = await run(body, scope);
@@ -788,4 +913,88 @@ export async function signozErrorSpanGroups(
     samples: parseRaw(recent).rows,
     truncated: today.length >= SPAN_GROUP_LIMIT,
   };
+}
+
+export interface SlowRequestGroup {
+  ns: string;
+  service: string;
+  name: string;
+  /** Requests slower than the threshold. */
+  slow: number;
+  total: number;
+  p50_ms: number;
+  p95_ms: number;
+}
+
+/**
+ * Requests (root spans: one per request, so a slow gateway call is not also counted at every service below it) slower
+ * than `thresholdMs`, per namespace, service and entry span, over the scan and baseline windows, plus the slowest
+ * root spans of the window (trace and request ids) as samples.
+ */
+export async function signozSlowRequestGroups(
+  w: Window,
+  baseline: Window,
+  namespaces: string[],
+  thresholdMs: number,
+  signal?: AbortSignal,
+) {
+  const cfg = current();
+  const nsKey = config.signoz.namespaceKey || "deployment.environment";
+  const roots = ["parent_span_id = ''", ...(namespaces.length ? [anyOf(nsKey, namespaces)] : [])].join(" AND ");
+  const nanos = Math.round(thresholdMs * 1e6);
+  const spec = {
+    signal: "traces",
+    aggregations: [`countIf(duration_nano > ${nanos})`, "count()", "p50(duration_nano)", "p95(duration_nano)"].map(
+      (expression, i) => ({ expression, alias: `a${i}` }),
+    ),
+    filter: { expression: roots },
+    groupBy: [nsKey, "service.name", "name"].map(groupKey),
+    order: [{ key: { name: "a0" }, direction: "desc" }],
+    limit: SPAN_GROUP_LIMIT,
+  };
+  const keys = await requestIdKeys();
+  const query = (body: unknown) => call(cfg, "POST", "/api/v5/query_range", body, signal);
+  const [now, base, recent] = await Promise.all([
+    query(envelope(w, "scalar", spec)),
+    query(envelope(baseline, "scalar", spec)),
+    query(
+      envelope(w, "raw", {
+        signal: "traces",
+        selectFields: [...TRACE_FIELDS, ...keys].map((name) => ({ name })),
+        filter: { expression: `${roots} AND duration_nano > ${nanos}` },
+        order: [{ key: { name: "duration_nano" }, direction: "desc" }],
+        limit: Math.min(200, config.signoz.maxLimit),
+      }),
+    ),
+  ]);
+  const groups = (json: unknown): SlowRequestGroup[] => {
+    const sc = parseScalar(json, SPAN_GROUP_LIMIT);
+    const at = (r: unknown[], k: string) => r[sc.columns.indexOf(k)];
+    // Aggregation columns follow the group-by columns in request order (SigNoz names them __result_<i>).
+    const agg = (r: unknown[], i: number) => Number(r[r.length - 4 + i]) || 0;
+    return sc.rows.map((r) => ({
+      ns: String(at(r, nsKey) ?? ""),
+      service: String(at(r, "service.name") ?? ""),
+      name: String(at(r, "name") ?? ""),
+      slow: agg(r, 0),
+      total: agg(r, 1),
+      p50_ms: Math.round(agg(r, 2) / 1e6),
+      p95_ms: Math.round(agg(r, 3) / 1e6),
+    }));
+  };
+  const today = groups(now).filter((g) => g.slow > 0);
+  return {
+    today,
+    yesterday: groups(base),
+    samples: parseRaw(recent).rows,
+    truncated: today.length >= SPAN_GROUP_LIMIT,
+  };
+}
+
+/** Untraced gaps of one trace, labelled "service span" (platform scan: no agent budget, nothing stored). */
+export async function signozTraceGaps(w: Window, traceId: string, signal?: AbortSignal) {
+  const cfg = current();
+  const rows = parseRaw(await call(cfg, "POST", "/api/v5/query_range", traceById(w, traceId), signal)).rows;
+  const labels = rows.map((r) => `${String(r.data["service.name"] ?? "")} ${String(r.data.name ?? "")}`.trim());
+  return traceGaps(rows, labels);
 }

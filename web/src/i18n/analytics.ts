@@ -115,6 +115,14 @@ const copy: Record<string, [string, string]> = {
   relatedWork: ["Công việc liên quan", "Related work"],
   noRelatedWork: ["Chưa có work item, run hoặc PR liên kết.", "No linked work item, run, or PR."],
   stackTrace: ["Stack trace", "Stack trace"],
+  slowLatency: ["Độ trễ", "Latency"],
+  slowSample: ["Request chậm nhất", "Slowest request"],
+  slowGaps: [
+    "Thời gian không có span con (code không được trace)",
+    "Time with no child span (untraced code)",
+  ],
+  slowGapAt: ["trong {span}, sau {after}, trước {before}", "in {span}, after {after}, before {before}"],
+  slowGapEdge: ["mép span", "span edge"],
   yes: ["Có", "Yes"],
   no: ["Không", "No"],
   resolutionInferredNo: [
