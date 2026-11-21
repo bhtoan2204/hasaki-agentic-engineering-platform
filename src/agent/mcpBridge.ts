@@ -1,4 +1,4 @@
-import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
+import { advertisedContextTools, CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { z } from "zod";
 /**
  * Stdio MCP server core shared by the CLI providers' per-run bridges (Cursor: cursor/bridge.ts, Codex: codex/bridge.ts).
@@ -152,7 +152,7 @@ export function bridgeToolsFor(mode: string, opts: { commit?: boolean } = {}): B
   const nativeNames = new Set(CONTEXT_TOOLS.map((t) => t.name));
   const all = [
     ...PLATFORM_BRIDGE_TOOLS.filter((t) => !nativeNames.has(t.name)),
-    ...CONTEXT_TOOLS.map((t) => ({
+    ...advertisedContextTools().map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: z.toJSONSchema(t.input),

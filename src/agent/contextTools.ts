@@ -1,4 +1,6 @@
-import { postClarification } from "./toolRuntime.ts";
+import { postClarification, validateToolBinding } from "./toolRuntime.ts";
+import { callTool, integrationTools } from "./toolRegistry.ts";
+import { toolAllowed } from "./toolPolicy.ts";
 import { codeIntelligenceEnabled, config } from "../config.ts";
 import {
   searchSymbols,
@@ -17,7 +19,8 @@ import { redactContextValue } from "../context/redact.ts";
 import type { PlatformToolEnv } from "./platformTools.ts";
 import type { ContextPack } from "../context/pack.ts";
 
-import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
+import { CONTEXT_TOOLS, contextToolSupported } from "./contextToolSchemas.ts";
+import { runCodeForRun } from "../codeact/surfaces.ts";
 export { CONTEXT_TOOLS, contextTool } from "./contextToolSchemas.ts";
 export const MAX_CONTEXT_RESULT_CHARS = 24000;
 export function boundedContextJson(value: unknown): string {
@@ -161,6 +164,8 @@ interface ContextToolArgs {
   handoff_limit?: number;
   offset?: number;
   questions?: Array<{ question: string; context?: string; options?: string[] }>;
+  code?: string;
+  timeout_ms?: number;
 }
 export async function executeContextTool(
   name: string,
@@ -431,12 +436,17 @@ export async function executeContextTool(
         capabilities: CONTEXT_TOOLS.map((t) => ({
           name: t.logicalName,
           read_only: t.readOnly,
-          supported:
-            !["search_code", "get_symbol", "find_dependencies"].includes(t.name) ||
-            codeIntelligenceEnabled(),
+          supported: contextToolSupported(t.name),
         })),
       };
     }
+    case "execute_code":
+      return runCodeForRun({ code: args.code ?? "", timeoutMs: args.timeout_ms }, env, {
+        integrationTools,
+        callTool,
+        toolAllowed,
+        validateBinding: () => validateToolBinding(env),
+      });
     case "get_production_errors":
       return relatedProductionErrors(env, args.query, args.limit);
     case "get_repository_metadata": {

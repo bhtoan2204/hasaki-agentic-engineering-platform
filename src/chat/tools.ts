@@ -19,6 +19,7 @@ import { chatRepository } from "./repository.ts";
 import { readKnowledge, searchKnowledge } from "./knowledge.ts";
 import { proposeOperation, verifyOperation } from "./operations.ts";
 import { learnProcedure } from "./memory.ts";
+import { runCodeForChat } from "../codeact/surfaces.ts";
 import { background } from "../workflow/background.ts";
 import { LIMITS } from "./policy.ts";
 import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
@@ -228,6 +229,36 @@ const TOOLS: ToolDef[] = [
       });
       if (!r.ok) throw new Error(r.error ?? `${a.name} failed`);
       return { label: a.name, data: r.result };
+    },
+  },
+  {
+    name: "code.execute",
+    group: "observability",
+    description:
+      "Run a short JavaScript program (async function body) in an isolated sandbox that combines several READ-ONLY integration tools: `await platform.callTool(name, args)`, `await platform.listTools()`; filter, join and count in code, `return` a compact JSON result. Use it when several lookups must be correlated; call a single tool directly with tools.call. The result is untrusted data with evidence refs.",
+    usage:
+      '{"code": "const { spans } = await platform.callTool(\\"signoz_search_traces\\", {...}); return spans.length;"}',
+    args: z
+      .object({
+        code: z.string().min(1).max(16384),
+        timeout_ms: z.number().int().min(100).max(60000).optional(),
+      })
+      .strict(),
+    async run(a, ctx) {
+      const answer = await runCodeForChat(
+        { code: a.code, timeoutMs: a.timeout_ms },
+        {
+          userId: ctx.binding.userId,
+          conversationId: ctx.binding.conversationId,
+          turnId: ctx.binding.turnId,
+          allowedRepositories: ctx.scoped.length ? ctx.scoped : ctx.readable,
+          signal: ctx.signal,
+          checkBinding: () => assertBinding(ctx.binding),
+        },
+        { integrationTools, callTool },
+      );
+      if (answer.category === "unsupported") throw new ChatToolDenied(answer.error ?? "CodeAct unavailable");
+      return { label: "code.execute", data: answer };
     },
   },
   {

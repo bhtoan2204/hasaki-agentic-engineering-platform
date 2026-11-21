@@ -6,7 +6,7 @@ import { liveClaudeSandbox } from "../eval/liveSandbox.ts";
 export { modelFor, codexModelFor } from "./stepAgent.ts";
 import { isolationEnforced, prepareAgentSandbox, SANDBOX_HOME } from "./isolation.ts";
 import { agentEnvironment, paidClaudeAuth, paidClaudeAuthMessage } from "./environment.ts";
-import { CONTEXT_TOOLS } from "./contextToolSchemas.ts";
+import { advertisedContextTools } from "./contextToolSchemas.ts";
 import { normalizeProviderFailure } from "./telemetry.ts";
 import { stopFailure, superviseTurn, turnLimits } from "./harness/cliTurn.ts";
 import {
@@ -295,7 +295,7 @@ function platformServer(
     ),
   ];
   tools.push(
-    ...CONTEXT_TOOLS.map((t) => tool(t.name, t.description, t.input.shape, call(t.logicalName))),
+    ...advertisedContextTools().map((t) => tool(t.name, t.description, t.input.shape, call(t.logicalName))),
   );
   if (mode === "coding") {
     tools.unshift(

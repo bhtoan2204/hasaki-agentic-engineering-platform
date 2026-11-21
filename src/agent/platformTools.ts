@@ -10,7 +10,7 @@ import {
   boundedContextJson,
   visibleSnapshotKnowledge,
 } from "./contextTools.ts";
-import { developerQuestionIssue } from "./contextToolSchemas.ts";
+import { contextToolSupported, developerQuestionIssue } from "./contextToolSchemas.ts";
 import {
   refreshToolProgress,
   validateToolBinding,
@@ -26,7 +26,7 @@ import type { AttemptRow, RunRow, StepRow } from "../workflow/types.ts";
 import { execFile, type ExecFileException } from "node:child_process";
 import { isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { config, codeIntelligenceEnabled } from "../config.ts";
+import { config } from "../config.ts";
 import { protectedRootsFor } from "../platform/selfDevelopment.ts";
 import { execution } from "../auth/execution.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
@@ -242,10 +242,11 @@ export async function dispatchPlatformTool(
             throw new Error(
               `Invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; ")}`,
             );
-          const timeout = Math.min(
-            60000,
-            Math.max(1000, Number(config.agent.contextToolTimeoutMs) || 10000),
-          );
+          // A CodeAct program runs several tool calls under its own deadline (it kills the program itself).
+          const timeout =
+            native.name === "execute_code"
+              ? config.codeAct.timeoutMs + 5000
+              : Math.min(60000, Math.max(1000, Number(config.agent.contextToolTimeoutMs) || 10000));
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             if (readOnly && (activeContextReads.get(env.attemptId) ?? 0) >= 4)
@@ -376,9 +377,7 @@ async function dispatchOwned(name: string, args: ToolArgs, env: PlatformToolEnv)
             name: t.logicalName,
             summary: t.description,
             read_only: t.readOnly,
-            available:
-              !["search_code", "get_symbol", "find_dependencies"].includes(t.name) ||
-              codeIntelligenceEnabled(),
+            available: contextToolSupported(t.name),
           })),
         ],
         null,
@@ -395,9 +394,7 @@ async function dispatchOwned(name: string, args: ToolArgs, env: PlatformToolEnv)
                 name: native.logicalName,
                 description: native.description,
                 read_only: native.readOnly,
-                available:
-                  !["search_code", "get_symbol", "find_dependencies"].includes(native.name) ||
-                  codeIntelligenceEnabled(),
+                available: contextToolSupported(native.name),
                 input_schema: z.toJSONSchema(native.input),
               }
             : describeTool(String(args?.name ?? "")),

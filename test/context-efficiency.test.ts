@@ -9,7 +9,8 @@ import {
 import { codeRetrievalKey, roleBudget } from "../src/context/pack.ts";
 import { evidenceSummary } from "../src/agent/evidence.ts";
 import { codexEnabledTools } from "../src/agent/codex/run.ts";
-import { CONTEXT_TOOLS } from "../src/agent/contextToolSchemas.ts";
+import { advertisedContextTools, CONTEXT_TOOLS } from "../src/agent/contextToolSchemas.ts";
+import { config } from "../src/config.ts";
 
 test("measurement: duplicate tool calls, repeated file reads and time to the first useful location come from tool_use events", () => {
   const m = newMetrics("model");
@@ -144,6 +145,15 @@ test("code intelligence first: Codex may call the native index tools", () => {
   for (const mode of ["coding", "analysis"] as const)
     for (const t of ["search_code", "get_symbol", "find_dependencies", "get_step_output"])
       assert.ok(codexEnabledTools(mode).includes(t), `${mode}: ${t}`);
-  assert.ok(CONTEXT_TOOLS.every((t) => codexEnabledTools("coding").includes(t.name)));
+  // Every advertised native tool is enabled; the optional CodeAct tool only when it is turned on.
+  assert.ok(advertisedContextTools().every((t) => codexEnabledTools("coding").includes(t.name)));
+  assert.ok(!codexEnabledTools("coding").includes("execute_code"), "CodeAct off: not advertised");
+  config.codeAct.enabled = true;
+  try {
+    assert.ok(codexEnabledTools("analysis").includes("execute_code"));
+    assert.ok(CONTEXT_TOOLS.every((t) => codexEnabledTools("coding").includes(t.name)));
+  } finally {
+    config.codeAct.enabled = false;
+  }
   assert.ok(!codexEnabledTools("analysis").includes("commit_changes"));
 });

@@ -11,7 +11,7 @@ import { superviseSpawn, supervisionNote } from "../process/supervisor.ts";
 import { npmCacheDir } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { addUsage, newMetrics, noteToolUse, type AgentMetrics } from "../metrics.ts";
-import { CONTEXT_TOOLS } from "../contextToolSchemas.ts";
+import { advertisedContextTools } from "../contextToolSchemas.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "../broker/server.ts";
 import {
@@ -290,7 +290,7 @@ const DISABLED_FEATURES = [
 ];
 /** Native context tools (search_code, get_symbol, find_dependencies, …) are exposed by the bridge: allow them too, or
  * Codex can never use code intelligence and falls back to whole-repository shell scans. */
-const PLATFORM_TOOL_NAMES = [
+const platformToolNames = () => [
   ...new Set([
     "ask_user",
     "post_update",
@@ -303,13 +303,14 @@ const PLATFORM_TOOL_NAMES = [
     "list_tools",
     "describe_tool",
     "call_tool",
-    ...CONTEXT_TOOLS.map((t) => t.name),
+    ...advertisedContextTools().map((t) => t.name),
   ]),
 ];
+// Computed per call: an optional capability (CodeAct) follows the configuration at invocation time.
 export const codexEnabledTools = (mode: ToolMode) =>
   mode === "coding"
-    ? PLATFORM_TOOL_NAMES
-    : PLATFORM_TOOL_NAMES.filter((t) => t !== "prepare_branch" && t !== "commit_changes");
+    ? platformToolNames()
+    : platformToolNames().filter((t) => t !== "prepare_branch" && t !== "commit_changes");
 
 export interface CodexInvocation {
   mode: ToolMode;

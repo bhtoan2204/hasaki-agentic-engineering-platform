@@ -30,7 +30,7 @@ import {
   envFromDatabase,
   dispatchPlatformTool,
 } from "../src/agent/platformTools.ts";
-import { CONTEXT_TOOLS } from "../src/agent/contextToolSchemas.ts";
+import { advertisedContextTools, CONTEXT_TOOLS } from "../src/agent/contextToolSchemas.ts";
 import { bridgeToolsFor } from "../src/agent/mcpBridge.ts";
 import { newMetrics } from "../src/agent/metrics.ts";
 import {
@@ -587,13 +587,24 @@ test("Claude dispatch and real Codex/Cursor stdio bridges expose the same bound 
     if (provider !== "claude") {
       const replies = await stdioCall(provider, env);
       const names = replies.get(1)!.result.tools.map((t) => t.name);
-      for (const t of CONTEXT_TOOLS) assert.ok(names.includes(t.name));
+      for (const t of advertisedContextTools()) assert.ok(names.includes(t.name));
+      assert.ok(!names.includes("execute_code"), "CodeAct is off: not advertised");
       assert.ok(!names.includes("prepare_branch"));
       assert.match(replies.get(2)!.result.content[0].text, /idempotent/);
     }
   }
-  for (const t of CONTEXT_TOOLS)
+  for (const t of advertisedContextTools())
     assert.ok(bridgeToolsFor("analysis").some((b) => b.name === t.name));
+  config.codeAct.enabled = true;
+  try {
+    for (const t of CONTEXT_TOOLS)
+      assert.ok(
+        bridgeToolsFor("analysis").some((b) => b.name === t.name),
+        t.name,
+      );
+  } finally {
+    config.codeAct.enabled = false;
+  }
 });
 async function client(user: string) {
   const response = await fetch(base + "/api/auth/login", {

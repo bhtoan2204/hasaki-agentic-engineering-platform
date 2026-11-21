@@ -2,6 +2,7 @@ import { PRECEDENCE_STATEMENT } from "../knowledge/resolve.ts";
 import { renderContextPack, packCodeBody, type ContextPack } from "../context/pack.ts";
 import { TEST_COMMAND } from "../workflow/templates.ts";
 import { verifyConfig } from "./verify.ts";
+import { config } from "../config.ts";
 import { branchFor } from "../workflow/branches.ts";
 import { buildTaskPrompt } from "../prompt.ts";
 import type { ResolvedContext, StepInput } from "../workflow/context.ts";
@@ -188,7 +189,11 @@ export function buildSystemAppend(
   lines.push(
     "",
     "## Integration tools",
-    "Native logical tools: platform.search_code, get_symbol, find_dependencies, search_knowledge, get_business_rules, search_task_memory, get_work_item, get_step_output, get_run_context, get_production_errors, get_repository_metadata, request_clarification. MCP transport names are mcp__platform__<suffix>. These are attempt-bound; unsupported capabilities are reported explicitly. No tool can start another workflow.",
+    "Native logical tools: platform.search_code, get_symbol, find_dependencies, search_knowledge, get_business_rules, search_task_memory, get_work_item, get_step_output, get_run_context, get_production_errors, get_repository_metadata, request_clarification" +
+      (config.codeAct.enabled
+        ? ", execute_code (one sandboxed read-only program for several correlated integration lookups)"
+        : "") +
+      ". MCP transport names are mcp__platform__<suffix>. These are attempt-bound; unsupported capabilities are reported explicitly. No tool can start another workflow.",
   );
   if (integrations?.available.length) {
     lines.push(

@@ -92,9 +92,16 @@ export function canonicalJson(v: unknown): string {
   return JSON.stringify(v ?? null);
 }
 
+let testLauncher: Launcher | undefined;
+/** Tests only: run programs in a plain child process (surface wiring tests on hosts without the OS sandbox). */
+export function setCodeActLauncherForTests(launcher: Launcher | undefined) {
+  testLauncher = launcher;
+}
+
 /** Enabled by the operator and the OS sandbox usable on this host right now; otherwise the reason. */
 export async function codeActAvailability(): Promise<true | string> {
   if (!config.codeAct.enabled) return "CodeAct is disabled on this installation (codeAct.enabled)";
+  if (testLauncher) return true;
   const runtime = await probeIsolation();
   if (!runtime.available)
     return `CodeAct needs the OS sandbox, which is unavailable here: ${runtime.problems.join("; ")}`;
@@ -180,7 +187,7 @@ export async function executeCode(
   ];
   let inv: Awaited<ReturnType<Launcher>>;
   try {
-    inv = await (deps.launch ?? sandboxLauncher)(process.execPath, nodeArgs);
+    inv = await (deps.launch ?? testLauncher ?? sandboxLauncher)(process.execPath, nodeArgs);
   } catch (e) {
     return fail(
       e instanceof CodeActError ? e.category : "dependency_unavailable",
