@@ -1,4 +1,5 @@
 import { test, before, after, beforeEach } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -98,8 +99,11 @@ const analyzerCalls: AnalyzerInput[] = [];
 let drafted: (content: string) => string = (c) => c.replace(/line_amount/g, "platform_price");
 
 let wfKey = "";
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate();
+  // The repository knowledge scan runs only in platform-go, which is ready once the schema is migrated.
+  platformGo = await startPlatformGo();
   await seedTemplates();
   registerExecutor("agent", fakeAgent);
   registerExecutor("coding_agent", fakeAgent);
@@ -129,6 +133,7 @@ before(async () => {
 });
 after(async () => {
   await settleBackground();
+  platformGo?.stop();
   await pool.end();
 });
 beforeEach(() => {

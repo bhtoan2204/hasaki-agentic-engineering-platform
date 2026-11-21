@@ -1,4 +1,5 @@
-import { test, after } from "node:test";
+import { test, before, after } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -23,7 +24,16 @@ import { knowledgeRestricted } from "../src/knowledge/visibility.ts";
 import { createUser } from "../src/auth/users.ts";
 import { allowedRepositoriesForRun } from "../src/repos/access.ts";
 
-after(() => pool.end());
+// The repository knowledge scan (importFromRepositories) runs only in platform-go, ready once the schema is migrated.
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
+before(async () => {
+  await migrate();
+  platformGo = await startPlatformGo();
+});
+after(async () => {
+  platformGo?.stop();
+  await pool.end();
+});
 
 /**
  * Project mapping is now one input of user-scoped access (repos/access.ts): these tests look at the mapping alone, so
@@ -383,7 +393,8 @@ test("importSkillDirectory: a local, not-yet-committed skill is attributed to a 
 });
 
 test("user-level ~/.claude skills: imported once (copies of repo skills skipped), autonomous workflow skills disabled", async () => {
-  const dir = join(config.reposRoot, "..", "user-skills");
+  // Inside a trusted root platform-go was started with (the data directory): the scan never reads elsewhere.
+  const dir = join(config.dataDir, "user-skills");
   for (const [n, body] of [
     ["solid", "---\nname: solid\ndescription: apply SOLID\n---\n# SOLID\nSRP first.\n"],
     ["tdd", "---\nname: tdd\ndescription: red green refactor\n---\n# TDD\n"],
@@ -393,33 +404,37 @@ test("user-level ~/.claude skills: imported once (copies of repo skills skipped)
     mkdirSync(join(dir, n), { recursive: true });
     writeFileSync(join(dir, n, "SKILL.md"), body);
   }
+  const previous = process.env.CLAUDE_USER_SKILLS_DIR;
   process.env.CLAUDE_USER_SKILLS_DIR = dir;
-  const r = await importFromRepositories();
-  const keys = r.candidates.map((c) => c.key);
-  assert.ok(!keys.includes("user.skill.solid"), "identical to the repository copy of solid");
-  const solidItem = (await knowledge.get("skill.solid"))!;
-  assert.equal(
-    solidItem.scope_type,
-    "ORGANIZATION",
-    "was available everywhere via ~/.claude: widened, not limited to the repos holding a copy",
-  );
-  assert.deepEqual(solidItem.versions[0].applicability, {});
-  assert.ok(keys.includes("user.skill.tdd"));
-  const tdd = (await knowledge.get("user.skill.tdd"))!;
-  assert.equal(tdd.scope_type, "ORGANIZATION");
-  assert.equal(tdd.enabled, true);
-  assert.equal(
-    (await knowledge.get("user.skill.pr"))!.enabled,
-    false,
-    "pushes/opens PRs on its own: imported disabled",
-  );
-  const carrier = (await knowledge.get("user.skill.oms-carrier-x"))!;
-  assert.equal(
-    `${carrier.scope_type}:${carrier.scope_ref}`,
-    "PROJECT:OMS",
-    "named after the OMS repositories (oms-*): OMS only, never Payment",
-  );
-  process.env.CLAUDE_USER_SKILLS_DIR = join(config.reposRoot, "..", "empty-user-skills");
+  try {
+    const r = await importFromRepositories();
+    const keys = r.candidates.map((c) => c.key);
+    assert.ok(!keys.includes("user.skill.solid"), "identical to the repository copy of solid");
+    const solidItem = (await knowledge.get("skill.solid"))!;
+    assert.equal(
+      solidItem.scope_type,
+      "ORGANIZATION",
+      "was available everywhere via ~/.claude: widened, not limited to the repos holding a copy",
+    );
+    assert.deepEqual(solidItem.versions[0].applicability, {});
+    assert.ok(keys.includes("user.skill.tdd"));
+    const tdd = (await knowledge.get("user.skill.tdd"))!;
+    assert.equal(tdd.scope_type, "ORGANIZATION");
+    assert.equal(tdd.enabled, true);
+    assert.equal(
+      (await knowledge.get("user.skill.pr"))!.enabled,
+      false,
+      "pushes/opens PRs on its own: imported disabled",
+    );
+    const carrier = (await knowledge.get("user.skill.oms-carrier-x"))!;
+    assert.equal(
+      `${carrier.scope_type}:${carrier.scope_ref}`,
+      "PROJECT:OMS",
+      "named after the OMS repositories (oms-*): OMS only, never Payment",
+    );
+  } finally {
+    process.env.CLAUDE_USER_SKILLS_DIR = previous;
+  }
   assert.ok(
     (await repositories.get("oms-api"))!.description.includes("Money fields"),
     "repo description filled from CLAUDE.md",
