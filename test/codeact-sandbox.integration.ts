@@ -93,3 +93,51 @@ test("a timed-out program leaves no process behind", { skip }, async () => {
   }
   assert.equal(left.trim(), "", "no runner process survives");
 });
+
+const runnerProcesses = () => {
+  try {
+    return execFileSync("pgrep", ["-af", "codeact/runner\\.mjs"], { encoding: "utf8" }).trim();
+  } catch {
+    return ""; // pgrep exits 1 when nothing matches
+  }
+};
+
+test("cancelling a sandboxed program mid-call kills it: no process is left", { skip }, async () => {
+  const ac = new AbortController();
+  let started = false;
+  const pending = executeCode(
+    { code: `await platform.callTool("echo", {}); while (true) {}` },
+    {
+      tools: () => TOOLS,
+      signal: ac.signal,
+      call: async (_n, args) => {
+        started = true;
+        return { ok: true, result: args };
+      },
+    },
+  );
+  for (let i = 0; i < 300 && !started; i++) await new Promise((r) => setTimeout(r, 10));
+  const t0 = Date.now();
+  ac.abort(new Error("attempt canceled"));
+  const r = await pending;
+  assert.equal(r.category, "canceled");
+  assert.ok(Date.now() - t0 < 1000, "cancellation is prompt");
+  await new Promise((res) => setTimeout(res, 500));
+  assert.equal(runnerProcesses(), "");
+});
+
+test(
+  "an IPC flood from inside the sandbox is cut off and leaves no process",
+  { skip },
+  async () => {
+    const r = await executeCode(
+      {
+        code: `${ESCAPE} for (let i = 0; i < 50000; i++) proc.stdout.write("{}\\n"); await new Promise(() => {});`,
+      },
+      { tools: () => TOOLS, call },
+    );
+    assert.equal(r.category, "budget_exceeded");
+    await new Promise((res) => setTimeout(res, 500));
+    assert.equal(runnerProcesses(), "");
+  },
+);

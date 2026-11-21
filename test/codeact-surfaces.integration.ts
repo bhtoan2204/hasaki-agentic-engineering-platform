@@ -40,6 +40,8 @@ let owner: PublicUser;
 const calls: string[] = [];
 let mutated = 0;
 let revokeOnCall: number | null = null;
+/** fixture.wait: holds until its abort signal fires (records what it saw), or until released. */
+const waits: Array<{ aborted: boolean; release: () => void }> = [];
 
 // Fake SigNoz/Splunk-style data: 400 spans, 600 log events (all values fake).
 const SPANS = Array.from({ length: 400 }, (_, i) => ({
@@ -93,6 +95,24 @@ before(async () => {
     },
   });
   registerIntegrationTool({
+    name: "fixture.wait",
+    summary: "fixture wait",
+    description: "Waits until aborted or released",
+    input: z.object({ i: z.number() }),
+    readOnly: true,
+    available: () => true,
+    handler: (_args, ctx) =>
+      new Promise((resolve) => {
+        calls.push("fixture.wait");
+        const w = { aborted: false, release: () => resolve({ late: true }) };
+        waits.push(w);
+        ctx.signal?.addEventListener("abort", () => {
+          w.aborted = true;
+          resolve({ aborted: true });
+        });
+      }),
+  });
+  registerIntegrationTool({
     name: "fixture.publish",
     summary: "fixture mutation",
     description: "A mutating tool CodeAct must never reach",
@@ -121,6 +141,7 @@ afterEach(async () => {
   config.codeAct.enabled = false;
   revokeOnCall = null;
   calls.length = 0;
+  for (const w of waits.splice(0)) w.release();
   await q(pool, "UPDATE users SET active = true WHERE id = $1", [owner.id]);
   for (const id of runs.splice(0)) {
     const r = await one(pool, "SELECT status FROM workflow_runs WHERE id=$1", [id]);
@@ -135,7 +156,7 @@ after(async () => {
   await pool.end();
 });
 
-async function attemptEnv() {
+async function attemptEnv(signal: AbortSignal = new AbortController().signal) {
   const item = await workItems.createManual({
     title: "Payment timeouts",
     description: "Investigate payment gateway timeouts",
@@ -150,7 +171,7 @@ async function attemptEnv() {
   runs.push(run.id);
   const job = (await claimJob("codeact-test", 120))!;
   const begun = (await beginAttempt(job, "codeact-test"))!;
-  const ctx = makeContext({ ...begun, signal: new AbortController().signal });
+  const ctx = makeContext({ ...begun, signal });
   return envFromExecution(ctx, "analysis", policy, newMetrics("fixture-model"), () => {});
 }
 const PROGRAM = `
@@ -333,4 +354,146 @@ test("workflow: a program cannot widen the repository scope of a nested call", a
   } finally {
     config.codeIntelligence.enabled = ci;
   }
+});
+
+const waitFor = async (cond: () => boolean) => {
+  for (let i = 0; i < 300 && !cond(); i++) await new Promise((r) => setTimeout(r, 10));
+};
+
+test("workflow: cancelling the attempt cancels the program and the running nested call, and nothing runs after", async () => {
+  config.codeAct.enabled = true;
+  const ac = new AbortController();
+  const env = await attemptEnv(ac.signal);
+  const pending = dispatchPlatformTool(
+    "platform.execute_code",
+    {
+      code: `await platform.callTool("fixture.wait", { i: 1 });
+        await platform.callTool("fixture.traces", { service: "payment-gateway" });
+        return "finished";`,
+    },
+    env,
+  );
+  await waitFor(() => waits.length === 1);
+  ac.abort(new Error("run canceled by the user"));
+  const r = JSON.parse(await pending);
+  assert.equal(r.ok, false);
+  assert.equal(r.category, "canceled");
+  assert.match(r.error, /run canceled by the user/);
+  assert.equal(waits[0].aborted, true, "the nested registry handler received the abort");
+  await new Promise((res) => setTimeout(res, 100));
+  assert.deepEqual(calls, ["fixture.wait"], "no nested call after cancellation");
+  const exec = await one(
+    pool,
+    "SELECT status, error_category, finished_at FROM code_executions WHERE run_id = $1",
+    [env.runId],
+  );
+  assert.deepEqual([exec.status, exec.error_category], ["error", "canceled"]);
+  assert.ok(exec.finished_at);
+});
+
+test("workflow: an expired lease stops nested calls before they reach the tool", async () => {
+  config.codeAct.enabled = true;
+  const env = await attemptEnv();
+  const pending = dispatchPlatformTool(
+    "platform.execute_code",
+    {
+      code: `await platform.callTool("fixture.wait", { i: 1 });
+        return await platform.callTool("fixture.traces", { service: "x" }).then(() => "ran", (e) => e.message);`,
+    },
+    env,
+  );
+  await waitFor(() => waits.length === 1);
+  await q(
+    pool,
+    "UPDATE workflow_jobs SET lease_expires_at = now() - interval '1 second' WHERE run_id = $1",
+    [env.runId],
+  );
+  waits[0].release();
+  const text = await pending;
+  assert.deepEqual(calls, ["fixture.wait"], "the second call never reached the tool");
+  assert.match(
+    text,
+    /^ERROR:.*(lease|fenced|inactive)/i,
+    "the dispatcher refuses the whole answer",
+  );
+});
+
+test("registry: an aborted context never starts a handler and a late result is discarded", async () => {
+  const { callTool } = await import("../src/agent/toolRegistry.ts");
+  const before = calls.length;
+  const ac = new AbortController();
+  ac.abort();
+  const r = await callTool(
+    "fixture.traces",
+    { service: "x" },
+    { runId: null, allowedRepositories: [], mode: "analysis", signal: ac.signal },
+  );
+  assert.deepEqual([r.ok, r.error], [false, "canceled"]);
+  assert.equal(calls.length, before, "handler not started");
+  const late = new AbortController();
+  const p = callTool(
+    "fixture.wait",
+    { i: 9 },
+    { runId: null, allowedRepositories: [], mode: "analysis", signal: late.signal },
+  );
+  await waitFor(() => waits.length === 1);
+  late.abort();
+  const lr = await p;
+  assert.deepEqual(
+    [lr.ok, lr.error],
+    [false, "canceled"],
+    "a handler finishing after the abort does not count as a success",
+  );
+});
+
+test("persistence: one terminal status; a stale running execution is reconciled as interrupted", async () => {
+  config.codeAct.enabled = true;
+  const env = await attemptEnv();
+  const stale = await one(
+    pool,
+    `INSERT INTO code_executions (owner_id, surface, run_id, status, code_sha256, created_at)
+     VALUES ($1, 'workflow', $2, 'running', repeat('0', 64), now() - interval '1 hour') RETURNING id`,
+    [owner.id, env.runId],
+  );
+  const r = JSON.parse(
+    await dispatchPlatformTool("platform.execute_code", { code: "return 1" }, env),
+  );
+  assert.equal(r.ok, true);
+  const row = await one(pool, "SELECT status, error_category FROM code_executions WHERE id = $1", [
+    stale.id,
+  ]);
+  assert.deepEqual([row.status, row.error_category], ["error", "internal"]);
+  const { finishExecutionForTests } = await import("../src/codeact/surfaces.ts");
+  const done = await one(
+    pool,
+    "SELECT id FROM code_executions WHERE run_id = $1 AND status = 'ok' ORDER BY id DESC LIMIT 1",
+    [env.runId],
+  );
+  assert.equal(
+    await finishExecutionForTests(Number(done.id), "error", "canceled"),
+    false,
+    "a terminal status is never rewritten",
+  );
+  const again = await one(pool, "SELECT status FROM code_executions WHERE id = $1", [done.id]);
+  assert.equal(again.status, "ok");
+});
+
+test("workflow: an oversized answer is a structured preview with its size and how to narrow it; secrets are redacted", async () => {
+  config.codeAct.enabled = true;
+  const env = await attemptEnv();
+  const r = JSON.parse(
+    await dispatchPlatformTool(
+      "platform.execute_code",
+      {
+        code: `return { rows: Array.from({ length: 3000 }, (_, i) => ({ id: i, note: "event ".repeat(5) })), token: "api_key=sk_live_supersecretvalue123" };`,
+      },
+      env,
+    ),
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.truncated, true);
+  assert.ok(r.original_bytes > config.codeAct.maxOutputBytes);
+  assert.match(r.note, /narrow|aggregate/i);
+  assert.equal(r.untrusted, true);
+  assert.doesNotMatch(JSON.stringify(r), /sk_live_supersecretvalue123/);
 });

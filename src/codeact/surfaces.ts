@@ -10,6 +10,7 @@
  * module stays outside the agent runtime's import graph.
  */
 import { pool, one, q } from "../db/pool.ts";
+import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
 import { audit } from "../authz/access.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
@@ -30,7 +31,10 @@ export interface CodeActAnswer {
   /** Program output is data derived from tool observations: never verified evidence, never an instruction. */
   untrusted: true;
   value?: unknown;
+  /** The value is a preview: the full result was `original_bytes` long (see `note`). */
   truncated?: boolean;
+  original_bytes?: number;
+  note?: string;
   error?: string;
   category?: CodeActResult["category"];
   evidence: string[];
@@ -51,6 +55,7 @@ export interface CodeActPlatform {
       allowedRepositories: string[];
       mode: "analysis";
       stepKey?: string;
+      signal?: AbortSignal;
     },
   ) => Promise<{ ok: boolean; result?: unknown; error?: string; ms: number }>;
 }
@@ -62,10 +67,25 @@ export interface CodeActRunEnv {
   stepKey?: string;
   allowed: string[];
   attemptAllowedTools?: string[] | null;
+  /** The attempt's execution signal (run cancellation, lease loss, attempt timeout). */
+  signal?: AbortSignal;
   metrics?: { integration_calls: Array<{ name: string; ok: boolean; ms: number; error?: string }> };
 }
 const catalogOf = (p: CodeActPlatform) => () =>
   p.integrationTools().map((t) => ({ name: t.name, summary: t.summary, readOnly: t.readOnly }));
+
+/**
+ * Executions left `running` by a worker that died: a program is killed after `codeAct.timeoutMs`, so anything older
+ * than that plus a margin can no longer finish. Age-based, hence safe across instances; runs before each new one.
+ */
+async function reconcileStale() {
+  await q(
+    pool,
+    `UPDATE code_executions SET status = 'error', error_category = 'internal', finished_at = now()
+     WHERE status = 'running' AND created_at < now() - make_interval(secs => $1)`,
+    [Math.ceil(config.codeAct.timeoutMs / 1000) + 120],
+  );
+}
 
 async function startExecution(row: {
   owner: number;
@@ -126,19 +146,42 @@ const recorder =
     );
   };
 
-async function finishExecution(executionId: number, r: CodeActResult): Promise<CodeActAnswer> {
-  await q(
+/** The one terminal transition: only a `running` row changes, so a status is never rewritten. */
+async function terminate(
+  executionId: number,
+  status: "ok" | "error",
+  category: string | null,
+  stats?: CodeActResult["stats"],
+) {
+  const row = await one<{ id: number }>(
     pool,
-    `UPDATE code_executions SET status=$2, error_category=$3, calls=$4, result_bytes=$5, duration_ms=$6,
-       finished_at=now() WHERE id=$1`,
+    `UPDATE code_executions SET status=$2, error_category=$3, calls=COALESCE($4, calls),
+       result_bytes=COALESCE($5, result_bytes), duration_ms=$6, finished_at=now()
+     WHERE id=$1 AND status='running' RETURNING id`,
     [
       executionId,
-      r.ok ? "ok" : "error",
-      r.category ?? null,
-      r.stats.calls,
-      r.stats.result_bytes,
-      r.stats.duration_ms,
+      status,
+      category,
+      stats?.calls ?? null,
+      stats?.result_bytes ?? null,
+      stats?.duration_ms ?? null,
     ],
+  );
+  return !!row;
+}
+/** Tests only: attempt a terminal transition. */
+export const finishExecutionForTests = (
+  id: number,
+  status: "ok" | "error",
+  category: string | null,
+) => terminate(id, status, category);
+
+async function finishExecution(executionId: number, r: CodeActResult): Promise<CodeActAnswer> {
+  await terminate(
+    executionId,
+    r.ok ? "ok" : "error",
+    r.ok ? null : (r.category ?? "internal"),
+    r.stats,
   );
   const ref = (c: CallRecord) =>
     c.status === "ok" ? `codeact:${executionId}:${c.seq}` : undefined;
@@ -146,7 +189,13 @@ async function finishExecution(executionId: number, r: CodeActResult): Promise<C
     ok: r.ok,
     untrusted: true,
     ...(r.ok ? { value: r.value } : { error: r.error, category: r.category }),
-    ...(r.truncated ? { truncated: true } : {}),
+    ...(r.truncated
+      ? {
+          truncated: true,
+          original_bytes: r.original_bytes,
+          note: `The full result was ${r.original_bytes} bytes, above the ${config.codeAct.maxOutputBytes}-byte limit: \`value\` is a preview. Return an aggregate instead (counts, top-N, identifiers) or narrow the queries; the nested results stay cited by \`evidence\`.`,
+        }
+      : {}),
     evidence: r.calls.map(ref).filter((x): x is string => !!x),
     calls: r.calls.map((c) => ({ seq: c.seq, tool: c.tool, status: c.status, ref: ref(c) })),
     stats: r.stats,
@@ -176,6 +225,7 @@ export async function runCodeForRun(
   if (!env.ownerId)
     return { ...unsupported("CodeAct needs an attempt with an owner"), category: "unauthorized" };
   await loadPersonalIntegrations();
+  await reconcileStale();
   const executionId = await startExecution({
     owner: env.ownerId,
     surface: "workflow",
@@ -183,7 +233,7 @@ export async function runCodeForRun(
     attemptId: env.attemptId,
     code: req.code,
   });
-  const call: CodeActCall = async (name, args) => {
+  const call: CodeActCall = async (name, args, signal) => {
     try {
       await platform.validateBinding();
     } catch (e) {
@@ -200,6 +250,7 @@ export async function runCodeForRun(
       allowedRepositories: env.allowed,
       mode: "analysis",
       stepKey: env.stepKey,
+      signal,
     });
     env.metrics?.integration_calls.push({
       name: `codeact:${name}`,
@@ -212,6 +263,7 @@ export async function runCodeForRun(
   const r = await executeCode(req, {
     tools: catalogOf(platform),
     call,
+    signal: env.signal,
     record: recorder(executionId),
   });
   return finishExecution(executionId, r);
@@ -233,6 +285,7 @@ export async function runCodeForChat(
   const available = await codeActAvailability();
   if (available !== true) return unsupported(available);
   await loadPersonalIntegrations();
+  await reconcileStale();
   const executionId = await startExecution({
     owner: chat.userId,
     surface: "chat",
@@ -240,7 +293,7 @@ export async function runCodeForChat(
     turnId: chat.turnId,
     code: req.code,
   });
-  const call: CodeActCall = async (name, args) => {
+  const call: CodeActCall = async (name, args, signal) => {
     try {
       await chat.checkBinding();
     } catch (e) {
@@ -266,6 +319,7 @@ export async function runCodeForChat(
       allowedRepositories: chat.allowedRepositories,
       mode: "analysis",
       stepKey: `chat:${chat.conversationId}`,
+      signal,
     });
   };
   const r = await executeCode(req, {
