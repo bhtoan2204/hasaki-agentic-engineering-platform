@@ -131,10 +131,10 @@ export async function goSearch<H, E>(
   return call<H, E>(op, scope, await resolveScope(scope, provision), query);
 }
 
-function unavailable(reason: string): never {
+function unavailable(reason: string, detail?: string): never {
   goSearchStats.failures[reason] = (goSearchStats.failures[reason] ?? 0) + 1;
   throw new CodeSearchUnavailable(
-    `Code search is unavailable (platform-go: ${reason}); retry shortly`,
+    `Code search is unavailable (platform-go: ${reason}${detail ? `: ${detail}` : ""}); retry shortly`,
   );
 }
 
@@ -153,7 +153,7 @@ async function call<H, E>(
     goSearchRequest(op, query, resolved, roots),
     Math.min(config.codeIntelligence.timeoutMs, 60_000),
   );
-  if (!res.ok) unavailable(res.reason);
+  if (!res.ok) unavailable(res.reason, res.detail);
   const body = res.body as unknown as GoSearchResponse<H, E>;
   goSearchStats.calls++;
   // Indexing stays a TypeScript queue: schedule what platform-go found unindexed.

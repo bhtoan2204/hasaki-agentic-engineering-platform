@@ -29,6 +29,10 @@ delete process.env.NOTIFY_WEBHOOK;
 // Budget limits from the developer shell would change cost assertions; tests set budgets explicitly.
 for (const k of Object.keys(process.env)) if (k.startsWith("COST_BUDGET_")) delete process.env[k];
 process.env.TEST_ROOT = root;
+// Never reach a developer's running platform-go (default 127.0.0.1:4646) or reuse its token: suites that need the
+// service start their own (test/fixtures/platformGo.ts), everything else sees it as unreachable.
+process.env.RETRIEVAL_SEMANTIC_URL = "http://127.0.0.1:9";
+delete process.env.RETRIEVAL_INTERNAL_TOKEN;
 process.env.PLATFORM_DEPENDENCY_EVIDENCE_DIR = join(root, "data", "dependency-evidence");
 mkdirSync(join(root, "empty-user-skills"));
 process.env.CLAUDE_USER_SKILLS_DIR = join(root, "empty-user-skills"); // never read the developer's real ~/.claude

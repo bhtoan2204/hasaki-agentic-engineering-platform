@@ -53,8 +53,14 @@ export async function startPlatformGo(env: Record<string, string> = {}) {
       PLATFORM_TRUSTED_ROOTS: platformTrustedRoots(),
       ...env,
     },
-    stdio: ["pipe", "ignore", "inherit"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
+  // platform-go logs JSON to stdout: only the tail is kept (stderr is forwarded), so a service that never becomes
+  // ready says why in the failure itself.
+  let logTail = "";
+  const keep = (b: Buffer) => (logTail = (logTail + b.toString()).slice(-2000));
+  child.stdout!.on("data", keep);
+  child.stderr!.on("data", (b: Buffer) => (process.stderr.write(b), keep(b)));
   const url = `http://127.0.0.1:${port}`;
   for (let i = 0; ; i++) {
     if (
@@ -64,7 +70,10 @@ export async function startPlatformGo(env: Record<string, string> = {}) {
       )
     )
       break;
-    if (i > 100 || child.exitCode !== null) throw new Error("platform-go did not become ready");
+    if (i > 100 || child.exitCode !== null)
+      throw new Error(
+        `platform-go did not become ready (exit ${child.exitCode ?? "none"}): ${logTail.trim().split("\n").slice(-3).join(" | ")}`,
+      );
     await new Promise((r) => setTimeout(r, 100));
   }
   process.env.RETRIEVAL_INTERNAL_TOKEN = token;

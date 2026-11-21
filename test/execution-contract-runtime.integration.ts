@@ -1,5 +1,6 @@
 import { pgEvidenceStore } from "../src/agent/verifyEvidence.ts";
 import { before, after, test } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -62,8 +63,12 @@ const git = (path: string, ...args: string[]) =>
   execFileSync("git", ["-C", path, ...args], { encoding: "utf8", stdio: "pipe" }).trim();
 const step = (run: number, key = "implement") =>
   one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id=$1 AND key=$2", [run, key]);
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate();
+  // Code intelligence (indexing, search) runs only in platform-go, which is ready once the schema is migrated
+  // (started here, not in a second root-level before hook: those run concurrently with this one).
+  platformGo = await startPlatformGo();
   await shareAllRepositoriesForTests();
   await seedTemplates();
   ownerId = (
@@ -122,6 +127,7 @@ before(async () => {
   });
 });
 after(async () => {
+  platformGo?.stop();
   for (const id of runs) await cancelRun(id).catch(() => {});
   await settleBackground();
   await pool.end();

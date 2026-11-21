@@ -1,5 +1,6 @@
 import { approvedCodingFixture } from "./approved-coding-fixture.ts";
 import { before, after, test } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
@@ -40,8 +41,12 @@ const logs = () =>
 const block = (prompt: string) =>
   /<untrusted_input source="code_intelligence">([\s\S]*?)<\/untrusted_input>/.exec(prompt)?.[1] ??
   "";
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate();
+  // Code intelligence (indexing, search) runs only in platform-go, which is ready once the schema is migrated
+  // (started here, not in a second root-level before hook: those run concurrently with this one).
+  platformGo = await startPlatformGo();
   await shareAllRepositoriesForTests();
   config.codeIntelligence.enabled = true;
   config.codeIntelligence.contextTokens = 200;
@@ -89,6 +94,7 @@ before(async () => {
   });
 });
 after(async () => {
+  platformGo?.stop();
   for (const key of ["CODEX_BIN", "FAKE_CODEX_LOG", "FAKE_CODEX_MODE"]) delete process.env[key];
   await pool.end();
 });
@@ -239,15 +245,17 @@ test("Missing ripgrep is visible to exact search and does not abort hybrid disco
   const { searchCodeExact, searchSymbols } = await import("../src/codeIntelligence/search.ts");
   const directory = mkdtempSync(join(process.env.TEST_ROOT!, "git-only-"));
   symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(directory, "git"));
-  const path = process.env.PATH;
+  // Exact search runs in platform-go: start one whose PATH has git but no rg.
+  const url = config.retrieval.semantic.url;
+  const noRg = await startPlatformGo({ PATH: directory });
   try {
-    process.env.PATH = directory;
     const scope = { repositories: [a], allowed: [a] };
     await assert.rejects(searchCodeExact("NoSuchNeedle", scope), /ripgrep unavailable/);
     const result = await searchSymbols("NoSuchNeedle", scope);
     assert.equal(result.hits.length, 0);
     assert.ok(result.fallback_count > 0);
   } finally {
-    process.env.PATH = path;
+    noRg.stop();
+    config.retrieval.semantic.url = url;
   }
 });

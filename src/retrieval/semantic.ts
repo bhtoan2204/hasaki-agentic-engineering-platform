@@ -78,7 +78,9 @@ export async function platformGoCall(
   path: string,
   body: unknown,
   timeoutMs: number,
-): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; reason: string }> {
+): Promise<
+  { ok: true; body: Record<string, unknown> } | { ok: false; reason: string; detail?: string }
+> {
   if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return { ok: false, reason: "missing_token" };
   let res: Response;
   try {
@@ -90,7 +92,12 @@ export async function platformGoCall(
   if (res.status === 400 || res.status === 401 || res.status === 403)
     throw new Error(`${label} refused (${res.status}): ${parsed?.error ?? "invalid"}`);
   if (!res.ok)
-    return { ok: false, reason: res.status === 409 ? "version_mismatch" : `http_${res.status}` };
+    return {
+      ok: false,
+      reason: res.status === 409 ? "version_mismatch" : `http_${res.status}`,
+      // platform-go's own short explanation (e.g. "ripgrep unavailable…"); the reason stays the metric key.
+      ...(typeof parsed?.error === "string" ? { detail: parsed.error.slice(0, 200) } : {}),
+    };
   if (!parsed || typeof parsed !== "object") return { ok: false, reason: "invalid_response" };
   return { ok: true, body: parsed };
 }

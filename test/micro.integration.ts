@@ -1,4 +1,5 @@
 import { test, before, after } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -29,8 +30,12 @@ let root: string;
 let sessions = 0;
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate();
+  // Code intelligence (indexing, search) runs only in platform-go, which is ready once the schema is migrated
+  // (started here, not in a second root-level before hook: those run concurrently with this one).
+  platformGo = await startPlatformGo();
   await shareAllRepositoriesForTests();
   config.codeIntelligence.enabled = true;
   setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
@@ -56,6 +61,7 @@ before(async () => {
   });
 });
 after(async () => {
+  platformGo?.stop();
   await settleBackground();
   setHandoffReadinessForTests(undefined);
   await pool.end();

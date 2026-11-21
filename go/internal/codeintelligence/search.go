@@ -24,6 +24,9 @@ import (
 	"golang.org/x/text/language"
 )
 
+// ErrRipgrepUnavailable is the one search failure whose message is safe to return as is (no path, no SQL).
+var ErrRipgrepUnavailable = errors.New("ripgrep unavailable; install rg on the assigned worker")
+
 // Code search (ADR 0006): searchSymbols, findDependencies/findReferences, searchCodeExact and buildCodeContext of
 // src/codeIntelligence/search.ts, answered in one request. TypeScript authorizes and resolves the scope (which
 // repositories, which checkout or worktree, which run) and sends only that; this side never chooses a path.
@@ -931,7 +934,7 @@ func (st *search) exactRepo(ctx context.Context, name, pattern string, limit int
 	}
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return nil, errors.New("ripgrep unavailable; install rg on the assigned worker")
+			return nil, ErrRipgrepUnavailable
 		}
 		return nil, err
 	}

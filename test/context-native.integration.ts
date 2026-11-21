@@ -1,4 +1,5 @@
 import { before, after, afterEach, test } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
@@ -57,8 +58,12 @@ const policy = {
   protectedRoots: [],
   baseBranch: "main",
 };
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate();
+  // Code intelligence (indexing, search) runs only in platform-go, which is ready once the schema is migrated
+  // (started here, not in a second root-level before hook: those run concurrently with this one).
+  platformGo = await startPlatformGo();
   await shareAllRepositoriesForTests();
   a = await createUser({ username: "context-a", password: "context-password", role: "member" });
   b = await createUser({ username: "context-b", password: "context-password", role: "member" });
@@ -142,6 +147,7 @@ afterEach(async () => {
   await settleBackground();
 });
 after(async () => {
+  platformGo?.stop();
   server?.close();
   await settleBackground();
   await pool.end();

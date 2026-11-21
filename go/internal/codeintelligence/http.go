@@ -157,8 +157,10 @@ func routeSearch(mux *http.ServeMux, s *Searcher, log *slog.Logger) {
 			platform.WriteError(w, http.StatusGatewayTimeout, "timeout", "code search exceeded its deadline")
 		case r.Context().Err() != nil:
 			return // caller gone
+		case errors.Is(err, ErrRipgrepUnavailable):
+			platform.WriteError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
 		default:
-			// Paths and SQL stay in the log; the caller falls back to its own engine.
+			// Paths and SQL stay in the log; the caller reports the search as unavailable.
 			log.Warn("code search failed", "op", req.Op, "error", err)
 			platform.WriteError(w, http.StatusServiceUnavailable, "unavailable", "code search failed")
 		}

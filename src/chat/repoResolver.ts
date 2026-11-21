@@ -25,13 +25,11 @@ const STOP = new Set(
   ).split(" "),
 );
 
-const fold = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/đ/g, "d");
-const words = (s: string) => fold(s).split(/[^a-z0-9]+/).filter(Boolean);
+const fold = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
+const words = (s: string) =>
+  fold(s)
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
 /** `payment_gateway` / `Payment Gateway` / `payment.gateway` → `payment-gateway`. */
 export const canonicalName = (s: string) => words(s).join("-");
 

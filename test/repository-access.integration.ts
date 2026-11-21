@@ -4,6 +4,7 @@
  * Bitbucket is answered by a test checker that says each member can see their own repository and repo C.
  */
 import { test, before, after, beforeEach } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -90,8 +91,12 @@ const register = (name: string, extra: Record<string, unknown> = {}) =>
     ...extra,
   });
 
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate();
+  // Code intelligence (indexing, search) runs only in platform-go, which is ready once the schema is migrated
+  // (started here, not in a second root-level before hook: those run concurrently with this one).
+  platformGo = await startPlatformGo();
   await seedTemplates();
   await seedKnowledge();
   for (const [u, role] of [
@@ -124,6 +129,7 @@ before(async () => {
 });
 
 after(async () => {
+  platformGo?.stop();
   setBitbucketPermissionChecker(null);
   server.close();
   await pool.end();

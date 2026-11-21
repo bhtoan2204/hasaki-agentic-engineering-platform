@@ -7,8 +7,11 @@ import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { pool } from "../src/db/pool.ts";
 import { analyticsFixtures } from "./analytics.fixtures.ts";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import { handle } from "../src/http/app.ts";
 const fixture = await analyticsFixtures();
+// The dashboards are read only by platform-go.
+const platformGo = await startPlatformGo();
 // The aggregate fixtures also represent one latest scanner result for operational UI checks.
 await pool.query("UPDATE prod_error_scans SET preset='custom',namespaces=ARRAY['oms'],groups=2");
 await pool.query(
@@ -326,6 +329,7 @@ try {
   process.stdout.write(results.join("\n") + "\n");
 } finally {
   await browser.close();
+  platformGo.stop();
   await new Promise<void>((r) => server.close(() => r()));
   await pool.end();
 }

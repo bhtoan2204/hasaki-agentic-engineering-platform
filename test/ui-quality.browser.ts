@@ -6,11 +6,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { analyticsFixtures } from "./analytics.fixtures.ts";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import { repositories } from "../src/repos/service.ts";
 import { knowledge } from "../src/knowledge/service.ts";
 import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 const fixture = await analyticsFixtures();
+// The dashboards are read only by platform-go.
+const platformGo = await startPlatformGo();
 await pool.query("UPDATE prod_error_scans SET preset='custom',namespaces=ARRAY['oms'],groups=34");
 await pool.query(
   "UPDATE prod_error_groups SET last_scan_id=(SELECT max(id) FROM prod_error_scans)",
@@ -673,6 +676,7 @@ try {
     JSON.stringify({ phase, errors, measurements }, null, 2),
   );
   await browser.close();
+  platformGo.stop();
   await new Promise<void>((r) => server.close(() => r()));
   await pool.end();
 }

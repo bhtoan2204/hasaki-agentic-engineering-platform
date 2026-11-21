@@ -1,6 +1,7 @@
 import { config } from "../src/config.ts";
 import { repositories } from "../src/repos/service.ts";
 import { test, before, after } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { pool, q, one } from "../src/db/pool.ts";
@@ -66,8 +67,12 @@ function client() {
   };
 }
 
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate();
+  // Code intelligence (indexing, search) runs only in platform-go, which is ready once the schema is migrated
+  // (started here, not in a second root-level before hook: those run concurrently with this one).
+  platformGo = await startPlatformGo();
   await seedTemplates();
   await seedKnowledge();
   await createUser({ username: "admin", password: "admin-password", role: "admin" });
@@ -80,6 +85,7 @@ before(async () => {
 });
 
 after(async () => {
+  platformGo?.stop();
   server?.close();
   await pool.end();
 });

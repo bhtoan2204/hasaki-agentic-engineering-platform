@@ -1,4 +1,5 @@
 import { test, before, after, mock } from "node:test";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync } from "node:fs";
@@ -53,6 +54,7 @@ const asA = <T>(f: () => Promise<T>) => execution.run({ userId: userA, kind: "us
 const asB = <T>(f: () => Promise<T>) => execution.run({ userId: userB, kind: "user" }, f);
 let oldPath: string | undefined;
 
+let platformGo: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
   await migrate(pool, loadMigrations().slice(0, 27));
   await q(
@@ -72,6 +74,9 @@ before(async () => {
     `INSERT INTO code_intelligence.snapshots(repository_id,commit_sha,index_version,identity) SELECT id,'abc123','legacy','before-migration' FROM repositories WHERE name='legacy-full'`,
   );
   await migrate();
+  // Code intelligence (indexing, search) runs only in platform-go, which is ready once the schema is migrated
+  // (started here, not in a second root-level before hook: those run concurrently with this one).
+  platformGo = await startPlatformGo();
   await shareAllRepositoriesForTests();
   userA = (await createUser({ username: "remote-a", password: "password-a", role: "admin" })).id;
   userB = (await createUser({ username: "remote-b", password: "password-b", role: "member" })).id;
@@ -118,6 +123,7 @@ try {
   await seedTemplates();
 });
 after(async () => {
+  platformGo?.stop();
   process.env.PATH = oldPath;
   delete process.env.REMOTE_TEST_REVOKED;
   await pool.end();

@@ -71,6 +71,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+      # The analytics dashboards (smoke:ui-quality) are served only by platform-go, built from go/ by the test.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
       - id: modules
         uses: actions/cache@v5
         with:
