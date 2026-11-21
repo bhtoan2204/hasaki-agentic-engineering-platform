@@ -233,6 +233,8 @@ const runners: Record<AgentProvider, CompletionRunner> = {
   antigravity: antigravityComplete,
   copilot: copilotComplete,
 };
+/** The real provider runners (evaluation wraps them to measure prompts; chat uses them through completeForRun). */
+export const completionRunners: Readonly<Record<AgentProvider, CompletionRunner>> = runners;
 
 /** One tools-free completion using the same frozen analysis routing as ordinary agent steps. */
 export async function completeForRun(

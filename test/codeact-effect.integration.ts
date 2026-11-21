@@ -1,0 +1,160 @@
+/**
+ * CodeAct effectiveness evaluation (M2), deterministic CI path: the ten fixture tasks, Direct vs CodeAct, through the
+ * real Chat harness (routing, prompts, dispatch, CodeAct surface, persistence) with the SIMULATED provider policy.
+ * Checks the harness and the metrics' honesty (unknown stays null), not model quality.
+ */
+import { before, after, test } from "node:test";
+import assert from "node:assert/strict";
+import { pool } from "../src/db/pool.ts";
+import { migrate } from "../src/db/migrate.ts";
+import { createUser, type PublicUser } from "../src/auth/users.ts";
+import { setCodeActLauncherForTests } from "../src/codeact/execute.ts";
+import { setChatHealthProbe } from "../src/chat/admission.ts";
+import { settleBackground } from "../src/workflow/background.ts";
+import type { AgentProvider } from "../src/agent/provider.ts";
+import { TASKS, referenceAnswer, gradeAnswer, parseAnswer } from "../src/eval/codeactTasks.ts";
+import {
+  runEvaluation,
+  simulatedPolicy,
+  summarize,
+  renderMarkdown,
+  type EffectReport,
+} from "../src/eval/codeactEffect.ts";
+
+const PROVIDERS: AgentProvider[] = ["claude", "cursor", "codex", "antigravity", "copilot"];
+let user: PublicUser;
+let report: EffectReport;
+
+before(async () => {
+  await migrate();
+  user = await createUser({
+    username: `effect-${Date.now()}`,
+    password: "effect-pass",
+    role: "member",
+  });
+  setCodeActLauncherForTests(async (node, args) => ({
+    command: node,
+    args,
+    env: { PATH: process.env.PATH ?? "" },
+  }));
+  setChatHealthProbe(async () =>
+    PROVIDERS.map((provider) => ({ provider, connected: true, quota: "unknown" as const })),
+  );
+});
+after(async () => {
+  setCodeActLauncherForTests(undefined);
+  setChatHealthProbe(undefined);
+  await settleBackground();
+  await pool.end();
+});
+
+test("reference answers are what the fixture data says (hand-checked fields)", async () => {
+  const ref = Object.fromEntries(
+    await Promise.all(TASKS.map(async (t) => [t.id, await referenceAnswer(t)])),
+  );
+  assert.deepEqual(ref["T01-single-lookup"], { status: "paid" });
+  assert.deepEqual(ref["T02-independent-lookups"], {
+    statuses: { "ORD-3": "paid", "ORD-11": "paid", "ORD-42": "paid", "ORD-99": "refund_pending" },
+  });
+  assert.equal(ref["T06-refund-timeout"].root_operation, "provider.refund.http");
+  assert.equal(
+    ref["T06-refund-timeout"].db_pool_warning_overlap,
+    0,
+    "the DB pool warning is the misleading signal",
+  );
+  assert.ok((ref["T06-refund-timeout"].slow_refund_orders as number) > 0);
+  assert.deepEqual(ref["T09-partial-failure"].unavailable, ["eval.traces"]);
+  assert.equal(ref["T09-partial-failure"].slowest_operation, null);
+  assert.deepEqual(ref["T10-codeact-unnecessary"].services, [
+    "order-api",
+    "payment-gateway",
+    "payment-provider",
+    "refund-worker",
+  ]);
+  assert.equal(
+    (ref["T03-trace-log-correlation"].order_ids as string[]).length,
+    ref["T03-trace-log-correlation"].count,
+  );
+});
+
+test("grading: exact identifiers and counts; asserting what the evidence leaves unknown is unsupported", () => {
+  const exp = { slowest_operation: null, count: 3 };
+  assert.equal(gradeAnswer(exp, { slowest_operation: null, count: 3 }).correct, true);
+  const g = gradeAnswer(exp, { slowest_operation: "refund.db.update", count: 3 });
+  assert.equal(g.correct, false);
+  assert.equal(g.unsupported, 1);
+  assert.equal(gradeAnswer(exp, parseAnswer("no block")).answered, false);
+  assert.deepEqual(parseAnswer('x\n```answer\n{"a":1}\n```'), { a: 1 });
+});
+
+test("every reference plan is plain JavaScript that runs as a CodeAct program", () => {
+  for (const t of TASKS)
+    assert.doesNotThrow(() => new Function(`return (${t.plan.toString()})`), t.id);
+});
+
+test("paired Direct vs CodeAct through the Chat harness (simulated provider)", async () => {
+  const actor = { ...user, active: true };
+  const { samples, stopped } = await runEvaluation(
+    { repetitions: 1 },
+    {
+      actor,
+      provider: "claude",
+      runnerFor: (task) => simulatedPolicy(task),
+      turnTimeoutMs: 60_000,
+    },
+  );
+  assert.equal(stopped, null);
+  assert.equal(samples.length, 20);
+  report = summarize(samples, {
+    level: "fixture-simulated-provider",
+    sandbox: "plain-process",
+    provider: "simulated",
+    model: null,
+  });
+  console.log(`M2-REPORT ${JSON.stringify(report)}`);
+  console.log(renderMarkdown(report));
+  assert.ok(
+    samples.every((s) => s.turn_status === "completed"),
+    JSON.stringify(samples.map((s) => s.turn_status)),
+  );
+  const get = (id: string, v: string) => samples.find((s) => s.task_id === id && s.variant === v)!;
+  for (const t of TASKS) assert.equal(get(t.id, "codeact").correct, true, `${t.id} with CodeAct`);
+  for (const id of ["T01-single-lookup", "T02-independent-lookups", "T10-codeact-unnecessary"])
+    assert.equal(get(id, "direct").correct, true, `${id} direct`);
+  const t08 = get("T08-large-aggregation", "direct");
+  assert.equal(
+    t08.correct,
+    false,
+    "the direct path cannot count events it was only shown truncated",
+  );
+  assert.ok(t08.truncated_results > 0);
+  // Only the variable changed: an ineligible task never uses CodeAct even when offered.
+  assert.equal(get("T01-single-lookup", "codeact").codeact_executions, 0);
+  assert.equal(get("T03-trace-log-correlation", "codeact").codeact_executions, 1);
+  assert.equal(get("T03-trace-log-correlation", "codeact").nested_calls, 2);
+  assert.equal(get("T03-trace-log-correlation", "direct").codeact_executions, 0);
+  // Honest metrics: a provider that reports nothing yields unknown tokens and cost, never zero.
+  assert.ok(samples.every((s) => s.input_tokens === null && s.cost_usd === null));
+  assert.equal(report.variants.direct.metrics.input_tokens.known, 0);
+  assert.equal(report.adoption.eligible_turns, 8);
+  assert.equal(report.adoption.eligible_turns_using_codeact, 8);
+  assert.equal(report.adoption.ineligible_turns_using_codeact, 0);
+  assert.equal(report.adoption.evidence_incomplete_turns, 0);
+  assert.match(renderMarkdown(report), /SIMULATED PROVIDER/);
+  assert.match(renderMarkdown(report), /fixture-simulated-provider/);
+});
+
+test("the budget stops the evaluation before the next sample", async () => {
+  const actor = { ...user, active: true };
+  const { samples, stopped } = await runEvaluation(
+    { repetitions: 1, tasks: ["T01-single-lookup", "T10-codeact-unnecessary"], maxSamples: 1 },
+    {
+      actor,
+      provider: "claude",
+      runnerFor: (task) => simulatedPolicy(task),
+      turnTimeoutMs: 60_000,
+    },
+  );
+  assert.equal(samples.length, 1);
+  assert.match(stopped ?? "", /sample limit/);
+});
