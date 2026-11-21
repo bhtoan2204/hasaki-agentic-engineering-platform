@@ -60,6 +60,12 @@ export interface CallRecord {
   output_sha256?: string;
   bytes: number;
   read_only: boolean;
+  /**
+   * Whether this call's evidence row was durably recorded: true once the recorder resolved, false when it failed or
+   * exceeded `persistTimeoutMs` (with `persist_error`); undefined when no recorder was given (persistence unknown).
+   */
+  persisted?: boolean;
+  persist_error?: string;
 }
 export interface CodeActResult {
   ok: boolean;
@@ -438,9 +444,33 @@ export async function executeCode(
       const keep = (rec: CallRecord, result: unknown, error?: string) => {
         calls[seq - 1] = rec;
         if (!deps.record) return;
-        const p = Promise.resolve(deps.record(rec, result, error)).catch(() => {});
+        const record = deps.record;
+        // The outcome is kept on the record itself, never swallowed: a reference is only emitted for persisted calls.
+        let expiry: NodeJS.Timeout | undefined;
+        const p = Promise.race([
+          Promise.resolve().then(() => record(rec, result, error)),
+          new Promise<never>((_, reject) => {
+            expiry = setTimeout(
+              () =>
+                reject(new Error(`evidence recording timed out after ${lim.persistTimeoutMs} ms`)),
+              lim.persistTimeoutMs,
+            );
+          }),
+        ])
+          .then(
+            () => {
+              rec.persisted = true;
+            },
+            (e: unknown) => {
+              rec.persisted = false;
+              rec.persist_error = String((e as Error)?.message ?? e).slice(0, 500);
+            },
+          )
+          .finally(() => {
+            clearTimeout(expiry);
+            records.delete(p);
+          });
         records.add(p);
-        void p.finally(() => records.delete(p));
       };
       const deny = (error: string, category: Category, readOnly = false) => {
         keep(

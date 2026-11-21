@@ -12,7 +12,7 @@
 import { pool, one, q } from "../db/pool.ts";
 import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
-import { audit } from "../authz/access.ts";
+import { audit, type Actor } from "../authz/access.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { redactContextValue } from "../context/redact.ts";
 import {
@@ -37,8 +37,23 @@ export interface CodeActAnswer {
   note?: string;
   error?: string;
   category?: CodeActResult["category"];
+  /** References to durably recorded nested results, each resolvable with resolveCodeActEvidence. */
   evidence: string[];
-  calls: Array<{ seq: number; tool: string; status: CallRecord["status"]; ref?: string }>;
+  /**
+   * Whether every successful nested call is cited: `complete`, `partial` (some results were not recorded) or `none`
+   * (no successful call is citable). Results that are not cited are not evidence, whatever the value says.
+   */
+  evidence_status: "complete" | "partial" | "none";
+  /** Recording problems, in words the caller can repeat (never silently dropped). */
+  warnings?: string[];
+  calls: Array<{
+    seq: number;
+    tool: string;
+    status: CallRecord["status"];
+    /** The call's row was durably written (and the execution finalized): only then is there a `ref`. */
+    recorded: boolean;
+    ref?: string;
+  }>;
   stats?: CodeActResult["stats"];
 }
 
@@ -145,6 +160,9 @@ const recorder =
       ],
     );
   };
+/** Tests only: write one nested-call row through the production recorder. */
+export const recordCodeActCallForTests = (executionId: number, c: CallRecord) =>
+  recorder(executionId)(c, undefined);
 
 /** The one terminal transition: only a `running` row changes, so a status is never rewritten. */
 async function terminate(
@@ -177,14 +195,35 @@ export const finishExecutionForTests = (
 ) => terminate(id, status, category);
 
 async function finishExecution(executionId: number, r: CodeActResult): Promise<CodeActAnswer> {
-  await terminate(
-    executionId,
-    r.ok ? "ok" : "error",
-    r.ok ? null : (r.category ?? "internal"),
-    r.stats,
-  );
+  // A reference is a claim that a durable row exists: only for recorded calls of an execution finalized here.
+  const warnings: string[] = [];
+  let finalized = false;
+  try {
+    finalized = await terminate(
+      executionId,
+      r.ok ? "ok" : "error",
+      r.ok ? null : (r.category ?? "internal"),
+      r.stats,
+    );
+    if (!finalized)
+      warnings.push(
+        `execution ${executionId} was already finalized elsewhere (reconciled as interrupted); no nested result is cited`,
+      );
+  } catch (e) {
+    warnings.push(
+      `execution ${executionId} could not be finalized (${(e as Error).message}); no nested result is cited`,
+    );
+  }
+  for (const c of r.calls)
+    if (c.persisted === false)
+      warnings.push(
+        `call ${c.seq} (${c.tool}) was not recorded: ${c.persist_error ?? "unknown error"}; its result is not citable evidence`,
+      );
+  const recorded = (c: CallRecord) => finalized && c.persisted === true;
   const ref = (c: CallRecord) =>
-    c.status === "ok" ? `codeact:${executionId}:${c.seq}` : undefined;
+    c.status === "ok" && recorded(c) ? `codeact:${executionId}:${c.seq}` : undefined;
+  const succeeded = r.calls.filter((c) => c.status === "ok");
+  const evidence = r.calls.map(ref).filter((x): x is string => !!x);
   return {
     ok: r.ok,
     untrusted: true,
@@ -196,9 +235,78 @@ async function finishExecution(executionId: number, r: CodeActResult): Promise<C
           note: `The full result was ${r.original_bytes} bytes, above the ${config.codeAct.maxOutputBytes}-byte limit: \`value\` is a preview. Return an aggregate instead (counts, top-N, identifiers) or narrow the queries; the nested results stay cited by \`evidence\`.`,
         }
       : {}),
-    evidence: r.calls.map(ref).filter((x): x is string => !!x),
-    calls: r.calls.map((c) => ({ seq: c.seq, tool: c.tool, status: c.status, ref: ref(c) })),
+    evidence,
+    evidence_status:
+      evidence.length === succeeded.length ? "complete" : evidence.length ? "partial" : "none",
+    ...(warnings.length ? { warnings: warnings.slice(0, 20) } : {}),
+    calls: r.calls.map((c) => ({
+      seq: c.seq,
+      tool: c.tool,
+      status: c.status,
+      recorded: recorded(c),
+      ref: ref(c),
+    })),
     stats: r.stats,
+  };
+}
+
+/** A resolved `codeact:<execution>:<seq>` reference: the recorded (redacted, capped) nested result. */
+export interface CodeActEvidence {
+  ref: string;
+  execution_id: number;
+  seq: number;
+  tool: string;
+  surface: "workflow" | "chat";
+  run_id: number | null;
+  conversation_id: number | null;
+  output_sha256: string | null;
+  result: unknown;
+  recorded_at: string;
+}
+/**
+ * Resolve a reference the way its caller would see it: only a successful call of a finalized execution, only for the
+ * execution's owner (an admin in support mode is audited). Anything else, malformed refs included, is null — existence
+ * is never revealed outside the scope.
+ */
+export async function resolveCodeActEvidence(
+  actor: Actor,
+  ref: string,
+  opts: { support?: boolean } = {},
+): Promise<CodeActEvidence | null> {
+  const m = /^codeact:(\d{1,15}):(\d{1,9})$/.exec(ref);
+  if (!m) return null;
+  const row = await one<{
+    owner_id: number;
+    surface: "workflow" | "chat";
+    run_id: number | null;
+    conversation_id: number | null;
+    tool: string;
+    output_sha256: string | null;
+    result: unknown;
+    created_at: Date;
+  }>(
+    pool,
+    `SELECT e.owner_id, e.surface, e.run_id, e.conversation_id, c.tool, c.output_sha256, c.result, c.created_at
+     FROM code_execution_calls c JOIN code_executions e ON e.id = c.execution_id
+     WHERE c.execution_id = $1 AND c.seq = $2 AND c.status = 'ok' AND e.status <> 'running'`,
+    [m[1], m[2]],
+  );
+  if (!row) return null;
+  if (Number(row.owner_id) !== actor.id) {
+    if (!(opts.support && actor.role === "admin")) return null;
+    await audit(actor.id, "support.access", "code_execution", m[1], { ref });
+  }
+  return {
+    ref,
+    execution_id: Number(m[1]),
+    seq: Number(m[2]),
+    tool: row.tool,
+    surface: row.surface,
+    run_id: row.run_id == null ? null : Number(row.run_id),
+    conversation_id: row.conversation_id == null ? null : Number(row.conversation_id),
+    output_sha256: row.output_sha256,
+    result: row.result,
+    recorded_at: new Date(row.created_at).toISOString(),
   };
 }
 
@@ -208,6 +316,7 @@ const unsupported = (error: string): CodeActAnswer => ({
   error,
   category: "unsupported",
   evidence: [],
+  evidence_status: "complete",
   calls: [],
 });
 

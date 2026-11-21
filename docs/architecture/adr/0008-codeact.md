@@ -31,6 +31,16 @@ args)` and `platform.listTools()` and returns a JSON value.
 - **Evidence.** `code_executions` / `code_execution_calls` (migration 089) keep identity, status, error category,
   durations, sha256 of inputs/outputs and the redacted, capped result of each nested call (`codeact:<exec>:<seq>`).
   The answer is marked `untrusted: true` and is never verified evidence by itself.
+- **Evidence integrity.** A reference is a claim that a durable row exists, so it is emitted only for a successful
+  nested call whose row was written (the broker tracks each recorder outcome as `persisted`, bounded by
+  `codeAct.persistTimeoutMs`, default 10 s, and never swallows a failure) *and* whose execution was finalized by this
+  surface. Otherwise the answer keeps the program's value but reports `evidence_status: "partial" | "none"`, the call
+  as `recorded: false` without `ref`, and a `warnings` line — a degraded answer rather than a failed one, because the
+  value itself is never evidence (it is `untrusted`) and Chat/workflow evidence is what the refs cite. A row that lands
+  after its timeout is not retroactively cited. `resolveCodeActEvidence(actor, ref)` resolves a reference to its
+  recorded (redacted) result only for a successful call of a finalized execution and only for the execution owner
+  (an admin in support mode is audited as `support.access`); anything else is null, so existence is not revealed.
+  Failure-injection tests (database triggers): `test/codeact-evidence.integration.ts`, `test/codeact-evidence.test.ts`.
 - **Disclosure.** When disabled the tool is not advertised (Claude MCP server, stdio bridge, Codex enabled tools) and
   the step prompt does not mention it.
 

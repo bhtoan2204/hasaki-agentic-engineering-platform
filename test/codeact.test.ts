@@ -21,6 +21,7 @@ test("config defaults keep CodeAct off with the documented limits", () => {
     maxCallResultBytes: 1000000,
     maxProtocolMessages: 1000,
     maxListTools: 10,
+    persistTimeoutMs: 10000,
   });
 });
 

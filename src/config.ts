@@ -521,6 +521,8 @@ export interface Config {
     maxProtocolMessages: number;
     /** listTools() calls per execution. */
     maxListTools: number;
+    /** One nested call's evidence write; past it the call is reported unrecorded (no reference is emitted). */
+    persistTimeoutMs: number;
   };
   /**
    * OS isolation of agent processes (bubblewrap). "off" = legacy trusted single-operator mode: agents run as the worker
@@ -852,6 +854,7 @@ const defaults: Config = {
     maxCallResultBytes: 1000000,
     maxProtocolMessages: 1000,
     maxListTools: 10,
+    persistTimeoutMs: 10000,
   },
   isolation: {
     mode: "off",
