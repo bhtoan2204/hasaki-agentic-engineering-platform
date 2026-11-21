@@ -106,6 +106,11 @@ export interface PlatformToolEnv {
     questions: Array<{ question: string; context?: string; options?: string[] }>,
   ): Promise<number>;
   onSubmit?(output: Record<string, unknown>): void;
+  /**
+   * Set only while `execute_code` runs: this dispatcher, so the program's allowed `platform.*` reads take exactly the
+   * path a direct call takes (binding, allowed_tools, benchmark permissions, scope, deadline, redaction, journal).
+   */
+  dispatch?: (name: string, args: unknown, env: PlatformToolEnv) => Promise<string>;
 }
 
 const MUTATING = new Set(["prepare_branch", "commit_changes", "submit_result", "escalate_profile"]);
@@ -260,7 +265,11 @@ export async function dispatchPlatformTool(
                 env.attemptId,
                 (activeContextReads.get(env.attemptId) ?? 0) + 1,
               );
-            const operation = executeContextTool(native.name, parsed.data, env);
+            const operation = executeContextTool(
+              native.name,
+              parsed.data,
+              native.name === "execute_code" ? { ...env, dispatch: dispatchPlatformTool } : env,
+            );
             if (readOnly) {
               const release = () => {
                 const n = (activeContextReads.get(env.attemptId) ?? 1) - 1;

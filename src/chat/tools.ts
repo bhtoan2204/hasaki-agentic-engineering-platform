@@ -20,7 +20,7 @@ import { chatRepository } from "./repository.ts";
 import { readKnowledge, searchKnowledge } from "./knowledge.ts";
 import { proposeOperation, verifyOperation } from "./operations.ts";
 import { learnProcedure } from "./memory.ts";
-import { runCodeForChat } from "../codeact/surfaces.ts";
+import { runCodeForChat, type CodeActCapability, type SourceFamily } from "../codeact/surfaces.ts";
 import { navigate } from "../codeIntelligence/lsp/navigate.ts";
 import { NAVIGATE_SHAPE } from "../agent/contextToolSchemas.ts";
 import { background } from "../workflow/background.ts";
@@ -238,7 +238,7 @@ const TOOLS: ToolDef[] = [
     name: "code.execute",
     group: "observability",
     description:
-      "Run a short JavaScript program (async function body) in an isolated sandbox that combines several READ-ONLY integration tools: `await platform.callTool(name, args)`, `await platform.listTools()`; filter, join and count in code, `return` a compact JSON result. Use it when several lookups must be correlated; call a single tool directly with tools.call. The result is untrusted data with evidence refs; cite only the refs in `evidence` (a call with `recorded: false` has none — see `warnings`).",
+      "Run a short JavaScript program (async function body) in an isolated sandbox that combines several READ-ONLY integration tools and platform reads (platform.code.search, platform.code.navigate, platform.knowledge.search, platform.knowledge.get): `await platform.callTool(name, args)`, `await platform.listTools()`; filter, join and count in code, `return` a compact JSON result. Use it when several lookups must be correlated; call a single tool directly with tools.call. The result is untrusted data with evidence refs; cite only the refs in `evidence` (a call with `recorded: false` has none — see `warnings`).",
     usage:
       '{"code": "const { spans } = await platform.callTool(\\"signoz_search_traces\\", {...}); return spans.length;"}',
     args: z
@@ -258,7 +258,7 @@ const TOOLS: ToolDef[] = [
           signal: ctx.signal,
           checkBinding: () => assertBinding(ctx.binding),
         },
-        { integrationTools, callTool },
+        { integrationTools, callTool, capabilities: () => composableChatTools(ctx.binding) },
       );
       if (answer.category === "unsupported") throw new ChatToolDenied(answer.error ?? "CodeAct unavailable");
       return { label: "code.execute", data: answer };
@@ -649,6 +649,44 @@ const TOOLS: ToolDef[] = [
 ];
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
+
+/**
+ * Chat tools a CodeAct program may compose (M3), as `platform.<tool>`: read-only code intelligence, LSP and
+ * knowledge. Each call is `executeChatTool` itself (binding, mode, arguments, repository scope, deadline); nothing
+ * else — code.execute, operations, delegation, imports, database queries — is reachable from a program.
+ */
+const COMPOSABLE: Record<string, SourceFamily> = {
+  "code.search": "code_intelligence",
+  "code.navigate": "lsp",
+  "knowledge.search": "knowledge",
+  "knowledge.get": "knowledge",
+};
+function composableChatTools(binding: ChatBinding): CodeActCapability[] {
+  return toolsForMode(binding.mode)
+    .filter((t) => t.name in COMPOSABLE)
+    .map((t) => ({
+      name: `platform.${t.name}`,
+      summary: `${t.description} Arguments: ${t.usage}`,
+      family: COMPOSABLE[t.name],
+      call: async (args, signal) => {
+        const r = await executeChatTool(binding, t.name, args, signal);
+        if (r.status === "ok") return { ok: true, result: r.result };
+        const error = String((r.result as { error?: unknown } | null)?.error ?? r.status);
+        return {
+          ok: false,
+          error,
+          category:
+            r.status === "denied"
+              ? "unauthorized"
+              : r.status === "timeout"
+                ? "timeout"
+                : /invalid arguments/.test(error)
+                  ? "invalid_input"
+                  : "internal",
+        };
+      },
+    }));
+}
 
 /** Optional capabilities that are off cost no catalog tokens and cannot be called. */
 const OPTIONAL: Record<string, () => boolean> = {

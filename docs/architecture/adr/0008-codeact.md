@@ -41,6 +41,13 @@ args)` and `platform.listTools()` and returns a JSON value.
   recorded (redacted) result only for a successful call of a finalized execution and only for the execution owner
   (an admin in support mode is audited as `support.access`); anything else is null, so existence is not revealed.
   Failure-injection tests (database triggers): `test/codeact-evidence.integration.ts`, `test/codeact-evidence.test.ts`.
+- **Composition (M3).** Besides integration tools, a program may call an explicit allowlist of read-only platform
+  reads (`platform.search_code`, `get_symbol`, `find_dependencies`, `navigate_code`, `search_knowledge`,
+  `get_business_rules`, `search_task_memory`, `get_run_context`; Chat: `platform.code.search`, `code.navigate`,
+  `knowledge.search`, `knowledge.get`). Each goes through the surface's own dispatcher (`dispatchPlatformTool` /
+  `executeChatTool`), so authorization, scope, freshness, journal and budgets are the direct path's. Answers carry
+  per-call `source` (family, trust), `sources` caveats and `missing_sources`. See
+  `docs/validation/codeact-m3-composition.md`.
 - **Disclosure.** When disabled the tool is not advertised (Claude MCP server, stdio bridge, Codex enabled tools) and
   the step prompt does not mention it.
 

@@ -20,6 +20,7 @@ import {
   codeActAvailability,
   executeCode,
   type CallRecord,
+  type Category,
   type CodeActCall,
   type CodeActResult,
 } from "./execute.ts";
@@ -53,8 +54,61 @@ export interface CodeActAnswer {
     /** The call's row was durably written (and the execution finalized): only then is there a `ref`. */
     recorded: boolean;
     ref?: string;
+    /** Which kind of source answered, and how far its answer can be trusted (see SOURCES). */
+    source?: { family: SourceFamily; trust: string };
   }>;
+  /** Per source family used: calls made and how many succeeded; a family with none succeeded is in `missing_sources`. */
+  sources?: Partial<Record<SourceFamily, { calls: number; ok: number; caveat: string }>>;
+  missing_sources?: SourceFamily[];
   stats?: CodeActResult["stats"];
+}
+
+/**
+ * Source families a program can compose (M3). Their freshness and trust differ, and the program's own value never
+ * erases that: each nested call keeps its family, and the recorded result keeps the tool's own provenance (snapshot,
+ * index fallback, freshness state, LSP status).
+ */
+export type SourceFamily =
+  "integration" | "code_intelligence" | "lsp" | "knowledge" | "memory" | "run_context";
+export const SOURCES: Record<SourceFamily, { trust: string; caveat: string }> = {
+  integration: {
+    trust: "live_observation",
+    caveat: "external tool output at query time: an untrusted observation, not a conclusion",
+  },
+  code_intelligence: {
+    trust: "indexed_syntax",
+    caveat:
+      "syntax-index candidates at the indexed snapshot (see snapshot / index_fallback): not semantic resolution",
+  },
+  lsp: {
+    trust: "semantic_worktree",
+    caveat:
+      "language-server answer over the current checkout; `unavailable` / `stale` statuses are not evidence of absence",
+  },
+  knowledge: {
+    trust: "knowledge_registry",
+    caveat: "registry entries with version and visibility provenance; check their scope applies",
+  },
+  memory: {
+    trust: "historical_memory",
+    caveat:
+      "past-task memory: only entries with freshness.state FRESH apply; never treat it as current architecture",
+  },
+  run_context: { trust: "run_context", caveat: "this run's own recorded context" },
+};
+/**
+ * A read-only platform capability a surface explicitly allows inside programs (e.g. `platform.search_code`). Its
+ * `call` is the surface's own trusted dispatch for that capability — the same path a direct call takes — so the
+ * adapter adds no authorization of its own and never widens it.
+ */
+export interface CodeActCapability {
+  name: string;
+  summary: string;
+  family: SourceFamily;
+  call: (
+    args: unknown,
+    signal: AbortSignal,
+  ) => Promise<{ ok: boolean; result?: unknown; error?: string; category?: Category }>;
 }
 
 const RESULT_CHARS = 24000;
@@ -73,6 +127,8 @@ export interface CodeActPlatform {
       signal?: AbortSignal;
     },
   ) => Promise<{ ok: boolean; result?: unknown; error?: string; ms: number }>;
+  /** Explicitly allowed read-only platform capabilities (code intelligence, LSP, knowledge, memory, run context). */
+  capabilities?: () => CodeActCapability[];
 }
 /** The attempt binding as the workflow surface sees it (a structural subset of PlatformToolEnv). */
 export interface CodeActRunEnv {
@@ -86,8 +142,30 @@ export interface CodeActRunEnv {
   signal?: AbortSignal;
   metrics?: { integration_calls: Array<{ name: string; ok: boolean; ms: number; error?: string }> };
 }
-const catalogOf = (p: CodeActPlatform) => () =>
-  p.integrationTools().map((t) => ({ name: t.name, summary: t.summary, readOnly: t.readOnly }));
+/** Integration tools (never one named like a platform capability) plus the surface's allowed capabilities. */
+const catalogOf = (p: CodeActPlatform) => () => [
+  ...p
+    .integrationTools()
+    .filter((t) => !t.name.startsWith("platform."))
+    .map((t) => ({ name: t.name, summary: t.summary, readOnly: t.readOnly })),
+  ...(p.capabilities?.() ?? []).map((c) => ({
+    name: c.name,
+    summary: `[${c.family}] ${c.summary}`,
+    readOnly: true,
+  })),
+];
+/** Route a nested call: an allowed capability through its own dispatch, anything else through the integration path. */
+const composed =
+  (p: CodeActPlatform, integration: CodeActCall): CodeActCall =>
+  (name, args, signal) => {
+    const capability = p.capabilities?.().find((c) => c.name === name);
+    return capability ? capability.call(args ?? {}, signal) : integration(name, args, signal);
+  };
+const familiesOf = (p: CodeActPlatform) =>
+  new Map<string, SourceFamily>([
+    ...p.integrationTools().map((t) => [t.name, "integration"] as [string, SourceFamily]),
+    ...(p.capabilities?.() ?? []).map((c) => [c.name, c.family] as [string, SourceFamily]),
+  ]);
 
 /**
  * Executions left `running` by a worker that died: a program is killed after `codeAct.timeoutMs`, so anything older
@@ -194,7 +272,11 @@ export const finishExecutionForTests = (
   category: string | null,
 ) => terminate(id, status, category);
 
-async function finishExecution(executionId: number, r: CodeActResult): Promise<CodeActAnswer> {
+async function finishExecution(
+  executionId: number,
+  r: CodeActResult,
+  families: Map<string, SourceFamily> = new Map(),
+): Promise<CodeActAnswer> {
   // A reference is a claim that a durable row exists: only for recorded calls of an execution finalized here.
   const warnings: string[] = [];
   let finalized = false;
@@ -239,15 +321,35 @@ async function finishExecution(executionId: number, r: CodeActResult): Promise<C
     evidence_status:
       evidence.length === succeeded.length ? "complete" : evidence.length ? "partial" : "none",
     ...(warnings.length ? { warnings: warnings.slice(0, 20) } : {}),
-    calls: r.calls.map((c) => ({
-      seq: c.seq,
-      tool: c.tool,
-      status: c.status,
-      recorded: recorded(c),
-      ref: ref(c),
-    })),
+    calls: r.calls.map((c) => {
+      const family = families.get(c.tool);
+      return {
+        seq: c.seq,
+        tool: c.tool,
+        status: c.status,
+        recorded: recorded(c),
+        ref: ref(c),
+        ...(family ? { source: { family, trust: SOURCES[family].trust } } : {}),
+      };
+    }),
+    ...sourceSummary(r.calls, families),
     stats: r.stats,
   };
+}
+
+function sourceSummary(calls: CallRecord[], families: Map<string, SourceFamily>) {
+  const sources: NonNullable<CodeActAnswer["sources"]> = {};
+  for (const c of calls) {
+    const family = families.get(c.tool);
+    if (!family) continue;
+    const s = (sources[family] ??= { calls: 0, ok: 0, caveat: SOURCES[family].caveat });
+    s.calls++;
+    if (c.status === "ok") s.ok++;
+  }
+  const missing = (Object.keys(sources) as SourceFamily[]).filter((f) => sources[f]!.ok === 0);
+  return Object.keys(sources).length
+    ? { sources, ...(missing.length ? { missing_sources: missing } : {}) }
+    : {};
 }
 
 /** A resolved `codeact:<execution>:<seq>` reference: the recorded (redacted, capped) nested result. */
@@ -371,11 +473,11 @@ export async function runCodeForRun(
   };
   const r = await executeCode(req, {
     tools: catalogOf(platform),
-    call,
+    call: composed(platform, call),
     signal: env.signal,
     record: recorder(executionId),
   });
-  return finishExecution(executionId, r);
+  return finishExecution(executionId, r, familiesOf(platform));
 }
 
 /** Chat surface: the caller supplies the per-call binding check (owner, turn, mode) and the audit identity. */
@@ -433,9 +535,9 @@ export async function runCodeForChat(
   };
   const r = await executeCode(req, {
     tools: catalogOf(platform),
-    call,
+    call: composed(platform, call),
     signal: chat.signal,
     record: recorder(executionId),
   });
-  return finishExecution(executionId, r);
+  return finishExecution(executionId, r, familiesOf(platform));
 }

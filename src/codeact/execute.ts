@@ -38,7 +38,7 @@ export type CodeActCall = (
   name: string,
   args: unknown,
   signal: AbortSignal,
-) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
+) => Promise<{ ok: boolean; result?: unknown; error?: string; category?: Category }>;
 /** Builds the command that runs `node <args>` (the runner). Throws a CodeActError when it cannot be done safely. */
 export type Launcher = (
   node: string,
@@ -532,7 +532,7 @@ export async function executeCode(
         AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       ]);
       const t0 = Date.now();
-      let r: { ok: boolean; result?: unknown; error?: string };
+      let r: { ok: boolean; result?: unknown; error?: string; category?: Category };
       try {
         r = await Promise.race([
           deps.call(tool.name, args ?? {}, signal),
@@ -573,7 +573,9 @@ export async function executeCode(
             ? { category: "budget_exceeded" as const }
             : timedOut
               ? { category: "timeout" as const }
-              : {}),
+              : !r.ok && r.category
+                ? { category: r.category }
+                : {}),
           ms: Date.now() - t0,
           input_sha256,
           ...(text ? { output_sha256: sha256(text) } : {}),

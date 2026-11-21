@@ -20,7 +20,8 @@ import type { PlatformToolEnv } from "./platformTools.ts";
 import type { ContextPack } from "../context/pack.ts";
 
 import { CONTEXT_TOOLS, contextToolSupported } from "./contextToolSchemas.ts";
-import { runCodeForRun } from "../codeact/surfaces.ts";
+import { runCodeForRun, type CodeActCapability, type SourceFamily } from "../codeact/surfaces.ts";
+import type { Category } from "../codeact/execute.ts";
 import { navigate, type NavOperation } from "../codeIntelligence/lsp/navigate.ts";
 export { CONTEXT_TOOLS, contextTool } from "./contextToolSchemas.ts";
 export const MAX_CONTEXT_RESULT_CHARS = 24000;
@@ -172,6 +173,62 @@ interface ContextToolArgs {
   line?: number;
   character?: number;
 }
+/**
+ * The read-only context tools a CodeAct program may compose (M3), by source family. Explicit: anything else —
+ * execute_code itself, request_clarification, step outputs, work items, mutations — is not reachable from a program.
+ */
+const COMPOSABLE: Record<string, SourceFamily> = {
+  search_code: "code_intelligence",
+  get_symbol: "code_intelligence",
+  find_dependencies: "code_intelligence",
+  navigate_code: "lsp",
+  search_knowledge: "knowledge",
+  get_business_rules: "knowledge",
+  search_task_memory: "memory",
+  get_run_context: "run_context",
+};
+/** A dispatcher's text answer as a nested-call result (an `ERROR:` line keeps its category). */
+export function dispatchResult(text: string): {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+  category?: Category;
+} {
+  if (text.startsWith("ERROR:")) {
+    const error = text.slice(6).trim();
+    return {
+      ok: false,
+      error,
+      category: /outside|revoked|refused|excluded|denied|permission|not authori/i.test(error)
+        ? "unauthorized"
+        : /invalid arguments/i.test(error)
+          ? "invalid_input"
+          : /deadline/i.test(error)
+            ? "timeout"
+            : /concurrency limit/i.test(error)
+              ? "budget_exceeded"
+              : "internal",
+    };
+  }
+  try {
+    return { ok: true, result: JSON.parse(text) };
+  } catch {
+    return { ok: true, result: text };
+  }
+}
+function composableContextTools(env: PlatformToolEnv): CodeActCapability[] {
+  const dispatch = env.dispatch;
+  if (!dispatch) return [];
+  return CONTEXT_TOOLS.filter((t) => t.name in COMPOSABLE && contextToolSupported(t.name)).map(
+    (t) => ({
+      name: t.logicalName,
+      summary: `${t.description} Args: ${Object.keys(t.input.shape).join(", ")}.`,
+      family: COMPOSABLE[t.name],
+      call: async (args) => dispatchResult(await dispatch(t.logicalName, args, env)),
+    }),
+  );
+}
+
 export async function executeContextTool(
   name: string,
   args: ContextToolArgs,
@@ -463,6 +520,7 @@ export async function executeContextTool(
         callTool,
         toolAllowed,
         validateBinding: () => validateToolBinding(env),
+        capabilities: () => composableContextTools(env),
       });
     case "get_production_errors":
       return relatedProductionErrors(env, args.query, args.limit);
