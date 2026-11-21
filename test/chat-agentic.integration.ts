@@ -92,10 +92,19 @@ test("uploads: type from the bytes, size bounds, base64 only, owner's conversati
   assert.equal(ok.media_type, "image/png");
   const gif = Buffer.from("R0lGODlhAQABAAAAACw=", "base64");
   await assert.rejects(uploadAttachment(owner.id, c.id, { data: gif.toString("base64") }), /PNG, JPEG and WebP/);
-  // A PNG name or claim does not matter: the bytes decide.
-  await assert.rejects(uploadAttachment(owner.id, c.id, { data: Buffer.from("not an image").toString("base64") }), /PNG/);
+  // A PNG name or claim does not matter: the bytes decide (plain text is a text document, binary is refused).
+  const text = await uploadAttachment(owner.id, c.id, { data: Buffer.from("not an image").toString("base64"), filename: "x.png" });
+  assert.equal(text.kind, "document");
+  assert.equal(text.media_type, "text/plain");
+  await assert.rejects(
+    uploadAttachment(owner.id, c.id, { data: Buffer.from([0x4d, 0x5a, 0x90, 0, 3, 0]).toString("base64"), filename: "x.png" }),
+    /PNG, JPEG and WebP/,
+  );
   await assert.rejects(uploadAttachment(owner.id, c.id, { data: "%%%" }), /not base64/);
-  await assert.rejects(uploadAttachment(owner.id, c.id, { data: "A".repeat(8 * 1024 * 1024) }), /larger than/);
+  await assert.rejects(uploadAttachment(owner.id, c.id, { data: "A".repeat(14 * 1024 * 1024) }), /larger than/);
+  // A valid PNG above the image limit (5 MB) is refused even though documents may be larger.
+  const bigPng = Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024)]);
+  await assert.rejects(uploadAttachment(owner.id, c.id, { data: bigPng.toString("base64") }), /image larger than 5 MB/);
   await assert.rejects(uploadAttachment(other.id, c.id, { data: PNG.toString("base64") }), /not found/);
   assert.ok(await readAttachment(owner.id, ok.id));
   assert.equal(await readAttachment(other.id, ok.id), undefined, "another user never reads it");

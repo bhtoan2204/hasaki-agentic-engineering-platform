@@ -740,3 +740,92 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Document chips (composer, pending bubble, history) and the document import review card. */
+.chat-docs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+.chat-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+.chat-doc > a,
+.chat-doc > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.chat-doc small {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chat-doc button {
+  min-height: 0;
+  padding: 2px;
+}
+.chat-import {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: var(--surface);
+}
+.chat-import-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.chat-import ul {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: grid;
+  gap: 8px;
+}
+.chat-import li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.chat-import-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.chat-import-body small {
+  overflow-wrap: anywhere;
+}
+.chat-import-title {
+  font-weight: 600;
+  width: 100%;
+}
+.chat-import-scope {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.chat-import-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.chat-import-errors {
+  color: var(--st-err);
+  font-size: var(--fs-sm);
+}

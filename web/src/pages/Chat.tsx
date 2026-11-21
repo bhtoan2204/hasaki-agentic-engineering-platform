@@ -17,7 +17,8 @@ import {
   Trash2,
   Workflow,
   AlertTriangle,
-  ImagePlus,
+  FileText,
+  Paperclip,
   X,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
@@ -27,6 +28,7 @@ import { EmptyState, ErrorBox, Loading, Markdown, SearchInput, act, ago, toast }
 import { useI18n } from "../i18n/index.tsx";
 import { applyChatEvent, seedFromTurn, type LiveStatus, type LiveTurn, type TraceItem } from "./chatStream.ts";
 import { markPending, reconcilePending, type PendingMessage } from "./chatOptimistic.ts";
+import { ChatImportReview, type ImportedProposal } from "./ChatImportReview.tsx";
 import "./Chat.css";
 
 type Mode = "AUTO" | "ASK" | "INVESTIGATE" | "PLAN" | "DELEGATE";
@@ -85,13 +87,60 @@ type Message = {
   content: string;
   citations?: Array<{ label: string; tool?: string; ref: string; repository?: string }>;
   withheld?: boolean;
-  attachments?: Array<{ id: number; media_type: string; bytes: number }>;
+  attachments?: Array<{ id: number; media_type: string; bytes: number; kind?: "image" | "document"; filename?: string }>;
   created_at: string;
 };
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const IMAGE_BYTES = 5 * 1024 * 1024;
 const IMAGES_PER_MESSAGE = 4;
+/** Documents the server can read; the server checks the bytes again (the extension only pre-filters here). */
+const DOCUMENT_EXT = /\.(pdf|docx|xlsx|md|markdown|txt|json|csv)$/i;
+const DOCUMENT_BYTES = 10 * 1024 * 1024;
+const DOCUMENTS_PER_MESSAGE = 10;
+const TOTAL_BYTES = 40 * 1024 * 1024;
+const isImage = (f: File) => IMAGE_TYPES.includes(f.type);
+const isDocument = (f: File) => !isImage(f) && DOCUMENT_EXT.test(f.name);
+const sizeLabel = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const typeLabel = (name: string) => (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? "file").toUpperCase();
+
+/** Document chips (name, type, size); in history each downloads through the authenticated route. */
+function DocChips({
+  items,
+  onRemove,
+  removeLabel,
+}: {
+  items: Array<{ key: string | number; name: string; bytes: number; href?: string; state?: string }>;
+  onRemove?: (key: string | number) => void;
+  removeLabel?: string;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="chat-docs">
+      {items.map((d) => (
+        <span key={d.key} className="chat-doc">
+          <FileText size={14} />
+          {d.href ? (
+            <a href={d.href} download={d.name}>
+              {d.name}
+            </a>
+          ) : (
+            <span>{d.name}</span>
+          )}
+          <small>
+            {typeLabel(d.name)} · {sizeLabel(d.bytes)}
+            {d.state ? ` · ${d.state}` : ""}
+          </small>
+          {onRemove && (
+            <button type="button" className="ghost xs" aria-label={removeLabel} title={removeLabel} onClick={() => onRemove(d.key)}>
+              <X size={12} />
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
 /** Base64 of a file (the upload body); the bytes are validated again by the server. */
 const base64Of = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -364,8 +413,15 @@ const ChatMessages = memo(function ChatMessages({
                 <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
               )}
               <Thumbs
-                items={(m.attachments ?? []).map((a) => ({ key: a.id, src: `/api/chat/attachments/${a.id}` }))}
+                items={(m.attachments ?? [])
+                  .filter((a) => a.kind !== "document")
+                  .map((a) => ({ key: a.id, src: `/api/chat/attachments/${a.id}` }))}
                 label={t("chat.attach.open")}
+              />
+              <DocChips
+                items={(m.attachments ?? [])
+                  .filter((a) => a.kind === "document")
+                  .map((a) => ({ key: a.id, name: a.filename || `#${a.id}`, bytes: a.bytes, href: `/api/chat/attachments/${a.id}` }))}
               />
               {!!tools?.length && !turn?.trace?.length && (
                 <details className="chat-tools">
@@ -474,8 +530,12 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const addImages = (files: File[]) => {
     const ok: Array<{ url: string; file: File }> = [];
+    const docs: File[] = [];
     for (const f of files) {
-      if (!IMAGE_TYPES.includes(f.type)) toast(t("chat.attach.type"), "err");
+      if (isDocument(f)) {
+        if (f.size > DOCUMENT_BYTES) toast(t("chat.attach.docSize", { name: f.name }), "err");
+        else docs.push(f);
+      } else if (!isImage(f)) toast(t("chat.attach.type"), "err");
       else if (f.size > IMAGE_BYTES) toast(t("chat.attach.size"), "err");
       else ok.push({ url: URL.createObjectURL(f), file: f });
     }
@@ -485,7 +545,19 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       for (const extra of ok.slice(Math.max(0, room))) URL.revokeObjectURL(extra.url);
       return [...cur, ...ok.slice(0, Math.max(0, room))];
     });
+    if (docs.length)
+      setDocuments((cur) => {
+        const room = DOCUMENTS_PER_MESSAGE - cur.length;
+        if (docs.length > room) toast(t("chat.attach.docLimit", { n: DOCUMENTS_PER_MESSAGE }), "err");
+        const next = [...cur, ...docs.slice(0, Math.max(0, room))];
+        if (next.reduce((n, f) => n + f.size, 0) > TOTAL_BYTES) {
+          toast(t("chat.attach.total"), "err");
+          return cur;
+        }
+        return next;
+      });
   };
+  const [documents, setDocuments] = useState<File[]>([]);
   const removeImage = (url: string) => {
     URL.revokeObjectURL(url);
     setImages((cur) => cur.filter((i) => i.url !== url));
@@ -776,13 +848,19 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     try {
       // Images are uploaded once; a retry of the same message reuses their ids.
       let attachments = pendingImages?.attachmentIds;
-      if (!attachments && pendingImages?.images?.length) {
+      const files = [...(pendingImages?.images ?? []).map((i) => i.file), ...(pendingImages?.documents ?? [])];
+      if (!attachments && files.length) {
         attachments = [];
-        for (const img of pendingImages.images) {
-          const up = await api<{ id: number }>(`/api/chat/conversations/${conversationId}/attachments`, {
-            data: await base64Of(img.file),
-          });
-          attachments.push(up.id);
+        for (const file of files) {
+          try {
+            const up = await api<{ id: number }>(`/api/chat/conversations/${conversationId}/attachments`, {
+              data: await base64Of(file),
+              filename: file.name,
+            });
+            attachments.push(up.id);
+          } catch (e) {
+            throw new Error(`${file.name}: ${(e as Error).message}`);
+          }
         }
         const ids = attachments;
         setPending((p) => markPending(p, cid, { attachmentIds: ids }));
@@ -804,7 +882,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   };
 
   const send = () => {
-    if (!activeId || (!draft.trim() && !images.length) || busy || detail?.active_turn) return;
+    if (!activeId || (!draft.trim() && !images.length && !documents.length) || busy || detail?.active_turn) return;
     const content = draft.trim();
     const cid = clientMessageId();
     const message: PendingMessage = {
@@ -812,6 +890,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       conversationId: activeId,
       content,
       ...(images.length ? { images } : {}),
+      ...(documents.length ? { documents } : {}),
       status: "sending",
       at: new Date().toISOString(),
     };
@@ -819,6 +898,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     setPending((p) => [...p, message]);
     setDraft("");
     setImages([]);
+    setDocuments([]);
     stickBottom.current = true;
     void deliver(activeId, cid, content, message);
   };
@@ -968,6 +1048,18 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     );
     if (p) setPreview(p);
   };
+  // Document imports of this conversation (knowledge.propose_import results): reviewed in place.
+  const imports = useMemo(
+    () =>
+      (detail?.tool_calls ?? [])
+        .filter((c) => c.tool === "knowledge.propose_import" && c.status === "ok")
+        .slice(-3)
+        .map((c) => {
+          const r = c.result as { scope?: string; proposals?: ImportedProposal[]; errors?: Array<{ filename: string; error: string }> };
+          return { id: c.id, scope: r?.scope ?? "", proposals: r?.proposals ?? [], errors: r?.errors ?? [] };
+        }),
+    [detail?.tool_calls],
+  );
   // A task the agent proposed in the latest turn (work.delegate): reviewed and started through the same preview.
   const proposal = useMemo(() => {
     // Turns arrive newest first; take the highest id rather than trust the order.
@@ -1210,6 +1302,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   t={t}
                 />
 
+                {imports.map((im) => (
+                  <ChatImportReview key={im.id} scope={im.scope} proposals={im.proposals} errors={im.errors} />
+                ))}
                 {(opsByTurn.get(null) ?? []).map((op) => (
                   <OperationCard key={op.id} op={op} onDecide={(id, d) => void decideOperation(id, d)} />
                 ))}
@@ -1225,6 +1320,14 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                       <Thumbs
                         items={(p.images ?? []).map((i) => ({ key: i.url, src: i.url }))}
                         label={t("chat.attach.open")}
+                      />
+                      <DocChips
+                        items={(p.documents ?? []).map((f, i) => ({
+                          key: i,
+                          name: f.name,
+                          bytes: f.size,
+                          state: p.status === "failed" ? t("chat.sendFailed") : p.attachmentIds ? t("chat.attach.uploaded") : t("chat.attach.uploading"),
+                        }))}
                       />
                     </article>
                     {p.status === "failed" && (
@@ -1347,6 +1450,26 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   <Settings2 size={15} />
                   <ChevronRight size={14} style={{ transform: advanced ? "rotate(90deg)" : undefined }} />
                 </button>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept={[...IMAGE_TYPES, ".pdf", ".docx", ".xlsx", ".md", ".markdown", ".txt", ".json", ".csv"].join(",")}
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    addImages(Array.from(e.target.files ?? []));
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ghost sm"
+                  title={t("chat.attach")}
+                  onClick={() => fileInput.current?.click()}
+                  disabled={!!detail.active_turn || (images.length >= IMAGES_PER_MESSAGE && documents.length >= DOCUMENTS_PER_MESSAGE)}
+                >
+                  <Paperclip size={15} /> {t("chat.attach.short")}
+                </button>
               </div>
               {advanced && (
                 <div className="chat-advanced">
@@ -1398,6 +1521,11 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   </button>
                 </div>
               )}
+              <DocChips
+                items={documents.map((f, i) => ({ key: i, name: f.name, bytes: f.size }))}
+                onRemove={(key) => setDocuments((cur) => cur.filter((_, i) => i !== key))}
+                removeLabel={t("chat.attach.remove")}
+              />
               {images.length > 0 && (
                 <div className="chat-thumbs is-composer">
                   {images.map((i) => (
@@ -1419,7 +1547,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
               <textarea
                 value={draft}
                 onPaste={(e) => {
-                  const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+                  const files = Array.from(e.clipboardData.files).filter((f) => isImage(f) || isDocument(f));
                   if (!files.length) return;
                   // A pasted screenshot is an attachment; pasted text keeps its default behaviour.
                   if (!e.clipboardData.getData("text")) e.preventDefault();
@@ -1429,7 +1557,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   if (Array.from(e.dataTransfer.items).some((i) => i.kind === "file")) e.preventDefault();
                 }}
                 onDrop={(e) => {
-                  const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+                  const files = Array.from(e.dataTransfer.files).filter((f) => isImage(f) || isDocument(f));
                   if (!files.length) return;
                   e.preventDefault();
                   addImages(files);
@@ -1466,32 +1594,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     <Square size={15} /> {t("chat.stop")}
                   </button>
                 ) : (
-                  <>
-                    <input
-                      ref={fileInput}
-                      type="file"
-                      accept={IMAGE_TYPES.join(",")}
-                      multiple
-                      hidden
-                      onChange={(e) => {
-                        addImages(Array.from(e.target.files ?? []));
-                        e.target.value = "";
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="ghost"
-                      aria-label={t("chat.attach")}
-                      title={t("chat.attach")}
-                      onClick={() => fileInput.current?.click()}
-                      disabled={images.length >= IMAGES_PER_MESSAGE}
-                    >
-                      <ImagePlus size={15} />
-                    </button>
-                    <button onClick={() => void send()} disabled={(!draft.trim() && !images.length) || busy}>
-                      <Send size={15} /> {t("chat.send")}
-                    </button>
-                  </>
+                  <button onClick={() => void send()} disabled={(!draft.trim() && !images.length && !documents.length) || busy}>
+                    <Send size={15} /> {t("chat.send")}
+                  </button>
                 )}
               </div>
             </div>

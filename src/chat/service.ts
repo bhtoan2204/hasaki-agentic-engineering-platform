@@ -64,7 +64,10 @@ const MessagePost = z
   .object({
     content: z.string().max(LIMITS.messageChars).default(""),
     /** Uploaded image ids (POST /api/chat/conversations/:id/attachments); a message may be images only. */
-    attachments: z.array(z.number().int().positive()).max(ATTACHMENT_LIMITS.imagesPerMessage).optional(),
+    attachments: z
+      .array(z.number().int().positive())
+      .max(ATTACHMENT_LIMITS.imagesPerMessage + ATTACHMENT_LIMITS.documentsPerMessage)
+      .optional(),
     client_message_id: z
       .string()
       .min(8)
@@ -242,7 +245,7 @@ export const chat = {
       ...m,
       attachments: attached
         .filter((a) => a.message_id === m.id)
-        .map(({ id, media_type, bytes }) => ({ id, media_type, bytes })),
+        .map(({ id, media_type, kind, filename, bytes }) => ({ id, media_type, kind, filename, bytes })),
     }));
     const tools = toolRows.map((t) => ({
       id: t.id,

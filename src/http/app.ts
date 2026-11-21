@@ -257,7 +257,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       return send(
         res,
         200,
-        await uploadAttachment(actor.id, Number(upload[1]), await readJson(req, 7_200_000)),
+        // 10 MB document as base64 plus the JSON envelope.
+        await uploadAttachment(actor.id, Number(upload[1]), await readJson(req, 14_200_000)),
       );
     }
     const image = method === "GET" && url.pathname.match(/^\/api\/chat\/attachments\/(\d+)$/);
@@ -265,12 +266,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const { readAttachment } = await import("../chat/attachments.ts");
       const a = await readAttachment(actor.id, Number(image[1]));
       if (!a) return send(res, 404, { error: "not found" });
+      // Documents are downloaded, never rendered in the platform's origin.
+      const name = (a.filename || `attachment-${image[1]}`).replace(/[^\w.\- ]/g, "_");
       res.writeHead(200, {
         "Content-Type": a.media_type,
         "Content-Length": a.content.length,
         "Cache-Control": "private, max-age=3600",
         "X-Content-Type-Options": "nosniff",
-        "Content-Security-Policy": "default-src 'none'",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        ...(a.kind === "document" ? { "Content-Disposition": `attachment; filename="${name}"` } : {}),
       });
       return res.end(a.content);
     }

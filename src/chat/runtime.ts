@@ -11,7 +11,7 @@ import {
 } from "../agent/complete.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import { AGENT_PROVIDERS, type AgentProvider } from "../agent/provider.ts";
-import { imagesForTurn } from "./attachments.ts";
+import { documentsForTurn, documentText, imagesForTurn } from "./attachments.ts";
 import { invalidateSharedAgentHealth, rememberProviderQuota } from "../agent/health.ts";
 import { boundedContextJson } from "../agent/contextTools.ts";
 import { chatRepository } from "./repository.ts";
@@ -404,6 +404,10 @@ async function executeTurn(
       reason: `continues the unfinished request of turn #${unfinished.goal_turn_id} (${follow.reason})`,
       source: "context",
     };
+  // Attached documents need the tools (read further, propose knowledge): the turn takes the tools path.
+  const documentRows = await documentsForTurn(turn.owner_id, conversation.id, userMessage.id);
+  if (documentRows.length && routing.path === "direct")
+    routing = { ...routing, path: "tools", reason: `${routing.reason}; documents attached` };
   const effectiveMode = routing.effective_mode as ManualChatMode;
 
   await emitChatEvent({
@@ -537,6 +541,24 @@ async function executeTurn(
       ? { content: item.content }
       : { description: String(item.metadata?.description ?? "").slice(0, 200) }),
   }));
+
+  // A bounded excerpt of each document in the prompt (the rest through documents.read).
+  let excerptBudget = 16_000;
+  const documents = [];
+  for (const d of documentRows.slice(0, 10)) {
+    const t = await documentText(turn.owner_id, d.id, signal).catch(() => null);
+    const text = (t?.extraction.sections ?? []).map((s) => `[${s.ref}]\n${s.text}`).join("\n\n");
+    const excerpt = text.slice(0, Math.min(4000, Math.max(0, excerptBudget)));
+    excerptBudget -= excerpt.length;
+    documents.push({
+      id: d.id,
+      filename: d.filename,
+      media_type: d.media_type,
+      bytes: d.bytes,
+      warnings: t?.extraction.warnings ?? ["could not be read"],
+      excerpt: excerpt + (text.length > excerpt.length ? `\n… (${text.length - excerpt.length} more characters: documents.read)` : ""),
+    });
+  }
 
   const binding: ChatBinding = {
     userId: turn.owner_id,
@@ -765,6 +787,7 @@ async function executeTurn(
           canEscalate: routing.path === "direct" && !escalated && step < LIMITS.maxSteps - 1,
           nativeTools: !!catalog && nativeToolsFor(admission.provider),
           images: images.length,
+          documents,
         });
         // Native tool calls (Claude): the provider runs the loop inside this step; each call is the same runCall.
         const native: NativeTools | undefined =
