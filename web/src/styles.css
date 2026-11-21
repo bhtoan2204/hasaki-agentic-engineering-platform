@@ -702,6 +702,13 @@ input[type="radio"] {
   margin-top: var(--sp-2);
 }
 
+/* A long label wraps inside its button on a narrow screen instead of widening the page. */
+.row > button,
+.row > .btn {
+  max-width: 100%;
+  white-space: normal;
+}
+
 .row.tight {
   margin-top: 0;
 }
@@ -2124,6 +2131,36 @@ details>summary {
     font-size: 11px;
   }
 
+  /* Narrow screens: provider and live state as dots; the names stay for screen readers and in the tooltip. */
+  .tb-right {
+    gap: 6px;
+  }
+
+  .tb-right > * {
+    flex: none;
+  }
+
+  .tb-health-name,
+  .live-pill b {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .tb-health-item,
+  .live-pill {
+    position: relative;
+    padding: 6px;
+  }
+
+  .tb-title {
+    min-width: 17px;
+    flex: 1 1 auto;
+  }
+
   .page {
     padding: 16px 16px 40px;
   }
@@ -2162,6 +2199,37 @@ details>summary {
   table:not(.ins-table) {
     display: block;
     overflow-x: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    padding: 0 8px;
+    gap: 6px;
+  }
+
+  .tb-right {
+    gap: 4px;
+  }
+
+  /* One pill of provider dots. */
+  .tb-health {
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+  }
+
+  .tb-health-item {
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .lang-switch .sm {
+    min-width: 30px;
+    padding-inline: 6px;
   }
 }
 

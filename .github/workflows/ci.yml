@@ -59,6 +59,60 @@ jobs:
       - if: ${{ !cancelled() && (steps.lint.outcome == 'success' || steps.lint.outcome == 'failure') }}
         run: npm run build
 
+  # Browser regression suite: production bundle in headless Chromium against a private PostgreSQL cluster (the same
+  # test/pg-cluster.ts the test job uses). Stub providers only, no model call, no credentials: the runner's HOME has no
+  # logged-in CLI, and chat titles in tests keep their fallback (PLATFORM_TEST=1). Assertions are counts and layout
+  # invariants; timings are measured but not asserted.
+  browser:
+    runs-on: ubuntu-latest
+    name: browser smoke
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - id: modules
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      # The Chromium build is the one pinned by the locked playwright-core version.
+      - id: playwright
+        run: echo "version=$(node -p "require('./node_modules/playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+      - id: browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright-core install chromium
+      # install-deps calls sudo itself (passwordless on hosted runners); `sudo npx` would lose setup-node's PATH.
+      - run: npx playwright-core install-deps chromium
+      - name: Install PostgreSQL 17
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - run: npm run build
+      # Run Detail with partial telemetry (no database), then the database-backed suites.
+      - run: npm run smoke:run-view
+      - name: Chat SSE lifecycle, reconnection and replay
+        run: npm run smoke:chat
+      - name: Run Detail and DAG rendering, inspector navigation
+        run: npm run smoke:run-detail
+      - name: Workflow live updates (cursor replay, polling fallback, tabs)
+        run: npm run smoke:live-updates
+      - name: Responsive layout (1920 → 320 px), keyboard focus
+        run: npm run smoke:ui-quality
+
   # platform-go: vet + unit, contract and extractor parity tests, and the production build (CGO: the tree-sitter
   # grammars are C). Cross-language suites (test/*-go.integration.ts) run in the test job and fail without Go.
   go:

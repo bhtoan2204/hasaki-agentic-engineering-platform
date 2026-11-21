@@ -261,6 +261,11 @@ async function measure(size: string, steps: number, extra: number, events: numbe
     }
   });
   const sample = await perf(page);
+  // The top bar asks /api/agent-providers on every page: the first call of a process runs each provider's readiness
+  // CLI (2–3 s cold on this host, environment-specific). Warm it first so the load measures the page, and report it.
+  const s0 = performance.now();
+  await context.request.get(`${base}/api/agent-providers`);
+  const providerStatusMs = performance.now() - s0;
   // ---- cold load: navigation → every DAG node rendered
   const t0 = Date.now();
   await page.goto(`${base}/#/runs/${seeded.runId}`);
@@ -378,6 +383,7 @@ async function measure(size: string, steps: number, extra: number, events: numbe
     state_change: { ...stateChange, script_ms: Math.round(stateChange.script_ms) },
     activity_burst_200: { ...burst, script_ms: Math.round(burst.script_ms) },
     step_switching: { ...switching, script_ms: Math.round(switching.script_ms) },
+    provider_status_first_call_ms: Math.round(providerStatusMs),
     streams_opened: final.streams,
     heap_mb_end: Math.round((await heapMb(page)) * 10) / 10,
   };

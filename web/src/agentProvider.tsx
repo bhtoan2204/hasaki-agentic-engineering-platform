@@ -66,7 +66,7 @@ export function AgentHealthBar() {
         return (
           <span key={id} className={`tb-health-item is-${state}`} title={detail}>
             <i />
-            {t(agentKey(id, true))}
+            <span className="tb-health-name">{t(agentKey(id, true))}</span>
           </span>
         );
       })}

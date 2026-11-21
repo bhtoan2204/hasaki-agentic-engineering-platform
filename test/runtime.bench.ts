@@ -11,6 +11,8 @@
  *   chat_concurrent    8 conversations at once, same provider
  *   workflow_run       a 12-step run of stub agent steps (10 ms each): start → COMPLETED, scheduler overhead per step
  *   checkpoint_replay  re-execute the root of that run (context-only replay of 12 descendants) → COMPLETED
+ *   workflow_concurrent_8 / _16  that many runs started together under the production loops (4 + 1 workers)
+ *   chat_concurrent_16 16 conversations at once
  *   workflow_scheduled the same run executed by the production scheduler loops (2 workers + 1 light worker, 1 s idle
  *                      poll) instead of drain(): adds the queue wait between a job becoming runnable and its claim
  * Measured per scenario: p50/p95/p99 latency, SQL statements, Node CPU, event-loop delay p99/max, peak RSS, and the
@@ -270,6 +272,8 @@ async function scenario(name: string, n: number, one: () => Promise<Record<strin
   };
   const out = {
     ...Object.fromEntries(Object.keys(samples[0]).map((k) => [k, stat(k)])),
+    // The first iteration of a scenario in this process (cold caches: provider readiness CLIs, plans, JIT).
+    first_sample: Object.fromEntries(Object.entries(samples[0]).map(([k, v]) => [k, round(v)])),
     sql_statements_per_op: round((db.statements - s0) / n),
     pool_waiting_avg: round(waitSum / Math.max(1, waitSamples)),
     pool_waiting_max: waitMax,
@@ -314,23 +318,26 @@ const turn = async (conversation: number, tag: string) => {
   }
 };
 let seq = 0;
+/** n conversations each answering one turn at once: the last first delta and completion. */
+const concurrentTurns = async (n: number) => {
+  const cs = await Promise.all(
+    Array.from({ length: n }, () => chat.create(actor, { mode: "ASK", provider: "claude" })),
+  );
+  const t0 = performance.now();
+  const r = await Promise.all(cs.map((c) => turn(c.id, `runtime-bench-${seq++}`)));
+  return {
+    first_delta_ms: Math.max(...r.map((x) => x.first_delta_ms)),
+    turn_ms: Math.max(...r.map((x) => x.turn_ms)),
+    all_ms: performance.now() - t0,
+  };
+};
 const scenarios = {
   chat_turn: withInstantHealth(async () => {
     const c = await chat.create(actor, { mode: "ASK", provider: "claude" });
     return turn(c.id, `runtime-bench-${seq++}`);
   }),
-  chat_concurrent: withInstantHealth(async () => {
-    const cs = await Promise.all(
-      Array.from({ length: 8 }, () => chat.create(actor, { mode: "ASK", provider: "claude" })),
-    );
-    const t0 = performance.now();
-    const r = await Promise.all(cs.map((c) => turn(c.id, `runtime-bench-${seq++}`)));
-    return {
-      first_delta_ms: Math.max(...r.map((x) => x.first_delta_ms)),
-      turn_ms: Math.max(...r.map((x) => x.turn_ms)),
-      all_ms: performance.now() - t0,
-    };
-  }),
+  chat_concurrent: withInstantHealth(() => concurrentTurns(8)),
+  chat_concurrent_16: withInstantHealth(() => concurrentTurns(16)),
   /**
    * 8 new conversations at once, production-like: every admission pays a real readiness probe and every first message
    * schedules a title that costs what a real one does (see modeledTitle). Also measured: when every title has settled.
@@ -367,7 +374,7 @@ const scenarios = {
     const t0 = performance.now();
     const run = await startRun({ definitionKey: "runtime-bench", inputs: { enabled: true } });
     await drain();
-    if ((await getRun(run.id)).status !== "COMPLETED") throw new Error("run did not complete");
+    if ((await settled(run.id)) !== "COMPLETED") throw new Error("run did not complete");
     const ms = performance.now() - t0;
     lastRun = run.id;
     return { run_ms: ms, overhead_per_step_ms: (ms - STEPS * 10) / STEPS };
@@ -376,9 +383,11 @@ const scenarios = {
     const t0 = performance.now();
     await reexecuteStep(lastRun, "root");
     await drain();
-    if ((await getRun(lastRun)).status !== "COMPLETED") throw new Error("replay did not complete");
+    if ((await settled(lastRun)) !== "COMPLETED") throw new Error("replay did not complete");
     return { replay_ms: performance.now() - t0 };
   }),
+  workflow_concurrent_8: withRealHealth(() => concurrentRuns(8)),
+  workflow_concurrent_16: withRealHealth(() => concurrentRuns(16)),
   workflow_scheduled: withRealHealth(async () => {
     scheduler ??= startScheduler({
       workers: 2,
@@ -411,6 +420,59 @@ const scenarios = {
   }),
 };
 let scheduler: ReturnType<typeof startScheduler> | null = null;
+/**
+ * drain() returns when it finds no claimable job; under BENCH_LOAD_WORKFLOW the background loop's own drain() may still
+ * hold one of this run's jobs. Wait for the run to settle instead of reading its status at once (that race aborted the
+ * before-run of checkpoint_replay under load).
+ */
+async function settled(runId: number) {
+  for (;;) {
+    const status = (await getRun(runId)).status;
+    if (["COMPLETED", "FAILED", "CANCELED"].includes(status)) return status;
+    await drain();
+    await sleep(5);
+  }
+}
+/** Scheduler empty claims, when the platform counts them (src/runtimeMetrics.ts; absent before Phase 4D). */
+const runtimeMetrics = await import("../src/runtimeMetrics.ts").catch(() => null);
+const emptyClaims = () =>
+  (runtimeMetrics?.runtimeMetricsSnapshot().counters["scheduler.claims_empty"] as number | undefined) ?? NaN;
+/** n 12-step runs started together under the production loops (4 workers + 1 light worker, 1 s idle poll). */
+async function concurrentRuns(n: number) {
+  scheduler ??= startScheduler({ workers: 4, lightWorkers: 1, leaseSeconds: 120, heartbeatSeconds: 10, pollMs: 1000 });
+  await sleep(1200);
+  const e0 = emptyClaims();
+  const t0 = performance.now();
+  const runs = await Promise.all(
+    Array.from({ length: n }, () => startRun({ definitionKey: "runtime-bench", inputs: { enabled: true } })),
+  );
+  const done = new Map<number, number>();
+  while (done.size < n) {
+    const rows = await q<{ id: number; status: string }>(
+      observer as never,
+      "SELECT id, status FROM workflow_runs WHERE id = ANY($1::bigint[])",
+      [runs.map((r) => r.id)],
+    );
+    for (const r of rows) {
+      if (["FAILED", "CANCELED"].includes(r.status)) throw new Error(`run ${r.status}`);
+      if (r.status === "COMPLETED" && !done.has(r.id)) done.set(r.id, performance.now() - t0);
+    }
+    await sleep(10);
+  }
+  const [w] = await q<{ max: number; avg: number }>(
+    observer as never,
+    "SELECT max(telemetry_queue_duration_ms)::float AS max, avg(telemetry_queue_duration_ms)::float AS avg FROM workflow_step_attempts WHERE run_id = ANY($1::bigint[])",
+    [runs.map((r) => r.id)],
+  );
+  const each = [...done.values()];
+  return {
+    all_ms: Math.max(...each),
+    run_median_ms: quantile(each, 0.5),
+    queue_wait_avg_ms: w.avg,
+    queue_wait_max_ms: w.max,
+    empty_claims: emptyClaims() - e0,
+  };
+}
 let lastRun = 0;
 const titleBusy = () =>
   (titles as { titleBacklog?: () => number }).titleBacklog?.() ??

@@ -353,6 +353,23 @@ test("large GET results are compressed when the client accepts it, never the ses
     );
     const refused = await raw("br;q=0, gzip;q=0");
     assert.equal(refused.headers["content-encoding"], undefined);
+    // Runtime metrics: admin only, fixed names (no run id, user or path in any key).
+    const metrics = await fetch(`${base}/api/metrics/runtime`, { headers: { cookie } });
+    assert.equal(metrics.status, 200);
+    const snapshot = JSON.stringify(await metrics.json());
+    assert.ok(!snapshot.includes(username) && !snapshot.includes(`/runs/${run.id}`));
+    const member = `wf-perf-member-${Date.now()}`;
+    await createUser({ username: member, password: "local-test-password", role: "member" });
+    const memberLogin = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: member, password: "local-test-password" }),
+    });
+    const memberCookie = memberLogin.headers.get("set-cookie")!.split(";")[0];
+    const denied = await fetch(`${base}/api/metrics/runtime`, {
+      headers: { cookie: memberCookie },
+    });
+    assert.equal(denied.status, 403, "members cannot read process-wide metrics");
     // The session route carries the CSRF token: never compressed (BREACH).
     const me = await fetch(`${base}/api/auth/me`, { headers: { cookie, "accept-encoding": "br" } });
     assert.equal(me.headers.get("content-encoding"), null);

@@ -167,10 +167,26 @@ under-load runs showed 2 → 2 and 3 → 0, so no regression is claimed or exclu
 | EventSources opened                   | 1 → 1            | 1 → 1                           | 1 → 1                                          |
 | heap after load                       | 8.8 → 9.1 MB     | 12.1 → 11.6 MB                  | 32.7 → 33.2 MB                                 |
 
-¹ The small run is the first page of each test process: the server compresses each static file once per build on its
-first request (~25 files), and that first load pays it. Every later load reads the compressed copies (medium and large
-loads are faster). Precompressing at build time would remove it; not done (see "not implemented"). Localhost transfer
-hides the byte savings, which dominate on a VPN or remote link.
+¹ **Corrected in the final validation** ([`phase4-final-validation.md`](phase4-final-validation.md)): the slower first
+load was a benchmark artifact, not static compression. The page's top bar calls `/api/agent-providers`, whose first call
+in a process runs every provider's readiness CLI (2.9 s cold here). Before this change the seeded workflow had already
+run those CLIs (each step probed them); after it, the seed used the shared reading, so the page paid the cold CLIs and
+its concurrent requests waited for CPU. With the status warmed first in both versions: **283 → 246 ms** (small),
+308 → 272 ms (medium), 505 → 456 ms (large), medians of 3. Build-time precompression was added anyway (it removes the
+on-request compression and shrinks the transfer, 233 → 218 KB) but did not change load time.
+
+### Final validation (2026-11-21): concurrency and mixed load
+
+Same fixtures, N = 10, before `badb5d0` → after; full table and raw numbers in
+[`phase4-final-validation.md`](phase4-final-validation.md) and `phase4-performance.json` (`final_validation`).
+
+| p50 (alone)                                | before   | after    |
+| ------------------------------------------ | -------- | -------- |
+| 8 runs at once, all complete               | 2 575 ms | 958 ms   |
+| 16 runs at once, all complete              | 4 361 ms | 1 927 ms |
+| one run under the production scheduler     | 1 462 ms | 443 ms   |
+| replay of 12 descendants                   | 1 048 ms | 540 ms   |
+| 16 concurrent chat turns, last first delta | 63.6 ms  | 65.8 ms  |
 
 ## Correctness evidence
 
@@ -186,16 +202,16 @@ hides the byte savings, which dominate on a VPN or remote link.
 
 ## CI status (local run of the CI commands, 2026-11-21)
 
-| Command                                                      | Result                                                                                                                                                                        |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run typecheck`, `lint`, `build`                         | pass                                                                                                                                                                          |
-| `npm run arch:check`                                         | 5 cycles, 6 violations — unchanged from before                                                                                                                                |
-| `npm test`                                                   | 1 070 / 1 070                                                                                                                                                                 |
-| `npm run test:integration`                                   | 869 / 869 (`GIT_CONFIG_GLOBAL=/dev/null` on this host, as before)                                                                                                             |
-| `npm run eval:autonomy:ci`                                   | pass                                                                                                                                                                          |
-| `smoke:run-detail` (new), `smoke:chat`, `smoke:live-updates` | 3/3, 5/5, 4/4                                                                                                                                                                 |
-| `smoke:run-view`, `smoke:ui-quality`                         | **fail before and after, identically** (run-view: a TimeoutError at `run-view.smoke.ts:151`; ui-quality: "overview overflows at 390: 265") — pre-existing, not addressed here |
-| Go tests                                                     | not run: no Go code or shared contract changed                                                                                                                                |
+| Command                                                      | Result                                                                                                    |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`, `lint`, `build`                         | pass                                                                                                      |
+| `npm run arch:check`                                         | 5 cycles, 6 violations — unchanged from before                                                            |
+| `npm test`                                                   | 1 070 / 1 070                                                                                             |
+| `npm run test:integration`                                   | 869 / 869 (`GIT_CONFIG_GLOBAL=/dev/null` on this host, as before)                                         |
+| `npm run eval:autonomy:ci`                                   | pass                                                                                                      |
+| `smoke:run-detail` (new), `smoke:chat`, `smoke:live-updates` | 3/3, 5/5, 4/4                                                                                             |
+| `smoke:run-view`, `smoke:ui-quality`                         | failed before and after this change; **fixed in the final validation** (see `phase4-final-validation.md`) |
+| Go tests                                                     | not run: no Go code or shared contract changed                                                            |
 
 GitHub CI itself was not run from here (nothing is pushed).
 
@@ -219,8 +235,8 @@ GitHub CI itself was not run from here (nothing is pushed).
 - **Wake-up cost**: woken workers that find nothing go back to sleep; measured 27 empty claims per 13-step run with 3
   lanes (cheap, `SKIP LOCKED`, no lock waits). The scheduled scenario still uses 2 % fewer statements than before,
   because the run spends less time polling.
-- **Browser tests are not in CI** (Chromium and its system libraries are not installed there); the deterministic
-  backend gates are.
+- Browser tests run in the CI `browser` job since the final validation (not yet observed on GitHub at the time of
+  writing).
 
 ## Not implemented, and why
 
@@ -234,6 +250,3 @@ GitHub CI itself was not run from here (nothing is pushed).
   and parses in a few ms; splitting it would add requests for every view that uses attempts.
 - DAG virtualization (`onlyRenderVisibleElements`): 241 nodes render within the load budget; virtualization would
   change pan/zoom and keyboard behaviour for no measured gain.
-- A CI browser job: needs Chromium and PostgreSQL provisioning that could not be validated from here.
-- Build-time precompression of the bundle (`.br`/`.gz` next to each asset): would remove the first-request compression
-  after a restart (footnote ¹); a build-pipeline change left for a follow-up.

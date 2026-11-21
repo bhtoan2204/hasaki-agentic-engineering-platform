@@ -50,3 +50,24 @@ test("compression negotiation: best accepted encoding, q=0 refuses, off switch",
     delete process.env.HTTP_COMPRESSION;
   }
 });
+
+test("static compression: a fresh precompressed sibling is served as built, a stale one is ignored", async () => {
+  const { mkdtempSync, writeFileSync, utimesSync, statSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { brotliDecompressSync } = await import("node:zlib");
+  const { compressedStatic, compress } = await import("../src/http/compression.ts");
+  const dir = mkdtempSync(join(tmpdir(), "precompress-"));
+  const file = join(dir, "app.js");
+  const body = Buffer.from("console.log('bundle');\n".repeat(200));
+  writeFileSync(file, body);
+  const sibling = await compress(Buffer.from("// precompressed\n"), "br");
+  writeFileSync(`${file}.br`, sibling);
+  const fresh = await compressedStatic(file, statSync(file).mtimeMs, body, "br");
+  assert.deepEqual(fresh, sibling, "the build's copy, not a new compression");
+  // The file changed after the build: its sibling is older and must not be served.
+  const later = new Date(Date.now() + 5000);
+  utimesSync(file, later, later);
+  const rebuilt = await compressedStatic(file, statSync(file).mtimeMs, body, "br");
+  assert.deepEqual(brotliDecompressSync(rebuilt), body);
+});

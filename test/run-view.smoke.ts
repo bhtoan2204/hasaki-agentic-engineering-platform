@@ -123,6 +123,26 @@ try {
           retries: 0,
           failed: 0,
         };
+        // GET /api/runs/:id/cost for a run without attempts (runCost: summarize([]) + budget lines); the cost card
+        // reads `total` unconditionally, as the API always returns it.
+        const cost = {
+          run_id: 42,
+          total: {
+            cost_usd: null,
+            attempts: 0,
+            attempts_without_cost: 0,
+            tokens: { input: 0, output: 0, cache_read: 0, cache_creation: 0, reasoning: 0 },
+          },
+          availability: "none",
+          wasted: { cost_usd: 0, pct: null, by_reason: {} },
+          by_step: [],
+          by_model: [],
+          budget: {
+            run: { limit_usd: null, source: null, used_usd: 0, pct: null, status: "none" },
+            work_item: null,
+            work_item_id: null,
+          },
+        };
         await page.route("**/api/**", async (route) => {
           assert.equal(route.request().method(), "GET", "Smoke must never mutate execution state");
           const path = new URL(route.request().url()).pathname;
@@ -135,7 +155,9 @@ try {
                   ? { totals, per_step: {}, agent_provider: "codex", wall_ms: 0 }
                   : path === "/api/runs/42/worker"
                     ? {}
-                    : [];
+                    : path === "/api/runs/42/cost"
+                      ? cost
+                      : [];
           await route.fulfill({
             status: 200,
             contentType: "application/json",

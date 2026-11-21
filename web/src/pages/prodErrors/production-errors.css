@@ -200,6 +200,15 @@
   color: var(--ink-2);
   padding: 5px 10px;
   font-size: var(--fs-xs);
+  /* Long service names wrap inside the pill instead of widening the page on a phone. */
+  max-width: 100%;
+  min-width: 0;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.an-health-toggle button > i {
+  flex: none;
 }
 
 .an-health-toggle button.on {

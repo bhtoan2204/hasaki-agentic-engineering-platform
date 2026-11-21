@@ -25,7 +25,7 @@
     "smoke:codex": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/codex.live.ts",
     "smoke:copilot": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/copilot.live.ts",
     "typecheck": "tsc -p . --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo && tsc -p web --incremental --tsBuildInfoFile node_modules/.cache/tsc/web.tsbuildinfo",
-    "build": "vite build --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts && node --disable-warning=ExperimentalWarning scripts/precompress-web.ts",
     "serve": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "knowledge:import": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/import-knowledge.ts",

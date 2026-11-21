@@ -188,21 +188,27 @@ try {
     ["account", "/account"],
   ];
   for (const [name, path] of process.env.UI_QUALITY_FAST ? [] : routes) {
-    for (const width of phase === "before" ? [1440, 390] : [1920, 1440, 1280, 1024, 768, 390]) {
+    for (const width of phase === "before"
+      ? [1440, 390]
+      : [1920, 1440, 1280, 1024, 768, 390, 375, 320]) {
       await page.setViewportSize({
         width,
         height:
           width === 390
             ? 844
-            : width === 768
-              ? 1024
-              : width === 1024
-                ? 768
-                : width === 1280
-                  ? 800
-                  : width === 1440
-                    ? 900
-                    : 1080,
+            : width === 375
+              ? 812
+              : width === 320
+                ? 640
+                : width === 768
+                  ? 1024
+                  : width === 1024
+                    ? 768
+                    : width === 1280
+                      ? 800
+                      : width === 1440
+                        ? 900
+                        : 1080,
       });
       await go(path);
       // Give cached API renders two animation frames; wait for pending initial skeletons below.
