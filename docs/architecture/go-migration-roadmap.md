@@ -119,13 +119,12 @@ re-validates the paths, memoizes freshness per request, batches the SQL across s
 time, streams ripgrep and reads sources with one `git cat-file --batch`. Results are identical to the TypeScript
 engine; unavailable, slow or outdated platform-go falls back to it.
 
-| Measure (`npm run bench:code-search`, p50) | 5 repositories | 30 repositories |
+| Measure (`npm run bench:code-search`, p50, re-measured in the hardening review) | 5 repositories | 30 repositories |
 |---|---|---|
-| `buildCodeContext` (3 queries) | 14.8 s → 2.8 s (−81%) | 53.5 s → 5.5 s (−90%) |
-| `searchSymbols` (4 queries) | −59% | −74% |
-| `findDependencies`, `findReferences` | −73%, −74% | −81%, −45% |
-| `searchCodeExact` (limit 20) | −55% | +7% (scope resolution of all 30 repositories) |
-| SQL statements per `buildCodeContext` | 814 → 76 | 3,025 → 54 |
+| `buildCodeContext` (3 queries) | 10.1 s → 2.2 s (−78%) | 37.2 s → 5.3 s (−86%) |
+| `searchSymbols` (4 queries) | −53% | −67% |
+| `findDependencies`, `findReferences` | −71%, −71% | −76%, −41% |
+| `searchCodeExact` (limit 20) | −62% | −66% |
 
 Checks: `go test ./internal/codeintelligence/` (validation, collation, contract) and
 `test/code-search-go.integration.ts` (the whole code intelligence suite on the Go engine, engine parity on base and
@@ -141,16 +140,23 @@ hash, writes without read-back, serialized publications), plus one set of safe s
 budgets, incomplete scans never retire). The scan itself runs in platform-go with `KNOWLEDGE_IMPORT_ENGINE=go`, inside
 trusted roots configured by the server.
 
-| Measure (`npm run bench:knowledge-import`, p50) | 5 repositories | 30 repositories |
+| Measure (`npm run bench:knowledge-import`, p50, re-measured in the hardening review) | 5 repositories | 30 repositories |
 |---|---|---|
-| unchanged re-import | 2.9 s → 0.15 s (−95%) | 19.0 s → 0.49 s (−97%) |
-| 1% / 10% modified | −93% / −80% | −96% / −84% |
-| cold import | −41% | −47% |
-| SQL statements, unchanged | 1,103 → 10 | 6,339 → 17 |
-| scan, Go vs TypeScript | 24 → 21 ms | 140 → 95 ms (−32%), Node CPU −78% |
+| unchanged re-import | 306 → 92 ms (−70%) | 1,740 → 232 ms (−87%) |
+| 1% / 10% modified | −56% / −69% | −83% / −79% |
+| cold import | −54% | −59% |
+| SQL statements, unchanged | 1,009 → 8 | 5,747 → 8 |
+| scan, Go vs TypeScript | 33 → 21 ms (−37%) | 128 → 82 ms (−36%), Node CPU −78% |
 
 Also in this phase (ADR 0007 §9): code search validates request roots against platform-go's trusted roots, raises
 401/403 instead of falling back, and authorizes exact-search scopes lazily with the sequential semantics; the
 supervision budget reserves memory for the host's services and never overcommits across classes. Remaining before the
 exit criteria: two weeks with `KNOWLEDGE_IMPORT_ENGINE=go` in daily use; the Go scan stays opt-in unless it shows a
 latency benefit on real repositories.
+
+## Hardening review (2026-11)
+
+The completed migrations were reviewed end to end before any further module moves:
+[go-migration-hardening.md](go-migration-hardening.md) — knowledge-import correctness under unreadable files,
+cross-instance import serialization, memory, resource budgets, every Go boundary, end-to-end runtime measurements
+(`npm run bench:runtime`) and the remaining production risks.

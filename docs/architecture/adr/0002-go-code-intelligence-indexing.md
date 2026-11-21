@@ -35,6 +35,13 @@ publish. Closing the request (lease lost, shutdown) cancels the Go job through i
 Moving the queue too would have meant re-implementing provisioning and authorization in Go: two copies of the
 security-relevant code for no throughput gain (claiming is a single statement per job).
 
+Amended by the hardening review of 2026-11 ([ADR 0007](0007-go-knowledge-scan.md), `go-migration-hardening.md`): the
+endpoint only checked that its paths were non-empty, so a holder of the internal token could have indexed any Git
+checkout on the host into the database, and `base` reached `git ls-tree` unchecked. It now requires `base` to be a
+commit id and `primary`/`root` to be absolute, clean checkouts whose real path lies inside platform-go's trusted roots
+(`PLATFORM_TRUSTED_ROOTS`); without trusted roots it answers 503 and the job fails with that message
+(`TestIndexJobsStayInsideTheTrustedRoots`).
+
 ### Byte-identical extraction, shared index
 
 Go produces exactly the TypeScript extraction and uses the same `parser_version`, so snapshots and the extraction

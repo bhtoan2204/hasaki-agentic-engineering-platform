@@ -124,9 +124,10 @@ Debian bookworm-slim image (CGO binary, git for indexing), non-root, `GOMEMLIMIT
 `127.0.0.1:4646` only. Indexing receives absolute paths: compose mounts `~/src` and `~/.claude-task-platform`
 read-only at the same paths. Compose sets
 `DATABASE_URL` to the `postgres` service (image `pgvector/pgvector:pg17`) and `EMBEDDING_URL` to the `ollama`
-service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`). Code search and knowledge scans in the
-container need `PLATFORM_TRUSTED_ROOTS` in `.env` (the mounted paths, e.g. `/home/<user>/src:/home/<user>/.claude-task-platform`);
-without it they answer 503 and the TypeScript engines serve those requests.
+service; the rest comes from `.env` (at least `RETRIEVAL_INTERNAL_TOKEN`). Indexing, code search and knowledge scans in
+the container need `PLATFORM_TRUSTED_ROOTS` in `.env` (the mounted paths, e.g. `/home/<user>/src:/home/<user>/.claude-task-platform`);
+without it they answer 503 — search and scans then fall back to the TypeScript engines; indexing jobs fail (and
+retry) with that message, since an indexing job never reads outside the trusted roots.
 
 ## Environment
 
@@ -137,7 +138,7 @@ without it they answer 503 and the TypeScript engines serve those requests.
 | `DATABASE_POOL_MAX` | `4` | 1–16 |
 | `RETRIEVAL_INTERNAL_TOKEN` | required | ≥ 32 characters; `Authorization: Bearer` on `/internal/*` |
 | `REQUEST_TIMEOUT_MAX_MS` | `2000` | request deadline = min(`X-Request-Timeout-Ms`, this) |
-| `PLATFORM_TRUSTED_ROOTS` | empty | `:`-separated directories code search and knowledge scans may read below (ADR 0006, 0007); set by the supervising server; empty → those endpoints answer 503 |
+| `PLATFORM_TRUSTED_ROOTS` | empty | `:`-separated directories indexing, code search and knowledge scans may read below (ADR 0002, 0006, 0007); set by the supervising server; empty → those endpoints answer 503 |
 | `EMBEDDING_PROVIDER` | `ollama` | `ollama` or `openai` (any OpenAI-compatible `/v1/embeddings`) |
 | `EMBEDDING_URL` | `http://127.0.0.1:11434` | `https://api.openai.com` for `openai` |
 | `EMBEDDING_MODEL` | `bge-m3` | |

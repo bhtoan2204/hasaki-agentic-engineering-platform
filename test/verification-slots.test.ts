@@ -51,3 +51,14 @@ test("an aborted waiter gets null and does not hold or block a slot", async () =
   assert.equal(await acquireVerificationSlot(pre.signal, 5), null);
   assert.equal(verificationSlotsInUse(), 0);
 });
+
+test("with host-wide admission slots, the in-process default never exceeds them (no admission_timeout queue)", () => {
+  assert.equal(verificationSlotLimit({}, 1), 1);
+  assert.ok(verificationSlotLimit({}, 64) <= verificationSlotLimit({}));
+  assert.equal(verificationSlotLimit({}, undefined), verificationSlotLimit({}));
+  assert.equal(
+    verificationSlotLimit({ VERIFY_MAX_CONCURRENT: "3" }, 1),
+    3,
+    "an explicit operator setting wins",
+  );
+});

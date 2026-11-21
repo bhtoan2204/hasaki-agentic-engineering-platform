@@ -5,6 +5,7 @@ import { one, pool, q, withTx, json } from "../db/pool.ts";
 import { hashOf } from "../workflow/definitions.ts";
 import {
   looksSecret,
+  importGuard,
   serializedImport,
   skillCandidates,
   type ImportCandidate,
@@ -207,6 +208,7 @@ async function applyExternalSkillsNow(
     const action = !existing ? "create" : same ? "unchanged" : "update";
     report.rows.push({ key: c.key, action });
     if (opts.dryRun || action === "unchanged") continue;
+    await importGuard();
     const origin = c.metadata?.origin as ExternalManifestSkill["origin"];
     const note = `third-party skill ${origin.repo}@${String(origin.commit).slice(0, 7)}`;
     if (action === "create")
@@ -250,6 +252,7 @@ async function applyExternalSkillsNow(
     }
     report.superseded.push({ ...s, action: "set" });
     if (opts.dryRun) continue;
+    await importGuard();
     await withTx(async (c) => {
       await q(
         c,

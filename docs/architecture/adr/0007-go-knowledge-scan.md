@@ -45,10 +45,16 @@ whole import.
 - `knowledge.createWithoutReload` / `updateWithoutReload`: the same transactions (row lock, new version, audit,
   tombstone removal) without reading the item back (5 statements fewer per write). `create`/`update` keep their API.
 - Retirement lists items without contents and reads contents only for the items it retires.
-- Publications are serialized across instances with an advisory lock (`serializedImport`): candidates are compared once
-  before writing, so two concurrent imports would otherwise both create the same key. A second import waits and finds
-  the first one's items unchanged. Dry runs only read and take no lock. Nothing is retried after a partial write: each
-  item is its own transaction, as before.
+- Publications are serialized (`serializedImport`): candidates are compared once before writing, so two concurrent
+  imports would otherwise both create the same key. A second import waits and finds the first one's items unchanged.
+  In-process by a queue; across instances by `pg_advisory_lock` held on a **dedicated connection outside the pool**
+  (hardening review: the first version took a pool connection and skipped the lock with a one-connection pool, which
+  it would have deadlocked). PostgreSQL releases the lock when the holding process dies. Every write first calls
+  `importGuard()`, which refuses to write once the lock connection is gone (probed at most once a second), so an
+  import that lost its lock stops instead of publishing next to another instance. Dry runs only read and take no lock.
+  Nothing is retried after a partial write: each item is its own transaction, as before, so a crash leaves only
+  complete items (`test/knowledge-import-concurrency.integration.ts`: one-connection pools in two processes, SIGKILL
+  while holding the lock, lost lock connection).
 - Optimistic concurrency, version history, the registry-evolution conflict rule (`registry_newer` / `conflict` →
   UPDATE proposal), tombstones of deleted items, blocked third-party skills and the retirement rules are unchanged.
 - Embeddings (`go/internal/retrieval`): unchanged documents create no version, so nothing is enqueued. A new version
@@ -75,6 +81,8 @@ engine can widen a scope from what a document says.
 | file larger than 1 MiB | read whole, secret-scanned, truncated to 60,000 chars | skipped, reported (`larger than 1048576 bytes`) — never imported unscanned; read bounded before allocation |
 | per-repository entries > 20,000, total bytes > 512 MiB, scan > 120 s | unbounded | the scan stops there; the repository is reported **incomplete** and nothing of it is retired |
 | broken symlink, checkout gone mid-scan | import aborted | skipped / repository incomplete |
+| directory or file that cannot be read (EACCES, EIO, EMFILE…) | treated as absent: its items **retired** | reported `unreadable (CODE)`; the repository is incomplete; nothing of it retired (hardening review) |
+| absent (ENOENT, ENOTDIR, symlink loop) | absent | absent: a legitimate deletion, retired when the scan is complete |
 | wiki `docs/` test | on the absolute path: a checkout below any `…/docs/…` imported every Markdown file | on the path relative to the repository |
 | a cut inside a surrogate pair (60,000-char truncation, 300/600-char descriptions) | lone surrogate: PostgreSQL stored U+FFFD for text, JSONB metadata refused the insert | U+FFFD at the cut (`sliceUnits` / `jsstr.SliceUTF16`) |
 
@@ -82,6 +90,14 @@ Secret detection, path exclusions, external manifest hash verification and block
 (the external manifest import stays TypeScript: a handful of platform-owned files). A user skills directory
 symlinked to elsewhere is now skipped and reported like any symlink out of its root; user-level items are never
 retired, so nothing disappears from the registry.
+
+An incomplete scan never changes what a complete one would decide (hardening review, failure-injection tests in
+`test/knowledge-import-go.integration.ts`): besides retirement, an item is **not updated** when the candidate lacks a
+source repository whose scan was incomplete (it would narrow a shared skill's applicability); a skill whose main file
+or a companion could not be read is neither emitted nor grouped (it would split into per-repository variants, or fall
+back to `.agents/skills`); after an unreadable agent-instruction file, the later ones of that repository are not
+emitted (AGENTS.md may duplicate an unreadable CLAUDE.md). A read failure no longer stops the rest of the repository's
+scan — only budgets do.
 
 ### 4. The scan in Go (`KNOWLEDGE_IMPORT_ENGINE=go`)
 
@@ -120,21 +136,26 @@ downstream (no version, no embedding).
 ## Results
 
 `npm run bench:knowledge-import` (`docs/architecture/knowledge-import-engines.json`; pre-change code:
-`knowledge-import-baseline.json`), 16 CPUs / 15.5 GiB WSL2, local PostgreSQL 17, 5 iterations (cold: 3), p50.
-Both engines produced **identical import reports** in every scenario and scale, locally and with latency; the parity
-suite additionally compares the registry rows and the embedding eligibility.
+`knowledge-import-baseline.json`), 16 CPUs / 15.5 GiB WSL2, local PostgreSQL 17, 3 iterations, p50. Both engines
+produced **identical import reports** in every scenario and scale, locally and with latency; the parity suite
+additionally compares the registry rows and the embedding eligibility.
+
+*Re-measured in the hardening review* (5 and 30 repositories) after a defect in the benchmark harness was fixed: its
+PostgreSQL proxy delayed every packet by a 0 ms timer (~1 ms each way) even without injected latency, which inflated
+every "local" figure in proportion to its statement count — the pre-change code most. The first local table of this
+ADR (19.0 s → 0.49 s unchanged at 30 repositories, etc.) overstated the gains; the 20 ms latency figures below were
+not affected.
 
 **Publication path (TypeScript engine, before → after):**
 
-| p50 | 1 repository | 5 | 15 | 30 |
-|---|---|---|---|---|
-| unchanged re-import | 601 → 114 ms (−81%) | 2,884 → 152 (−95%) | 9,101 → 283 (−97%) | 19,028 → 487 (−97%) |
-| 1% modified | 594 → 113 (−81%) | 3,135 → 210 (−93%) | 9,282 → 440 (−95%) | 20,319 → 886 (−96%) |
-| 10% modified | 710 → 199 (−72%) | 4,656 → 908 (−80%) | 13,480 → 2,445 (−82%) | 26,839 → 4,222 (−84%) |
-| 100% modified | 1,916 → 972 (−49%) | 13,597 → 6,096 (−55%) | 42,697 → 17,477 (−59%) | 84,519 → 34,191 (−60%) |
-| cold import | 1,379 → 927 (−33%) | 7,891 → 4,651 (−41%) | 22,758 → 13,299 (−42%) | 50,001 → 26,674 (−47%) |
-| SQL statements, unchanged | 195 → 9 | 1,103 → 10 | 3,194 → 13 | 6,339 → 17 |
-| Node CPU, unchanged | 126 → 32 ms | 456 → 45 | 1,680 → 153 | 3,436 → 250 |
+| p50 | 5 repositories | 30 repositories |
+|---|---|---|
+| unchanged re-import | 306 → 92 ms (−70%) | 1,740 → 232 ms (−87%) |
+| 1% modified | 269 → 119 ms (−56%) | 1,897 → 325 ms (−83%) |
+| 10% modified | 448 → 138 ms (−69%) | 2,520 → 519 ms (−79%) |
+| 100% modified | 1,233 → 456 ms (−63%) | 7,748 → 2,322 ms (−70%) |
+| cold import | 646 → 297 ms (−54%) | 3,717 → 1,515 ms (−59%) |
+| SQL statements, unchanged | 1,009 → 8 | 5,747 → 8 |
 
 With 20 ms of latency on every database packet (1 repository, `knowledge-import-baseline-latency20.json` vs
 `knowledge-import-engines-latency20.json`): unchanged 7.4 s → 0.26 s (−96%), 1% 7.6 s → 0.31 s (−96%), 10% 9.4 s →
@@ -146,27 +167,31 @@ New versions = embedding queue entries in every run: unchanged documents enqueue
 cost of modified documents is the per-item write transaction (≈ 7 statements), kept for its row lock, audit and
 version semantics.
 
-**Go scan vs. TypeScript scan (same publication path):**
+**Go scan vs. TypeScript scan (same publication path, re-measured):**
 
-| p50 | 5 repositories | 15 | 30 |
-|---|---|---|---|
-| scan alone | 24 → 21 ms | 70 → 48 ms (−31%) | 140 → 95 ms (−32%) |
-| Node CPU of the scan | 29 → 6 ms | 78 → 16 ms | 157 → 34 ms |
-| unchanged import | 152 → 171 ms | 283 → 302 ms | 487 → 396 ms (−19%) |
-| Node CPU, unchanged import | 45 → 48 ms | 153 → 103 ms | 250 → 156 ms |
-| event-loop p99, unchanged import | 26 → 13 ms | 82 → 18 ms | 25 → 24 ms |
-| 1% / 10% / 100% modified, cold | within ±10% | within ±10% | within ±10% |
+| p50 | 5 repositories | 30 repositories |
+|---|---|---|
+| scan alone | 33 → 21 ms (−37%) | 128 → 82 ms (−36%) |
+| Node CPU of the scan | 40 → 17 ms | 169 → 37 ms |
+| unchanged import | 92 → 87 ms | 232 → 186 ms (−20%) |
+| 1% modified | 119 → 126 ms | 325 → 271 ms (−16%) |
+| event-loop p99, unchanged import | 28 → 16 ms | 60 → 26 ms |
+| Node CPU, unchanged import | 64 → 55 ms | 255 → 143 ms |
+| 10% / 100% modified, cold | within ±15% | within ±10% |
 
-The scan got slower than before (30 repositories: 72 → 140 ms in TypeScript) because every file is now resolved,
+The scan got slower than before (30 repositories: 77 → 128 ms in TypeScript) because every file is now resolved,
 opened without following symlinks and re-checked through `/proc`: the price of the rules in §3, paid by both engines.
 platform-go's peak RSS stayed at 46 MiB. The concurrent pool probe's p95 (a `SELECT 1` every 25 ms during the import)
-stayed at 3–15 ms on every engine. Node's peak RSS is reported per process and both engines shared one process, so it
-does not separate them (pre-change 252 MiB, after 370 MiB at 30 repositories, not investigated further).
+stayed at 3–15 ms on every engine. Node memory (hardening review): measured in isolation at 30 repositories with a forced GC after each scenario, the peak
+RSS is 186.7 MiB before and 187.6 MiB after, the retained heap 27–40 MiB in both, and 21 consecutive imports keep the
+retained heap flat (15.1 → 15.5 MiB). The earlier "252 → 370 MiB" compared each process's cumulative `maxRSS` over all
+scales without GC: V8 heap growth under a higher allocation rate (fewer awaits per item), not retention — no leak.
 
 Conclusion: the ≥ 30% target is met by the publication path for every expensive workload (unchanged and incremental
-imports −72% to −97%, full re-imports −49% to −60%, cold imports −33% to −47%), on both engines. The Go scan meets it
-for the scan itself (−31/−32% at 15/30 repositories) and takes 75–80% of the scan's CPU off the Node event loop, but
-does not change import latency measurably below 30 repositories: it stays opt-in (`typescript` default).
+imports −56% to −87%, full re-imports −63% to −70%, cold imports −54% to −59%; with 20 ms database latency −54% to
+−96%), on both engines. The Go scan meets it for the scan itself (−36/−37%) and takes 60–80% of the scan's CPU off the
+Node event loop; it shortens imports only modestly (−16/−20% at 30 repositories) and stays opt-in (`typescript`
+default).
 
 ## Rollback
 

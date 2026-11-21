@@ -9,7 +9,7 @@
  * (401/403) is raised: falling back would hide a misconfiguration or a scope this module should never send.
  */
 import { config } from "../config.ts";
-import { retrievalService } from "../retrieval/semantic.ts";
+import { platformGoCall } from "../retrieval/semantic.ts";
 import { MAX_CHARS, SCAN_LIMITS, type Discovery, type DiscoveryRepository } from "./importTypes.ts";
 
 /** Version of the discovery rules both engines implement; platform-go refuses (409) any other. */
@@ -43,23 +43,15 @@ export async function goKnowledgeScan(
     goKnowledgeStats.fallbacks[reason] = (goKnowledgeStats.fallbacks[reason] ?? 0) + 1;
     return null;
   };
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallback("missing_token");
-  let res: Response;
-  try {
-    res = await retrievalService(
-      "/internal/v1/knowledge/scan",
-      knowledgeScanRequest(repos, userDir),
-      SCAN_LIMITS.deadlineMs + 10_000,
-    );
-  } catch (e) {
-    return fallback((e as Error).name === "TimeoutError" ? "timeout" : "unreachable");
-  }
-  const body = await res.json().catch(() => undefined);
-  if (res.status === 400 || res.status === 401 || res.status === 403)
-    throw new Error(`knowledge scan refused (${res.status}): ${body?.error ?? "invalid"}`);
-  if (!res.ok) return fallback(res.status === 409 ? "version_mismatch" : `http_${res.status}`);
+  const res = await platformGoCall(
+    "knowledge scan",
+    "/internal/v1/knowledge/scan",
+    knowledgeScanRequest(repos, userDir),
+    SCAN_LIMITS.deadlineMs + 10_000,
+  );
+  if (!res.ok) return fallback(res.reason);
+  const body = res.body as unknown as Discovery;
   if (
-    !body ||
     !Array.isArray(body.candidates) ||
     !Array.isArray(body.skipped) ||
     !Array.isArray(body.scanned) ||

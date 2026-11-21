@@ -128,9 +128,14 @@ func Discover(ctx context.Context, repos []Repository, userDir string, lim Limit
 
 		// 1. Agent instructions / conventions (identical copies once).
 		seen := map[string]bool{}
+		failuresBefore := t.failures
 		for _, f := range []string{"CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"} {
 			file := filepath.Join(root, f)
-			if !exists(file) {
+			if !t.exists(file) {
+				continue
+			}
+			// After an unreadable one, a later file may be its duplicate (AGENTS.md = CLAUDE.md): not emitted.
+			if t.failures > failuresBefore {
 				continue
 			}
 			text, ok := t.read(file)
@@ -169,30 +174,36 @@ func Discover(ctx context.Context, repos []Repository, userDir string, lim Limit
 		inRepo := map[string]bool{}
 		for _, base := range []string{".claude/skills", ".agents/skills"} {
 			dir := filepath.Join(root, base)
-			names, err := readNames(dir)
-			if err != nil {
-				continue
-			}
-			for _, name := range names {
+			for _, e := range t.list(dir) {
+				name := e.Name()
 				if inRepo[name] {
 					continue
 				}
+				failures := t.failures
 				file := ""
 				for _, f := range []string{"SKILL.md", name + ".md"} {
-					if p := filepath.Join(dir, name, f); exists(p) {
+					if p := filepath.Join(dir, name, f); t.exists(p) {
 						file = p
 						break
 					}
 				}
-				if file == "" {
-					continue
+				text, ok := "", false
+				if file != "" {
+					text, ok = t.read(file)
 				}
-				text, ok := t.read(file)
-				if !ok {
+				// Unreadable (not absent): never fall back to .agents/skills under this name.
+				if t.failures > failures {
+					inRepo[name] = true
+				}
+				if file == "" || !ok {
 					continue
 				}
 				inRepo[name] = true
 				comps := skillCompanions(t, filepath.Join(dir, name), file)
+				// An unreadable companion changes the skill's identity (another group, other keys): skip it.
+				if t.failures > failures {
+					continue
+				}
 				id := name + "\x00" + jsstr.Sha256Hex(text) + "\x00" + companionsID(comps)
 				g := byID[id]
 				if g == nil {
@@ -319,11 +330,12 @@ func Discover(ctx context.Context, repos []Repository, userDir string, lim Limit
 	userHashes := map[string]bool{}
 	if userDir != "" && exists(userDir) {
 		t, err := newTree(userDir, "~/.claude/skills", &d.Skipped, b)
-		names, _ := readNames(userDir)
-		for _, name := range names {
-			if err != nil {
-				break
-			}
+		var names []os.DirEntry
+		if err == nil {
+			names = t.list(userDir)
+		}
+		for _, e := range names {
+			name := e.Name()
 			text, ok := t.readRaw(filepath.Join(userDir, name, "SKILL.md"))
 			if !ok {
 				continue
@@ -380,19 +392,6 @@ func Discover(ctx context.Context, repos []Repository, userDir string, lim Limit
 		}
 	}
 	return d, Metrics{FilesRead: b.files, BytesRead: b.bytes, Entries: b.entries, TookMs: time.Since(start).Milliseconds()}, nil
-}
-
-// readNames is readdirSync(dir): every entry name, in byte order.
-func readNames(dir string) ([]string, error) {
-	list, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, len(list))
-	for i, e := range list {
-		names[i] = e.Name()
-	}
-	return names, nil
 }
 
 // headingOr is firstHeading(text) ?? fallback (an empty heading is kept: `??` only replaces a missing one).

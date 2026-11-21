@@ -12,7 +12,7 @@
 import { realpath } from "node:fs/promises";
 import { config } from "../config.ts";
 import { workspacesOf } from "../git/provider.ts";
-import { retrievalService } from "../retrieval/semantic.ts";
+import { platformGoCall } from "../retrieval/semantic.ts";
 import { enqueue, goLimits, localScope } from "./indexer.ts";
 import { parserVersion } from "./parser.ts";
 
@@ -128,15 +128,11 @@ export async function goSearch<H, E>(
   query: Query,
 ): Promise<GoSearchResponse<H, E> | null> {
   if (config.codeIntelligence.searchEngine !== "go") return null;
-  const fallback = (reason: string) => {
-    goSearchStats.fallbacks[reason] = (goSearchStats.fallbacks[reason] ?? 0) + 1;
-    return null;
-  };
   if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallback("missing_token");
-  return call<H, E>(op, scope, await resolveScope(scope, provision), query, fallback);
+  return call<H, E>(op, scope, await resolveScope(scope, provision), query);
 }
 
-const fallbackTo = (reason: string) => {
+const fallback = (reason: string) => {
   goSearchStats.fallbacks[reason] = (goSearchStats.fallbacks[reason] ?? 0) + 1;
   return null;
 };
@@ -146,33 +142,24 @@ async function call<H, E>(
   scope: SearchScope,
   resolved: Awaited<ReturnType<typeof resolveScope>>,
   query: Query,
-  fallback: (reason: string) => null = fallbackTo,
 ): Promise<GoSearchResponse<H, E> | null> {
   const roots = await Promise.all(
     [config.reposRoot, config.dataDir].map((p) => realpath(p).catch(() => p)),
   );
-  let res: Response;
-  try {
-    res = await retrievalService(
-      "/internal/v1/code-intelligence/search",
-      goSearchRequest(op, query, resolved, roots),
-      Math.min(config.codeIntelligence.timeoutMs, 60_000),
-    );
-  } catch (e) {
-    return fallback((e as Error).name === "TimeoutError" ? "timeout" : "unreachable");
-  }
-  const body = await res.json().catch(() => undefined);
-  // A refused request or credential is a defect or a misconfiguration: falling back would hide it (ADR 0007 §9).
-  if (res.status === 400 || res.status === 401 || res.status === 403)
-    throw new Error(`code search request refused (${res.status}): ${body?.error ?? "invalid"}`);
-  if (!res.ok) return fallback(res.status === 409 ? "version_mismatch" : `http_${res.status}`);
-  if (!body || typeof body !== "object") return fallback("invalid_response");
+  const res = await platformGoCall(
+    "code search request",
+    "/internal/v1/code-intelligence/search",
+    goSearchRequest(op, query, resolved, roots),
+    Math.min(config.codeIntelligence.timeoutMs, 60_000),
+  );
+  if (!res.ok) return fallback(res.reason);
+  const body = res.body as unknown as GoSearchResponse<H, E>;
   goSearchStats.calls++;
   // Indexing stays a TypeScript queue: schedule what platform-go found unindexed.
   if (scope.provision !== false)
     for (const e of body.enqueue ?? [])
       await enqueue(e.repository, e.run_id ?? undefined).catch(() => {});
-  return body as GoSearchResponse<H, E>;
+  return body;
 }
 
 /**
@@ -187,7 +174,7 @@ export async function goExactSearch<H extends { repository: string }>(
   query: { pattern: string; limit: number; any_file: boolean },
 ): Promise<H[] | null> {
   if (config.codeIntelligence.searchEngine !== "go") return null;
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallbackTo("missing_token");
+  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallback("missing_token");
   const inRun = await runRepos(scope);
   const hits: H[] = [];
   for (let i = 0; i < scope.repositories.length && hits.length < query.limit; i += 4) {

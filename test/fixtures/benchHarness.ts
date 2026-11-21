@@ -58,6 +58,12 @@ export async function installBenchHarness(opts: { tools: string[]; latencyMs: nu
           buf = buf.subarray(len + 1);
         }
       }
+      // Without injected latency, forward at once: a 0 ms timer per packet still costs ~1 ms each way and inflated
+      // every local measurement (≈ 2 s of a 1,000-statement workflow run).
+      if (!opts.latencyMs) {
+        to.write(chunk);
+        return;
+      }
       const due = Date.now() + opts.latencyMs;
       tail = tail.then(
         () =>

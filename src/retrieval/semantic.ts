@@ -68,6 +68,34 @@ export function retrievalService(
 }
 
 /**
+ * One platform-go call of an engine with a TypeScript fallback (code search, knowledge scan): the parsed body, or the
+ * fallback reason when the TypeScript engine must answer — unreachable, timeout, another version (409), overload or
+ * failure (5xx), unparsable body. A refused request (400) or credential (401/403) is raised: it is a defect or a
+ * misconfiguration, and falling back would hide it.
+ */
+export async function platformGoCall(
+  label: string,
+  path: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; reason: string }> {
+  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return { ok: false, reason: "missing_token" };
+  let res: Response;
+  try {
+    res = await retrievalService(path, body, timeoutMs);
+  } catch (e) {
+    return { ok: false, reason: (e as Error).name === "TimeoutError" ? "timeout" : "unreachable" };
+  }
+  const parsed = await res.json().catch(() => undefined);
+  if (res.status === 400 || res.status === 401 || res.status === 403)
+    throw new Error(`${label} refused (${res.status}): ${parsed?.error ?? "invalid"}`);
+  if (!res.ok)
+    return { ok: false, reason: res.status === 409 ? "version_mismatch" : `http_${res.status}` };
+  if (!parsed || typeof parsed !== "object") return { ok: false, reason: "invalid_response" };
+  return { ok: true, body: parsed };
+}
+
+/**
  * Semantic rank (1-based, best chunk per source) of the given authorized sources, or null when the service cannot
  * be used — callers then keep lexical ranking. Never throws.
  */

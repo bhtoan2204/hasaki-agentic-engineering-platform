@@ -83,7 +83,7 @@ jobs:
           for i in $(seq 20); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 0.5; done
       - run: go vet ./...
       - run: go test -race ./internal/supervise/ ./internal/worker/
-      - run: go test -race -run 'Search|Locale|QueryTerms|SortHits|Contract|AllowedRoots' ./internal/codeintelligence/
+      - run: go test -race -run 'Search|Locale|QueryTerms|SortHits|Contract|AllowedRoots|IndexJobs' ./internal/codeintelligence/
       - run: go test -race ./internal/knowledge/ ./internal/jsstr/
       - run: go test ./...
       - run: go build -trimpath -o bin/platform-go ./cmd/platform-go

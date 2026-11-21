@@ -13,6 +13,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { config } from "../config.ts";
+import pg from "pg";
 import { pool, q } from "../db/pool.ts";
 import { isSelfRepository } from "../platform/selfDevelopment.ts";
 import { repositories, repoPath, type RepositoryRow } from "../repos/service.ts";
@@ -204,6 +205,8 @@ export class SourceTree {
   readonly budget: ScanBudget;
   readonly real: string;
   incomplete = false;
+  /** Read failures so far (not absences): callers that would otherwise fall back to another file check it. */
+  failures = 0;
   private entries = 0;
   constructor(root: string, label: string, skipped: ImportReport["skipped"], budget: ScanBudget) {
     this.root = root;
@@ -218,46 +221,86 @@ export class SourceTree {
   private shown(file: string) {
     return `${this.label}/${relative(this.root, file)}`;
   }
+  /** A budget is spent (entries, bytes, deadline): the scan stops here. A read failure only makes it incomplete. */
+  private stopped = false;
   private exhausted() {
     if (this.budget.bytes > SCAN_LIMITS.maxTotalBytes || Date.now() > this.budget.deadline)
-      this.incomplete = true;
-    return this.incomplete;
+      this.stopped = true;
+    if (this.stopped) this.incomplete = true;
+    return this.stopped;
   }
-  /** Real path of `p` when it exists and stays inside the root. */
+  /**
+   * A filesystem error: ENOENT, ENOTDIR and ELOOP mean the source is gone (a legitimate deletion); anything else —
+   * permissions, I/O, descriptor exhaustion — means it could not be read, so the repository's scan is incomplete
+   * (reported, and nothing of it is retired). Returns false either way.
+   */
+  private failed(p: string, e: unknown): false {
+    const code = (e as NodeJS.ErrnoException)?.code ?? "EIO";
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") return false;
+    this.incomplete = true;
+    this.failures++;
+    this.skipped.push({ path: this.shown(p), reason: `unreadable (${code})` });
+    return false;
+  }
+  /** existsSync with the distinction above: true when it exists, false when absent or unreadable (incomplete). */
+  exists(p: string): boolean {
+    try {
+      statSync(p);
+      return true;
+    } catch (e) {
+      return this.failed(p, e);
+    }
+  }
+  /** A symlink whose target exists outside the root (resolve() returned null for that reason, not another). */
+  private pointsOutside(p: string) {
+    try {
+      return !this.inside(realpathSync(p));
+    } catch {
+      return false;
+    }
+  }
+  /** Real path of `p` when it exists and stays inside the root; null when absent, unreadable or outside. */
   private resolve(p: string): string | null {
     try {
       const real = realpathSync(p);
       return this.inside(real) ? real : null;
-    } catch {
-      return null;
+    } catch (e) {
+      return this.failed(p, e) || null;
+    }
+  }
+  /** Directory entries in byte order; [] when absent, [] and incomplete when unreadable. */
+  list(dir: string) {
+    try {
+      return readdirSync(dir, { withFileTypes: true });
+    } catch (e) {
+      this.failed(dir, e);
+      return [];
     }
   }
 
   walk(dir: string, depth = 4): string[] {
     if (depth < 0 || this.exhausted()) return [];
-    let list;
-    try {
-      list = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return [];
-    }
+    const list = this.list(dir);
     const out: string[] = [];
     for (const e of list) {
       if (e.name === "node_modules" || e.name === ".git" || e.name === "vendor") continue;
-      if (++this.entries > SCAN_LIMITS.maxEntries || this.exhausted()) {
-        this.incomplete = true;
-        break;
-      }
+      if (++this.entries > SCAN_LIMITS.maxEntries) this.stopped = true;
+      if (this.exhausted()) break;
       const p = join(dir, e.name);
       let isDir = e.isDirectory();
       if (e.isSymbolicLink()) {
         const target = this.resolve(p);
         if (!target) {
-          if (existsSync(p))
+          if (this.pointsOutside(p))
             this.skipped.push({ path: this.shown(p), reason: "symlink outside the repository" });
           continue;
         }
-        isDir = statSync(target).isDirectory();
+        try {
+          isDir = statSync(target).isDirectory();
+        } catch (err) {
+          this.failed(p, err);
+          continue;
+        }
       }
       if (isDir) out.push(...this.walk(p, depth - 1));
       else out.push(p);
@@ -276,23 +319,33 @@ export class SourceTree {
     }
     const real = this.resolve(file);
     if (!real) {
-      if (existsSync(file))
+      if (this.pointsOutside(file))
         this.skipped.push({ path: this.shown(file), reason: "symlink outside the repository" });
       return null;
     }
     let fd: number;
     try {
       fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    } catch {
-      return null;
+    } catch (e) {
+      return this.failed(file, e) || null;
     }
     try {
-      const st = fstatSync(fd);
+      let st, opened;
+      try {
+        st = fstatSync(fd);
+        opened = realpathSync(`/proc/self/fd/${fd}`);
+      } catch (e) {
+        return this.failed(file, e) || null;
+      }
       // The descriptor, not the path: a component swapped for a symlink after resolve() is caught here.
-      if (!st.isFile() || !this.inside(realpathSync(`/proc/self/fd/${fd}`))) return null;
+      if (!st.isFile() || !this.inside(opened)) return null;
       const buf = Buffer.alloc(Math.min(st.size, SCAN_LIMITS.maxFileBytes) + 1);
       let n = 0;
-      for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0;) n += r;
+      try {
+        for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0;) n += r;
+      } catch (e) {
+        return this.failed(file, e) || null;
+      }
       if (n > SCAN_LIMITS.maxFileBytes) {
         this.skipped.push({
           path: this.shown(file),
@@ -545,9 +598,12 @@ export function discoverKnowledge(
 
     // 1. Agent instructions / conventions: inlined for that repository (identical copies, e.g. AGENTS.md = CLAUDE.md, once).
     const seenText = new Set<string>();
+    const failuresBefore = tree.failures;
     for (const f of ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"]) {
       const file = join(root, f);
-      if (!existsSync(file)) continue;
+      if (!tree.exists(file)) continue;
+      // After an unreadable one, a later file may be its duplicate (AGENTS.md = CLAUDE.md): not decidable, not emitted.
+      if (tree.failures > failuresBefore) continue;
       const text = read(file);
       if (!text || seenText.has(sha(text))) continue;
       seenText.add(sha(text));
@@ -582,20 +638,21 @@ export function discoverKnowledge(
     const seenInRepo = new Set<string>();
     for (const base of [".claude/skills", ".agents/skills"]) {
       const dir = join(root, base);
-      let names: string[];
-      try {
-        names = readdirSync(dir);
-      } catch {
-        continue;
-      }
-      for (const name of names) {
+      for (const name of tree.list(dir).map((e) => e.name)) {
         if (seenInRepo.has(name)) continue;
-        const file = ["SKILL.md", `${name}.md`].map((f) => join(dir, name, f)).find(existsSync);
-        if (!file) continue;
-        const text = read(file);
-        if (!text) continue;
+        const failures = tree.failures;
+        const file = ["SKILL.md", `${name}.md`]
+          .map((f) => join(dir, name, f))
+          .find((f) => tree.exists(f));
+        const text = file ? read(file) : null;
+        // Unreadable (not absent): never fall back to .agents/skills — that would publish another file as this skill.
+        if (tree.failures > failures) seenInRepo.add(name);
+        if (!file || !text) continue;
         seenInRepo.add(name);
         const companions = readSkillCompanions(tree, join(dir, name), file);
+        // A companion that could not be read changes the skill's identity (another group, other keys): skip the
+        // skill until a complete scan.
+        if (tree.failures > failures) continue;
         const id = `${name}:${sha(text)}:${sha(JSON.stringify(companions))}`;
         const e =
           skills.get(id) ??
@@ -696,7 +753,7 @@ export function discoverKnowledge(
   const userSkillHashes = new Set<string>();
   if (userDir && existsSync(userDir)) {
     const tree = new SourceTree(userDir, "~/.claude/skills", skipped, budget);
-    for (const name of readdirSync(userDir)) {
+    for (const name of tree.list(userDir).map((e) => e.name)) {
       const text = tree.readRaw(join(userDir, name, "SKILL.md"));
       if (text === null) continue;
       // Same content as a repository skill: keep the repository item, but it was available everywhere via ~/.claude,
@@ -874,24 +931,55 @@ const IMPORT_LOCK = 727_007; // pg_advisory_lock key: one knowledge import publi
 /**
  * Publications are serialized (a second import waits, then finds the first one's items unchanged): candidates are
  * compared with the registry once, before writing. In this process by a queue; across instances by an advisory lock
- * held on a second connection (skipped with a one-connection pool, which it would deadlock). Dry runs only read.
+ * held on a dedicated connection outside the pool — so it works with any pool size, including one — which
+ * PostgreSQL releases when the holding process dies. Each write first checks the lock is still held
+ * (importGuard): an import that lost its lock connection stops instead of writing next to another instance. Dry runs
+ * only read and take no lock.
  */
 let importQueue: Promise<unknown> = Promise.resolve();
+let activeLock: { client: pg.Client; lost: Error | null; checkedAt: number } | null = null;
+
 export function serializedImport<T>(dryRun: boolean | undefined, fn: () => Promise<T>) {
   if (dryRun) return fn();
   const run = importQueue.then(async () => {
-    if (config.database.poolMax < 2) return fn();
-    const c = await pool.connect();
+    const client = new pg.Client({
+      connectionString: config.databaseUrl,
+      connectionTimeoutMillis: config.database.connectionTimeoutMillis,
+      keepAlive: true,
+    });
+    const lock = { client, lost: null as Error | null, checkedAt: Date.now() };
+    client.on("error", (e) => (lock.lost ??= e));
+    client.on("end", () => (lock.lost ??= new Error("connection closed")));
+    await client.connect();
     try {
-      await c.query("SELECT pg_advisory_lock($1)", [IMPORT_LOCK]);
+      await client.query("SELECT pg_advisory_lock($1)", [IMPORT_LOCK]);
+      activeLock = lock;
       return await fn();
     } finally {
-      await c.query("SELECT pg_advisory_unlock($1)", [IMPORT_LOCK]).catch(() => {});
-      c.release();
+      activeLock = null;
+      await client.query("SELECT pg_advisory_unlock($1)", [IMPORT_LOCK]).catch(() => {});
+      await client.end().catch(() => {});
     }
   });
   importQueue = run.catch(() => {});
   return run;
+}
+
+/**
+ * Before a registry write of a serialized import: throws if the lock connection is gone (the lock went with it).
+ * The connection is probed at most once a second, so a long import pays one round trip per second, not per write.
+ */
+export async function importGuard() {
+  const lock = activeLock;
+  if (!lock) return;
+  if (!lock.lost && Date.now() - lock.checkedAt >= 1000) {
+    await lock.client.query("SELECT 1").catch((e) => (lock.lost ??= e));
+    lock.checkedAt = Date.now();
+  }
+  if (lock.lost)
+    throw new Error(
+      `knowledge import stopped: its publication lock was lost (${lock.lost.message})`,
+    );
 }
 
 /** Create/update registry items from the scan. Unchanged files create no new version. */
@@ -935,6 +1023,7 @@ async function importFromRepositoriesNow(opts: { dryRun?: boolean; only?: string
     dryRun: opts.dryRun,
     owned: true,
     createdBy: "repository import",
+    incomplete: new Set(scan.incomplete),
   });
 
   // Retire imported items whose source files are gone from repositories that were scanned (moved/deleted docs).
@@ -974,6 +1063,7 @@ async function importFromRepositoriesNow(opts: { dryRun?: boolean; only?: string
     });
     report.retired++;
     if (opts.dryRun) continue;
+    await importGuard();
     await knowledge.updateWithoutReload(it.key, {
       enabled: false,
       metadata: {
@@ -1066,7 +1156,7 @@ export async function importLocalCheckout(opts: {
   const seen = new Set<string>();
   for (const f of ["CLAUDE.md", "AGENTS.md"]) {
     const file = join(root, f);
-    if (!existsSync(file)) continue;
+    if (!tree.exists(file)) continue;
     const text = read(file);
     if (!text || seen.has(sha(text))) continue;
     seen.add(sha(text));
@@ -1134,7 +1224,7 @@ export async function importLocalCheckout(opts: {
 async function applyCandidates(
   candidates: ImportCandidate[],
   report: ImportReport,
-  opts: { dryRun?: boolean; owned: boolean; createdBy: string },
+  opts: { dryRun?: boolean; owned: boolean; createdBy: string; incomplete?: Set<string> },
 ) {
   // Deleted by an admin (knowledge_deletions): never re-created while the source file still exists.
   const deleted = await knowledge.deletedKeys();
@@ -1157,6 +1247,19 @@ async function applyCandidates(
       ...(opts.owned ? { imported_from_repository: true } : {}),
     };
     const existing = current.get(c.key);
+    // An incomplete scan must not narrow an item either: if it came from a repository whose scan did not finish and
+    // that repository is missing from the candidate's sources, the candidate may be missing it only because a file
+    // could not be read. Defer the update to a complete scan (retirement is likewise never decided from one).
+    const lost = ((existing?.metadata?.source ?? []) as { repo: string }[])
+      .map((x) => x.repo)
+      .filter((repo) => opts.incomplete?.has(repo) && !source.some((x) => x.repo === repo));
+    if (lost.length) {
+      report.skipped.push({
+        path: source.map((x) => `${x.repo}/${x.path}`).join(", "),
+        reason: `${c.key} not updated: the scan of ${[...new Set(lost)].join(", ")} is incomplete`,
+      });
+      continue;
+    }
     const sameContent = existing?.content_sha256 === sha(c.content);
     const evolution = existing?.metadata?.evolution;
     if (existing && evolution && !sameContent) {
@@ -1174,6 +1277,7 @@ async function applyCandidates(
       else {
         report.conflicts++;
         if (!opts.dryRun) {
+          await importGuard();
           const r = await createProposal({
             ownerId: existing.owner_id ?? null,
             changeType: "UPDATE",
@@ -1231,6 +1335,7 @@ async function applyCandidates(
     });
     report[action === "create" ? "created" : action === "update" ? "updated" : "unchanged"]++;
     if (opts.dryRun || action === "unchanged") continue;
+    await importGuard();
     if (action === "create")
       await knowledge.createWithoutReload({
         ...item,

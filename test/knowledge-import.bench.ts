@@ -237,6 +237,23 @@ const summarize = (ms: M[], extra: Record<string, unknown> = {}) => {
     ...extra,
   };
 };
+/**
+ * Node memory after a scenario: live heap and buffers after a full GC (what is retained), RSS, and the process's peak
+ * RSS so far (maxRSS only grows, so compare it between scenarios of one run). Needs --expose-gc for the GC.
+ */
+const memory = () => {
+  (globalThis as { gc?: () => void }).gc?.();
+  const m = process.memoryUsage();
+  const mb = (x: number) => round(x / 1048576);
+  return {
+    rss_mb: mb(m.rss),
+    heap_used_mb: mb(m.heapUsed),
+    heap_total_mb: mb(m.heapTotal),
+    external_mb: mb(m.external),
+    array_buffers_mb: mb(m.arrayBuffers),
+    peak_rss_mb: round(process.resourceUsage().maxRSS / 1024),
+  };
+};
 const report = (r: Awaited<ReturnType<typeof importer.importFromRepositories>>) => ({
   created: r.created,
   updated: r.updated,
@@ -274,13 +291,13 @@ for (const engine of ENGINES) {
     // Scan alone (no database writes), to split the cost.
     const scan: M[] = [];
     for (let i = 0; i < N; i++) scan.push(await measure(() => importer.scanRepositories()));
-    out.scan_only = summarize(scan);
+    out.scan_only = summarize(scan, { memory: memory() });
     const cold: M[] = [];
     for (let i = 0; i < Math.max(2, Math.ceil(N / 2)); i++) {
       await clearRegistry();
       cold.push(await measure(() => importer.importFromRepositories()));
     }
-    out.cold = summarize(cold, { report: report(cold[0].out as never) });
+    out.cold = summarize(cold, { report: report(cold[0].out as never), memory: memory() });
     reports[engine].push(report(cold[0].out as never));
     await q(pool, "DELETE FROM retrieval.queue");
     const unchanged: M[] = [];
@@ -288,7 +305,10 @@ for (const engine of ENGINES) {
       unchanged.push(await measure(() => importer.importFromRepositories()));
       await q(pool, "DELETE FROM retrieval.queue");
     }
-    out.unchanged = summarize(unchanged, { report: report(unchanged[0].out as never) });
+    out.unchanged = summarize(unchanged, {
+      report: report(unchanged[0].out as never),
+      memory: memory(),
+    });
     reports[engine].push(report(unchanged[0].out as never));
     for (const pct of [1, 10, 100]) {
       const ms: M[] = [];
@@ -303,6 +323,7 @@ for (const engine of ENGINES) {
       out[`modified_${pct}pct`] = summarize(ms, {
         modified_files: round(total / N),
         report: report(ms[0].out as never),
+        memory: memory(),
       });
     }
     out.documents = files.length;

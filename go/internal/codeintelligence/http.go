@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +41,16 @@ func Routes(mux *http.ServeMux, ix *Indexer, log *slog.Logger) {
 			platform.WriteError(w, http.StatusBadRequest, "invalid_request", "repository, paths, base and limits are required")
 			return
 		}
+		if err := ix.trustedJob(req); err != nil {
+			if errors.Is(err, ErrVersion) {
+				platform.WriteError(w, http.StatusConflict, "version_mismatch", err.Error())
+			} else if errors.Is(err, ErrUnconfigured) {
+				platform.WriteError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
+			} else {
+				platform.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			}
+			return
+		}
 		res, err := ix.Index(ctx, req)
 		switch {
 		case err == nil:
@@ -53,6 +65,37 @@ func Routes(mux *http.ServeMux, ix *Indexer, log *slog.Logger) {
 			platform.WriteError(w, http.StatusUnprocessableEntity, "index_failed", publicMessage(err))
 		}
 	})
+}
+
+// trustedJob: the checkouts an indexing job reads lie inside the trusted roots of this process's configuration
+// (never only where a request says) and its base is a commit id, not something git could take as an option.
+func (ix *Indexer) trustedJob(r Request) error {
+	if !strings.HasPrefix(r.ParserVersion, ExtractorVersion+"/") {
+		return ErrVersion // another extractor answers 409 whatever the paths
+	}
+	if len(ix.searcher.Roots) == 0 {
+		return ErrUnconfigured
+	}
+	if !commitID.MatchString(r.Base) {
+		return errors.New("base must be a commit id")
+	}
+	paths := []string{r.Primary}
+	if r.Root != "" {
+		paths = append(paths, r.Root)
+	}
+	for _, p := range paths {
+		if !filepath.IsAbs(p) || filepath.Clean(p) != p {
+			return errors.New("checkout path is not absolute and clean")
+		}
+		real, err := filepath.EvalSymlinks(p)
+		if err != nil || !platform.Inside(real, ix.searcher.Roots) {
+			return errors.New("checkout path outside the trusted roots")
+		}
+		if _, err := os.Lstat(filepath.Join(p, ".git")); err != nil {
+			return errors.New("checkout path is not a Git checkout")
+		}
+	}
+	return nil
 }
 
 var publicMessages = []string{

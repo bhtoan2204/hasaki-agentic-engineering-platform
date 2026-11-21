@@ -357,6 +357,65 @@ if (!goToolchain()) {
     assert.equal(await knowledge.get("kb-api.claude"), undefined, "still deleted");
   });
 
+  test("unreadable is not deleted: permission errors make the scan incomplete and retire nothing; deletions still retire", async () => {
+    engine("go");
+    await importer.importFromRepositories(); // settle the registry on the current files
+    const api = root("kb-api");
+    put(join(api, ".agents", "skills", "shared", "SKILL.md"), skill("shared", " agents copy"));
+    engine("typescript");
+    await importer.importFromRepositories();
+    const lock = [
+      join(api, "docs"), // directory: readdir EACCES
+      join(api, "CLAUDE.md"), // file: open EACCES
+      join(api, ".claude", "skills", "shared", "SKILL.md"), // preferred skill file: no fallback to .agents
+      join(api, ".claude", "skills", "local", "references", "guide.md"), // companion: the skill is not split
+    ];
+    for (const p of lock) execFileSync("chmod", ["000", p]);
+    try {
+      const ts = await dry("typescript");
+      assert.deepEqual(await dry("go"), ts);
+      assert.deepEqual(ts.incomplete, ["kb-api"]);
+      for (const p of ["kb-api/docs", "kb-api/CLAUDE.md", "kb-api/.claude/skills/shared/SKILL.md"])
+        assert.ok(
+          ts.skipped.some((x) => x.path === p && x.reason === "unreadable (EACCES)"),
+          `${p} reported unreadable`,
+        );
+      const actions = Object.fromEntries(ts.candidates.map((c) => [c.key, c.action]));
+      assert.ok(
+        !Object.values(actions).includes("retire"),
+        "nothing retired from an unreadable scan",
+      );
+      assert.equal(
+        actions["skill.shared"],
+        undefined,
+        "neither replaced by the .agents copy nor narrowed",
+      );
+      assert.ok(
+        ts.skipped.some(
+          (x) => x.reason === "skill.shared not updated: the scan of kb-api is incomplete",
+        ),
+      );
+      engine("go");
+      const r = await importer.importFromRepositories();
+      assert.equal(r.retired, 0);
+      assert.deepEqual(r.incomplete, ["kb-api"]);
+      assert.ok((await knowledge.get("kb-api.conventions"))?.enabled, "still enabled");
+    } finally {
+      for (const p of lock) execFileSync("chmod", ["u+rwX", p]);
+      execFileSync("chmod", ["-R", "u+rwX", join(api, "docs")]);
+      rmSync(join(api, ".agents", "skills", "shared"), { recursive: true, force: true });
+    }
+    // Readable again and one file really deleted: that one is retired, nothing else.
+    unlinkSync(join(api, "docs", "naming-convention.md"));
+    const ts = await dry("typescript");
+    assert.deepEqual(await dry("go"), ts);
+    assert.equal(ts.incomplete, undefined);
+    assert.deepEqual(
+      ts.candidates.filter((c) => c.action === "retire").map((c) => c.key),
+      ["kb-api.naming-convention"],
+    );
+  });
+
   test("a partial scan never retires: entry budget exhausted, or a repository gone from disk", async () => {
     const saved = importer.SCAN_LIMITS.maxEntries;
     importer.SCAN_LIMITS.maxEntries = 3;

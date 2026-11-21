@@ -65,7 +65,11 @@ import {
   type BaselineComparison,
 } from "./baseline.ts";
 import { superviseSpawn, supervisionNote } from "../../agent/process/supervisor.ts";
-import { acquireVerificationSlot, verificationSlotsInUse } from "./verificationSlots.ts";
+import {
+  acquireVerificationSlot,
+  verificationSlotLimit,
+  verificationSlotsInUse,
+} from "./verificationSlots.ts";
 import {
   askAboutFailure,
   handleDecision,
@@ -352,7 +356,13 @@ export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps[
 ) => {
   const started = Date.now();
   const busy = verificationSlotsInUse();
-  const release = await acquireVerificationSlot(signal);
+  const release = await acquireVerificationSlot(
+    signal,
+    verificationSlotLimit(
+      process.env,
+      config.supervision.engine === "go" ? config.supervision.slots.verification : undefined,
+    ),
+  );
   if (!release)
     return {
       code: null,

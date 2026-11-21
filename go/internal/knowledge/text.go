@@ -431,7 +431,7 @@ func nextAssignment(text, lower string, from int) (start int, value string, end 
 		for w < e && !isWord(text[w]) {
 			w++
 		}
-		if w == e || (w > 0 && isWord(text[w-1])) {
+		if w == e { // dashes only: \b never holds inside
 			s = e
 			continue
 		}

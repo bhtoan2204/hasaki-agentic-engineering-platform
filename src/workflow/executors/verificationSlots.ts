@@ -1,9 +1,16 @@
 import { availableParallelism } from "node:os";
 
-/** Concurrent verification commands per process: `VERIFY_MAX_CONCURRENT`, default a quarter of the CPUs (min 1). */
-export function verificationSlotLimit(env: NodeJS.ProcessEnv = process.env) {
+/**
+ * Concurrent verification commands per process: `VERIFY_MAX_CONCURRENT`, default a quarter of the CPUs (min 1) — and,
+ * when host-wide admission slots apply (PROCESS_SUPERVISION_ENGINE=go, `hostSlots`), no more than those: a command
+ * past them would only wait in the launcher's admission and fail with admission_timeout after
+ * supervision.admissionTimeoutMs, while here it waits without a deadline and can be canceled.
+ */
+export function verificationSlotLimit(env: NodeJS.ProcessEnv = process.env, hostSlots?: number) {
   const n = Number(env.VERIFY_MAX_CONCURRENT);
-  return Number.isInteger(n) && n > 0 ? n : Math.max(1, Math.floor(availableParallelism() / 4));
+  if (Number.isInteger(n) && n > 0) return n;
+  const cpus = Math.max(1, Math.floor(availableParallelism() / 4));
+  return hostSlots && hostSlots > 0 ? Math.min(cpus, hostSlots) : cpus;
 }
 
 let busy = 0;

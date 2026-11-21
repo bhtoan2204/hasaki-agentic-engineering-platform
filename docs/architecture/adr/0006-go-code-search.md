@@ -112,15 +112,19 @@ never wider than the authorized scope.
 calls; SQL statements counted by a wire proxy, git/rg processes by `PATH` wrappers. Retrieval quality: both engines
 return identical results (deep equality) for every symbol, dependency and code-context query at 30 repositories.
 
-| p50, TypeScript → Go (Δ) | 1 repository | 5 | 15 | 30 |
-|---|---|---|---|---|
-| `searchSymbols` (4 queries) | 295 → 251 ms (−15%) | 1,509 → 626 (−59%) | 4,377 → 1,437 (−67%) | 8,919 → 2,311 (−74%) |
-| `findDependencies` (depth 2) | 255 → 116 (−55%) | 654 → 176 (−73%) | 1,737 → 352 (−80%) | 3,362 → 626 (−81%) |
-| `findReferences` | 118 → 61 (−48%) | 594 → 154 (−74%) | 554 → 188 (−66%) | 565 → 314 (−45%) |
-| `searchCodeExact` (limit 20) | 71 → 66 (−8%) | 181 → 81 (−55%) | 175 → 127 (−28%) | 175 → 188 (**+7%**) |
-| `buildCodeContext` (3 queries) | 3,330 → 863 (−74%) | 14,799 → 2,755 (−81%) | 34,704 → 4,622 (−87%) | 53,478 → 5,507 (−90%) |
+Re-measured in the hardening review (5 and 30 repositories, 3 iterations) after fixing the benchmark harness, whose
+PostgreSQL proxy added ~1 ms per packet even without injected latency; the first version of this table (1,509 → 626 ms
+etc.) included that overhead. Exact search now also authorizes lazily (ADR 0007 §9).
 
-| per call at 30 repositories, TypeScript → Go | SQL statements | git processes | CPU (Node + Go) |
+| p50, TypeScript → Go (Δ) | 5 repositories | 30 repositories |
+|---|---|---|
+| `searchSymbols` (4 queries) | 1,041 → 488 ms (−53%) | 6,338 → 2,077 ms (−67%) |
+| `findDependencies` (depth 2) | 488 → 141 (−71%) | 2,198 → 523 (−76%) |
+| `findReferences` | 385 → 111 (−71%) | 363 → 216 (−41%) |
+| `searchCodeExact` (limit 20) | 179 → 68 (−62%) | 178 → 61 (−66%) |
+| `buildCodeContext` (3 queries) | 10,072 → 2,219 (−78%) | 37,181 → 5,252 (−86%) |
+
+| per call at 30 repositories, TypeScript → Go (first measurement) | SQL statements | git processes | CPU (Node + Go) |
 |---|---|---|---|
 | `searchSymbols` | 480 → 16 | 1,140 → 930 | 2,276 → 929 ms |
 | `findDependencies` | 213 → 6 | 488 → 180 | 929 → 229 ms |
@@ -142,10 +146,9 @@ With every PostgreSQL packet delayed 20 ms each way (`BENCH_DB_LATENCY_MS=20`, 1
 
 Where the ≥30% target is **not** met, and why:
 
-- `searchCodeExact` at 1, 15 and 30 repositories: with a limit of 20 the sequential TypeScript loop is satisfied by the
-  first two repositories. Go now stops the same way (four repositories at a time), but `goSearch` resolves the whole
-  authorized scope (`localScope` for all 30) before calling Go. A lazy, windowed scope resolution would close this;
-  it was left out to keep one authorization point per call.
+- `searchCodeExact` at 30 repositories (+7% in the first measurement): `goSearch` resolved the whole authorized
+  scope before calling Go. Fixed in the hardening review by lazy, windowed authorization (four at a time, stop at the
+  limit, same errors as the sequential loop): −66% at 30 repositories in the re-measurement.
 - `searchSymbols` on one repository (−15% locally, +6% with 20 ms database latency): the same 16 statements on
   both engines, issued one after another (snapshot lookup, per-query rows, the after-check); freshness costs the same git commands on both engines (`localScope` validation
   in TypeScript, then base commit in Go); with one repository there is nothing to batch or parallelize. The

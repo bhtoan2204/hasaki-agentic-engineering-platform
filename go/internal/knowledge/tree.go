@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 
 	"claude-task-platform/go/internal/jsstr"
 )
@@ -46,6 +49,8 @@ type tree struct {
 	skipped           *[]Skipped
 	b                 *budget
 	incomplete        bool
+	stopped           bool // a budget is spent
+	failures          int  // read failures (not absences), see failed
 	entries           int
 }
 
@@ -65,21 +70,82 @@ func (t *tree) skip(file, reason string) {
 	*t.skipped = append(*t.skipped, Skipped{Path: t.shown(file), Reason: reason})
 }
 
-// exhausted: the total byte budget or the deadline is spent (a canceled request ends the scan elsewhere).
+// exhausted: a budget is spent (entries, total bytes, deadline) and the scan stops here; a read failure only makes it
+// incomplete (a canceled request ends the scan elsewhere).
 func (t *tree) exhausted() bool {
 	if t.b.bytes > t.b.lim.MaxTotalBytes || t.b.ctx.Err() != nil {
+		t.stopped = true
+	}
+	if t.stopped {
 		t.incomplete = true
 	}
-	return t.incomplete
+	return t.stopped
+}
+
+// absent: the error says the path is gone (ENOENT, ENOTDIR, a symlink loop) — a legitimate deletion.
+func absent(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP) ||
+		strings.Contains(err.Error(), "too many links") // filepath.EvalSymlinks' own loop error
+}
+
+// errnoName is the error's code as Node reports it (EACCES, EIO, EMFILE…); EIO when there is none.
+func errnoName(err error) string {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		if name := unix.ErrnoName(errno); name != "" {
+			return name
+		}
+	}
+	return "EIO"
+}
+
+// failed is SourceTree.failed: an absence returns quietly; any other error makes the scan incomplete and is
+// reported, so nothing of this repository is retired.
+func (t *tree) failed(p string, err error) {
+	if absent(err) {
+		return
+	}
+	t.incomplete = true
+	t.failures++
+	t.skip(p, "unreadable ("+errnoName(err)+")")
+}
+
+// exists is SourceTree.exists.
+func (t *tree) exists(p string) bool {
+	if _, err := os.Stat(p); err != nil {
+		t.failed(p, err)
+		return false
+	}
+	return true
+}
+
+// list is SourceTree.list: entries in byte order; none when absent or unreadable (the latter incomplete).
+func (t *tree) list(dir string) []os.DirEntry {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.failed(dir, err)
+		return nil
+	}
+	return entries
 }
 
 // resolve is the real path of p when it exists and stays inside the root.
 func (t *tree) resolve(p string) (string, bool) {
 	real, err := filepath.EvalSymlinks(p)
-	if err != nil || !t.inside(real) {
+	if err != nil {
+		t.failed(p, err)
+		return "", false
+	}
+	if !t.inside(real) {
 		return "", false
 	}
 	return real, true
+}
+
+// pointsOutside: p resolves to an existing path outside the root.
+func (t *tree) pointsOutside(p string) bool {
+	real, err := filepath.EvalSymlinks(p)
+	return err == nil && !t.inside(real)
 }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
@@ -89,20 +155,18 @@ func (t *tree) walk(dir string, depth int) []string {
 	if depth < 0 || t.exhausted() {
 		return nil
 	}
-	list, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
 	var out []string
-	for _, e := range list {
+	for _, e := range t.list(dir) {
 		name := e.Name()
 		if name == "node_modules" || name == ".git" || name == "vendor" {
 			continue
 		}
 		t.entries++
 		t.b.entries++
-		if t.entries > t.b.lim.MaxEntries || t.exhausted() {
-			t.incomplete = true
+		if t.entries > t.b.lim.MaxEntries {
+			t.stopped = true
+		}
+		if t.exhausted() {
 			break
 		}
 		p := filepath.Join(dir, name)
@@ -110,13 +174,14 @@ func (t *tree) walk(dir string, depth int) []string {
 		if e.Type()&os.ModeSymlink != 0 {
 			target, ok := t.resolve(p)
 			if !ok {
-				if exists(p) {
+				if t.pointsOutside(p) {
 					t.skip(p, "symlink outside the repository")
 				}
 				continue
 			}
 			st, err := os.Stat(target)
 			if err != nil {
+				t.failed(p, err)
 				continue
 			}
 			isDir = st.IsDir()
@@ -138,29 +203,37 @@ func (t *tree) readRaw(file string) (string, bool) {
 	}
 	real, ok := t.resolve(file)
 	if !ok {
-		if exists(file) {
+		if t.pointsOutside(file) {
 			t.skip(file, "symlink outside the repository")
 		}
 		return "", false
 	}
 	fd, err := syscall.Open(real, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	if err != nil {
+		t.failed(file, err)
 		return "", false
 	}
 	f := os.NewFile(uintptr(fd), real)
 	defer f.Close()
 	st, err := f.Stat()
-	if err != nil || !st.Mode().IsRegular() {
+	if err != nil {
+		t.failed(file, err)
+		return "", false
+	}
+	opened, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+	if err != nil {
+		t.failed(file, err)
 		return "", false
 	}
 	// The descriptor, not the path: a component swapped for a symlink after resolve() is caught here.
-	if opened, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd)); err != nil || !t.inside(opened) {
+	if !st.Mode().IsRegular() || !t.inside(opened) {
 		return "", false
 	}
 	limit := min(st.Size(), int64(t.b.lim.MaxFileBytes)) + 1
 	buf := make([]byte, limit)
 	n, err := io.ReadFull(f, buf)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		t.failed(file, err)
 		return "", false
 	}
 	if n > t.b.lim.MaxFileBytes {
