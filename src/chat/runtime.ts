@@ -4,7 +4,7 @@ import { background } from "../workflow/background.ts";
 import { completeForRun, completionAgent, type CompletionRunner } from "../agent/complete.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import type { AgentProvider } from "../agent/provider.ts";
-import { rememberProviderQuota } from "../agent/health.ts";
+import { invalidateSharedAgentHealth, rememberProviderQuota } from "../agent/health.ts";
 import { boundedContextJson } from "../agent/contextTools.ts";
 import { chatRepository } from "./repository.ts";
 import { emitChatEvent } from "./events.ts";
@@ -30,6 +30,7 @@ import {
 } from "./context.ts";
 import { executeChatTool, readableRepositories, toolCatalog, type ChatBinding } from "./tools.ts";
 import { stallGuard, TurnStream } from "./streaming.ts";
+import { turnScheduled, turnSettled } from "./turnActivity.ts";
 import { estimateTokens } from "../context/plan.ts";
 import { learnFromTurn, recallMemories } from "./memory.ts";
 import { knowledgeForTurn, refOf } from "./knowledge.ts";
@@ -66,7 +67,8 @@ export class TurnCanceled extends Error {}
 const VIETNAMESE = /[ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i;
 
 export function scheduleTurn(turnId: number) {
-  background(`chat turn ${turnId}`, () => runTurn(turnId));
+  turnScheduled(turnId);
+  background(`chat turn ${turnId}`, () => runTurn(turnId).finally(() => turnSettled(turnId)));
 }
 
 export function parseToolCalls(text: string): Array<{ tool: string; arguments: unknown }> | null {
@@ -161,18 +163,15 @@ export function withholdRevoked<T extends Pick<MessageRow, "role" | "content" | 
   });
 }
 
+/** The turn's phase and its phase.updated event, written by one statement. */
 async function phase(
   turn: TurnRow,
   name: ExecutionPhase,
   data: Record<string, unknown> = {},
 ) {
-  await chatRepository.setPhase(turn.id, name, data);
-  await emitChatEvent({
+  await chatRepository.setPhaseWithEvent(turn.id, name, data, {
     conversationId: turn.conversation_id,
     ownerId: turn.owner_id,
-    turnId: turn.id,
-    kind: "phase.updated",
-    data: { phase: name, ...data },
   });
 }
 
@@ -412,6 +411,8 @@ async function executeTurn(
   await phase(turn, "validating_provider");
   const attempts: ProviderAttempt[] = [];
   const avoid = new Set<string>();
+  // One configuration document for the whole turn: admission, agent resolution and every completion use it.
+  const cfg = await loadAgentConfiguration();
   let admission = await admitProvider({
     strategy,
     preferred,
@@ -419,6 +420,7 @@ async function executeTurn(
     effort: turn.reasoning_effort ?? conversation.reasoning_effort,
     fallbackEnabled,
     avoid,
+    configuration: cfg,
   });
   await emitChatEvent({
     ...ids,
@@ -457,7 +459,6 @@ async function executeTurn(
     phase: "preparing_context",
   });
 
-  const cfg = await loadAgentConfiguration();
   const readable = await readableRepositories(turn.owner_id);
   const repositories = [
     ...new Set([
@@ -538,6 +539,7 @@ async function executeTurn(
         effort: null,
         fallbackEnabled: true,
         avoid,
+        configuration: cfg,
       });
       await emitChatEvent({
         ...ids,
@@ -823,6 +825,13 @@ async function executeTurn(
         ? { ...stallRef.current.failure, provider: admission.provider }
         : asChatFailure(e, admission.provider);
       if (failure.code === "QUOTA_EXHAUSTED") rememberProviderQuota(admission.provider);
+      // Readiness reused across admissions must not outlive evidence that it is wrong.
+      if (
+        ["AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE", "PROVIDER_STARTUP_TIMEOUT"].includes(
+          failure.code,
+        )
+      )
+        invalidateSharedAgentHealth();
       attemptRec.ok = false;
       attemptRec.failure = failure;
       attemptRec.finished_at = new Date().toISOString();

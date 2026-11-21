@@ -8,7 +8,7 @@ import { antigravityCapabilities } from "./antigravity/capabilities.ts";
 import { copilotCapabilities } from "./copilot/capabilities.ts";
 
 import { AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
-import { probeAgentHealth } from "./health.ts";
+import { primeSharedAgentHealth, probeAgentHealth } from "./health.ts";
 import { DiscoveryCache, type DiscoveryProbe } from "./providerDiscovery.ts";
 import { providerControlState } from "./providerCapabilities.ts";
 import { loadAgentConfiguration } from "./configurationStore.ts";
@@ -20,6 +20,8 @@ export async function agentProviderStatus(refresh = false) {
     probeAgentHealth(),
     Promise.all(AGENT_PROVIDERS.map((provider) => discoverProvider(provider, refresh))),
   ]);
+  // A fresh probe ("Refresh health" included) is what the next chat admissions see.
+  primeSharedAgentHealth(health);
   return AGENT_PROVIDERS.map((id, index) => {
     const discovery = discoveries[index];
     const status = health.find((entry) => entry.provider === id);

@@ -339,6 +339,23 @@ export const chatRepository = {
     ]);
   },
 
+  /** setPhase and its phase.updated event (NOTIFY by the insert trigger) in one statement. */
+  setPhaseWithEvent(
+    id: number,
+    phase: string,
+    progress: Record<string, unknown>,
+    ids: { conversationId: number; ownerId: number },
+    db: Db = pool,
+  ) {
+    return one<EventRow>(
+      db,
+      `WITH turn AS (UPDATE chat_turns SET phase = $2, progress = $3 WHERE id = $1)
+       INSERT INTO chat_events (conversation_id, owner_id, turn_id, kind, data)
+       VALUES ($4, $5, $1, 'phase.updated', $6) RETURNING *`,
+      [id, phase, json(progress), ids.conversationId, ids.ownerId, json({ phase, ...progress })],
+    );
+  },
+
   setStream(id: number, draft: string, trace: unknown[], db: Db = pool) {
     return q(db, "UPDATE chat_turns SET draft = $2, trace = $3 WHERE id = $1", [
       id,

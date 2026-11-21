@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ChevronLeft,
@@ -264,6 +264,164 @@ function phaseLabel(phase: string | null | undefined, t: T) {
   return label === key ? phase.replace(/_/g, " ") : label;
 }
 
+type ChatActions = {
+  copy: (text: string) => void;
+  regenerate: (turnId: number) => void;
+  delegate: (kind: "task" | "delegate") => void;
+  decide: (id: number, decision: "confirm" | "reject") => void;
+  retry: (turn: Turn) => void;
+  retryOther: (turn: Turn) => void;
+  refreshHealth: () => void;
+};
+
+/**
+ * The stored transcript. Memoized: a streamed delta, a status line or a keystroke in the composer re-renders the page
+ * but not these messages (with a long conversation that was most of each render), only a new detail does.
+ */
+const ChatMessages = memo(function ChatMessages({
+  messages,
+  turnsById,
+  toolsByTurn,
+  opsByTurn,
+  hasActiveTurn,
+  actions,
+  t,
+}: {
+  messages: Message[];
+  turnsById: Map<number, Turn>;
+  toolsByTurn: Map<number, ToolCall[]>;
+  opsByTurn: Map<number | null, Operation[]>;
+  hasActiveTurn: boolean;
+  actions: ChatActions;
+  t: T;
+}) {
+  return (
+    <>
+      {messages.map((m) => {
+        const turn = m.turn_id ? turnsById.get(m.turn_id) : undefined;
+        const tools = m.turn_id ? toolsByTurn.get(m.turn_id) : undefined;
+        return (
+          <div key={m.id} className="chat-block">
+            <article className={`chat-bubble is-${m.role}`}>
+              <div className="chat-bubble-meta">
+                <span>
+                  {m.role === "user"
+                    ? t("chat.role.user")
+                    : m.role === "assistant"
+                      ? t("chat.role.assistant")
+                      : t("chat.role.system")}
+                </span>
+                {m.role === "assistant" && turn?.provider && (
+                  <span className="chat-meta-pill">
+                    {turn.provider}
+                    {turn.model ? ` · ${turn.model}` : ""}
+                    {turn.route ? ` · ${turn.route}` : ""}
+                  </span>
+                )}
+                {m.role === "assistant" && turn && ["canceled", "failed"].includes(turn.status) && (
+                  <span className="chat-meta-pill is-partial">
+                    {t(turn.status === "canceled" ? "chat.partial.stopped" : "chat.partial.failed")}
+                  </span>
+                )}
+                <span>{ago(m.created_at)}</span>
+              </div>
+              {m.role === "assistant" && !!turn?.trace?.length && (
+                <Reasoning trace={turn.trace} summary={traceSummary(turn, t)} />
+              )}
+              {m.role === "assistant" ? (
+                <Markdown text={m.content} />
+              ) : (
+                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
+              )}
+              {!!tools?.length && !turn?.trace?.length && (
+                <details className="chat-tools">
+                  <summary>{t("chat.tools", { n: tools.length })}</summary>
+                  {tools.map((tc) => (
+                    <div
+                      key={tc.id}
+                      className={`chat-tool${tc.status === "ok" ? "" : " is-err"}`}
+                    >
+                      #{tc.seq} {tc.tool} — {tc.status}
+                      {tc.duration_ms != null ? ` (${Math.round(tc.duration_ms)} ms)` : ""}
+                    </div>
+                  ))}
+                </details>
+              )}
+              {!!m.citations?.length && (
+                <div className="chat-citations">
+                  {m.citations.map((c, i) => (
+                    <span key={i} className="chat-cite" title={c.ref}>
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {m.role === "assistant" && (
+                <div className="chat-bubble-actions">
+                  <button className="ghost xs" onClick={() => actions.copy(m.content)}>
+                    <Copy size={14} />
+                  </button>
+                  {m.turn_id && !hasActiveTurn && (
+                    <button className="ghost xs" onClick={() => actions.regenerate(m.turn_id!)}>
+                      <RefreshCw size={14} />
+                    </button>
+                  )}
+                  <button className="ghost xs" onClick={() => actions.delegate("task")}>
+                    <Workflow size={14} /> {t("chat.createTask")}
+                  </button>
+                  <button className="ghost xs" onClick={() => actions.delegate("delegate")}>
+                    {t("chat.delegate")}
+                  </button>
+                </div>
+              )}
+            </article>
+            {m.role === "assistant" &&
+              m.turn_id != null &&
+              (opsByTurn.get(m.turn_id) ?? []).map((op) => (
+                <OperationCard key={op.id} op={op} onDecide={actions.decide} />
+              ))}
+            {m.role === "user" && turn?.status === "failed" && turn.failure && (
+              <div className="chat-failure" role="alert">
+                <AlertTriangle size={16} />
+                <div>
+                  <div className="chat-failure-title">
+                    {turn.failure.code ?? "ERROR"}
+                    {turn.failure.provider ? ` · ${turn.failure.provider}` : ""}
+                  </div>
+                  <div>{turn.failure.message}</div>
+                  {turn.failure.fallback_attempted && (
+                    <div className="muted">{t("chat.failure.fallbackTried")}</div>
+                  )}
+                  <div className="chat-failure-actions">
+                    <button className="sm" onClick={() => actions.retry(turn)}>
+                      {t("chat.retry")}
+                    </button>
+                    <button
+                      className="ghost sm"
+                      onClick={() => actions.retryOther(turn)}
+                    >
+                      {t("chat.retryOther")}
+                    </button>
+                    <a className="btn ghost sm" href="#/settings">
+                      {t("chat.openSettings")}
+                    </a>
+                    <button
+                      className="ghost sm"
+                      onClick={actions.refreshHealth}
+                    >
+                      {t("chat.refreshHealth")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+});
+
 export function ChatPage({ conversationId }: { conversationId?: number }) {
   const { t } = useI18n();
   const [q, setQ] = useState("");
@@ -309,11 +467,15 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
 
   const activeId = conversationId ?? detail?.conversation.id ?? null;
 
+  const detailSeq = useRef(0);
   const loadDetail = useCallback(async (id: number) => {
+    // Latest request wins: an older response arriving late must not replace a newer state (a reverted transcript).
+    const n = ++detailSeq.current;
     setLoadingDetail(true);
     setDetailErr("");
     try {
       const d = await api<Detail>(`/api/chat/conversations/${id}`);
+      if (n !== detailSeq.current) return null;
       if (detailIdRef.current !== null && detailIdRef.current !== id) return null;
       setDetail(d);
       setLive((l) => (d.active_turn ? seedFromTurn(l, d.active_turn) : null));
@@ -329,29 +491,85 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       setFallback(d.conversation.fallback_enabled !== false);
       return d;
     } catch (e) {
+      if (n !== detailSeq.current) return null;
       setDetail(null);
       setDetailErr((e as Error).message);
       return null;
     } finally {
-      setLoadingDetail(false);
+      if (n === detailSeq.current) setLoadingDetail(false);
     }
   }, []);
 
   useEffect(() => {
     detailIdRef.current = conversationId ?? null;
+    // The live turn and its status line belong to the conversation being left.
+    setLive(null);
+    setLiveNote("");
     if (conversationId) void loadDetail(conversationId);
     else setDetail(null);
   }, [conversationId, loadDetail]);
 
-  // One stable EventSource per open conversation — do not recreate on detail object identity.
+  // Latest values for the stream handlers below; the stream itself depends only on the open conversation.
+  const reloadList = useRef(list.reloadFresh);
+  reloadList.current = list.reloadFresh;
+  const tRef = useRef(t);
+  tRef.current = t;
+  /** A turn is running or a message is being sent (set below, once `waiting` is known). */
+  const turnActive = useRef(false);
+
+  /**
+   * One EventSource per open conversation: created when it opens, closed when it changes or the page unmounts — never
+   * because the page rendered. (It used to depend on the `useApi` result, a new object on every render, so every
+   * streamed delta and every keystroke closed the stream and opened another, losing events in between.) The browser
+   * reconnects by itself with Last-Event-ID and the server replays the gap. Polling is the recovery path only: while
+   * the stream is down, or while the server reports its LISTEN down (`hello.live === false`).
+   */
   useEffect(() => {
     if (!activeId) return;
     const id = activeId;
     const es = new EventSource(`/api/chat/conversations/${id}/stream`, { withCredentials: true });
+    let poll: ReturnType<typeof setInterval> | null = null;
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    let withList = false;
+    let interrupted = false;
+    /** Terminal and update events come in bursts (completed, partial, title): one detail (and list) reload each. */
+    const reload = (list: boolean) => {
+      withList ||= list;
+      reloadTimer ??= setTimeout(() => {
+        reloadTimer = null;
+        if (detailIdRef.current === id) void loadDetail(id);
+        if (withList) void reloadList.current();
+        withList = false;
+      }, 50);
+    };
+    const startPolling = () => {
+      poll ??= setInterval(() => {
+        if (document.visibilityState === "visible" && detailIdRef.current === id) void loadDetail(id);
+      }, 8000);
+    };
+    const stopPolling = () => {
+      if (poll) clearInterval(poll);
+      poll = null;
+    };
+    const onHello = (ev: MessageEvent) => {
+      let h: { live?: boolean; reset?: boolean } = {};
+      try {
+        h = JSON.parse(ev.data);
+      } catch {
+        /* ignore */
+      }
+      if (h.live === false) startPolling();
+      else stopPolling();
+      // Replayed events cover a short gap. The stored state is needed once after a gap too large to replay, after an
+      // interruption, and when a turn may have ended between the detail request and this stream's start.
+      if (h.reset || interrupted || turnActive.current) reload(false);
+      interrupted = false;
+    };
     const onChat = (ev: MessageEvent) => {
       try {
         const p = JSON.parse(ev.data);
         const kind = String(p.kind ?? "");
+        const t = tRef.current;
         setLive((l) => applyChatEvent(l, p));
         if (kind === "phase.updated") setLiveNote(phaseLabel(p.data?.phase, t));
         else if (kind === "provider.selected")
@@ -370,23 +588,27 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
           kind === "conversation.updated"
         ) {
           setLiveNote("");
-          if (detailIdRef.current === id) void loadDetail(id);
-          void list.reloadFresh();
+          reload(true);
         }
       } catch {
         /* ignore */
       }
     };
+    es.addEventListener("hello", onHello as EventListener);
     es.addEventListener("chat", onChat as EventListener);
-    const poll = setInterval(() => {
-      if (document.visibilityState === "visible" && detailIdRef.current === id) void loadDetail(id);
-    }, 8000);
-    return () => {
-      es.removeEventListener("chat", onChat as EventListener);
-      es.close();
-      clearInterval(poll);
+    es.onerror = () => {
+      interrupted = true;
+      startPolling();
     };
-  }, [activeId, loadDetail, list, t]);
+    return () => {
+      es.removeEventListener("hello", onHello as EventListener);
+      es.removeEventListener("chat", onChat as EventListener);
+      es.onerror = null;
+      es.close();
+      stopPolling();
+      if (reloadTimer) clearTimeout(reloadTimer);
+    };
+  }, [activeId, loadDetail]);
 
   useEffect(() => {
     const el = threadRef.current;
@@ -424,6 +646,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     });
   }, [detail]);
   const waiting = !!detail?.active_turn || visiblePending.some((p) => p.status === "sending");
+  turnActive.current = waiting;
   const opsByTurn = useMemo(() => {
     const m = new Map<number | null, Operation[]>();
     const answered = new Set(
@@ -687,6 +910,25 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     }
   };
 
+  // Stable handlers for the memoized transcript; they call the latest closures.
+  const latest = useRef({ copyText, regenerate, openDelegation, decideOperation, retryTurn, setProvider, providers });
+  latest.current = { copyText, regenerate, openDelegation, decideOperation, retryTurn, setProvider, providers };
+  const actions = useMemo<ChatActions>(
+    () => ({
+      copy: (text) => void latest.current.copyText(text),
+      regenerate: (turnId) => void latest.current.regenerate(turnId),
+      delegate: (kind) => void latest.current.openDelegation(kind),
+      decide: (id, decision) => void latest.current.decideOperation(id, decision),
+      retry: (turn) => void latest.current.retryTurn(turn),
+      retryOther: (turn) => {
+        latest.current.setProvider("auto");
+        void latest.current.retryTurn(turn);
+      },
+      refreshHealth: () => void latest.current.providers.reloadFresh(),
+    }),
+    [],
+  );
+
   const usage = detail?.conversation.usage as
     | { cost_usd?: number | null; input_tokens?: number | null; output_tokens?: number | null }
     | undefined;
@@ -863,130 +1105,15 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     <p className="muted">{t("chat.startHint")}</p>
                   </div>
                 )}
-                {detail.messages.map((m) => {
-                  const turn = m.turn_id ? turnsById.get(m.turn_id) : undefined;
-                  const tools = m.turn_id ? toolsByTurn.get(m.turn_id) : undefined;
-                  return (
-                    <div key={m.id} className="chat-block">
-                      <article className={`chat-bubble is-${m.role}`}>
-                        <div className="chat-bubble-meta">
-                          <span>
-                            {m.role === "user"
-                              ? t("chat.role.user")
-                              : m.role === "assistant"
-                                ? t("chat.role.assistant")
-                                : t("chat.role.system")}
-                          </span>
-                          {m.role === "assistant" && turn?.provider && (
-                            <span className="chat-meta-pill">
-                              {turn.provider}
-                              {turn.model ? ` · ${turn.model}` : ""}
-                              {turn.route ? ` · ${turn.route}` : ""}
-                            </span>
-                          )}
-                          {m.role === "assistant" && turn && ["canceled", "failed"].includes(turn.status) && (
-                            <span className="chat-meta-pill is-partial">
-                              {t(turn.status === "canceled" ? "chat.partial.stopped" : "chat.partial.failed")}
-                            </span>
-                          )}
-                          <span>{ago(m.created_at)}</span>
-                        </div>
-                        {m.role === "assistant" && !!turn?.trace?.length && (
-                          <Reasoning trace={turn.trace} summary={traceSummary(turn, t)} />
-                        )}
-                        {m.role === "assistant" ? (
-                          <Markdown text={m.content} />
-                        ) : (
-                          <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-                        )}
-                        {!!tools?.length && !turn?.trace?.length && (
-                          <details className="chat-tools">
-                            <summary>{t("chat.tools", { n: tools.length })}</summary>
-                            {tools.map((tc) => (
-                              <div
-                                key={tc.id}
-                                className={`chat-tool${tc.status === "ok" ? "" : " is-err"}`}
-                              >
-                                #{tc.seq} {tc.tool} — {tc.status}
-                                {tc.duration_ms != null ? ` (${Math.round(tc.duration_ms)} ms)` : ""}
-                              </div>
-                            ))}
-                          </details>
-                        )}
-                        {!!m.citations?.length && (
-                          <div className="chat-citations">
-                            {m.citations.map((c, i) => (
-                              <span key={i} className="chat-cite" title={c.ref}>
-                                {c.label}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {m.role === "assistant" && (
-                          <div className="chat-bubble-actions">
-                            <button className="ghost xs" onClick={() => void copyText(m.content)}>
-                              <Copy size={14} />
-                            </button>
-                            {m.turn_id && !detail.active_turn && (
-                              <button className="ghost xs" onClick={() => void regenerate(m.turn_id!)}>
-                                <RefreshCw size={14} />
-                              </button>
-                            )}
-                            <button className="ghost xs" onClick={() => void openDelegation("task")}>
-                              <Workflow size={14} /> {t("chat.createTask")}
-                            </button>
-                            <button className="ghost xs" onClick={() => void openDelegation("delegate")}>
-                              {t("chat.delegate")}
-                            </button>
-                          </div>
-                        )}
-                      </article>
-                      {m.role === "assistant" &&
-                        m.turn_id != null &&
-                        (opsByTurn.get(m.turn_id) ?? []).map((op) => (
-                          <OperationCard key={op.id} op={op} onDecide={(id, d) => void decideOperation(id, d)} />
-                        ))}
-                      {m.role === "user" && turn?.status === "failed" && turn.failure && (
-                        <div className="chat-failure" role="alert">
-                          <AlertTriangle size={16} />
-                          <div>
-                            <div className="chat-failure-title">
-                              {turn.failure.code ?? "ERROR"}
-                              {turn.failure.provider ? ` · ${turn.failure.provider}` : ""}
-                            </div>
-                            <div>{turn.failure.message}</div>
-                            {turn.failure.fallback_attempted && (
-                              <div className="muted">{t("chat.failure.fallbackTried")}</div>
-                            )}
-                            <div className="chat-failure-actions">
-                              <button className="sm" onClick={() => void retryTurn(turn)}>
-                                {t("chat.retry")}
-                              </button>
-                              <button
-                                className="ghost sm"
-                                onClick={() => {
-                                  setProvider("auto");
-                                  void retryTurn(turn);
-                                }}
-                              >
-                                {t("chat.retryOther")}
-                              </button>
-                              <a className="btn ghost sm" href="#/settings">
-                                {t("chat.openSettings")}
-                              </a>
-                              <button
-                                className="ghost sm"
-                                onClick={() => void providers.reloadFresh()}
-                              >
-                                {t("chat.refreshHealth")}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                <ChatMessages
+                  messages={detail.messages}
+                  turnsById={turnsById}
+                  toolsByTurn={toolsByTurn}
+                  opsByTurn={opsByTurn}
+                  hasActiveTurn={!!detail.active_turn}
+                  actions={actions}
+                  t={t}
+                />
 
                 {(opsByTurn.get(null) ?? []).map((op) => (
                   <OperationCard key={op.id} op={op} onDecide={(id, d) => void decideOperation(id, d)} />

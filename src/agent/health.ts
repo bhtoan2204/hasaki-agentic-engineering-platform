@@ -95,3 +95,47 @@ export async function probeAgentHealth(
     }),
   );
 }
+
+/**
+ * Readiness shared by concurrent callers and reused for a few seconds. A probe starts every provider's readiness
+ * check — `claude auth status` alone is a ~0.3 s, ~150 MiB process — so probing on every chat admission put that cost
+ * in front of every first answer and multiplied it by the number of turns starting together. Remembered quota is
+ * applied on every read (it changes when a call fails, not when the probe runs). Invalidated when a call fails as
+ * unavailable or unauthenticated, and by an explicit health refresh.
+ */
+export const HEALTH_REUSE_MS = 10_000;
+let shared: { at: number; rows: Promise<AgentHealth[]> } | null = null;
+let prober: () => Promise<AgentHealth[]> = () => probeAgentHealth();
+
+export async function sharedAgentHealth(): Promise<AgentHealth[]> {
+  if (!shared || Date.now() - shared.at > HEALTH_REUSE_MS) {
+    const rows = prober();
+    const entry = { at: Date.now(), rows };
+    shared = entry;
+    rows.catch(() => {
+      if (shared === entry) shared = null;
+    });
+  }
+  const rows = await shared.rows;
+  return rows.map((h) =>
+    h.quota !== "exhausted" && rememberedQuota(h.provider) === "exhausted"
+      ? { ...h, quota: "exhausted" as const, reason: h.reason ?? "quota exhausted" }
+      : h,
+  );
+}
+
+export function invalidateSharedAgentHealth() {
+  shared = null;
+}
+
+/** A fresh probe made elsewhere (the provider status page, "Refresh health") becomes the shared reading. */
+export function primeSharedAgentHealth(rows: AgentHealth[]) {
+  shared = { at: Date.now(), rows: Promise.resolve(rows) };
+}
+
+/** Benchmarks and tests: replace what a shared probe runs (the reuse above still applies). */
+export function setSharedHealthProber(fn: (() => Promise<AgentHealth[]>) | undefined) {
+  if (process.env.PLATFORM_TEST !== "1") throw new Error("Health prober override disabled");
+  prober = fn ?? (() => probeAgentHealth());
+  shared = null;
+}

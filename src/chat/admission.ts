@@ -2,10 +2,12 @@ import {
   isUsableAgent,
   healthSkipReason,
   nextHealthyProvider,
-  probeAgentHealth,
+  setSharedHealthProber,
+  sharedAgentHealth,
   type AgentHealth,
 } from "../agent/health.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
+import type { AgentConfiguration } from "../agent/configuration.ts";
 import {
   AGENT_PROVIDERS,
   parseAgentProvider,
@@ -44,9 +46,12 @@ export function setChatHealthProbe(fn: (() => Promise<AgentHealth[]>) | undefine
   healthSeam = fn;
 }
 
+/** Benchmarks: the real probe path (shared, reused) with a substitute prober. */
+export const setChatHealthProber = setSharedHealthProber;
+
 export async function loadChatHealth(): Promise<AgentHealth[]> {
   if (healthSeam) return healthSeam();
-  return probeAgentHealth();
+  return sharedAgentHealth();
 }
 
 /**
@@ -61,8 +66,10 @@ export async function admitProvider(input: {
   effort: string | null | undefined;
   fallbackEnabled: boolean;
   avoid?: ReadonlySet<string>;
+  /** The caller's configuration document, when it already loaded one for this turn. */
+  configuration?: AgentConfiguration;
 }): Promise<AdmissionResult> {
-  const cfg = await loadAgentConfiguration();
+  const cfg = input.configuration ?? (await loadAgentConfiguration());
   const health = await loadChatHealth();
   const flags = Object.fromEntries(
     AGENT_PROVIDERS.map((p) => [p, cfg.providers[p].enabled]),

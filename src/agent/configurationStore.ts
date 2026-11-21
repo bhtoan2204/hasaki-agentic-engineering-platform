@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { one, q, withTx, type Db } from "../db/pool.ts";
+import { one, pool, q, withTx, type Db } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { AGENT_PROVIDERS, parseAgentProvider, type AgentProvider } from "./provider.ts";
 import {
@@ -31,7 +31,15 @@ export async function importLegacyAgentPatch(db: Db, patch: Record<string, unkno
 }
 /** Read from the shared table on every boundary. No process-global routing cache. */
 export async function loadAgentConfiguration(db?: Db): Promise<AgentConfiguration> {
-  if (!db) return withTx((c) => loadAgentConfiguration(c));
+  if (!db) {
+    // The document exists after the first load: one read, without holding a transaction (BEGIN/COMMIT and a pool
+    // connection for the duration) on every chat turn and completion. Only the one-time legacy import needs the lock.
+    const row = await one<{ value: string }>(pool, "SELECT value FROM settings WHERE key=$1", [
+      KEY,
+    ]);
+    if (row) return refreshEnvironmentDefaults(parseAgentConfiguration(JSON.parse(row.value)));
+    return withTx((c) => loadAgentConfiguration(c));
+  }
   const row = await one<{ value: string }>(db, "SELECT value FROM settings WHERE key=$1", [KEY]);
   if (row) return refreshEnvironmentDefaults(parseAgentConfiguration(JSON.parse(row.value)));
   const old = await one<{ value: string }>(

@@ -258,3 +258,57 @@ test("streaming: a failure without fallback keeps the streamed partial answer ne
     "Kết quả một phần",
   );
 });
+
+test("streaming: the first visible text is emitted at once, later updates at most once per flush interval", async () => {
+  const a = await owner("lead");
+  const c = await chat.create(a, { mode: "ASK", provider: "claude" });
+  // The provider sends its first text, then holds: that first delta must be stored without waiting for a flush.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let firstText = 0;
+  setChatProviders(
+    all(async (_p, opts) => {
+      firstText = Date.now();
+      opts.onStream?.({ type: "text", text: "first " });
+      await held;
+      let text = "first ";
+      for (let i = 0; i < 30; i++) {
+        opts.onStream?.({ type: "text", text: (text += `w${i} `) });
+        await sleep(10);
+      }
+      return { text, model: "stub", tokens: null };
+    }),
+  );
+  const m = await chat.postMessage(a, c.id, {
+    content: "lead",
+    client_message_id: `leading-edge-${c.id}`,
+  });
+  const deltas = () =>
+    q<{ at: Date; data: { text: string } }>(
+      pool,
+      "SELECT created_at AS at, data FROM chat_events WHERE turn_id = $1 AND kind = 'response.delta' ORDER BY id",
+      [m.turn.id],
+    );
+  let first: Awaited<ReturnType<typeof deltas>> = [];
+  for (let i = 0; i < 100 && !first.length; i++) {
+    first = await deltas();
+    await sleep(10);
+  }
+  assert.equal(first.length, 1);
+  assert.equal(first[0].data.text, "first ");
+  const lag = first[0].at.getTime() - firstText;
+  assert.ok(
+    lag < 150,
+    `first delta ${lag} ms after the provider's first text (the flush interval is 200 ms)`,
+  );
+  // 30 updates over ~300 ms: still at most one delta per 200 ms.
+  const t0 = Date.now();
+  release();
+  await sleep(250);
+  const n = (await deltas()).length - 1;
+  assert.ok(
+    n <= Math.ceil((Date.now() - t0) / 200) + 1,
+    `throttled: ${n} deltas in ${Date.now() - t0} ms`,
+  );
+  await settle(a, c.id);
+});

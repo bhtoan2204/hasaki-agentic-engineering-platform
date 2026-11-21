@@ -437,7 +437,9 @@ export const chat = {
     });
 
     scheduleTurn(created.turn.id);
-    if (created.shouldGenerateTitle) scheduleTitleGeneration(conversationId, actor.id);
+    // The fallback title is already stored; the generated one waits until this first turn has answered.
+    if (created.shouldGenerateTitle)
+      scheduleTitleGeneration(conversationId, actor.id, { afterTurn: created.turn.id });
     return {
       turn: {
         id: created.turn.id,

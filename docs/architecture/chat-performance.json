@@ -1,0 +1,677 @@
+{
+  "generated_at": "2026-11-21T04:49:29.198Z",
+  "host": "16 CPUs / 15.5 GiB WSL2, local PostgreSQL (no injected latency), isolated test database",
+  "how": {
+    "backend": "BENCH_N=8 BENCH_SCENARIOS=chat_turn,chat_concurrent,chat_new_titles BENCH_LOAD_WORKFLOW=1 npm run bench:runtime (before: the same benchmark files on commit e1efb08)",
+    "frontend": "npm run build && CHAT_BENCH_OUT=... npm run smoke:chat (before: web/src/pages/Chat.tsx and web/src/ui.tsx of e1efb08)"
+  },
+  "load": "knowledge import of 5 repositories + exact and symbol code search over 3 checkouts of src/ + a 12-step workflow run, in a loop",
+  "notes": [
+    "sql_statements_per_op counts the platform only: the benchmark observer polls on its own connection (before this change its ~80 polls per turn were counted: the 156 statements of the hardening review).",
+    "Under load the statement counts include the background load running in the same window.",
+    "chat_new_titles: every admission pays a real readiness probe (claude auth status); titles are modeled (a Claude CLI start + 3.5 s, the measured wall time of a real title) unless BENCH_REAL_TITLES=1.",
+    "titles_real_sdk: the same scenario with real titles through the Claude SDK on the developer account (before; after with CHAT_TITLE_CONCURRENCY=1, the first setting tried). Its titles_settled_ms after the change also counts titles left over from the two preceding scenarios (a benchmark artifact fixed afterwards); first-delta numbers are unaffected. Not re-run, to avoid further model calls."
+  ],
+  "chat": {
+    "before": {
+      "alone": {
+        "chat_turn": {
+          "first_delta_ms": {
+            "p50": 225.1,
+            "p95": 270.8,
+            "p99": 270.8
+          },
+          "turn_ms": {
+            "p50": 494.5,
+            "p95": 545.3,
+            "p99": 545.3
+          },
+          "sql_statements_per_op": 77.8,
+          "pool_waiting_avg": 0,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 101.5,
+          "event_loop_p95_ms": 5.9,
+          "event_loop_p99_ms": 6.1,
+          "event_loop_max_ms": 9.5,
+          "peak_rss_mb": 176.2,
+          "psi_stall_ms": {
+            "cpu": 10.7,
+            "memory": 0,
+            "io": 0.4
+          },
+          "wall_s": 4
+        },
+        "chat_concurrent": {
+          "first_delta_ms": {
+            "p50": 245.2,
+            "p95": 275.5,
+            "p99": 275.5
+          },
+          "turn_ms": {
+            "p50": 519.2,
+            "p95": 553.1,
+            "p99": 553.1
+          },
+          "all_ms": {
+            "p50": 519.3,
+            "p95": 553.2,
+            "p99": 553.2
+          },
+          "sql_statements_per_op": 616,
+          "pool_waiting_avg": 0.1,
+          "pool_waiting_max": 6,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 201.8,
+          "event_loop_p95_ms": 5.9,
+          "event_loop_p99_ms": 6.1,
+          "event_loop_max_ms": 7.1,
+          "peak_rss_mb": 177.6,
+          "psi_stall_ms": {
+            "cpu": 13.2,
+            "memory": 0,
+            "io": 0.2
+          },
+          "wall_s": 4.2
+        }
+      },
+      "under_load": {
+        "chat_turn": {
+          "first_delta_ms": {
+            "p50": 223.3,
+            "p95": 274,
+            "p99": 274
+          },
+          "turn_ms": {
+            "p50": 494,
+            "p95": 556,
+            "p99": 556
+          },
+          "sql_statements_per_op": 89.8,
+          "pool_waiting_avg": 0,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 97,
+          "event_loop_p95_ms": 5.9,
+          "event_loop_p99_ms": 6.2,
+          "event_loop_max_ms": 63.7,
+          "peak_rss_mb": 195.7,
+          "psi_stall_ms": {
+            "cpu": 16.8,
+            "memory": 1.1,
+            "io": 137.1
+          },
+          "wall_s": 4.1
+        },
+        "chat_concurrent": {
+          "first_delta_ms": {
+            "p50": 263.1,
+            "p95": 272.7,
+            "p99": 272.7
+          },
+          "turn_ms": {
+            "p50": 535.3,
+            "p95": 548.8,
+            "p99": 548.8
+          },
+          "all_ms": {
+            "p50": 535.3,
+            "p95": 548.9,
+            "p99": 548.9
+          },
+          "sql_statements_per_op": 839.6,
+          "pool_waiting_avg": 0.2,
+          "pool_waiting_max": 7,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 277,
+          "event_loop_p95_ms": 5.9,
+          "event_loop_p99_ms": 7.3,
+          "event_loop_max_ms": 18.9,
+          "peak_rss_mb": 190.7,
+          "psi_stall_ms": {
+            "cpu": 16.4,
+            "memory": 0,
+            "io": 0.2
+          },
+          "wall_s": 4.4
+        }
+      }
+    },
+    "after": {
+      "alone": {
+        "chat_turn": {
+          "first_delta_ms": {
+            "p50": 24.7,
+            "p95": 42.4,
+            "p99": 42.4
+          },
+          "turn_ms": {
+            "p50": 487.2,
+            "p95": 502.3,
+            "p99": 502.3
+          },
+          "sql_statements_per_op": 65.1,
+          "pool_waiting_avg": 0,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 81.6,
+          "event_loop_p95_ms": 5.8,
+          "event_loop_p99_ms": 6,
+          "event_loop_max_ms": 6.4,
+          "peak_rss_mb": 174.8,
+          "psi_stall_ms": {
+            "cpu": 8.9,
+            "memory": 0,
+            "io": 7.1
+          },
+          "wall_s": 3.9
+        },
+        "chat_concurrent": {
+          "first_delta_ms": {
+            "p50": 36.5,
+            "p95": 56.6,
+            "p99": 56.6
+          },
+          "turn_ms": {
+            "p50": 503.6,
+            "p95": 529.7,
+            "p99": 529.7
+          },
+          "all_ms": {
+            "p50": 503.6,
+            "p95": 530.1,
+            "p99": 530.1
+          },
+          "sql_statements_per_op": 492.6,
+          "pool_waiting_avg": 0,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 173,
+          "event_loop_p95_ms": 5.8,
+          "event_loop_p99_ms": 6,
+          "event_loop_max_ms": 7.4,
+          "peak_rss_mb": 180,
+          "psi_stall_ms": {
+            "cpu": 11.1,
+            "memory": 0,
+            "io": 4.8
+          },
+          "wall_s": 4.1
+        }
+      },
+      "under_load": {
+        "chat_turn": {
+          "first_delta_ms": {
+            "p50": 25.8,
+            "p95": 65.1,
+            "p99": 65.1
+          },
+          "turn_ms": {
+            "p50": 492,
+            "p95": 565.6,
+            "p99": 565.6
+          },
+          "sql_statements_per_op": 76.4,
+          "pool_waiting_avg": 0,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 102.3,
+          "event_loop_p95_ms": 5.8,
+          "event_loop_p99_ms": 6.3,
+          "event_loop_max_ms": 57.7,
+          "peak_rss_mb": 183.8,
+          "psi_stall_ms": {
+            "cpu": 14.6,
+            "memory": 0,
+            "io": 1.6
+          },
+          "wall_s": 4.1
+        },
+        "chat_concurrent": {
+          "first_delta_ms": {
+            "p50": 52.3,
+            "p95": 68.8,
+            "p99": 68.8
+          },
+          "turn_ms": {
+            "p50": 523.9,
+            "p95": 542.6,
+            "p99": 542.6
+          },
+          "all_ms": {
+            "p50": 524,
+            "p95": 542.8,
+            "p99": 542.8
+          },
+          "sql_statements_per_op": 593.5,
+          "pool_waiting_avg": 0,
+          "pool_waiting_max": 4,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 221.2,
+          "event_loop_p95_ms": 5.9,
+          "event_loop_p99_ms": 6.8,
+          "event_loop_max_ms": 9.7,
+          "peak_rss_mb": 185.9,
+          "psi_stall_ms": {
+            "cpu": 13.7,
+            "memory": 0,
+            "io": 0.2
+          },
+          "wall_s": 4.3
+        }
+      }
+    }
+  },
+  "new_conversations_with_titles": {
+    "before": {
+      "alone": {
+        "first_delta_ms": {
+          "p50": 456.3,
+          "p95": 931.2,
+          "p99": 931.2
+        },
+        "first_delta_median_ms": {
+          "p50": 451.5,
+          "p95": 910.1,
+          "p99": 910.1
+        },
+        "turn_ms": {
+          "p50": 737,
+          "p95": 1257.9,
+          "p99": 1257.9
+        },
+        "all_ms": {
+          "p50": 738.3,
+          "p95": 1258.1,
+          "p99": 1258.1
+        },
+        "titles_settled_ms": {
+          "p50": 3654.2,
+          "p95": 3867.2,
+          "p99": 3867.2
+        },
+        "sql_statements_per_op": 622,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 6,
+        "health_probes_per_op": 16,
+        "node_cpu_ms_per_op": 530.9,
+        "event_loop_p95_ms": 7.2,
+        "event_loop_p99_ms": 12.8,
+        "event_loop_max_ms": 49.1,
+        "peak_rss_mb": 179.5,
+        "psi_stall_ms": {
+          "cpu": 5202.9,
+          "memory": 0.1,
+          "io": 3.8
+        },
+        "wall_s": 29.9
+      },
+      "under_load": {
+        "first_delta_ms": {
+          "p50": 381.9,
+          "p95": 414.5,
+          "p99": 414.5
+        },
+        "first_delta_median_ms": {
+          "p50": 376.5,
+          "p95": 414.4,
+          "p99": 414.4
+        },
+        "turn_ms": {
+          "p50": 648.4,
+          "p95": 744.6,
+          "p99": 744.6
+        },
+        "all_ms": {
+          "p50": 648.4,
+          "p95": 744.6,
+          "p99": 744.6
+        },
+        "titles_settled_ms": {
+          "p50": 3615.9,
+          "p95": 3632.3,
+          "p99": 3632.3
+        },
+        "sql_statements_per_op": 974.8,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 8,
+        "health_probes_per_op": 16,
+        "node_cpu_ms_per_op": 532.8,
+        "event_loop_p95_ms": 5.6,
+        "event_loop_p99_ms": 7.2,
+        "event_loop_max_ms": 70.6,
+        "peak_rss_mb": 190,
+        "psi_stall_ms": {
+          "cpu": 195.5,
+          "memory": 0,
+          "io": 2.5
+        },
+        "wall_s": 29
+      }
+    },
+    "after": {
+      "alone": {
+        "first_delta_ms": {
+          "p50": 81,
+          "p95": 117.2,
+          "p99": 117.2
+        },
+        "first_delta_median_ms": {
+          "p50": 80.8,
+          "p95": 114.4,
+          "p99": 114.4
+        },
+        "turn_ms": {
+          "p50": 554,
+          "p95": 608,
+          "p99": 608
+        },
+        "all_ms": {
+          "p50": 554.1,
+          "p95": 609,
+          "p99": 609
+        },
+        "titles_settled_ms": {
+          "p50": 14605.8,
+          "p95": 14656.4,
+          "p99": 14656.4
+        },
+        "sql_statements_per_op": 517,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 0,
+        "health_probes_per_op": 1,
+        "node_cpu_ms_per_op": 811.2,
+        "event_loop_p95_ms": 5.7,
+        "event_loop_p99_ms": 6,
+        "event_loop_max_ms": 24.1,
+        "peak_rss_mb": 178.8,
+        "psi_stall_ms": {
+          "cpu": 300.8,
+          "memory": 0,
+          "io": 10.9
+        },
+        "wall_s": 117
+      },
+      "under_load": {
+        "first_delta_ms": {
+          "p50": 111,
+          "p95": 161.4,
+          "p99": 161.4
+        },
+        "first_delta_median_ms": {
+          "p50": 109.8,
+          "p95": 161.3,
+          "p99": 161.3
+        },
+        "turn_ms": {
+          "p50": 579.1,
+          "p95": 661.6,
+          "p99": 661.6
+        },
+        "all_ms": {
+          "p50": 579.2,
+          "p95": 661.7,
+          "p99": 661.7
+        },
+        "titles_settled_ms": {
+          "p50": 14634.9,
+          "p95": 14721.1,
+          "p99": 14721.1
+        },
+        "sql_statements_per_op": 986.6,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 3,
+        "health_probes_per_op": 1,
+        "node_cpu_ms_per_op": 907.8,
+        "event_loop_p95_ms": 5.7,
+        "event_loop_p99_ms": 6,
+        "event_loop_max_ms": 58.4,
+        "peak_rss_mb": 195.9,
+        "psi_stall_ms": {
+          "cpu": 304.2,
+          "memory": 0,
+          "io": 15.4
+        },
+        "wall_s": 117.2
+      }
+    }
+  },
+  "titles_real_sdk": {
+    "before": {
+      "alone": {
+        "first_delta_ms": {
+          "p50": 412.5,
+          "p95": 498.3,
+          "p99": 498.3
+        },
+        "first_delta_median_ms": {
+          "p50": 407,
+          "p95": 497.8,
+          "p99": 497.8
+        },
+        "turn_ms": {
+          "p50": 721.2,
+          "p95": 831.8,
+          "p99": 831.8
+        },
+        "all_ms": {
+          "p50": 721.3,
+          "p95": 831.8,
+          "p99": 831.8
+        },
+        "titles_settled_ms": {
+          "p50": 6434.7,
+          "p95": 7412.3,
+          "p99": 7412.3
+        },
+        "sql_statements_per_op": 640,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 6,
+        "health_probes_per_op": 16,
+        "node_cpu_ms_per_op": 662,
+        "event_loop_p95_ms": 5.9,
+        "event_loop_p99_ms": 9,
+        "event_loop_max_ms": 47.6,
+        "peak_rss_mb": 186.6,
+        "psi_stall_ms": {
+          "cpu": 2295.9,
+          "memory": 4.4,
+          "io": 312.7
+        },
+        "wall_s": 50.3
+      },
+      "under_load": {
+        "first_delta_ms": {
+          "p50": 498.7,
+          "p95": 556.5,
+          "p99": 556.5
+        },
+        "first_delta_median_ms": {
+          "p50": 492.6,
+          "p95": 549,
+          "p99": 549
+        },
+        "turn_ms": {
+          "p50": 830.3,
+          "p95": 909.5,
+          "p99": 909.5
+        },
+        "all_ms": {
+          "p50": 830.4,
+          "p95": 909.6,
+          "p99": 909.6
+        },
+        "titles_settled_ms": {
+          "p50": 5963.7,
+          "p95": 7424,
+          "p99": 7424
+        },
+        "sql_statements_per_op": 1112.6,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 8,
+        "health_probes_per_op": 16,
+        "node_cpu_ms_per_op": 1038.9,
+        "event_loop_p95_ms": 6,
+        "event_loop_p99_ms": 9.8,
+        "event_loop_max_ms": 37.6,
+        "peak_rss_mb": 200.1,
+        "psi_stall_ms": {
+          "cpu": 2609.3,
+          "memory": 0.4,
+          "io": 221.3
+        },
+        "wall_s": 49
+      }
+    },
+    "after_concurrency_1": {
+      "alone": {
+        "first_delta_ms": {
+          "p50": 81.2,
+          "p95": 110.3,
+          "p99": 110.3
+        },
+        "first_delta_median_ms": {
+          "p50": 81,
+          "p95": 108.8,
+          "p99": 108.8
+        },
+        "turn_ms": {
+          "p50": 551.3,
+          "p95": 576.7,
+          "p99": 576.7
+        },
+        "all_ms": {
+          "p50": 551.3,
+          "p95": 576.8,
+          "p99": 576.8
+        },
+        "titles_settled_ms": {
+          "p50": 39523,
+          "p95": 193592.7,
+          "p99": 193592.7
+        },
+        "sql_statements_per_op": 545.3,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 0,
+        "health_probes_per_op": 1,
+        "node_cpu_ms_per_op": 1373.8,
+        "event_loop_p95_ms": 5.4,
+        "event_loop_p99_ms": 5.6,
+        "event_loop_max_ms": 33.6,
+        "peak_rss_mb": 182.2,
+        "psi_stall_ms": {
+          "cpu": 1033.2,
+          "memory": 0.4,
+          "io": 687.6
+        },
+        "wall_s": 471.7
+      },
+      "under_load": {
+        "first_delta_ms": {
+          "p50": 108.7,
+          "p95": 152.8,
+          "p99": 152.8
+        },
+        "first_delta_median_ms": {
+          "p50": 108.6,
+          "p95": 152,
+          "p99": 152
+        },
+        "turn_ms": {
+          "p50": 589.3,
+          "p95": 634.9,
+          "p99": 634.9
+        },
+        "all_ms": {
+          "p50": 589.4,
+          "p95": 635,
+          "p99": 635
+        },
+        "titles_settled_ms": {
+          "p50": 34158.9,
+          "p95": 218889.7,
+          "p99": 218889.7
+        },
+        "sql_statements_per_op": 912.4,
+        "pool_waiting_avg": 0,
+        "pool_waiting_max": 3,
+        "health_probes_per_op": 1,
+        "node_cpu_ms_per_op": 1770.1,
+        "event_loop_p95_ms": 5.5,
+        "event_loop_p99_ms": 5.8,
+        "event_loop_max_ms": 28.9,
+        "peak_rss_mb": 198,
+        "psi_stall_ms": {
+          "cpu": 1147.8,
+          "memory": 0,
+          "io": 255.5
+        },
+        "wall_s": 461.3
+      }
+    }
+  },
+  "frontend": {
+    "before": {
+      "sse_connections_per_streamed_turn": 58,
+      "rest_requests_idle_20s": {
+        "detail": 2,
+        "list": 0
+      },
+      "rest_requests_per_turn": {
+        "detail": 2,
+        "list": 2
+      },
+      "long_transcript": {
+        "messages": 200,
+        "stream": {
+          "tokens": 300,
+          "interval_ms": 5
+        },
+        "streamed_turn": {
+          "react_commits": 20,
+          "script_ms": 292,
+          "task_ms": 771,
+          "layout_ms": 37
+        },
+        "typing": {
+          "keystrokes": 32,
+          "react_commits": 33,
+          "script_ms_per_key": 14.2,
+          "task_ms_per_key": 25.1
+        },
+        "sse_connections": 22
+      }
+    },
+    "after": {
+      "sse_connections_per_streamed_turn": 1,
+      "rest_requests_idle_20s": {
+        "detail": 0,
+        "list": 0
+      },
+      "rest_requests_per_turn": {
+        "detail": 2,
+        "list": 2
+      },
+      "long_transcript": {
+        "messages": 200,
+        "stream": {
+          "tokens": 300,
+          "interval_ms": 5
+        },
+        "streamed_turn": {
+          "react_commits": 26,
+          "script_ms": 50,
+          "task_ms": 484,
+          "layout_ms": 35
+        },
+        "typing": {
+          "keystrokes": 32,
+          "react_commits": 33,
+          "script_ms_per_key": 0.6,
+          "task_ms_per_key": 6
+        },
+        "sse_connections": 1
+      }
+    }
+  }
+}

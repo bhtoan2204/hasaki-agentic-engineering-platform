@@ -1,6 +1,8 @@
 import {
+  memo,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -68,16 +70,14 @@ export function Badge({
   );
 }
 
-export function Markdown({ text }: { text: string }) {
-  return (
-    <div
-      className="md"
-      dangerouslySetInnerHTML={{
-        __html: renderMarkdownSafe(text),
-      }}
-    />
-  );
-}
+/**
+ * Rendered markdown. Parsing and sanitizing is the costly part (a long chat answer takes milliseconds), so it runs only
+ * when the text changes, not on every render of the page around it.
+ */
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  const html = useMemo(() => ({ __html: renderMarkdownSafe(text) }), [text]);
+  return <div className="md" dangerouslySetInnerHTML={html} />;
+});
 
 export function Copy({ text, label }: { text: string; label?: string }) {
   const { t } = useI18n();

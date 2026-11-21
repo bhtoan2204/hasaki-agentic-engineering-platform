@@ -40,8 +40,8 @@ const commonPrefix = (a: string, b: string) => {
 };
 
 /**
- * Coalesces one turn's provider stream into bounded `chat_events` (at most one batch per `flushMs`, never one row per
- * token) and checkpoints the draft and trace on the turn row, so a reconnecting client and a stopped turn see the same
+ * Coalesces one turn's provider stream into bounded `chat_events` (at most one batch per `flushMs`, the first one at
+ * once, never one row per token) and checkpoints the draft and trace on the turn row, so a reconnecting client and a stopped turn see the same
  * text. Emission failures are logged and never fail the provider call.
  */
 export class TurnStream {
@@ -56,6 +56,7 @@ export class TurnStream {
   private checkpointTimer: NodeJS.Timeout | null = null;
   private chain: Promise<void> = Promise.resolve();
   private lastCheckpoint = 0;
+  private lastEmit = 0;
   readonly trace: TraceItem[] = [];
   private ids: { conversationId: number; ownerId: number; turnId: number };
   private opts: { flushMs?: number; checkpointMs?: number };
@@ -99,10 +100,15 @@ export class TurnStream {
       this.activities.push(e.label);
       this.push({ k: "activity", label: e.label });
     } else return;
-    this.timer ??= setTimeout(() => {
-      this.timer = null;
-      void this.flush();
-    }, this.opts.flushMs ?? 200);
+    // Throttled on the leading edge: the first update after a quiet period goes out on the next tick (time to first
+    // visible text is the provider's, not the flush interval), later ones at most once per flushMs.
+    this.timer ??= setTimeout(
+      () => {
+        this.timer = null;
+        void this.flush();
+      },
+      Math.max(0, this.lastEmit + (this.opts.flushMs ?? 200) - Date.now()),
+    );
   };
 
   tool(id: number, tool: string, status: string, ms?: number) {
@@ -153,6 +159,8 @@ export class TurnStream {
   private async emit() {
     const reasoning = this.reasoning.splice(0).join("");
     const activities = this.activities.splice(0);
+    // Only an actual emission starts the throttle window (begin() flushes an empty batch).
+    if (reasoning || activities.length || this.visible !== this.sent) this.lastEmit = Date.now();
     if (reasoning)
       await emitChatEvent({
         ...this.ids,

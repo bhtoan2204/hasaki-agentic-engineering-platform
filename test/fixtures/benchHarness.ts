@@ -34,11 +34,13 @@ export async function installBenchHarness(opts: { tools: string[]; latencyMs: nu
     }
   };
 
-  const db = { statements: 0 };
+  /** `byText`: statements per SQL text (the last Parse of the connection, or the simple query), for a breakdown. */
+  const db = { statements: 0, byText: new Map<string, number>() };
   const pipe = (from: Socket, to: Socket, counting: boolean) => {
     let tail = Promise.resolve();
     let buf = Buffer.alloc(0);
     let startup = counting;
+    let parsed = "";
     from.on("data", (chunk: Buffer) => {
       if (counting) {
         buf = Buffer.concat([buf, chunk]);
@@ -54,7 +56,19 @@ export async function installBenchHarness(opts: { tools: string[]; latencyMs: nu
           if (buf.length < 5) break;
           const len = buf.readInt32BE(1);
           if (buf.length < len + 1) break;
-          if (buf[0] === 0x51 || buf[0] === 0x45) db.statements++;
+          if (buf[0] === 0x50) {
+            // Parse: statement name (cstring), then the query text (cstring).
+            const nameEnd = buf.indexOf(0, 5);
+            parsed = buf.toString("utf8", nameEnd + 1, buf.indexOf(0, nameEnd + 1));
+          }
+          if (buf[0] === 0x51 || buf[0] === 0x45) {
+            db.statements++;
+            const text = (buf[0] === 0x51 ? buf.toString("utf8", 5, len) : parsed)
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 160);
+            db.byText.set(text, (db.byText.get(text) ?? 0) + 1);
+          }
           buf = buf.subarray(len + 1);
         }
       }
@@ -75,7 +89,8 @@ export async function installBenchHarness(opts: { tools: string[]; latencyMs: nu
     from.on("close", () => void tail.then(() => to.destroy()));
     from.on("error", () => to.destroy());
   };
-  const url = new URL(process.env.DATABASE_URL!);
+  const directUrl = process.env.DATABASE_URL!;
+  const url = new URL(directUrl);
   const socketPath = `${url.searchParams.get("host")}/.s.PGSQL.5432`;
   const server = tcpServer((client) => {
     const upstream = connect({ path: socketPath });
@@ -86,7 +101,8 @@ export async function installBenchHarness(opts: { tools: string[]; latencyMs: nu
   url.searchParams.delete("host");
   url.host = `127.0.0.1:${(server.address() as { port: number }).port}`;
   process.env.DATABASE_URL = url.toString();
-  return { db, count };
+  /** directUrl bypasses the proxy: a benchmark's own observation queries are neither counted nor delayed. */
+  return { db, count, directUrl };
 }
 
 export const quantile = (xs: number[], p: number) =>

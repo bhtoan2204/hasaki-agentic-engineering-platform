@@ -48,31 +48,32 @@ heap growth under a higher allocation rate, not retention. platform-go peaked at
 ## End-to-end measurements (`npm run bench:runtime`, `docs/architecture/runtime-e2e.json`)
 
 Stub providers and executors (no model), 10 iterations, local database; "under load" = a knowledge import of 5
-repositories and code searches over 3 checkouts of `src/`, in a loop on the same process.
+repositories and code searches over 3 checkouts of `src/`, in a loop on the same process. SQL counts are the platform's
+only (the benchmark's own polling no longer goes through the counting proxy).
 
-| p50 | alone | under load |
+| p50 (re-measured after `chat-performance.md`) | alone | under load |
 |---|---|---|
-| chat turn: first visible delta (stream flushes every 200 ms by design) | 224 ms | 225 ms |
-| chat turn: completion (provider streams ~450 ms) | 492 ms | 493 ms |
-| 8 concurrent chat turns: all complete | 525 ms | 545 ms |
-| 12-step workflow run (10 ms stub steps) | 1.04 s (77 ms/step, 935 statements) | 1.06 s |
-| checkpoint replay of 12 steps | 1.08 s | 1.17 s |
-| Node event-loop p99 / max | 6 / 8–93 ms | 13–15 / 20 ms |
+| chat turn: first visible delta (first batch at once, then every 200 ms) | 22 ms (was 224) | 22 ms (was 225) |
+| chat turn: completion (provider streams ~450 ms) | 493 ms | 492 ms |
+| 8 concurrent chat turns: all complete | 503 ms | 543 ms |
+| 8 new conversations with titles: last first delta | 81 ms | 95 ms |
+| 12-step workflow run (10 ms stub steps) | 1.00 s (73 ms/step, 935 statements) | 1.08 s |
+| checkpoint replay of 12 steps | 1.05 s | 1.25 s |
+| Node event-loop p99 / max | 6 / 7–59 ms | 13–16 / 20–31 ms |
 
-The workflow p95 (4.6 s) is the first run of the process: the provider health probe spawns every CLI before the first
+The workflow p95 (4.6–5.4 s) is the first run of the process: the provider health probe spawns every CLI before the first
 agent step (`healthyProviderSwitch`, by design, outside the run lock). Agent process start (`npm run bench:process`,
 8 concurrent): first output after 73 ms (TypeScript supervisor) / 175 ms (Go launcher with a systemd scope).
 Code search and knowledge import: ADR 0006 / 0007 (re-measured).
 
 ## Remaining production risks
 
-1. **Chat title generation competes with the turn.** Each new conversation starts a real model completion (Claude
-   SDK → CLI process). With that path live, 8 new conversations at once raised the last first-delta from 241 ms to
-   971 ms, the event-loop max from 9 to 225 ms and CPU pressure stall from 0.01 s to 10 s. Deferring titles until the
-   first turn finishes would fix it but changes visible behavior — a product decision.
-2. **Synchronous `process.report.getReport()` in the Claude Agent SDK** on every query (musl detection): 2–11 ms of
-   blocked event loop per agent step / chat turn / title, growing with open sockets (6.8 ms with 200 sockets;
-   `process.report.excludeNetwork` halves it). Not changed: a dependency behavior; worth an upstream issue.
+1. ~~**Chat title generation competes with the turn.**~~ Resolved in `chat-performance.md` (#6, #7): titles wait for
+   the first turn, run at most two at a time and yield to running turns; admissions share one readiness probe. 8 new
+   conversations: last first delta 456 → 81 ms p50. The "156 statements per chat turn" above was a benchmark artifact
+   (#8 there): 78 real, now 65.
+2. **Synchronous `process.report.getReport()` in the Claude Agent SDK**: confirmed in 0.3.316, once per `query()` and
+   only when `pathToClaudeCodeExecutable` is unset; mitigation (`CLAUDE_CODE_EXECUTABLE`) in `chat-performance.md`.
 3. **Docker deployments must set `PLATFORM_TRUSTED_ROOTS`**: without it indexing jobs now fail (fail closed) and
    search/scans fall back to TypeScript.
 4. **Retrieval integration tests need pgvector**, which the local toolchain lacks; their search assertions (including

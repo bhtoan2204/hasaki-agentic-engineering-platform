@@ -15,7 +15,7 @@
 
 `TurnStream` (src/chat/streaming.ts) gom sự kiện của một turn:
 
-- `response.delta {attempt, step, offset, text}`: tối đa một batch mỗi 200 ms, không phải một dòng mỗi token. `offset` là độ dài phần chung với lần gửi trước, nên provider sửa câu trả lời vẫn đúng.
+- `response.delta {attempt, step, offset, text}`: batch đầu tiên sau một khoảng lặng được ghi ngay (tick kế tiếp), sau đó tối đa một batch mỗi 200 ms, không phải một dòng mỗi token. `offset` là độ dài phần chung với lần gửi trước, nên provider sửa câu trả lời vẫn đúng.
 - `reasoning.delta`, `provider.activity`.
 - Ghi vào `chat_events` có sẵn, dùng lại SSE, `Last-Event-ID` replay và multi-instance qua NOTIFY. Không có transport thứ hai.
 - Block `chat-tool` (yêu cầu tool gửi platform) không bao giờ được stream ra như câu trả lời; phần đầu có thể là fence sẽ được giữ lại.
@@ -30,12 +30,15 @@
 
 ## UI
 
+Mỗi hội thoại đang mở có đúng một EventSource: tạo khi mở, đóng khi chuyển hội thoại hoặc rời trang, không bao giờ vì trang render lại. Trình duyệt tự kết nối lại với `Last-Event-ID`, server replay phần thiếu. Polling chi tiết (8 s) chỉ chạy khi stream lỗi hoặc server báo LISTEN hỏng (`hello.live === false`); sau gián đoạn, replay reset hoặc khi đang có turn, `hello` tải lại chi tiết một lần. Transcript đã lưu là component memo (delta và gõ phím chỉ render bubble đang chạy và ô soạn). Số đo: `chat-performance.md`.
+
 Bubble đang chạy: panel "suy luận" gập mặc định, tiêu đề là trạng thái thật (Đang suy nghĩ / Đang đọc file / Đang chạy công cụ / Đang soạn câu trả lời, suy ra từ event), bên dưới là Markdown của draft. Tin nhắn đã xong có panel "Đã xử lý Ns · K bước" từ trace. Reducer phía client thuần, có test: `web/src/pages/chatStream.ts`.
 
 ## Kiểm thử
 
 - Unit `test/chat-streaming.test.ts`: lọc tool block, watchdog, mapping Codex, reducer client (thứ tự, sửa, bước mới, mất event).
-- Integration `test/chat-streaming.integration.ts` (provider giả): delta được gom, trace, xóa delta khi xong, không lộ tool block, stop giữ câu trả lời dở, fallback giữa chừng, lỗi thủ công giữ câu trả lời dở.
+- Integration `test/chat-streaming.integration.ts` (provider giả): delta được gom, delta đầu tiên ghi ngay, trace, xóa delta khi xong, không lộ tool block, stop giữ câu trả lời dở, fallback giữa chừng, lỗi thủ công giữ câu trả lời dở.
+- Trình duyệt `test/chat.browser.ts` (`npm run smoke:chat`): một stream mỗi hội thoại khi render lại, chuyển hội thoại giữa lúc stream, mất kết nối và replay, không poll khi stream khỏe, transcript dài.
 
 ## Hạn chế
 
