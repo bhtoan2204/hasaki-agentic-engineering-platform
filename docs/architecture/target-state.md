@@ -38,7 +38,7 @@ workflows** with durable step-level state. Claude Code is one kind of step execu
 
 | Concept | Table | Notes |
 |---|---|---|
-| Work Item | `work_items` | The engineering request. Sources: `manual`, `hasaki_work`, `jira`, `legacy`. Importing never executes. Optional `automation_policy` (`{ "workflow": "<key>" }`) is the *only* way a run starts without a click. |
+| Work Item | `work_items` | The engineering request. Sources: `manual`, `hasaki_work` (Jira removed 2026-11-22). Importing never executes. Optional `automation_policy` (`{ "workflow": "<key>" }`) is the *only* way a run starts without a click. |
 | Workflow Definition | `workflow_definitions` + `workflow_definition_versions` | A key + immutable published versions (`spec` JSONB, validated DAG). Drafts are edited, publishing freezes a new version. |
 | Workflow Run | `workflow_runs` | Pinned to one `definition_version_id`; stores its own **resolved graph** (`graph` JSONB) so later definition edits never affect it. `work_item_id` is nullable. |
 | Step | `workflow_steps` | One row per node in the run: status, `generation`, inputs, current output, config, approval. |

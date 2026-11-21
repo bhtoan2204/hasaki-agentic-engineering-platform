@@ -47,13 +47,15 @@ after(async () => {
   await pool.end();
 });
 
-test("Telegram: env values are the fallback, UI values win and persist, clearing falls back; secrets masked", async () => {
-  Object.assign(config.telegram, { botToken: "999:ENVTOKENxxxxxxxxxxxxxxxxx", chatId: "7" }); // as if from .env
+test("Telegram: configured only in Integrations (no env fallback); values persist; clearing removes them; secrets masked", async () => {
+  // A value left in the in-memory config (e.g. by an older process) is not a source: only the saved settings are.
+  Object.assign(config.telegram, { botToken: "999:STALETOKENxxxxxxxxxxxxxxx", chatId: "7" });
   const acc: typeof import("../src/integrations/accounts.ts") = await import(
     `../src/integrations/accounts.ts?${Date.now()}`
-  ); // captures the env fallback now
+  );
   await acc.loadAccountSettings();
-  assert.equal((await acc.telegramStatus()).source, "env");
+  assert.equal((await acc.telegramStatus()).source, "none");
+  assert.equal(config.telegram.botToken, "", "nothing saved: no bot");
 
   await assert.rejects(acc.setTelegram({ botToken: "nope", chatId: "42" }), /BotFather/);
   await assert.rejects(acc.setTelegram({ botToken: TOKEN, chatId: "abc" }), /chat id/);
@@ -98,8 +100,12 @@ test("Telegram: env values are the fallback, UI values win and persist, clearing
   assert.equal(config.telegram.chatId, "-1001");
 
   const cleared = await acc.clearTelegram();
-  assert.equal(cleared.source, "env");
-  assert.equal(config.telegram.botToken, "999:ENVTOKENxxxxxxxxxxxxxxxxx");
+  assert.equal(cleared.source, "none");
+  assert.equal(
+    config.telegram.botToken,
+    "",
+    "cleared means no bot: nothing falls back to the environment",
+  );
 });
 
 test("Bitbucket: reviewers must be UUIDs; user+token required", async () => {

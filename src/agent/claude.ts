@@ -277,7 +277,7 @@ function platformServer(
     ),
     tool(
       "list_tools",
-      "Discover integration tools (Splunk production logs, project QC databases, Kafka, Vault, Argo CD, Jira, Hasaki Work, Bitbucket, code intelligence, repository registry, this run's history/changes). Optional query ranks by relevance.",
+      "Discover integration tools (Splunk production logs, project QC databases, Kafka, Vault, Argo CD, Hasaki Work, Bitbucket, code intelligence, repository registry, this run's history/changes). Optional query ranks by relevance.",
       { query: z.string().optional() },
       call("list_tools"),
     ),

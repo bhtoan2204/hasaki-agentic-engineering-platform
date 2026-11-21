@@ -15,7 +15,6 @@ import {
   Server,
   ShieldAlert,
   Trash2,
-  Upload,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
@@ -1207,14 +1206,13 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
 // ---------------------------------------------------------------- platform accounts
 
 function sourceLabel(t: (k: string) => string, source: string) {
-  return source === "platform" || source === "env" ? t(`ig.src.${source}`) : "";
+  return source === "platform" ? t("ig.src.platform") : "";
 }
 
 type BitbucketStatus = {
   configured: boolean;
   source: string;
   personal: boolean;
-  envAvailable: boolean;
   user: string | null;
   token: string;
   workspace: string;
@@ -1228,7 +1226,6 @@ type TelegramStatus = {
   canManage: boolean;
   myChatId: string | null;
   source: string;
-  envAvailable: boolean;
   chatId: string | null;
   botToken: string;
   mode: string;
@@ -1238,37 +1235,6 @@ type TelegramStatus = {
   preferences?: TelegramPrefs;
   receiver?: { active: boolean; mode: string | null };
 };
-
-function EnvNote({
-  st,
-  which,
-  reload,
-}: {
-  st: { source: string; envAvailable: boolean } | null;
-  which: string;
-  reload: () => void;
-}) {
-  const { t } = useI18n();
-  if (st?.source === "env")
-    return (
-      <div className="ig-note small">
-        {t("ig.envUsing")}
-        <button
-          className="sm ghost"
-          onClick={async () =>
-            (await act(() => api(`/api/integrations/${which}/adopt-env`, {}), t("ig.adopted"))) &&
-            reload()
-          }
-        >
-          <Upload size={14} strokeWidth={2} />
-          {t("ig.adopt")}
-        </button>
-      </div>
-    );
-  if (st?.source === "platform" && st?.envAvailable)
-    return <div className="ig-note small">{t("ig.envStored")}</div>;
-  return null;
-}
 
 function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
@@ -1315,7 +1281,6 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
       }
     >
       <p className="muted small">{t("ig.bb.body")}</p>
-      <EnvNote st={st} which="bitbucket" reload={reload} />
       <Steps>
         <li>
           {slot(t("ig.bb.s1"), {
@@ -1372,7 +1337,7 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
             onClick={async () =>
               (await act(
                 () => api("/api/integrations/bitbucket/clear", {}),
-                st.envAvailable ? t("ig.backEnv") : t("ig.removed"),
+                t("ig.removed"),
               )) && (setF({ token: "" }), reload())
             }
           >
@@ -1764,7 +1729,6 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
       <p className="muted small">{t("ig.tg.body")}</p>
       {st?.canManage && (
         <>
-          <EnvNote st={st} which="telegram" reload={reload} />
           <Steps>
             <li>{slot(t("ig.tg.s1"), { link: <Link href="https://t.me/BotFather" /> })}</li>
             <li>{t("ig.tg.s2")}</li>
@@ -1864,9 +1828,6 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
           </p>
           {st.canManage && (
             <Field label={t("ig.tg.modeTitle")}>
-              {st.modeSource === "env" ? (
-                <span className="muted small">{t("ig.tg.modeEnv", { mode: st.mode })}</span>
-              ) : (
                 <select
                   aria-label={t("ig.tg.modeTitle")}
                   value={st.mode === "polling" ? "polling" : "off"}
@@ -1883,7 +1844,6 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
                   <option value="off">{t("ig.tg.modeOffOpt")}</option>
                   <option value="polling">{t("ig.tg.modePolling")}</option>
                 </select>
-              )}
             </Field>
           )}
           {st.mode === "off" && <p className="muted small">{t("ig.tg.modeOff")}</p>}

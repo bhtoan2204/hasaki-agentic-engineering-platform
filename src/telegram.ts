@@ -3,8 +3,8 @@ import type { OutputLocale } from "./agent/language.ts";
 import { getUserSecret } from "./auth/secrets.ts";
 
 /**
- * One-way Telegram notifications through the Bot API `sendMessage`. Optional: without TELEGRAM_BOT_TOKEN and
- * TELEGRAM_CHAT_ID nothing is sent. The token is never logged: errors are reported without the request URL.
+ * One-way Telegram notifications through the Bot API `sendMessage`. Optional: without a bot token and chat
+ * (Integrations page) nothing is sent. The token is never logged: errors are reported without the request URL.
  */
 export interface StepWaiting {
   runId: number;

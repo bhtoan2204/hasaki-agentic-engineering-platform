@@ -3,7 +3,7 @@ import { pool, q, one, json, type Db } from "../db/pool.ts";
 export interface WorkItemRow {
   id: number;
   code: string;
-  source: "manual" | "hasaki_work" | "jira";
+  source: "manual" | "hasaki_work";
   external_key: string | null;
   external_id: string | null;
   title: string;

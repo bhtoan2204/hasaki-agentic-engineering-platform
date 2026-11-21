@@ -113,7 +113,7 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
   {
     name: "list_tools",
     description:
-      "Discover integration tools: Splunk production logs, project QC databases, Kafka, Vault, Argo CD, Jira, Hasaki Work, Bitbucket, code intelligence, repository registry, run history.",
+      "Discover integration tools: Splunk production logs, project QC databases, Kafka, Vault, Argo CD, Hasaki Work, Bitbucket, code intelligence, repository registry, run history.",
     inputSchema: { type: "object", properties: { query: { type: "string" } } },
   },
   {

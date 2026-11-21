@@ -218,7 +218,7 @@ export function retryDelayMs(e: unknown) {
 export function consumerFailure(e: unknown) {
   if (e instanceof TelegramApiError) {
     if (e.network)
-      return `cannot reach ${apiHost()} (${e.network}): check this machine's network, VPN or proxy (TELEGRAM_API_BASE)`;
+      return `cannot reach ${apiHost()} (${e.network}): check this machine's network, VPN or proxy`;
     return e.code === 401 || e.code === 404
       ? "bot token rejected by Telegram (401/404)"
       : e.code === 409

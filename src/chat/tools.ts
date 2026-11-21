@@ -123,7 +123,7 @@ const TOOLS: ToolDef[] = [
     name: "tools.search",
     group: "integrations",
     description:
-      "Find platform integration tools (Kafka QC, Argo CD, Vault, Jira, SigNoz, Splunk, QC databases, Git hosting…) by keywords; shows availability and whether a tool changes state.",
+      "Find platform integration tools (Kafka QC, Argo CD, Vault, SigNoz, Splunk, QC databases, Git hosting…) by keywords; shows availability and whether a tool changes state.",
     usage: '{"query": "kafka publish topic"}',
     args: z.object({ query: z.string().max(200).optional() }).strict(),
     async run(a) {

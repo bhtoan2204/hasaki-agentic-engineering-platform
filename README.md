@@ -1,6 +1,6 @@
 # Workflow Platform (Claude Task Platform v2)
 
-Workflow-driven AI engineering platform. Engineering requests (**work items**: manual, Hasaki Work, Jira) are executed
+Workflow-driven AI engineering platform. Engineering requests (**work items**: manual, Hasaki Work) are executed
 by reusable, versioned **workflows** made of typed steps (AI agent, coding agent, human input, approval, command,
 condition, integration, pull request, task result report). Every step has durable state, attempt history, questions, checkpoints and
 context snapshots in PostgreSQL. Five AI agent providers (Claude Code, Cursor CLI, OpenAI Codex CLI, Google Antigravity CLI, and GitHub Copilot CLI)
@@ -39,9 +39,7 @@ docker compose up -d                  # PostgreSQL 17 on 127.0.0.1:55432
 npm install
 cp .env.example .env                  # Set AUTH_SECRET (random string); configure optional secrets
 # Configuration comes from .env and the Settings page only (config.json is not read)
-# Optional Git shared service accounts (not personal tokens):
-export BITBUCKET_USER=you@hasaki.vn BITBUCKET_TOKEN=...
-# For a permitted shared account, also set bitbucket.allowSharedCredentials=true in config.json.
+# Git hosting (Bitbucket, GitHub, GitLab) credentials are personal: each user saves them in Integrations.
 # Keep the existing AUTH_SECRET in the git-ignored .env; never regenerate it on restart.
 # Localhost HTTP works automatically. Set COOKIE_SECURE=1 behind HTTPS.
 npm run admin:bootstrap -- --username alice --claim-legacy
@@ -73,9 +71,9 @@ Applicability scopes such as GLOBAL and REPOSITORY are not visibility. Task memo
 stays private; approving it does not publish it. Child rows (questions, attempts, artifacts, snapshots, events)
 are authorized through their run. Guessing another user's id returns 404.
 
-Personal Hasaki Work, Bitbucket, GitHub, GitLab and Jira credentials belong to the user and are encrypted with `AUTH_SECRET`.
-A missing personal account does not fall back to someone else's token. `BITBUCKET_*` / `GITHUB_*` / `GITLAB_*` / `JIRA_*` in the
-environment are explicit shared service accounts. The server does not open a Hasaki login window; paste a
+Personal Hasaki Work, Bitbucket, GitHub and GitLab credentials belong to the user and are encrypted with `AUTH_SECRET`.
+A missing personal account does not fall back to someone else's token; no Git credential is read from the environment.
+The server does not open a Hasaki login window; paste a
 token. Telegram's bot is admin-managed; private step notifications go only to that user's chat. Production-error
 monitors stay shared, and a member who investigates gets their own work item. The shared error list does not
 link to another member's task.
@@ -275,9 +273,9 @@ Platform tools reach Copilot through a per-attempt stdio MCP bridge. PreToolUse 
 | **Trace Explorer**                     | Granular attempt execution trace with stage transitions, span tree, tool call timings, and diagnostic details.                                                                                                                                                                                                                                                                                                                               |
 | **Workflows → editor**                 | Node canvas: add steps from palette, drag, connect (dependencies), delete; per-type forms (prompts, output contract, skills, rules, repo discovery, approval/reject routing, commands, conditions, PR mode, agent configuration); validate, save draft, publish version, load older versions, run (normal or step mode).                                                                                                                     |
 | **Knowledge**                          | Business rules, architecture, conventions, repo instructions, skills; scope + applicability, version history, audit, where it is assigned and which executions received it. Review and approve rule change proposals.                                                                                                                                                                                                                        |
-| **Work Items & Questions**             | Import (Hasaki task or list, Jira, JSON), manual requests, start runs; cross-run questions inbox; intake policies.                                                                                                                                                                                                                                                                                                                           |
+| **Work Items & Questions**             | Import (Hasaki task or list, JSON), manual requests, start runs; cross-run questions inbox; intake policies.                                                                                                                                                                                                                                                                                                                           |
 | **Repositories**                       | Repository registry (Bitbucket, GitHub, GitLab), per-user access grants, remote URLs, code intelligence status/indexing, and ranking preview.                                                                                                                                                                                                                                                                                                |
-| **Integrations**                       | Connection testing and credentials for Bitbucket, GitHub, GitLab, Hasaki Work (Chrome relay / token paste), Jira, Splunk, SigNoz, ArgoCD, Kafka UI, Vault, Telegram, and QC HTTP.                                                                                                                                                                                                                                                            |
+| **Integrations**                       | Connection testing and credentials for Bitbucket, GitHub, GitLab, Hasaki Work (Chrome relay / token paste), Splunk, SigNoz, ArgoCD, Kafka UI, Vault, Telegram, and QC HTTP.                                                                                                                                                                                                                                                            |
 | **Production Errors & Investigations** | Scheduled daily Splunk/SigNoz error scans across Kubernetes namespaces; triage into investigation runs with timeline correlation and latency analysis.                                                                                                                                                                                                                                                                                       |
 | **Insights & Quality**                 | Execution metrics, health, usage, quality benchmark comparison (P1/P2 evaluation suites), autonomy insights, and continuous learning review.                                                                                                                                                                                                                                                                                                 |
 | **Interactive Chat**                   | Real-time multi-turn conversational agent with SSE streaming, tool execution, operations verification, and task continuation.                                                                                                                                                                                                                                                                                                                |
@@ -288,7 +286,7 @@ Node ≥ 22.18 (runs `.ts` directly), the selected agent CLI logged in, Git, and
 
 Telegram can now approve/reject workflow gates and answer questions from verified private accounts, using the existing workflow engine. Connect your own account in **Integrations → Telegram** through the short-lived bot link; manually entered chat IDs never authorize actions.
 
-Use `TELEGRAM_MODE=polling` for local/WSL installations without a public endpoint, or `TELEGRAM_MODE=webhook` with HTTPS and a webhook secret. The default `off` retains legacy one-way notifications. Existing shared scan summaries and private notification destinations remain supported.
+Configure the bot and the receiver mode (`polling` works locally/WSL without a public endpoint) on Integrations → Telegram; no `TELEGRAM_*` environment variable is read. The default `off` retains legacy one-way notifications. Existing shared scan summaries and private notification destinations remain supported.
 
 See [Interactive Telegram setup, security and recovery](docs/integrations/interactive-telegram.md) for configuration, binding, transport exclusivity, message behavior and mocked tests. Do not run another `getUpdates` consumer against an active platform bot.
 
@@ -296,7 +294,7 @@ See [Interactive Telegram setup, security and recovery](docs/integrations/intera
 
 |                |                                                                                                                                                                                                                                                                                                                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Work item      | The request. `REQ-n` (manual), Hasaki task code, Jira key. The code is the branch name. Many runs per item.                                                                                                                                                                                                                                                                                  |
+| Work item      | The request. `REQ-n` (manual), Hasaki task code. The code is the branch name. Many runs per item.                                                                                                                                                                                                                                                                                  |
 | Workflow       | Key + immutable published versions. Built-ins: `feature-implementation`, `bug-investigation`, `code-review`, `refactoring`, `work-item-analysis`, `platform-self-development`, `intelligent-feature-engineering`, `production-incident-investigation`, `micro-change`, and pilot `ponytail-nonproduction-pilot`. Edit in UI → draft → publish.                                               |
 | Run            | One execution, pinned to a definition version, with its own resolved graph, allowed/selected repositories, execution profile and branch. Can exist without a work item.                                                                                                                                                                                                                      |
 | Step / attempt | Status `PENDING READY RUNNING WAITING_INPUT WAITING_APPROVAL COMPLETED FAILED RETRYING CANCELED SKIPPED`; step types: `agent`, `coding_agent`, `human_input`, `human_approval`, `integration`, `command`, `condition`, `git_pull_request`, `task_result_report`. Every execution is an attempt with immutable input, output, context snapshot, agent session, metrics, and harness evidence. |
@@ -359,7 +357,7 @@ results. See [docs/integrations/production-investigation.md](docs/integrations/p
 
 | Endpoint                                                                                                                  | Responsibility                                                                          |
 | ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `GET/POST /api/work-items`, `POST /api/work-items/import`, `GET/POST /api/work-items/:id`                                 | Work items (POST creates manual request; import = Hasaki Work / Jira, no execution)     |
+| `GET/POST /api/work-items`, `POST /api/work-items/import`, `GET/POST /api/work-items/:id`                                 | Work items (POST creates manual request; import = Hasaki Work, no execution)     |
 | `POST /api/work-items/:id/runs` `{workflow, repositories?, inputs?, start?}` · `POST /api/work-items/:id/analyze`         | Start a run / read-only analysis                                                        |
 | `GET/POST /api/workflows`, `POST /api/workflows/:key/draft`, `/publish`, `/validate`                                      | Workflow library & visual definition lifecycle                                          |
 | `GET/POST /api/runs`, `GET /api/runs/:id`, `POST /api/runs/:id/{start,pause,resume,cancel,repositories,feedback}`         | Run lifecycle controls                                                                  |

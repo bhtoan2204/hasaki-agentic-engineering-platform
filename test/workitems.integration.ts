@@ -5,7 +5,7 @@ import { workItems } from "../src/workitems/service.ts";
 test("a rejected work item patch does not mark the imported description as manual", async () => {
   const input = {
     code: "IMPORT-DESCRIPTION",
-    source: "jira" as const,
+    source: "hasaki_work" as const,
     title: "Imported issue",
     description: "Original description",
   };
@@ -16,9 +16,9 @@ test("a rejected work item patch does not mark the imported description as manua
   );
   const { item: refreshed, created } = await workItems.upsertImported({
     ...input,
-    description: "Updated by Jira",
+    description: "Updated by the source",
   });
   assert.equal(created, false);
   assert.equal(refreshed.id, item.id);
-  assert.equal(refreshed.description, "Updated by Jira");
+  assert.equal(refreshed.description, "Updated by the source");
 });

@@ -482,7 +482,7 @@ const dur = (ms: number | null) => {
       : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 };
 
-/** Plain Markdown version (for copying into Hasaki Work, Jira or a PR description). */
+/** Plain Markdown version (for copying into Hasaki Work or a PR description). */
 export function renderRunSummaryMarkdown(s: RunSummary, en: boolean): string {
   const L = (vi: string, e: string) => (en ? e : vi);
   const out: string[] = [];

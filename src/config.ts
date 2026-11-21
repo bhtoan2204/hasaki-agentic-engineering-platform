@@ -191,7 +191,7 @@ export interface Config {
   /**
    * GitLab.com and self-hosted GitLab. Only hosts listed in `instances` are accepted as repository URLs, so a token is
    * never sent to an unregistered host. Personal tokens live in user secrets (`gitlab_token:<host>`); the process token
-   * (GITLAB_TOKEN) is used only when allowSharedCredentials is true, and never as a permission grant.
+   * is never read from the environment (Integrations only), and never a permission grant.
    */
   gitlab: {
     instances: GitlabInstance[];
@@ -373,7 +373,7 @@ export interface Config {
      */
     models?: Record<string, Record<string, string>>;
   };
-  /** Optional one-way Telegram notifications (env TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID; never put the token in config.json). */
+  /** Telegram bot (Integrations page: encrypted shared token, mode off|polling); never read from the environment. */
   telegram: {
     botToken: string;
     chatId: string;
@@ -591,12 +591,6 @@ export interface Config {
     /** A request (root span) slower than this is counted in a SigNoz latency group; 0 disables latency groups. */
     slowThresholdMs: number;
   };
-  jira: {
-    /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
-    baseUrl: string;
-    user: string;
-    token: string;
-  };
 }
 
 const isLoopback = (url: string | undefined, fallback: string) => {
@@ -791,7 +785,6 @@ const defaults: Config = {
     heartbeatSeconds: 10,
     pollMs: 1000,
   },
-  jira: { baseUrl: "", user: "", token: "" },
   argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
   vault: { baseUrl: "https://vault-qc-v2.hasaki.dev" },
   qcHttp: {
@@ -979,7 +972,6 @@ function load(): Config {
     hasakiWork: { ...defaults.hasakiWork, ...(fromFile.hasakiWork ?? {}) },
     scheduler: { ...defaults.scheduler, ...(fromFile.scheduler ?? {}) },
     instance: { ...defaults.instance, ...(fromFile.instance ?? {}) },
-    jira: { ...defaults.jira, ...(fromFile.jira ?? {}) },
     argocd: { ...defaults.argocd, ...(fromFile.argocd ?? {}) },
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
     investigation: { ...defaults.investigation, ...(fromFile.investigation ?? {}) },
@@ -1081,26 +1073,10 @@ function load(): Config {
   )
     throw new Error("retrieval.semantic.minSimilarity must be between -1 and 1");
   if (!cfg.scheduler.workers) cfg.scheduler.workers = cfg.maxConcurrent;
-  cfg.telegram = {
-    botToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
-    chatId: process.env.TELEGRAM_CHAT_ID ?? "",
-    apiBase: process.env.TELEGRAM_API_BASE ?? defaults.telegram.apiBase,
-    mode: (process.env.TELEGRAM_MODE ?? "off") as "off" | "polling" | "webhook",
-    webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? "",
-    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL ?? "",
-  };
-  if (!["off", "polling", "webhook"].includes(cfg.telegram.mode))
-    throw new Error("Invalid TELEGRAM_MODE");
-  if (
-    cfg.telegram.mode === "webhook" &&
-    (!/^https:\/\//.test(cfg.telegram.webhookUrl) ||
-      !/^[A-Za-z0-9_-]{16,256}$/.test(cfg.telegram.webhookSecret))
-  )
-    throw new Error(
-      "Telegram webhook needs HTTPS TELEGRAM_WEBHOOK_URL and a 16-256 character TELEGRAM_WEBHOOK_SECRET",
-    );
-  cfg.jira.user = process.env.JIRA_USER ?? cfg.jira.user;
-  cfg.jira.token = process.env.JIRA_TOKEN ?? cfg.jira.token;
+  // Git hosting credentials (Bitbucket, GitHub, GitLab) are personal secrets saved in Integrations: no BITBUCKET_*,
+  // GITHUB_TOKEN or GITLAB_TOKEN is read. Telegram is configured on the Integrations page only (src/integrations/accounts.ts applies the saved bot token,
+  // chat and mode onto this object at startup and when they change); no TELEGRAM_* variable is read.
+  cfg.telegram = { ...defaults.telegram, mode: "off" };
   cfg.dataDir = resolve(cfg.dataDir);
   cfg.reposRoot = resolve(cfg.reposRoot);
   instanceIdentityExplicit = !!(process.env.PLATFORM_INSTANCE?.trim() || cfg.instanceId);
@@ -1163,10 +1139,6 @@ function load(): Config {
       (process.env.COST_BUDGET_UNKNOWN ?? cb.unknownEstimate) === "pause" ? "pause" : "warn",
   };
   // Secrets may come from env so config.json can be committed.
-  cfg.bitbucket.user = process.env.BITBUCKET_USER ?? cfg.bitbucket.user;
-  cfg.bitbucket.token = process.env.BITBUCKET_TOKEN ?? cfg.bitbucket.token;
-  cfg.github.token = process.env.GITHUB_TOKEN ?? cfg.github.token;
-  cfg.gitlab.token = process.env.GITLAB_TOKEN ?? cfg.gitlab.token;
   if (process.env.PLATFORM_REPOSITORY_URL)
     cfg.platform.repositoryUrl = process.env.PLATFORM_REPOSITORY_URL;
   if (process.env.PLATFORM_TRUSTED_OPERATOR_ISOLATION === "1")

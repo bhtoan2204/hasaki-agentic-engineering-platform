@@ -5,34 +5,26 @@ The bot uses the existing approval, rejection and question-answer services. It d
 ## Local / WSL setup (long polling)
 
 1. Create a bot with BotFather. Keep the bot token private. Use a dedicated bot for this installation.
-2. Configure the token through the administrator's Integrations → Telegram settings, or `TELEGRAM_BOT_TOKEN` in the ignored `.env` file. UI credentials retain their existing encrypted shared-secret storage. A shared chat ID is optional for interactive use.
-3. Set `TELEGRAM_MODE=polling` and restart the server. No public URL, tunnel, ngrok or inbound Telegram connection is needed. Outbound HTTPS to Telegram and PostgreSQL access are required.
+2. Save the bot token (and, optionally, a shared chat) in the administrator's Integrations → Telegram settings. It is stored as an encrypted shared secret. A shared chat ID is optional for interactive use.
+3. In the same page, set the receiver mode to **polling**. No public URL, tunnel, ngrok or inbound Telegram connection is needed. Outbound HTTPS to Telegram and PostgreSQL access are required.
 4. Open Integrations → Telegram as your own platform user and select **Connect Telegram**. Open the generated bot link and press Start. The link expires after ten minutes and is single-use.
 5. Return to the settings page and use **Check connection**. Choose approval/question/failure/completion notifications, interactive buttons, and VI/EN independently.
 
-Example environment:
+### Configuration
 
-```dotenv
-TELEGRAM_MODE=polling
-TELEGRAM_BOT_TOKEN=<private bot token, or configure through the admin UI>
-# Optional legacy shared Production Error scan summaries:
-# TELEGRAM_CHAT_ID=<shared destination>
-```
+Telegram is configured on the Integrations page only; no `TELEGRAM_*` environment variable is read (since 2026-11-22).
 
-### Configuration and precedence
-
-| Variable | Where it comes from | Notes |
+| Setting | Where | Notes |
 |---|---|---|
-| `TELEGRAM_MODE` | environment only | `off` (default), `polling` or `webhook`; any other value fails startup. |
-| `TELEGRAM_BOT_TOKEN` | admin UI (encrypted shared secret) **overrides** environment | Never logged or returned; the UI shows a masked suffix only. |
-| `TELEGRAM_CHAT_ID` | admin UI overrides environment | Legacy shared chat (Production Error summaries). Not used for authorization. |
-| `TELEGRAM_WEBHOOK_URL` | environment only | Must be `https://…`; required in webhook mode. |
-| `TELEGRAM_WEBHOOK_SECRET` | environment only | 16-256 characters `A-Z a-z 0-9 _ -`; required in webhook mode. |
-| `TELEGRAM_API_BASE` | environment only | Defaults to `https://api.telegram.org`; tests point it at a mock. |
+| Bot token | Integrations (encrypted shared secret) | Never logged or returned; the UI shows a masked suffix only. |
+| Shared chat | Integrations | Legacy shared chat (Production Error summaries). Not used for authorization. |
+| Receiver mode | Integrations (`off` default, `polling`) | Stored in `settings`; every instance follows it within about 30 seconds. |
 
-Credentials saved in the admin UI are loaded at startup before the receiver starts, and every instance re-reads them about every 30 seconds. A token saved or cleared on one instance therefore reaches all receivers without a restart. Changing `TELEGRAM_MODE` or webhook settings still requires a restart.
+Webhook mode is not available from the UI: it needs a public HTTPS URL and a secret, which the platform no longer takes from the environment. The webhook transport code remains (tests drive it by setting the configuration directly).
 
-`TELEGRAM_MODE` defaults to `off`, preserving one-way notifications for installations that have not enabled the receiver. A bot token is never returned by the API; the administrator sees only its existing masked representation. Members do not see bot credential controls.
+Credentials saved in the admin UI are loaded at startup before the receiver starts, and every instance re-reads them about every 30 seconds. A token saved or cleared on one instance therefore reaches all receivers without a restart.
+
+The receiver mode defaults to `off`, preserving one-way notifications for installations that have not enabled the receiver. A bot token is never returned by the API; the administrator sees only its existing masked representation. Members do not see bot credential controls.
 
 Polling refuses to start while Telegram reports an existing webhook. Disable the old webhook before changing transport. Using a trusted administrator terminal and a privately supplied environment token:
 
@@ -45,18 +37,11 @@ curl --fail --silent --show-error --request POST \
 
 Do not run a separate `getUpdates` consumer while the platform is receiving updates. The UI's old “find chats” action uses the durable observed-update history when an interactive transport is enabled; its legacy discovery mode takes the same PostgreSQL bot lock.
 
-## HTTPS webhook setup
+## HTTPS webhook (not configurable)
 
-Expose only the application behind your normal HTTPS reverse proxy. The Node listener may remain loopback behind that proxy. Set:
-
-```dotenv
-TELEGRAM_MODE=webhook
-TELEGRAM_BOT_TOKEN=<private token, or configure through the admin UI>
-TELEGRAM_WEBHOOK_URL=https://platform.example.com/api/telegram/webhook
-TELEGRAM_WEBHOOK_SECRET=<random 16-256 character A-Z a-z 0-9 _ - value>
-```
-
-Generate a strong secret, for example with `openssl rand -hex 32`. Do not use the bot token as the webhook secret. Keep both out of logs, screenshots and source control. Restart after changing transport settings.
+Webhook mode cannot be turned on: it needs a public HTTPS URL and a webhook secret, and Telegram settings are no longer
+read from the environment (the Integrations page offers `off` and `polling` only). The transport itself remains in the
+code and is described below for reference.
 
 The elected consumer registers `setWebhook` with the secret and accepts only `message` and `callback_query` updates. `POST /api/telegram/webhook` requires the exact `X-Telegram-Bot-Api-Secret-Token` header and an active webhook-mode lease. It does not require browser session/CSRF authentication; this exception applies only to that one authenticated Telegram route. Invalid secrets/mode return 403, and an unavailable consumer returns 503 so Telegram can retry. Bodies are bounded to 256 KiB. The route persists the update before returning 200; domain processing and delivery are durable background work.
 
@@ -103,7 +88,7 @@ Receiver problems are logged once per distinct reason (for example `Telegram pol
 
 ## Disabling the receiver safely
 
-1. Set `TELEGRAM_MODE=off` on **every** instance and restart them. Shutdown releases the lease. One-way notifications keep working through the legacy path while a token is configured.
+1. Set the receiver mode to **off** on Integrations → Telegram (every instance follows within about 30 seconds). Shutdown releases the lease. One-way notifications keep working through the legacy path while a token is configured.
 2. Pending buttons expire on their own (24 h); taps in the meantime are stored but not processed until a receiver runs again. No workflow state changes while the receiver is off.
 3. If you used webhook mode and want to stop Telegram delivering to the URL, call `deleteWebhook` (see above) from a trusted terminal.
 4. To revoke completely, clear the platform credentials (Integrations → Telegram → **Remove from the platform**, admin only) and revoke the token in BotFather.
@@ -141,7 +126,7 @@ SELECT action, count(*) FROM audit_log WHERE resource_type = 'telegram' GROUP BY
 
 Typical findings:
 
-- `active = false` with `TELEGRAM_MODE` enabled: no instance holds the lease. Check the server log for the `receiver unavailable: …` reason (invalid token, leftover webhook, database connectivity).
+- `active = false` with the receiver mode set to polling: no instance holds the lease. Check the server log for the `receiver unavailable: …` reason (invalid token, leftover webhook, database connectivity).
 - Growing `pending` updates while the lease is active: look at `retrying`, then at `telegram.action.denied` / `telegram.update.dead_lettered` audit rows.
 - `dead` outbox rows: 400/401/403/404 from Telegram are permanent (bot blocked by the user, message deleted, chat not found). Other errors are retried with backoff and become `dead` after 12 attempts.
 - Do not delete rows from `telegram_actions` or `telegram_outbox` by hand while a receiver runs; disconnecting a user or letting expiry run is the supported way to invalidate buttons.

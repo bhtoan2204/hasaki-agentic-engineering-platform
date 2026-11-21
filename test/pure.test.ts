@@ -29,7 +29,6 @@ import {
 import { isAmbiguous, rankRepositories, type RepositoryRow } from "../src/repos/service.ts";
 import { evaluateCondition } from "../src/workflow/executors/builtin.ts";
 import { classify, parseGoTest } from "../src/workflow/executors/baseline.ts";
-import { adfToText, normalizeJiraIssue } from "../src/integrations/jira.ts";
 import { buildResumeMessage, buildSystemAppend, buildUserPrompt } from "../src/agent/stepPrompt.ts";
 import type { ResolvedContext, StepInput } from "../src/workflow/context.ts";
 import type { RunRow, StepRow, StepStatus } from "../src/workflow/types.ts";
@@ -432,24 +431,6 @@ test("condition evaluation", () => {
     true,
   );
   assert.equal(evaluateCondition({ path: "upstream.missing", op: "exists" }, scope).result, false);
-});
-
-test("jira normalisation handles ADF descriptions", () => {
-  const n = normalizeJiraIssue({
-    key: "OMS-12",
-    id: "1001",
-    fields: {
-      summary: "Fix refund",
-      project: { key: "OMS", name: "OMS" },
-      description: {
-        type: "doc",
-        content: [{ type: "paragraph", content: [{ type: "text", text: "Refund twice" }] }],
-      },
-    },
-  });
-  assert.equal(n.code, "OMS-12");
-  assert.equal(n.description, "Refund twice");
-  assert.equal(adfToText(null), "");
 });
 
 test("prompts keep untrusted content out of the system prompt", () => {

@@ -467,11 +467,9 @@ export function WorkItemsPage({ query }: { query: string }) {
     `/api/work-items${source ? `?source=${source}` : ""}`,
     [source],
   );
-  const { data: meta } = useApi<{ jiraEnabled?: boolean }>("/api/meta");
   useLive(null, (p) => (!p || p.kind === "status") && reload());
   const [form, setForm] = useState({ title: "", project: "", description: "" });
   const [paste, setPaste] = useState("");
-  const [jiraKey, setJiraKey] = useState("");
   const [panel, setPanel] = useState<"" | "create" | "import">("");
   const importJson = async (src: string) => {
     let payload;
@@ -555,7 +553,7 @@ export function WorkItemsPage({ query }: { query: string }) {
                 onChange={setSource}
                 options={[
                   ["", t("wi.allSources")],
-                  ...["manual", "hasaki_work", "jira"].map(
+                  ...["manual", "hasaki_work"].map(
                     (s) => [s, sourceLabel(t, s)] as [string, string],
                   ),
                 ]}
@@ -714,39 +712,7 @@ export function WorkItemsPage({ query }: { query: string }) {
               <Download size={14} strokeWidth={2} />
               {t("wi.importHasaki")}
             </button>
-            <button className="ghost" disabled={!paste} onClick={() => importJson("jira")}>
-              <Download size={14} strokeWidth={2} />
-              {t("wi.importJira")}
-            </button>
           </div>
-          <div className="divider" />
-          {meta?.jiraEnabled ? (
-            <Field label={t("wi.fromJira")}>
-              <div className="wi-inline">
-                <input
-                  placeholder="JIRA-123"
-                  value={jiraKey}
-                  onChange={(e) => setJiraKey(e.target.value)}
-                />
-                <button
-                  className="ghost"
-                  onClick={async () => {
-                    const r = await act(() =>
-                      api<{ item: { id: number } }>("/api/work-items/import", {
-                        source: "jira",
-                        key: jiraKey,
-                      }),
-                    );
-                    if (r) navigate(`/work-items/${r.item.id}`);
-                  }}
-                >
-                  {t("wi.fetch")}
-                </button>
-              </div>
-            </Field>
-          ) : (
-            <div className="muted small">{t("wi.jiraOff")}</div>
-          )}
         </Drawer>
       )}
       <IntakeQueue />

@@ -13,7 +13,6 @@ import { getUserSecret } from "../auth/secrets.ts";
 import { pool, q } from "../db/pool.ts";
 import { listPullRequests } from "../bitbucket.ts";
 import { workApi } from "../hasakiAuth.ts";
-import { normalizeJiraIssue } from "../integrations/jira.ts";
 import {
   appPods,
   argoStatus,
@@ -201,7 +200,6 @@ const FAMILIES: Array<{ key: string; label: string; match: RegExp }> = [
     match: /^vault\./,
   },
   { key: "argocd", label: "Argo CD (QC): applications, pods and pod logs", match: /^argocd\./ },
-  { key: "jira", label: "Jira issues", match: /^jira\./ },
   { key: "hasaki_work", label: "Hasaki Work tasks", match: /^hasaki_work\./ },
   { key: "bitbucket", label: "Bitbucket pull requests", match: /^bitbucket\./ },
   {
@@ -494,41 +492,6 @@ export function registerBuiltinTools() {
         name: t.name,
         project: t.project?.name ?? t.project_name,
       }));
-    },
-  });
-  registerIntegrationTool({
-    name: "jira.get_issue",
-    summary: "Fetch a Jira issue (summary, description, status, labels) by key, e.g. OMS-123.",
-    description:
-      "Read-only. Jira Cloud REST v3 issue lookup; the description is flattened to text.",
-    input: z.object({ key: z.string().regex(/^[A-Z][A-Z0-9_]+-\d+$/) }),
-    readOnly: true,
-    available: () =>
-      config.jira.baseUrl && config.jira.user && config.jira.token
-        ? true
-        : "Jira not configured (jira.baseUrl, JIRA_USER, JIRA_TOKEN)",
-    handler: async ({ key }) => {
-      const userId = currentUserId();
-      const personalUser = userId ? await getUserSecret(userId, "jira_user") : null;
-      const personalToken = userId ? await getUserSecret(userId, "jira_token") : null;
-      if ((personalUser && !personalToken) || (!personalUser && personalToken))
-        throw new Error("This account's Jira credentials are incomplete");
-      const user = personalUser || config.jira.user;
-      const token = personalToken || config.jira.token;
-      if (!userId) throw new Error("this run has no owner");
-      if (!config.jira.baseUrl || !user || !token)
-        throw new Error("Jira is not configured for this account");
-      const res = await fetch(
-        `${config.jira.baseUrl.replace(/\/$/, "")}/rest/api/3/issue/${key}?fields=summary,description,project,status,issuetype,priority,labels`,
-        {
-          headers: {
-            Authorization: "Basic " + Buffer.from(`${user}:${token}`).toString("base64"),
-            Accept: "application/json",
-          },
-        },
-      );
-      if (!res.ok) throw new Error(`Jira ${res.status}`);
-      return normalizeJiraIssue(await res.json());
     },
   });
   const argoAvailable = () => {

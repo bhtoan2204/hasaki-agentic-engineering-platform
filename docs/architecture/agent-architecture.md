@@ -63,7 +63,7 @@ tools + platform tools + a discoverable integration registry), disclosed progres
 ## Tools: discovery → description → call
 
 `IntegrationTool { name, summary, description, input (zod), readOnly, available(), handler }`. Built-ins (all
-read-only): `hasaki_work.get_task`, `hasaki_work.my_tasks`, `jira.get_issue`, `bitbucket.list_pull_requests`,
+read-only): `hasaki_work.get_task`, `hasaki_work.my_tasks`, `bitbucket.list_pull_requests`,
 `repositories.search`, `run.changes`, `run.step_history`. `call_tool` validates arguments, refuses tools that change
 state in read-only steps and for subagents, checks availability (credentials) and the run's allowed repositories, and
 records `{name, ok, ms}`. Adding an integration = one `registerIntegrationTool` call; nothing in the prompt changes.

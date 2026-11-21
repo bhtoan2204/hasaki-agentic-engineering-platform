@@ -56,7 +56,7 @@ try {
       id: 102,
       code: "WI-102",
       title: "Bitbucket PR automation",
-      source: "jira",
+      source: "hasaki_work",
       status: "open",
       project: "Payment",
       run_count: 1,
@@ -156,7 +156,7 @@ try {
     }
 
     if (path === "/api/meta") {
-      return route.fulfill({ json: { jiraEnabled: true } });
+      return route.fulfill({ json: {} });
     }
 
     if (path === "/api/work-items") {

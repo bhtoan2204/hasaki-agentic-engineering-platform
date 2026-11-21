@@ -71,7 +71,6 @@ import { inbox } from "../db.ts";
 import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasakiAuth.ts";
 import { myTimesheet } from "../timesheet.ts";
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
-import { importJiraIssue, importJiraPayload } from "../integrations/jira.ts";
 import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd.ts";
 import {
   clearSharedSplunkToken,
@@ -110,7 +109,6 @@ import {
 } from "../prodErrors/scan.ts";
 import { cancelScan } from "../prodErrors/jobs.ts";
 import {
-  adoptEnv,
   bitbucketStatus,
   clearBitbucket,
   clearGithub,
@@ -503,7 +501,6 @@ export const routes: Route[] = [
       knowledgeScopes: SCOPES,
       baseBranch: config.baseBranch,
       organization: config.organization,
-      jiraEnabled: !!(config.jira.baseUrl && config.jira.user && config.jira.token),
     }),
   ],
 
@@ -539,15 +536,11 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/work-items\/import$/,
     async ({ body, actor }) => {
-      if (body.source === "jira")
-        return body.key
-          ? importJiraIssue(String(body.key), actor.id)
-          : importJiraPayload(body.payload, actor.id);
       if (body.source === "hasaki_work")
         return body.work_id
           ? pickTask(Number(body.work_id), null, actor.id)
           : importHasakiTask(body.payload, null, actor.id);
-      throw new HttpError(400, "source must be hasaki_work or jira");
+      throw new HttpError(400, "source must be hasaki_work");
     },
   ],
   [
@@ -2512,11 +2505,6 @@ export const routes: Route[] = [
     /^\/api\/integrations\/telegram\/clear$/,
     ({ actor }) => (requireAdmin(actor), clearTelegram()),
   ],
-  [
-    "POST",
-    /^\/api\/integrations\/telegram\/adopt-env$/,
-    ({ actor }) => (requireAdmin(actor), adoptEnv("telegram")),
-  ],
   // Background Git sync by consent (repos/backgroundGit.ts): the caller's own switch, stored with the caller's secrets.
   ["GET", /^\/api\/integrations\/background-git$/, ({ actor }) => backgroundGitStatus(actor.id)],
   [
@@ -2575,11 +2563,6 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/integrations\/gitlab\/clear$/,
     ({ body, actor }) => clearGitlab(body ?? {}, actor.id),
-  ],
-  [
-    "POST",
-    /^\/api\/integrations\/bitbucket\/adopt-env$/,
-    ({ actor }) => adoptEnv("bitbucket", actor.id),
   ],
   // Vault (QC): pasted token; agents see key names and presence, never values
   [

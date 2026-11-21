@@ -71,7 +71,7 @@ const GENERIC_TECH =
   /^(what is|what's|explain|define|why (?:do|does|is)|how does)\b|^[^.?]{0,80}\?$/i;
 
 const OPS =
-  /\b(kafka|topic|publish|produce|consumer group|argo ?cd|vault|jira|pod)\b|bắn event|đẩy event|gửi event|tạo đơn|bảo hành|tạo order|warranty/i;
+  /\b(kafka|topic|publish|produce|consumer group|argo ?cd|vault|pod)\b|bắn event|đẩy event|gửi event|tạo đơn|bảo hành|tạo order|warranty/i;
 
 function score(re: RegExp, text: string, weight: number) {
   return re.test(text) ? weight : 0;

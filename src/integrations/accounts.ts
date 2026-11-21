@@ -26,24 +26,14 @@ import {
 /**
  * Telegram and Bitbucket credentials managed from the Integrations page instead of environment variables.
  *
- * Values saved in the UI are stored in the `settings` table and applied onto the in-memory `config` (telegram.ts and
- * bitbucket.ts read `config` at call time, so nothing else changes). A value saved in the UI wins over .env / config.json;
- * clearing it falls back to what .env / config.json provided at startup. Secrets are never returned to the browser.
+ * Values saved in the UI are stored in the database and applied onto the in-memory `config` (telegram.ts and
+ * bitbucket.ts read `config` at call time, so nothing else changes). Nothing here comes from the environment.
+ * Secrets are never returned to the browser.
  */
 
 type TelegramSaved = { botToken: string; chatId: string };
 type BitbucketSaved = { user: string; token: string; workspace?: string; reviewers?: string[] };
 
-// What .env / config.json provided at startup (the fallback).
-const fromEnv = {
-  telegram: { botToken: config.telegram.botToken, chatId: config.telegram.chatId },
-  bitbucket: {
-    user: config.bitbucket.user,
-    token: config.bitbucket.token,
-    workspace: config.bitbucket.workspace,
-    reviewers: [...config.bitbucket.reviewers],
-  },
-};
 let saved: { telegram: TelegramSaved | null; bitbucket: BitbucketSaved | null } = {
   telegram: null,
   bitbucket: null,
@@ -65,11 +55,9 @@ const readJson = async <T>(key: string): Promise<T | null> => {
 
 /**
  * Update transport ("off" | "polling") chosen on the Integrations page, stored in `settings` (not a secret) so every
- * instance sharing the database follows it without a restart. TELEGRAM_MODE in the environment always wins (and is
- * the only way to use webhook mode, which also needs a public HTTPS URL and a secret).
+ * instance sharing the database follows it without a restart.
  */
 export type TelegramUiMode = "off" | "polling";
-const envMode = process.env.TELEGRAM_MODE ? config.telegram.mode : null;
 let savedMode: TelegramUiMode | null = null;
 const readMode = async (): Promise<TelegramUiMode | null> => {
   const v = await settings.get("telegram_mode");
@@ -77,21 +65,19 @@ const readMode = async (): Promise<TelegramUiMode | null> => {
 };
 
 function apply() {
-  const t = saved.telegram ?? fromEnv.telegram;
+  const t = saved.telegram ?? { botToken: "", chatId: "" };
   config.telegram.botToken = t.botToken;
   config.telegram.chatId = t.chatId;
-  if (!envMode && savedMode) config.telegram.mode = savedMode;
+  config.telegram.mode = savedMode ?? "off";
   // Bitbucket in config stays the shared service account from startup. Personal tokens are not copied onto it.
 }
 
-/** Where the active transport mode comes from: the environment, the Integrations page, or the default (off). */
-export const telegramModeSource = () => (envMode ? "env" : savedMode ? "platform" : "default");
+/** Where the active transport mode comes from: the Integrations page, or the default (off). */
+export const telegramModeSource = () => (savedMode ? "platform" : "default");
 
 /** Administrators turn the long-polling receiver on/off from the UI; the receiver loop picks it up within ~30 s. */
 export async function setTelegramMode(mode: unknown) {
   if (mode !== "off" && mode !== "polling") throw new HttpError(400, "mode must be off or polling");
-  if (envMode)
-    throw new HttpError(409, `TELEGRAM_MODE=${envMode} is set in the environment; change it there`);
   if (mode === "polling" && !config.telegram.botToken)
     throw new HttpError(409, "Save the bot token first");
   await settings.set("telegram_mode", mode);
@@ -153,7 +139,7 @@ async function telegramApi<T = unknown>(token: string, method: string, body?: un
       }
     })();
     throw new Error(
-      `không gọi được Telegram (${networkCode(e)}): máy chạy platform không kết nối được tới ${host}; kiểm tra mạng, VPN hoặc proxy (TELEGRAM_API_BASE)`,
+      `không gọi được Telegram (${networkCode(e)}): máy chạy platform không kết nối được tới ${host}; kiểm tra mạng, VPN hoặc proxy`,
     );
   });
   const j: { ok?: boolean; description?: string; result: T } = await res.json().catch(() => ({}));
@@ -173,12 +159,7 @@ export async function telegramStatus(userId?: number, canManage = false) {
     ...(userId ? await bindingStatus(userId) : {}),
     /** Where THIS user's step notifications (question / approval) go. Without it they are not sent at all. */
     myChatId: userId ? await getUserSecret(userId, "telegram_chat") : null,
-    source: saved.telegram
-      ? "platform"
-      : fromEnv.telegram.botToken || fromEnv.telegram.chatId
-        ? "env"
-        : "none",
-    envAvailable: !!(fromEnv.telegram.botToken && fromEnv.telegram.chatId),
+    source: saved.telegram ? "platform" : "none",
     chatId: config.telegram.chatId || null,
     botToken: mask(config.telegram.botToken),
     mode: config.telegram.mode,
@@ -297,7 +278,6 @@ export async function bitbucketStatus(userId?: number) {
     configured: !!(user && token),
     source: personalAttempt ? "user" : user || token ? "shared" : "none",
     personal,
-    envAvailable: !!(fromEnv.bitbucket.user && fromEnv.bitbucket.token),
     user: user || null,
     token: mask(token),
     workspace: config.bitbucket.workspace,
@@ -602,18 +582,6 @@ export async function clearBitbucket(userId?: number) {
     await forgetBitbucketChecks({ userId });
   }
   return bitbucketStatus(userId);
-}
-
-/** Copy what .env provides into the platform (after which the variables can be removed from .env). */
-export async function adoptEnv(which: "telegram" | "bitbucket", userId?: number) {
-  if (which === "telegram") {
-    if (!fromEnv.telegram.botToken || !fromEnv.telegram.chatId)
-      throw new Error(".env không có TELEGRAM_BOT_TOKEN và TELEGRAM_CHAT_ID");
-    return setTelegram(fromEnv.telegram);
-  }
-  if (!fromEnv.bitbucket.user || !fromEnv.bitbucket.token)
-    throw new Error(".env không có BITBUCKET_USER và BITBUCKET_TOKEN");
-  return setBitbucket(fromEnv.bitbucket, userId);
 }
 
 /** The chat that receives this user's private run notifications. The shared bot token is unchanged. */

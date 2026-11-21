@@ -211,7 +211,7 @@ export function buildSystemAppend(
       );
   } else
     lines.push(
-      "Domain integrations (Splunk, project QC databases, Kafka, Vault, Argo CD, Jira, Hasaki Work, Bitbucket, repository registry, this run's history/changes) are not loaded up front:",
+      "Domain integrations (Splunk, project QC databases, Kafka, Vault, Argo CD, Hasaki Work, Bitbucket, repository registry, this run's history/changes) are not loaded up front:",
       "mcp__platform__list_tools to discover them, mcp__platform__describe_tool for the full contract, mcp__platform__call_tool to use one.",
     );
   if (run.profile !== "MICRO" && step.config?.delegation?.enabled)
