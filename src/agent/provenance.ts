@@ -12,6 +12,11 @@
  *   CONTRADICTED          platform data contradicts the citation: unknown commit, file absent at that commit, lines
  *                         beyond the end of the file, or a tool call / artifact id that this run never produced.
  *
+ * CodeAct references (`codeact:<execution>:<seq>`, M1/M4) are records too: verified only for a successful, recorded
+ * nested call of a finalized execution of THIS run. A claim may add `observed: {pointer, equals | count | includes}` —
+ * a deterministic assertion about the recorded result (identifier, count) that the platform checks itself
+ * (`verifies: "observation"`); a mismatch is CONTRADICTED, so a wrong identifier or count cannot pass as a fact.
+ *
  * Claims are never deleted: an unverifiable or contradicted claim is kept, its `verification_status` lowered so that
  * root-cause and gate decisions cannot rest on it, and the reason recorded in `provenance`.
  */
@@ -36,7 +41,7 @@ export interface Provenance {
   by: "platform";
   status: ProvenanceStatus;
   /** What a VERIFIED_BY_PLATFORM result actually proves. */
-  verifies: "location" | "source_record" | null;
+  verifies: "location" | "source_record" | "observation" | null;
   reason: string | null;
   stale?: boolean;
 }
@@ -50,6 +55,11 @@ export interface ProvenanceEnv {
   toolCall(id: number): Promise<{ status: string } | null>;
   /** Artifact of THIS run by id. */
   artifact(id: number): Promise<boolean>;
+  /** A CodeAct nested call of THIS run (null = no such record). */
+  codeActCall?(
+    executionId: number,
+    seq: number,
+  ): Promise<{ status: string; finalized: boolean; result: unknown } | null>;
 }
 
 const mark = (
@@ -73,6 +83,75 @@ export function parseRecordRef(
     .match(/^(tool_call|tool|artifact|artifact_id)\s*[:#]\s*(\d{1,18})$/i);
   if (!m) return null;
   return { kind: /^tool/i.test(m[1]) ? "tool_call" : "artifact", id: Number(m[2]) };
+}
+
+/** `codeact:<execution>:<seq>`. */
+export function parseCodeActRef(ref: unknown): { execution: number; seq: number } | null {
+  const m = /^codeact:(\d{1,15}):(\d{1,9})$/.exec(String(ref ?? "").trim());
+  return m ? { execution: Number(m[1]), seq: Number(m[2]) } : null;
+}
+
+/** RFC 6901 pointer into a JSON value; undefined when a segment is missing. */
+export function jsonPointer(value: unknown, pointer: string): unknown {
+  if (pointer === "" || pointer === "/") return value;
+  if (!pointer.startsWith("/")) return undefined;
+  let cur: unknown = value;
+  for (const raw of pointer.slice(1).split("/")) {
+    const key = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+}
+const canonical = (v: unknown): string =>
+  Array.isArray(v)
+    ? `[${v.map(canonical).join(",")}]`
+    : v && typeof v === "object"
+      ? `{${Object.keys(v)
+          .sort()
+          .map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`)
+          .join(",")}}`
+      : JSON.stringify(v ?? null);
+
+/** Check a claim's `observed` assertion against a recorded result: null when it holds, else what the record shows. */
+export function checkObservation(
+  recorded: unknown,
+  observed: Record<string, unknown>,
+): { ok: true } | { ok: false; reason: string } | { ok: null; reason: string } {
+  const pointer = typeof observed.pointer === "string" ? observed.pointer : "";
+  const actual = jsonPointer(recorded, pointer);
+  if (actual === undefined)
+    return { ok: false, reason: `the cited record has nothing at ${pointer || "/"}` };
+  if ("count" in observed) {
+    const n = Array.isArray(actual) ? actual.length : null;
+    if (n === null)
+      return { ok: null, reason: `${pointer} is not a list: a count cannot be checked` };
+    return n === Number(observed.count)
+      ? { ok: true }
+      : {
+          ok: false,
+          reason: `the cited record has ${n} items at ${pointer}, not ${String(observed.count)}`,
+        };
+  }
+  if ("includes" in observed) {
+    const hit = Array.isArray(actual)
+      ? actual.some((x) => canonical(x) === canonical(observed.includes))
+      : typeof actual === "string" && actual.includes(String(observed.includes));
+    return hit
+      ? { ok: true }
+      : {
+          ok: false,
+          reason: `${JSON.stringify(observed.includes).slice(0, 80)} is not in the cited record at ${pointer}`,
+        };
+  }
+  if ("equals" in observed)
+    return canonical(actual) === canonical(observed.equals)
+      ? { ok: true }
+      : {
+          ok: false,
+          reason: `the cited record shows ${canonical(actual).slice(0, 80)} at ${pointer}, not ${canonical(observed.equals).slice(0, 80)}`,
+        };
+  return { ok: null, reason: "observed has no equals/count/includes to check" };
 }
 
 export async function verifyClaimProvenance(
@@ -129,6 +208,28 @@ export async function verifyClaimProvenance(
         );
     }
     return mark("VERIFIED_BY_PLATFORM", null, "location");
+  }
+  const cref = parseCodeActRef(raw?.source_ref);
+  if (cref) {
+    const call = env.codeActCall ? await env.codeActCall(cref.execution, cref.seq) : null;
+    const ref = `codeact:${cref.execution}:${cref.seq}`;
+    if (!call) return mark("CONTRADICTED", `${ref} is not a recorded CodeAct call of this run`);
+    if (!call.finalized) return mark("UNVERIFIED", `${ref} belongs to an unfinished execution`);
+    if (call.status !== "ok") return mark("UNVERIFIED", `${ref} ended ${call.status}`);
+    const observed = raw?.observed;
+    if (!observed || typeof observed !== "object")
+      return mark("VERIFIED_BY_PLATFORM", null, "source_record");
+    const stored = call.result as { result?: unknown; truncated?: boolean } | null;
+    if (!stored || stored.truncated || !("result" in stored))
+      return mark(
+        "UNVERIFIED",
+        `${ref}: the recorded result was truncated; the observation cannot be checked`,
+      );
+    const check = checkObservation(stored.result, observed as Record<string, unknown>);
+    if (check.ok === true) return mark("VERIFIED_BY_PLATFORM", null, "observation");
+    return check.ok === false
+      ? mark("CONTRADICTED", `${ref}: ${check.reason}`)
+      : mark("UNVERIFIED", `${ref}: ${check.reason}`);
   }
   const rec = parseRecordRef(raw?.source_ref);
   if (rec) {
@@ -215,5 +316,17 @@ export async function runProvenanceEnv(run: {
         id,
         run.id,
       ])),
+    codeActCall: (executionId, seq) =>
+      one<{ status: string; result: unknown; execution_status: string }>(
+        pool,
+        `SELECT c.status, c.result, e.status AS execution_status
+         FROM code_execution_calls c JOIN code_executions e ON e.id = c.execution_id
+         WHERE c.execution_id = $1 AND c.seq = $2 AND e.run_id = $3`,
+        [executionId, seq, run.id],
+      ).then((r) =>
+        r
+          ? { status: r.status, finalized: r.execution_status !== "running", result: r.result }
+          : null,
+      ),
   };
 }

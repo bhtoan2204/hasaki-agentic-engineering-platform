@@ -18,6 +18,8 @@ import {
   investigationReport,
 } from "../../investigation/steps.ts";
 import { approvedScopeFrom } from "../../agent/evidence.ts";
+import { buildEvidenceReport } from "../../agent/evidenceReport.ts";
+import { runProvenanceEnv } from "../../agent/provenance.ts";
 import { requiredTestTargets } from "../../agent/verify.ts";
 import { repoPath } from "../../repos/service.ts";
 import { environmentUnavailable, testEvidence } from "../../agent/verify.ts";
@@ -1161,6 +1163,26 @@ export async function integrateSubtasks(ctx: ExecutionContext): Promise<ExecResu
   };
 }
 
+/**
+ * Evidence-driven investigation, stages E–F (M4): re-verify the evidence step's claims against platform records and
+ * report facts, hypotheses, missing evidence and the verification verdict. Deterministic; changes nothing.
+ */
+async function evidenceReportStep(ctx: ExecutionContext): Promise<ExecResult> {
+  const from = String(ctx.step.config.from ?? "investigate");
+  const source = ctx.input.upstream[from]?.output;
+  if (!source || typeof source !== "object")
+    return { kind: "failed", error: `no output from step "${from}" to verify`, retryable: false };
+  const report = await buildEvidenceReport(
+    source as Record<string, unknown>,
+    await runProvenanceEnv(ctx.run),
+  );
+  await ctx.log(
+    "system",
+    `evidence verification ${report.verification.status}: ${report.verification.platform_verified}/${report.verification.claims_checked} claims verified by the platform, ${report.verification.failures.length} failures, root cause ${report.root_cause?.status ?? "none"}`,
+  );
+  return { kind: "completed", output: report as unknown as Record<string, unknown> };
+}
+
 /** Last step of coding workflows: delete the run's worktrees. Dirty ones are kept; branches always stay. */
 async function cleanupWorkspaces(ctx: ExecutionContext): Promise<ExecResult> {
   const removed: string[] = [];
@@ -1208,6 +1230,8 @@ export const integrationExecutor: StepExecutor = {
         return investigationLatency(ctx);
       case "investigation_report":
         return investigationReport(ctx);
+      case "evidence_report":
+        return evidenceReportStep(ctx);
       case "noop":
         return { kind: "completed", output: { ok: true } };
       default:

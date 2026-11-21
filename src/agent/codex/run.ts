@@ -12,6 +12,7 @@ import { npmCacheDir } from "../../git/provider.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import { addUsage, newMetrics, noteToolUse, type AgentMetrics } from "../metrics.ts";
 import { advertisedContextTools } from "../contextToolSchemas.ts";
+import { bridgeCapabilityEnv } from "../mcpBridge.ts";
 import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "../broker/server.ts";
 import {
@@ -366,7 +367,7 @@ export function codexArgs(inv: CodexInvocation): string[] {
       "mcp_servers.platform.args",
       ["--disable-warning=ExperimentalWarning", join(import.meta.dirname, "bridge.ts")],
     ],
-    ["mcp_servers.platform.env", { PLATFORM_MODE: inv.mode }],
+    ["mcp_servers.platform.env", { PLATFORM_MODE: inv.mode, ...bridgeCapabilityEnv() }],
     ["mcp_servers.platform.env_vars", ["PLATFORM_BROKER_SOCKET", "PLATFORM_BROKER_TOKEN"]],
     ["mcp_servers.platform.required", true],
     ["mcp_servers.platform.startup_timeout_sec", 30],

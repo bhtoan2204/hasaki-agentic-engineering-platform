@@ -48,6 +48,11 @@ args)` and `platform.listTools()` and returns a JSON value.
   `executeChatTool`), so authorization, scope, freshness, journal and budgets are the direct path's. Answers carry
   per-call `source` (family, trust), `sources` caveats and `missing_sources`. See
   `docs/validation/codeact-m3-composition.md`.
+- **Investigation workflow (M4).** `incident-investigation` template; claim provenance verifies `codeact:` refs
+  (this run's recorded, finalized calls only) and `observed` assertions against recorded results; the
+  `evidence_report` step re-verifies and reports. Provider bridges (Codex, Cursor) get `CODEACT_ENABLED` /
+  `LSP_ENABLED` from the worker so they offer what the worker enabled. See
+  `docs/validation/codeact-m4-investigation-workflow.md`.
 - **Disclosure.** When disabled the tool is not advertised (Claude MCP server, stdio bridge, Codex enabled tools) and
   the step prompt does not mention it.
 

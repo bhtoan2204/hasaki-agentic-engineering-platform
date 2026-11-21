@@ -392,6 +392,29 @@ const INVESTIGATION_HANDOFF =
   "If run inputs contain `investigation` (handed over from a read-only production investigation), start from it: its findings, timeline and latencies cite evidence_refs (S<search>:<n>). " +
   "Its evidence may come from Splunk or SigNoz (both use S<search>:<n> refs). Re-read the events you rely on with call_tool splunk_get_event before classifying them as OBSERVED_FACT (source_type production_log, source_ref = the evidence_ref); its hypotheses and missing_evidence are open questions, not facts. ";
 
+/** M4: one read-only evidence step; the platform verifies its claims (provenance, `observed`) and reports. */
+const INCIDENT_INVESTIGATE = {
+  evidence: "root_cause",
+  instructions:
+    "Investigate inputs.request READ-ONLY, in this order. (A) Collect evidence with the authorized tools (traces, logs, read-only queries). " +
+    "When several deterministic lookups must be combined (correlate traces with logs, aggregate large results, join with code or knowledge), " +
+    "run them in ONE platform.execute_code program that returns a compact result; call a single tool directly. " +
+    "(B) Correlate by request/trace/order ids, service, time window and error fingerprint; keep observed facts, correlations and hypotheses apart. " +
+    "(C) Find the owning code with platform.search_code/get_symbol/find_dependencies/navigate_code (syntax hits are candidates: check the live file) and relevant verified knowledge; " +
+    "use task memory only when its freshness is FRESH. (D) Assess the root cause against supporting AND contradicting evidence; a symptom fix " +
+    "(raise a timeout, add a retry) is not a root cause unless evidence shows why the operation is slow or failing. " +
+    "Evidence citations: for a fact taken from a CodeAct nested call, set source_ref to its `codeact:<execution>:<seq>` ref from `evidence` and, for every identifier or count you state, " +
+    "add observed: { pointer: '/<json pointer into that call's result>', equals | count | includes } so the platform can check it. " +
+    "Code facts need repository, file_path, line_range and commit. Put what you could not inspect under missing_evidence and next investigation steps under next_steps. " +
+    EVIDENCE_RULES,
+  output_contract:
+    "{ summary, hypotheses: string[], next_steps: string[], missing_evidence?: string[], " +
+    ROOT_CAUSE_CONTRACT +
+    ", " +
+    CLAIMS_CONTRACT.replace("contradicts?: string[] }]", "contradicts?: string[], observed?: { pointer, equals?, count?, includes? } }]") +
+    " }",
+};
+
 const BUG_ANALYZE = {
   evidence: "analysis",
   instructions:
@@ -895,6 +918,43 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
         },
         qcMerge("pr"),
         cleanup("qc_merge"),
+      ],
+    },
+  },
+  {
+    key: "incident-investigation",
+    spec: {
+      name: "Incident Investigation (evidence-driven)",
+      description:
+        "Read-only: collect and correlate evidence (CodeAct when several lookups combine) → code and knowledge correlation → root-cause assessment → deterministic verification and report. Changes nothing.",
+      inputs: {
+        request: {
+          description: "what to investigate (symptom, identifiers, time window, question)",
+          required: true,
+        },
+      },
+      steps: [
+        {
+          key: "discover",
+          type: "integration",
+          name: "Repository Discovery",
+          config: { ...DISCOVER, optional: true },
+        },
+        {
+          key: "investigate",
+          type: "agent",
+          name: "Collect, Correlate & Diagnose",
+          depends_on: ["discover"],
+          max_attempts: 2,
+          config: INCIDENT_INVESTIGATE,
+        },
+        {
+          key: "report",
+          type: "integration",
+          name: "Verify & Report",
+          depends_on: ["investigate"],
+          config: { action: "evidence_report", from: "investigate" },
+        },
       ],
     },
   },

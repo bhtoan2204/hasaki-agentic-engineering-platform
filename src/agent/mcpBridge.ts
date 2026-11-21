@@ -1,4 +1,5 @@
 import { advertisedContextTools, CONTEXT_TOOLS } from "./contextToolSchemas.ts";
+import { config } from "../config.ts";
 import { z } from "zod";
 /**
  * Stdio MCP server core shared by the CLI providers' per-run bridges (Cursor: cursor/bridge.ts, Codex: codex/bridge.ts).
@@ -147,6 +148,17 @@ export const COMMIT_TOOL: BridgeTool = {
     required: ["repo", "message"],
   },
 };
+
+/**
+ * A provider's bridge runs in its own process with a minimal environment (no .env), so it would see every optional
+ * capability as off and never offer it. The worker passes its own switches; the broker still decides every call.
+ */
+export function bridgeCapabilityEnv(): Record<string, string> {
+  return {
+    CODEACT_ENABLED: config.codeAct.enabled ? "1" : "0",
+    LSP_ENABLED: config.lsp.enabled ? "1" : "0",
+  };
+}
 
 export function bridgeToolsFor(mode: string, opts: { commit?: boolean } = {}): BridgeTool[] {
   const nativeNames = new Set(CONTEXT_TOOLS.map((t) => t.name));

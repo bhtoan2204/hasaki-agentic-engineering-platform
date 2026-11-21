@@ -76,11 +76,13 @@ export interface Claim {
   supports?: string[];
   contradicts?: string[];
   notes?: string[];
+  /** A deterministic assertion about a cited record (checked by the platform: provenance.ts checkObservation). */
+  observed?: { pointer: string; equals?: unknown; count?: number; includes?: unknown };
   /** Set by the platform (provenance.ts) — agent-supplied values are stripped before normalization. */
   provenance?: {
     by: "platform";
     status: "VERIFIED_BY_PLATFORM" | "AGENT_REPORTED" | "UNVERIFIED" | "CONTRADICTED";
-    verifies: "location" | "source_record" | null;
+    verifies: "location" | "source_record" | "observation" | null;
     reason: string | null;
     stale?: boolean;
   };
@@ -173,6 +175,17 @@ const answered = (v: unknown) =>
 
 // ---------------------------------------------------------------- claims
 
+function observedOf(o: Record<string, unknown>): NonNullable<Claim["observed"]> {
+  const out: NonNullable<Claim["observed"]> = { pointer: String(o.pointer).slice(0, 200) };
+  if ("equals" in o) {
+    const text = JSON.stringify(o.equals ?? null) ?? "null";
+    if (text.length <= 2000) out.equals = JSON.parse(text); // larger values are not checkable assertions
+  }
+  if ("count" in o && Number.isFinite(Number(o.count))) out.count = Number(o.count);
+  if ("includes" in o) out.includes = o.includes;
+  return out;
+}
+
 export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
@@ -214,13 +227,20 @@ export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
       contradicts: Array.isArray(r?.contradicts)
         ? r.contradicts.map((x: unknown) => String(x)).slice(0, 10)
         : undefined,
+      ...(r.observed &&
+      typeof r.observed === "object" &&
+      typeof record(r.observed).pointer === "string"
+        ? { observed: observedOf(record(r.observed)) }
+        : {}),
       ...(prov.by === "platform" && provStatus
         ? {
             provenance: {
               by: "platform" as const,
               status: provStatus,
               verifies:
-                prov.verifies === "location" || prov.verifies === "source_record"
+                prov.verifies === "location" ||
+                prov.verifies === "source_record" ||
+                prov.verifies === "observation"
                   ? prov.verifies
                   : null,
               reason: typeof prov.reason === "string" ? prov.reason : null,

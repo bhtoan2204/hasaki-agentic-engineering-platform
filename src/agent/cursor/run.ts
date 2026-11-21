@@ -1,3 +1,4 @@
+import { bridgeCapabilityEnv } from "../mcpBridge.ts";
 import { liveRuntime, observeLiveUsage } from "../../eval/liveRuntime.ts";
 import { isModelBlocked } from "../modelPolicy.ts";
 import { activityLabel, type CompletionStreamListener } from "../completionStream.ts";
@@ -191,6 +192,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       PLATFORM_BROKER_SOCKET: broker.socketPath,
       PLATFORM_BROKER_TOKEN: broker.token,
       PLATFORM_MODE: input.mode,
+      ...bridgeCapabilityEnv(),
     });
     const gitDir = join(input.cwd, ".git");
     if (existsSync(gitDir)) excludeFromGit(gitDir);

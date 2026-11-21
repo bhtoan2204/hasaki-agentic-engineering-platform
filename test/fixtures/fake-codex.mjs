@@ -77,9 +77,9 @@ function startMcp() {
   const command = JSON.parse(cfg("mcp_servers.platform.command"));
   const args = JSON.parse(cfg("mcp_servers.platform.args"));
   const names = JSON.parse(cfg("mcp_servers.platform.env_vars"));
-  const mode =
-    (cfg("mcp_servers.platform.env") || "").match(/PLATFORM_MODE="(\w+)"/)?.[1] || "analysis";
-  const env = { PATH: process.env.PATH, PLATFORM_MODE: mode };
+  // Like codex: every `mcp_servers.platform.env` entry is set for the server process.
+  const env = { PATH: process.env.PATH, PLATFORM_MODE: "analysis" };
+  for (const m of (cfg("mcp_servers.platform.env") || "").matchAll(/(\w+)="([^"]*)"/g)) env[m[1]] = m[2];
   for (const n of names) if (process.env[n]) env[n] = process.env[n];
   const child = spawn(command, args, { env, stdio: ["pipe", "pipe", "inherit"] });
   let buf = "";
@@ -215,6 +215,29 @@ const mcp = startMcp();
 await mcp.rpc("initialize", { protocolVersion: "2025-06-18" });
 const list = await mcp.rpc("tools/list", {});
 log({ tools: list.result.tools.map((t) => t.name) });
+if (mode === "script") {
+  // FAKE_CODEX_SCRIPT: a module whose default export drives the turn through the real MCP tools and returns the output
+  // to submit (or null to stop without submitting). Lets a test script an agent's tool use end to end.
+  const fail = (e) => {
+    log({ scriptError: String(e?.stack ?? e) });
+    process.exit(1); // a broken script must not leave a hanging agent process
+  };
+  process.on("uncaughtException", fail);
+  process.on("unhandledRejection", fail);
+  const script = (await import(process.env.FAKE_CODEX_SCRIPT)).default;
+  const call = async (name, args) => {
+    const r = await tool(mcp, name, args);
+    const text = r?.content?.[0]?.text ?? "";
+    log({ scriptCall: name, text: text.slice(0, 4000) });
+    return text;
+  };
+  const output = await script({ call, prompt });
+  if (output) await tool(mcp, "submit_result", { output });
+  out({ type: "item.completed", item: { id: "m", type: "agent_message", text: "done" } });
+  out({ type: "turn.completed", usage });
+  mcp.close();
+  process.exit(0);
+}
 
 if (mode === "lifecycle") {
   const repo = process.env.FAKE_LIFECYCLE_REPO;
