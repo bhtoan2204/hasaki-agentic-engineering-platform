@@ -49,7 +49,7 @@ export async function checkoutRoot(name: string, waitMs = CHECKOUT_WAIT_MS): Pro
       throw new SourceUnavailable(`Repository ${name} is disabled or not readable in the registry`);
     if (!repo.repository_url)
       throw new SourceUnavailable(
-        `Repository ${name} has no local checkout (${(local as Error).message}) and no registered remote: an admin sets its repository URL in Repositories (or repositories.${name} in PLATFORM_CONFIG)`,
+        `Repository ${name} has no local checkout (${(local as Error).message}) and no registered remote: an admin sets its repository URL on the Repositories page`,
       );
     let work = inflight.get(name);
     if (!work) {

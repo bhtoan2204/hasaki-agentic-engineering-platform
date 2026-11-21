@@ -74,7 +74,7 @@ export async function validateCheckout(
   const path = persistedPath ?? resolveRepoPath(repo);
   if (!existsSync(join(path, ".git")))
     throw new Error(
-      `Repository ${repo.name} unavailable locally; configure repositories.${repo.name} in PLATFORM_CONFIG`,
+      `Repository ${repo.name} unavailable locally; set its repository URL on the Repositories page so the platform workspace can prepare it`,
     );
   const top = (
     await exec("git", [
