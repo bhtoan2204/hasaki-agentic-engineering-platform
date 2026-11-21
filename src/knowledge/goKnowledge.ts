@@ -1,21 +1,17 @@
 /**
- * KNOWLEDGE_IMPORT_ENGINE=go (ADR 0007): the repository knowledge scan (discovery) runs in platform-go
- * (go/internal/knowledge, contract go/contracts/knowledge-v1.schema.json). TypeScript chooses the repositories,
- * resolves where each candidate applies and publishes; platform-go only reads, inside the roots this server
- * configured it with (PLATFORM_TRUSTED_ROOTS).
- *
- * Fallback: the scan has no side effects, so an unreachable, slow, overloaded or outdated platform-go (network error,
- * timeout, 5xx, 409 version) is answered by the TypeScript discovery. A refused request (400) or a refused credential
- * (401/403) is raised: falling back would hide a misconfiguration or a scope this module should never send.
+ * The repository knowledge scan (discovery) runs in platform-go (ADR 0007; go/internal/knowledge, contract
+ * go/contracts/knowledge-v1.schema.json). TypeScript chooses the repositories, resolves where each candidate applies
+ * and publishes; platform-go only reads, inside the roots this server configured it with (PLATFORM_TRUSTED_ROOTS).
+ * An unavailable platform-go fails the import (it is retryable and has no side effects); a refused request or
+ * credential is raised as such.
  */
-import { config } from "../config.ts";
 import { platformGoCall } from "../retrieval/semantic.ts";
 import { MAX_CHARS, SCAN_LIMITS, type Discovery, type DiscoveryRepository } from "./importTypes.ts";
 
 /** Version of the discovery rules both engines implement; platform-go refuses (409) any other. */
 export const KNOWLEDGE_SCAN_VERSION = "knowledge-scan-1";
 
-export const goKnowledgeStats = { calls: 0, fallbacks: {} as Record<string, number> };
+export const goKnowledgeStats = { calls: 0, failures: {} as Record<string, number> };
 
 /** The knowledge-v1 ScanRequest. */
 export function knowledgeScanRequest(repos: DiscoveryRepository[], userDir: string | null) {
@@ -33,15 +29,14 @@ export function knowledgeScanRequest(repos: DiscoveryRepository[], userDir: stri
   };
 }
 
-/** The discovery from platform-go, or null when the TypeScript engine must scan instead. */
+/** The discovery from platform-go (the only engine: an unavailable or invalid answer fails the import, retryable). */
 export async function goKnowledgeScan(
   repos: DiscoveryRepository[],
   userDir: string | null,
-): Promise<Discovery | null> {
-  if (config.knowledge.importEngine !== "go") return null;
-  const fallback = (reason: string) => {
-    goKnowledgeStats.fallbacks[reason] = (goKnowledgeStats.fallbacks[reason] ?? 0) + 1;
-    return null;
+): Promise<Discovery> {
+  const fail = (reason: string): never => {
+    goKnowledgeStats.failures[reason] = (goKnowledgeStats.failures[reason] ?? 0) + 1;
+    throw new Error(`Knowledge scan is unavailable (platform-go: ${reason}); retry shortly`);
   };
   const res = await platformGoCall(
     "knowledge scan",
@@ -49,7 +44,7 @@ export async function goKnowledgeScan(
     knowledgeScanRequest(repos, userDir),
     SCAN_LIMITS.deadlineMs + 10_000,
   );
-  if (!res.ok) return fallback(res.reason);
+  if (!res.ok) return fail(res.reason);
   const body = res.body as unknown as Discovery;
   if (
     !Array.isArray(body.candidates) ||
@@ -57,11 +52,11 @@ export async function goKnowledgeScan(
     !Array.isArray(body.scanned) ||
     !Array.isArray(body.incomplete)
   )
-    return fallback("invalid_response");
+    return fail("invalid_response");
   // Only repositories this server asked for can be reported scanned (retirement is decided from that list).
   const asked = new Set(repos.map((r) => r.name));
   if (![...body.scanned, ...body.incomplete].every((n: string) => asked.has(n)))
-    return fallback("invalid_response");
+    return fail("invalid_response");
   goKnowledgeStats.calls++;
   return {
     candidates: body.candidates,

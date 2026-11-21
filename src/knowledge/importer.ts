@@ -11,7 +11,7 @@ import {
   statSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { config } from "../config.ts";
 import pg from "pg";
 import { pool, q } from "../db/pool.ts";
@@ -20,11 +20,9 @@ import { repositories, repoPath, type RepositoryRow } from "../repos/service.ts"
 import { knowledge, type KnowledgeInput } from "./service.ts";
 import type {
   Discovery,
-  DiscoveredCandidate,
   DiscoveryRepository,
   ImportCandidate,
   ImportReport,
-  ScopeTarget,
 } from "./importTypes.ts";
 import { MAX_CHARS, SCAN_LIMITS } from "./importTypes.ts";
 import { goKnowledgeScan } from "./goKnowledge.ts";
@@ -93,15 +91,6 @@ export const USER_SKILLS_DISABLED = [
   "ask",
   "decision-analysis",
   "fact-check",
-];
-/** Extra wiki files outside docs/ worth importing (path relative to the wiki root). */
-const WIKI_EXTRA = [/^\.inventory\/conflicts\.md$/];
-const WIKI_SKIP = [
-  /changelog/i,
-  /build-docs/i,
-  /reference\/links/i,
-  /frontend-demo/i,
-  /authoring\.md$/i,
 ];
 
 export const slug = (s: string) =>
@@ -555,270 +544,8 @@ export function skillCandidates(s: {
 // ---------------------------------------------------------------- discovery (engine) and assembly (policy)
 // Discovery reads the sources and builds every candidate except where it applies: each carries a scope target that
 // assembleCandidates() resolves against the registry (scope, applicability, the enable policy of user skills). The
-// TypeScript engine below and platform-go (KNOWLEDGE_IMPORT_ENGINE=go, go/internal/knowledge) produce the same
-// Discovery for the same files; scope, applicability and governance never leave TypeScript.
-
-const retarget = (c: ImportCandidate, target: ScopeTarget): DiscoveredCandidate => {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { scope_type, scope_ref, applicability, ...rest } = c;
-  return { ...rest, target };
-};
-
-/** The TypeScript discovery engine: synchronous reads on this process, through SourceTree. */
-export function discoverKnowledge(
-  repos: DiscoveryRepository[],
-  userDir: string | null,
-  budget: ScanBudget = newBudget(),
-): Discovery {
-  const skipped: ImportReport["skipped"] = [];
-  const out: DiscoveredCandidate[] = [];
-  const incomplete: string[] = [];
-  const skills = new Map<
-    string,
-    { name: string; text: string; companions: SkillCompanion[]; repos: string[]; paths: string[] }
-  >(); // by name+hash
-
-  for (const r of repos) {
-    const root = r.root;
-    let tree: SourceTree;
-    try {
-      tree = new SourceTree(root, r.name, skipped, budget);
-    } catch {
-      incomplete.push(r.name); // gone since it was selected: never a reason to retire its items
-      continue;
-    }
-    const read = (file: string) => tree.read(file);
-    const src = (file: string, text: string) => ({
-      repo: r.name,
-      path: relative(root, file),
-      sha256: sha(text),
-    });
-    const isWiki = /wiki/i.test(r.name);
-    const here: ScopeTarget = { kind: "repository", repo: r.name };
-
-    // 1. Agent instructions / conventions: inlined for that repository (identical copies, e.g. AGENTS.md = CLAUDE.md, once).
-    const seenText = new Set<string>();
-    const failuresBefore = tree.failures;
-    for (const f of ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"]) {
-      const file = join(root, f);
-      if (!tree.exists(file)) continue;
-      // After an unreadable one, a later file may be its duplicate (AGENTS.md = CLAUDE.md): not decidable, not emitted.
-      if (tree.failures > failuresBefore) continue;
-      const text = read(file);
-      if (!text || seenText.has(sha(text))) continue;
-      seenText.add(sha(text));
-      out.push({
-        key: slug(`${r.name}.${f.replace(/\.md$/i, "")}`),
-        category: "repository_convention",
-        title: `${r.name}: ${f}`,
-        content: text,
-        metadata: { load: "inline", description: firstParagraph(text) },
-        source: [src(file, text)],
-        target: here,
-      });
-    }
-    for (const file of tree
-      .walk(join(root, "docs"), 1)
-      .filter((f) => /convention/i.test(basename(f)) && f.endsWith(".md"))) {
-      const text = read(file);
-      if (!text) continue;
-      out.push({
-        key: slug(`${r.name}.${basename(file, ".md")}`),
-        category: "repository_convention",
-        title: `${r.name}: ${firstHeading(text) ?? basename(file)}`,
-        content: text,
-        metadata: { load: "inline", description: firstParagraph(text) },
-        source: [src(file, text)],
-        // Nobody codes in the wiki itself: inline the conventions for the code repositories it documents.
-        target: isWiki ? { kind: "wiki_siblings", repo: r.name } : here,
-      });
-    }
-
-    // 2. Skills (.claude preferred over .agents for the same name).
-    const seenInRepo = new Set<string>();
-    for (const base of [".claude/skills", ".agents/skills"]) {
-      const dir = join(root, base);
-      for (const name of tree.list(dir).map((e) => e.name)) {
-        if (seenInRepo.has(name)) continue;
-        const failures = tree.failures;
-        const file = ["SKILL.md", `${name}.md`]
-          .map((f) => join(dir, name, f))
-          .find((f) => tree.exists(f));
-        const text = file ? read(file) : null;
-        // Unreadable (not absent): never fall back to .agents/skills — that would publish another file as this skill.
-        if (tree.failures > failures) seenInRepo.add(name);
-        if (!file || !text) continue;
-        seenInRepo.add(name);
-        const companions = readSkillCompanions(tree, join(dir, name), file);
-        // A companion that could not be read changes the skill's identity (another group, other keys): skip the
-        // skill until a complete scan.
-        if (tree.failures > failures) continue;
-        const id = `${name}:${sha(text)}:${sha(JSON.stringify(companions))}`;
-        const e =
-          skills.get(id) ??
-          skills.set(id, { name, text, companions, repos: [], paths: [] }).get(id)!;
-        e.repos.push(r.name);
-        e.paths.push(relative(root, file));
-      }
-    }
-
-    // 3. Cursor rules: coding standards for that repository, on demand.
-    for (const file of tree
-      .walk(join(root, ".cursor", "rules"), 1)
-      .filter((f) => f.endsWith(".mdc") || f.endsWith(".md"))) {
-      const text = read(file);
-      if (!text) continue;
-      const { fields, body } = frontmatter(text);
-      out.push({
-        key: slug(`${r.name}.rule.${basename(file).replace(/\.mdc?$/, "")}`),
-        category: "coding_standard",
-        title: `${r.name}: ${firstHeading(body) ?? basename(file)}`,
-        content: body.trim(),
-        metadata: {
-          load: fields.alwaysApply === "true" ? "inline" : "on_demand",
-          description: fields.description || firstParagraph(body),
-          globs: fields.globs ?? null,
-        },
-        source: [src(file, text)],
-        target: here,
-      });
-    }
-
-    // This installation's own checkout: architecture and integration notes are not a wiki, so the wiki pass
-    // never sees them. Keep them on demand for the platform repository only.
-    if (r.self) {
-      for (const file of tree.walk(join(root, "docs"), 3)) {
-        if (!file.endsWith(".md") || /convention/i.test(basename(file))) continue;
-        const rel = relative(root, file);
-        const platformDoc =
-          rel.startsWith("docs/architecture/") ||
-          rel.startsWith("docs/integrations/") ||
-          rel === "docs/frontend/ui-quality-standards.md";
-        if (!platformDoc) continue;
-        const text = read(file);
-        if (!text) continue;
-        const category = rel.startsWith("docs/architecture/")
-          ? "architecture_guideline"
-          : rel === "docs/frontend/ui-quality-standards.md"
-            ? "coding_standard"
-            : "domain_knowledge";
-        out.push({
-          key: slug(`${r.name}.${rel.replace(/\.md$/, "").replace(/\//g, ".")}`),
-          category,
-          title: `${r.name}: ${firstHeading(text) ?? basename(file)}`,
-          content: text,
-          metadata: { load: "on_demand", description: firstParagraph(text) },
-          source: [src(file, text)],
-          target: here,
-        });
-      }
-    }
-
-    // 4. Wiki repositories: architecture + partner/domain docs for the whole project, on demand. Paths are tested
-    // relative to the repository (an absolute test matched every file of a checkout below some ".../docs/...").
-    if (isWiki) {
-      for (const file of tree.walk(root, 4)) {
-        const rel = relative(root, file);
-        if (
-          !rel.endsWith(".md") ||
-          !(/(^|\/)docs\//.test(rel) || WIKI_EXTRA.some((re) => re.test(rel)))
-        )
-          continue;
-        if (WIKI_SKIP.some((re) => re.test(rel))) continue;
-        if (
-          /(^|\/)docs\//.test(rel) &&
-          /convention/i.test(basename(file)) &&
-          relative(join(root, "docs"), file).split("/").length <= 2
-        )
-          continue; // imported above as a convention
-        const text = read(file);
-        if (!text) continue;
-        out.push({
-          key: slug(`${r.name}.${rel.replace(/^\./, "").replace(/\.md$/, "").replace(/\//g, ".")}`),
-          category: /architecture/i.test(rel) ? "architecture_guideline" : "domain_knowledge",
-          title: `${r.name}: ${firstHeading(text) ?? rel}`,
-          content: text,
-          metadata: { load: "on_demand", description: firstParagraph(text) },
-          source: [src(file, text)],
-          target: { kind: "wiki_projects", repo: r.name },
-        });
-      }
-    }
-    if (tree.incomplete) incomplete.push(r.name);
-  }
-
-  // User-level skills (~/.claude/skills): previously auto-loaded by Claude Code; now imported once into the registry
-  // (agent steps no longer load Claude Code settings layers). Copies of repository skills are skipped.
-  const repoSkillHashes = new Set([...skills.values()].map((s) => sha(s.text)));
-  const userSkillHashes = new Set<string>();
-  if (userDir && existsSync(userDir)) {
-    const tree = new SourceTree(userDir, "~/.claude/skills", skipped, budget);
-    for (const name of tree.list(userDir).map((e) => e.name)) {
-      const text = tree.readRaw(join(userDir, name, "SKILL.md"));
-      if (text === null) continue;
-      // Same content as a repository skill: keep the repository item, but it was available everywhere via ~/.claude,
-      // so it must not shrink to the repositories that happen to contain a copy (widened below).
-      if (repoSkillHashes.has(sha(text))) {
-        userSkillHashes.add(sha(text));
-        continue;
-      }
-      if (looksSecret(text)) {
-        skipped.push({
-          path: `~/.claude/skills/${name}/SKILL.md`,
-          reason: "looks like it contains credentials",
-        });
-        continue;
-      }
-      const { fields, body } = frontmatter(text);
-      out.push({
-        key: slug(`user.skill.${name}`),
-        category: "agent_skill",
-        title: `Skill: ${fields.name || name}`,
-        content: sliceUnits(body.trim(), MAX_CHARS),
-        metadata: {
-          load: "on_demand",
-          description: sliceUnits(fields.description || firstParagraph(body), 600),
-          origin: "user",
-        },
-        source: [{ repo: "~/.claude", path: `skills/${name}/SKILL.md`, sha256: sha(text) }],
-        target: { kind: "user_skill", name },
-      });
-    }
-  }
-
-  // Skills: identical copies across repositories → one item for all of them.
-  const byName = new Map<string, number>();
-  for (const s of skills.values()) byName.set(s.name, (byName.get(s.name) ?? 0) + 1);
-  for (const s of skills.values()) {
-    const variants = byName.get(s.name)!;
-    // Also in ~/.claude (available everywhere before): widened to its project, or the organization if generic.
-    const target: ScopeTarget = userSkillHashes.has(sha(s.text))
-      ? { kind: "user_skill", name: s.name }
-      : { kind: "repositories", repos: s.repos };
-    out.push(
-      ...skillCandidates({
-        key: slug(variants > 1 ? `skill.${s.name}.${s.repos[0]}` : `skill.${s.name}`),
-        name: s.name,
-        text: s.text,
-        companions: s.companions,
-        titleSuffix: variants > 1 ? ` (${s.repos.join(", ")})` : "",
-        scope: { scope_type: "GLOBAL" },
-        applicability: {},
-        sources: s.repos.map((repo, i) => ({
-          repo,
-          dir: dirname(s.paths[i]),
-          mainFile: basename(s.paths[i]),
-        })),
-      }).map((c) => retarget(c, target)),
-    );
-  }
-  return {
-    candidates: out,
-    skipped,
-    scanned: repos.map((r) => r.name).filter((n) => !incomplete.includes(n)),
-    incomplete,
-  };
-}
+// platform-go (go/internal/knowledge) reads the files and returns the Discovery; scope, applicability and governance
+// never leave TypeScript.
 
 /** The user-level skills directory imported with the repositories. */
 export const userSkillsDir = () =>
@@ -916,8 +643,7 @@ export async function scanRepositories(): Promise<{
   incomplete: string[];
 }> {
   const { all, repos } = await scanTargets();
-  const d =
-    (await goKnowledgeScan(repos, userSkillsDir())) ?? discoverKnowledge(repos, userSkillsDir());
+  const d = await goKnowledgeScan(repos, userSkillsDir());
   return {
     candidates: assembleCandidates(d, all),
     skipped: d.skipped,

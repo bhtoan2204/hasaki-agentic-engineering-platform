@@ -2,6 +2,8 @@
 
 Status: accepted, behind `CODE_SEARCH_ENGINE=go` (default `typescript`) · Date: 2026-11-21
 
+> **Update 2026-11-21:** the TypeScript engine was removed; platform-go is the only engine (no flag, no fallback, no rollback switch).
+
 ## Context
 
 ADR 0002 moved indexing to Go; searching the index stayed in `src/codeIntelligence/search.ts`. Every agent step,

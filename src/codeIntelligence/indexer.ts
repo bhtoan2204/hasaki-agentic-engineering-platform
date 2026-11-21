@@ -8,16 +8,9 @@ import { ownsInstance, instanceSession } from "../instances.ts";
 import { retrievalService } from "../retrieval/semantic.ts";
 import { pool, one, q, type Db } from "../db/pool.ts";
 import { realpath } from "node:fs/promises";
-import { git, baseCommit, treeFiles, changes, readBlobs, hash, languageOf } from "./git.ts";
-import {
-  snapshot,
-  filesOf,
-  extractionBatch,
-  publish,
-  type FileRecord,
-  type Snapshot,
-} from "./store.ts";
-import { parserVersion, ParserLoadError } from "./parser.ts";
+import { git, baseCommit } from "./git.ts";
+import type { Snapshot } from "./store.ts";
+import { parserVersion } from "./parser.ts";
 import { backgroundDelegate, canSyncFor } from "../repos/backgroundGit.ts";
 
 export async function enqueue(repoName: string, runId?: number) {
@@ -93,7 +86,7 @@ export async function indexRepository(
   workspacePath?: string,
   /** false: index the checkout already in the platform workspace, without contacting the remote (no credentials). */
   provision = true,
-) {
+): Promise<{ snapshot: Snapshot; metrics: Record<string, number> }> {
   const start = Date.now();
   const metrics: Record<string, number> = {
     indexed_files: 0,
@@ -102,144 +95,11 @@ export async function indexRepository(
     index_cache_hits: 0,
   };
   const scope = await localScope(repoName, runId, provision, workspacePath);
-  const progress = async (processed: number, total: number) => {
-    if (!fence) return;
-    const row = await one(
-      pool,
-      `UPDATE code_intelligence.runs SET metrics=$3,updated_at=now()
-      WHERE id=$1 AND fencing_token=$2 AND status='running' RETURNING id`,
-      [
-        fence.id,
-        fence.token,
-        JSON.stringify({
-          ...metrics,
-          processed_files: processed,
-          total_files: total,
-        }),
-      ],
-    );
-    if (!row) throw new Error("Index lease lost");
-  };
   const base = await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch);
-  if (config.codeIntelligence.engine === "go")
-    return indexWithGo(scope.repo.id, scope.primary, scope.root, base, runId, signal, fence);
-  let baseline = await snapshot(scope.repo.id, `base:${base}`);
-  const check = () => {
-    signal?.throwIfAborted();
-    if (Date.now() - start > config.codeIntelligence.timeoutMs) throw new Error("Index timeout");
-  };
-  if (!baseline) {
-    const manifest = await treeFiles(scope.primary, base, metrics);
-    const prior = await one(
-      pool,
-      `SELECT id FROM code_intelligence.snapshots WHERE repository_id=$1 AND base_snapshot_id IS NULL AND index_version=$2 ORDER BY id DESC LIMIT 1`,
-      [scope.repo.id, parserVersion()],
-    );
-    const previous = new Map((prior ? await filesOf(prior.id) : []).map((f) => [f.file_path, f]));
-    const files: FileRecord[] = [];
-    const byBlob = new Map(
-      [...previous.values()].map((f) => [
-        `${languageOf(f.file_path)}:${f.blob_hash}`,
-        f.extraction_id,
-      ]),
-    );
-    for (let offset = 0; offset < manifest.length; offset += 100) {
-      check();
-      await progress(offset, manifest.length);
-      const batch = manifest.slice(offset, offset + 100);
-      const pending = batch.filter((f) => !byBlob.has(`${languageOf(f.path)}:${f.blob}`));
-      const sources = pending.length
-        ? await readBlobs(
-            scope.primary,
-            pending.map((f) => f.blob),
-            signal,
-          )
-        : [];
-      const ids = await extractionBatch(
-        pending.map((f, i) => ({ path: f.path, source: sources[i] })),
-        metrics,
-        signal,
-        start + config.codeIntelligence.timeoutMs,
-      );
-      for (const f of batch) {
-        const at = pending.indexOf(f);
-        const id = byBlob.has(`${languageOf(f.path)}:${f.blob}`)
-          ? byBlob.get(`${languageOf(f.path)}:${f.blob}`)!
-          : (ids.get(`${languageOf(f.path)}:${hash(sources[at])}`) ?? null);
-        if (byBlob.has(`${languageOf(f.path)}:${f.blob}`)) metrics.index_cache_hits++;
-        files.push({
-          file_path: f.path,
-          blob_hash: f.blob,
-          extraction_id: id,
-          deleted: false,
-        });
-      }
-    }
-    baseline = await publish(
-      {
-        repository_id: scope.repo.id,
-        commit_sha: base,
-        identity: `base:${base}`,
-      },
-      files,
-      fence,
-    );
-  }
-  let result = baseline;
-  if (runId) {
-    const state = await changes(scope.root, base);
-    const identity = `overlay:${config.instanceId}:${runId}:${baseline.id}:${state.generation}`;
-    result = (await snapshot(scope.repo.id, identity)) ?? null!;
-    if (!result) {
-      const files: FileRecord[] = [];
-      for (let offset = 0; offset < state.files.length; offset += 100) {
-        check();
-        await progress(offset, state.files.length);
-        const batch = state.files.slice(offset, offset + 100);
-        const ids = await extractionBatch(
-          batch
-            .filter((f) => f.content !== null)
-            .map((f) => ({ path: f.path, source: f.content! })),
-          metrics,
-          signal,
-          start + config.codeIntelligence.timeoutMs,
-        );
-        for (const f of batch)
-          files.push({
-            file_path: f.path,
-            blob_hash: f.hash,
-            extraction_id:
-              f.content === null ? null : (ids.get(`${languageOf(f.path)}:${f.hash}`) ?? null),
-            deleted: f.content === null,
-          });
-      }
-      result = await publish(
-        {
-          repository_id: scope.repo.id,
-          commit_sha: state.head,
-          identity,
-          base_snapshot_id: baseline.id,
-          instance_id: config.instanceId,
-          run_id: runId,
-          generation: state.generation,
-        },
-        files,
-        fence,
-        async () => {
-          check();
-          if ((await changes(scope.root, base)).generation !== state.generation)
-            throw new Error("Worktree changed while indexing");
-        },
-      );
-    }
-  }
-  metrics.indexed_files = (await one(
-    pool,
-    "SELECT indexed_files FROM code_intelligence.snapshots WHERE id=$1",
-    [result.id],
-  ))!.indexed_files;
-  metrics.index_duration = Date.now() - start;
-  return { snapshot: result, metrics };
+  // Extraction, snapshots and publication run in platform-go (go/internal/codeintelligence); the lease, heartbeat,
+  // authorization and checkout stay here, and the fence travels with the request.
+  const out = await indexWithGo(scope.repo.id, scope.primary, scope.root, base, runId, signal, fence);
+  return { ...out, metrics: { ...metrics, ...out.metrics, index_duration: Date.now() - start } };
 }
 
 /** The code-intelligence-v1 IndexRequest (go/contracts/code-intelligence-v1.schema.json). */
@@ -428,7 +288,6 @@ export async function runIndexOnce(signal?: AbortSignal) {
 }
 export function diagnostic(e: unknown) {
   // Child-process errors may embed source or credentials. Persist categories only.
-  if (e instanceof ParserLoadError) return `${e.message}; check installed WASM assets`;
   if ((e as NodeJS.ErrnoException)?.code === "EACCES") return "Indexing source permission denied";
   const message = (e as Error)?.message ?? "";
   // A job without a requesting user has no Git credentials (another member's token is never borrowed).

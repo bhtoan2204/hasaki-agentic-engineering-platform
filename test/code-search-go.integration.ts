@@ -1,16 +1,14 @@
 /**
- * CODE_SEARCH_ENGINE=go (ADR 0006). First the whole code intelligence suite (code-intelligence.integration.ts) runs
- * with searches answered by a real platform-go: stale overlays, modified/deleted/renamed files, symlinks,
- * unauthorized repositories and traversal, ranking ties, proto dependencies. Then both engines answer the same
- * queries on the same repositories, snapshots and worktrees and must agree hit for hit; plus the internal API's own
- * defenses, secret redaction, fallback, timeout and cancellation. Fails without a Go toolchain.
+ * Code search in platform-go (ADR 0006; the only engine). The whole code intelligence suite
+ * (code-intelligence.integration.ts) runs with searches answered by a real platform-go: stale overlays,
+ * modified/deleted/renamed files, symlinks, unauthorized repositories and traversal, ranking ties, proto
+ * dependencies; plus the internal API's own defenses, secret redaction, unavailability, timeout and cancellation. Fails without a Go toolchain.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { createServer } from "node:http";
 import { config } from "../src/config.ts";
 import { goToolchain, requireGoToolchain, startPlatformGo } from "./fixtures/platformGo.ts";
 
@@ -19,7 +17,7 @@ if (!goToolchain()) {
 } else {
   const go = await startPlatformGo();
   after(go.stop);
-  config.codeIntelligence.searchEngine = "go";
+  // The shared code-intelligence fixtures (repositories, workflow, worktrees) and its suite, on platform-go.
   await import("./code-intelligence.integration.ts");
   const search = await import("../src/codeIntelligence/search.ts");
   const { goSearchStats } = await import("../src/codeIntelligence/goSearch.ts");
@@ -92,84 +90,7 @@ if (!goToolchain()) {
     provision: false,
     ...extra,
   });
-  const runScope = () => scope({ runId: run.id });
-  const strip = (x: unknown): unknown =>
-    JSON.parse(
-      JSON.stringify(x, (k, v) =>
-        k === "search_latency" || k === "context_latency" ? undefined : v,
-      ),
-    );
-  const both = async <T>(fn: () => Promise<T>) => {
-    config.codeIntelligence.searchEngine = "typescript";
-    const ts = await fn();
-    config.codeIntelligence.searchEngine = "go";
-    const calls = goSearchStats.calls;
-    const viaGo = await fn();
-    assert.ok(goSearchStats.calls > calls, "answered by platform-go");
-    return { ts: strip(ts), go: strip(viaGo) };
-  };
-
-  const queries = [
-    "searchSymbols fresh",
-    "buildCodeContext applyEvidence",
-    "eligibleText queryTerms",
-    "overlayOnly addedInWorktree readSource",
-    "sharedHelper0 sharedHelper2",
-    "noSuchSymbolAnywhereXyz",
-    "search.ts",
-  ];
-  for (const [label, sc] of [
-    ["base snapshots", scope],
-    ["a run worktree overlay", runScope],
-  ] as const)
-    test(`parity: symbols, definitions, dependencies, references and code context (${label})`, async () => {
-      for (const q of queries) {
-        const r = await both(() => search.searchSymbols(q, sc(), 30));
-        assert.deepEqual(r.go, r.ts, `searchSymbols ${q}`);
-      }
-      for (const sym of ["searchSymbols", "fresh", "localScope", "applyEvidence"]) {
-        let r = await both(() => search.findDefinitions(sym, sc()));
-        assert.deepEqual(r.go, r.ts, `findDefinitions ${sym}`);
-        r = await both(() => search.findDependencies(sym, sc(), 2));
-        assert.deepEqual(r.go, r.ts, `findDependencies ${sym}`);
-        r = await both(() => search.findReferences(sym, sc()));
-        assert.deepEqual(r.go, r.ts, `findReferences ${sym}`);
-      }
-      for (const q of queries.slice(0, 5)) {
-        const r = await both(() => search.buildCodeContext(q, sc()));
-        assert.deepEqual(r.go, r.ts, `buildCodeContext ${q}`);
-      }
-      const rows = (await repositories.list()).filter((r) => repos.includes(r.name));
-      const hybrid = await both(() =>
-        search.hybridRank(rows, { text: "searchSymbols readSource" }),
-      );
-      assert.deepEqual(hybrid.go, hybrid.ts, "hybridRank");
-    });
-
-  test("parity: exact search keeps the repository order and the limit across repositories", async () => {
-    for (const [pattern, limit, anyFile] of [
-      ["searchSymbols", 7, false],
-      ["export function", 20, false],
-      ["hunter2", 5, true],
-    ] as const) {
-      const r = await both(() => search.searchCodeExact(pattern, scope(), limit, { anyFile }));
-      const go = r.go as Array<{ repository: string; file_path: string }>;
-      const ts = r.ts as typeof go;
-      assert.equal(go.length, ts.length, pattern);
-      // ripgrep walks in parallel for TypeScript; Go asks it for path order. The per-repository sets agree, and
-      // repositories appear in scope order in both.
-      const order = (h: typeof go) => [...new Set(h.map((x) => x.repository))];
-      assert.deepEqual(order(go), order(ts));
-      if (go.length < limit)
-        assert.deepEqual(
-          new Set(go.map((h) => JSON.stringify(h))),
-          new Set(ts.map((h) => JSON.stringify(h))),
-        );
-    }
-  });
-
-  test("secrets in snippets are redacted by Go as by TypeScript", async () => {
-    config.codeIntelligence.searchEngine = "go";
+  test("secrets in snippets are redacted", async () => {
     const hits = await search.searchCodeExact("hunter2", scope(), 5, { anyFile: true });
     assert.ok(hits.length > 0);
     for (const h of hits) assert.doesNotMatch(h.snippet!, /hunter2/);
@@ -178,7 +99,6 @@ if (!goToolchain()) {
   });
 
   test("a revoked repository permission is resolved by TypeScript and never reaches Go", async () => {
-    config.codeIntelligence.searchEngine = "go";
     await repositories.upsert("cs-gamma", { projects: ["CS"], allowed_actions: [] } as never);
     try {
       const r = await search.searchSymbols("sharedHelper2", scope(), 30);
@@ -201,8 +121,7 @@ if (!goToolchain()) {
   test("exact search authorizes lazily with the sequential semantics: an unauthorized repository raises only when reached", async () => {
     await repositories.upsert("cs-beta", { projects: ["CS"], allowed_actions: [] } as never);
     try {
-      for (const e of ["typescript", "go"] as const) {
-        config.codeIntelligence.searchEngine = e;
+      for (const e of ["go"] as const) {
         // sharedHelper occurs once per repository: limit 2 reaches cs-beta, limit 1 is filled by cs-alpha.
         await assert.rejects(
           search.searchCodeExact("sharedHelper", scope(), 2),
@@ -225,7 +144,6 @@ if (!goToolchain()) {
   });
 
   test("a refused credential is raised, never answered by fallback", async () => {
-    config.codeIntelligence.searchEngine = "go";
     const token = process.env.RETRIEVAL_INTERNAL_TOKEN;
     process.env.RETRIEVAL_INTERNAL_TOKEN = "y".repeat(64);
     try {
@@ -313,18 +231,17 @@ if (!goToolchain()) {
     assert.equal(versionRes.status, 409);
   });
 
-  test("an unreachable or slow platform-go falls back to the TypeScript engine with the same authorization", async () => {
-    config.codeIntelligence.searchEngine = "go";
-    config.codeIntelligence.searchEngine = "typescript";
-    const expected = strip(await search.searchSymbols("searchSymbols", scope(), 30));
-    config.codeIntelligence.searchEngine = "go";
+  test("an unreachable or slow platform-go fails the search with its reason (no second engine)", async () => {
     const url = config.retrieval.semantic.url;
     config.retrieval.semantic.url = "http://127.0.0.1:9";
     try {
-      const before = goSearchStats.fallbacks.unreachable ?? 0;
-      assert.deepEqual(strip(await search.searchSymbols("searchSymbols", scope(), 30)), expected);
-      assert.equal(goSearchStats.fallbacks.unreachable, before + 1);
-      // Fallback never widens the scope: an unauthorized repository is still refused.
+      const before = goSearchStats.failures.unreachable ?? 0;
+      await assert.rejects(
+        search.searchSymbols("searchSymbols", scope(), 30),
+        /Code search is unavailable/,
+      );
+      assert.equal(goSearchStats.failures.unreachable, before + 1);
+      // The scope is still authorized first.
       await assert.rejects(
         search.searchSymbols("x", { repositories: ["cs-alpha"], allowed: [] }),
         /Unauthorized/,
@@ -332,34 +249,5 @@ if (!goToolchain()) {
     } finally {
       config.retrieval.semantic.url = url;
     }
-    // A platform-go that accepts the request and never answers: the deadline (timeoutMs) cancels it.
-    const hang = createServer(() => {}).listen(0, "127.0.0.1");
-    await new Promise((r) => hang.once("listening", r));
-    const timeout = config.codeIntelligence.timeoutMs;
-    config.codeIntelligence.timeoutMs = 2000;
-    config.retrieval.semantic.url = `http://127.0.0.1:${(hang.address() as { port: number }).port}`;
-    try {
-      const before = goSearchStats.fallbacks.timeout ?? 0;
-      assert.deepEqual(strip(await search.searchSymbols("searchSymbols", scope(), 30)), expected);
-      assert.equal(
-        goSearchStats.fallbacks.timeout,
-        before + 1,
-        "the deadline cancels Go; TypeScript answers",
-      );
-    } finally {
-      hang.close();
-      hang.closeAllConnections();
-      config.retrieval.semantic.url = url;
-      config.codeIntelligence.timeoutMs = timeout;
-    }
-  });
-
-  test("rollback: the flag selects the engine per call; results are identical", async () => {
-    const r = await both(() => search.searchSymbols("readSource safePath", scope(), 30));
-    assert.deepEqual(r.go, r.ts);
-    config.codeIntelligence.searchEngine = "typescript";
-    const calls = goSearchStats.calls;
-    await search.searchSymbols("readSource", scope(), 30);
-    assert.equal(goSearchStats.calls, calls);
   });
 }

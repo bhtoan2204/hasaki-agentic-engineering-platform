@@ -94,30 +94,6 @@ export async function baseCommit(root: string, defaultBranch = config.baseBranch
   }
   throw new Error("Default/configured base branch unavailable");
 }
-export async function treeFiles(root: string, sha: string, metrics?: Record<string, number>) {
-  const out = await git(root, ["ls-tree", "-rlz", sha]);
-  const files = out
-    .split("\0")
-    .filter(Boolean)
-    .flatMap((line) => {
-      const m = /^(\d+) blob ([a-f0-9]+)\s+(\d+)\t(.*)$/s.exec(line);
-      if (
-        m &&
-        ["100644", "100755"].includes(m[1]) &&
-        eligible(m[4]) &&
-        +m[3] <= config.codeIntelligence.maxFileBytes
-      )
-        return [{ path: m[4], blob: m[2], size: +m[3] }];
-      if (metrics) metrics.skipped_files++;
-      return [];
-    });
-  if (
-    files.length > config.codeIntelligence.maxFiles ||
-    files.reduce((n, f) => n + f.size, 0) > config.codeIntelligence.maxScanBytes
-  )
-    throw new Error("Repository scan limit exceeded");
-  return files;
-}
 export interface Change {
   path: string;
   content: string | null;

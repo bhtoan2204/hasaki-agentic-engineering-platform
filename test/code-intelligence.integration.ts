@@ -24,7 +24,7 @@ import { changes, readSource, safePath } from "../src/codeIntelligence/git.ts";
 import { definitions } from "../src/workflow/definitions.ts";
 import { startRun } from "../src/workflow/engine.ts";
 import { recordWorkspace } from "../src/git/provider.ts";
-import { publish } from "../src/codeIntelligence/store.ts";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import { parserVersion } from "../src/codeIntelligence/parser.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
 
@@ -51,10 +51,13 @@ const names = async (run?: number) =>
   (
     await searchSymbols("Original Modified Added Branch Committed Renamed", scope(run), 100)
   ).hits.map((h) => h.symbol_name);
+let go: Awaited<ReturnType<typeof startPlatformGo>>;
 before(async () => {
   await migrate();
   await shareAllRepositoriesForTests();
   config.codeIntelligence.enabled = true;
+  // Indexing and search run in platform-go (the only engine).
+  go = await startPlatformGo();
   root = join(config.reposRoot, name);
   mkdirSync(root, { recursive: true });
   git(root, "init", "-q", "-b", config.baseBranch);
@@ -99,7 +102,10 @@ before(async () => {
     }
   }
 });
-after(() => pool.end());
+after(async () => {
+  go?.stop();
+  await pool.end();
+});
 test("Initial base snapshot, exact and qualified definitions; immutable publication deduplication", async () => {
   const [a, b] = await Promise.all([indexRepository(name), indexRepository(name)]);
   assert.equal(a.snapshot.id, b.snapshot.id);
@@ -278,18 +284,6 @@ test("Durable queue deduplication, expired lease restart recovery and cancellati
   await q(pool, "UPDATE code_intelligence.runs SET status='canceled',fencing_token=3 WHERE id=$1", [
     c!.id,
   ]);
-  await assert.rejects(
-    publish(
-      {
-        repository_id: (await repositories.get(name))!.id,
-        commit_sha: "never",
-        identity: "never",
-      },
-      [],
-      { id: c!.id, token: 2 },
-    ),
-    /lease lost/,
-  );
   await q(
     pool,
     "UPDATE code_intelligence.runs SET status='running',attempts=3,lease_expires_at=now()-interval '1 second' WHERE id=$1",

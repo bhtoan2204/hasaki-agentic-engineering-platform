@@ -1,9 +1,8 @@
 /**
- * KNOWLEDGE_IMPORT_ENGINE=go (ADR 0007): the TypeScript discovery and platform-go scan the same repositories and must
- * produce the same discovery, the same import reports, the same registry and the same embedding eligibility — at
- * every step of a fixture's life (conventions, wikis, skills with companions, identical skills across repositories,
+ * The knowledge scan in platform-go (ADR 0007; the only engine): import reports, registry and embedding eligibility
+ * at every step of a fixture's life (conventions, wikis, skills with companions, identical skills across repositories,
  * user-level skills, secrets, oversized files, symlinks, renames, deletions, registry deletions, evolution conflicts,
- * partial scans). Plus the scan endpoint's own defenses (trusted roots, versions), fallback, credential refusal,
+ * partial scans). Plus the scan endpoint's own defenses (trusted roots, versions), unavailability, credential refusal,
  * cancellation and concurrent imports. Fails without a Go toolchain.
  */
 import { test, before, after } from "node:test";
@@ -169,12 +168,11 @@ if (!goToolchain()) {
   });
 
   const repoArgs = () => REPOS.map((name) => ({ name, root: root(name), self: name === "kb-api" }));
-  const engine = (e: "typescript" | "go") => (config.knowledge.importEngine = e);
-  const dry = async (e: "typescript" | "go") => {
-    engine(e);
+  /** A dry run, answered by platform-go (the only discovery engine). */
+  const dry = async () => {
     const calls = goKnowledgeStats.calls;
     const r = await importer.importFromRepositories({ dryRun: true });
-    if (e === "go") assert.equal(goKnowledgeStats.calls, calls + 1, "answered by platform-go");
+    assert.equal(goKnowledgeStats.calls, calls + 1, "answered by platform-go");
     return r;
   };
   /** The registry as both engines must leave it: items and current versions, without ids and timestamps. */
@@ -202,12 +200,8 @@ if (!goToolchain()) {
     }
   };
 
-  test("discovery: both engines find the same candidates, skips and repositories", async () => {
-    const ts = importer.discoverKnowledge(repoArgs(), userDir);
-    engine("go");
-    const viaGo = await goKnowledgeScan(repoArgs(), userDir);
-    assert.ok(viaGo, "platform-go answered");
-    assert.deepEqual(viaGo, ts);
+  test("discovery: candidates, skips and repositories", async () => {
+    const ts = await goKnowledgeScan(repoArgs(), userDir);
     // The fixture exercised what it is meant to.
     const keys = ts.candidates.map((c) => c.key);
     for (const k of [
@@ -256,17 +250,13 @@ if (!goToolchain()) {
     assert.deepEqual(ts.scanned, REPOS);
   });
 
-  test("import: the same reports, registry and embedding eligibility from either engine; dry runs write nothing", async () => {
+  test("import: reports, registry and embedding eligibility; dry runs write nothing", async () => {
     const out: Record<string, unknown> = {};
-    for (const e of ["typescript", "go"] as const) {
-      await clear();
-      assert.deepEqual(await dry(e), await dry(e === "go" ? "typescript" : "go"), "dry runs agree");
-      assert.equal((await registry()).length, 0, "a dry run writes nothing");
-      engine(e);
-      const report = await importer.importFromRepositories();
-      out[e] = { report, registry: await registry(), eligible: await eligible() };
-    }
-    assert.deepEqual(out.go, out.typescript);
+    await clear();
+    assert.deepEqual(await dry(), await dry(), "dry runs are repeatable");
+    assert.equal((await registry()).length, 0, "a dry run writes nothing");
+    const report = await importer.importFromRepositories();
+    out.go = { report, registry: await registry(), eligible: await eligible() };
     const reg = (
       out.go as { registry: Array<{ key: string; enabled: boolean; scope_type: string }> }
     ).registry;
@@ -290,8 +280,7 @@ if (!goToolchain()) {
     assert.ok(!keys.includes("user.skill.pr"), "a disabled skill is never embedded");
   });
 
-  test("incremental: unchanged, modified, added, deleted and renamed documents; both engines agree at every step", async () => {
-    engine("go");
+  test("incremental: unchanged, modified, added, deleted and renamed documents", async () => {
     const unchanged = await importer.importFromRepositories();
     assert.equal(
       unchanged.created + unchanged.updated + unchanged.retired,
@@ -309,15 +298,13 @@ if (!goToolchain()) {
       join(root("kb-docs-wiki"), "docs", "partners", "ghn.md"),
       join(root("kb-docs-wiki"), "docs", "partners", "ghn-express.md"),
     ); // renamed
-    const ts = await dry("typescript");
-    assert.deepEqual(await dry("go"), ts);
+    const ts = await dry();
     const byKey = Object.fromEntries(ts.candidates.map((c) => [c.key, c.action]));
     assert.equal(byKey["kb-api.conventions"], "update");
     assert.equal(byKey["kb-api.new-convention"], "create");
     assert.equal(byKey["kb-api.gemini"], "retire");
     assert.equal(byKey["kb-docs-wiki.docs.partners.ghn-express"], "create");
     assert.equal(byKey["kb-docs-wiki.docs.partners.ghn"], "retire");
-    engine("go");
     const r = await importer.importFromRepositories();
     assert.equal(await versions(), before + r.created + r.updated + r.retired);
     commitAll(); // staged/committed: same content, nothing new
@@ -340,11 +327,9 @@ if (!goToolchain()) {
       join(root("kb-worker"), "CLAUDE.md"),
       "# kb-worker\n\nQueues, edited in the repository too.\n",
     );
-    const ts = await dry("typescript");
-    assert.deepEqual(await dry("go"), ts);
+    const ts = await dry();
     assert.ok(ts.skipped.some((s) => s.reason === "kb-api.claude was deleted from the registry"));
     assert.equal(ts.candidates.find((c) => c.key === "kb-worker.claude")!.action, "conflict");
-    engine("go");
     const r = await importer.importFromRepositories();
     assert.ok(
       r.candidates.find((c) => c.key === "kb-worker.claude")!.proposal_id,
@@ -358,11 +343,9 @@ if (!goToolchain()) {
   });
 
   test("unreadable is not deleted: permission errors make the scan incomplete and retire nothing; deletions still retire", async () => {
-    engine("go");
     await importer.importFromRepositories(); // settle the registry on the current files
     const api = root("kb-api");
     put(join(api, ".agents", "skills", "shared", "SKILL.md"), skill("shared", " agents copy"));
-    engine("typescript");
     await importer.importFromRepositories();
     const lock = [
       join(api, "docs"), // directory: readdir EACCES
@@ -372,8 +355,7 @@ if (!goToolchain()) {
     ];
     for (const p of lock) execFileSync("chmod", ["000", p]);
     try {
-      const ts = await dry("typescript");
-      assert.deepEqual(await dry("go"), ts);
+      const ts = await dry();
       assert.deepEqual(ts.incomplete, ["kb-api"]);
       for (const p of ["kb-api/docs", "kb-api/CLAUDE.md", "kb-api/.claude/skills/shared/SKILL.md"])
         assert.ok(
@@ -395,7 +377,6 @@ if (!goToolchain()) {
           (x) => x.reason === "skill.shared not updated: the scan of kb-api is incomplete",
         ),
       );
-      engine("go");
       const r = await importer.importFromRepositories();
       assert.equal(r.retired, 0);
       assert.deepEqual(r.incomplete, ["kb-api"]);
@@ -407,8 +388,7 @@ if (!goToolchain()) {
     }
     // Readable again and one file really deleted: that one is retired, nothing else.
     unlinkSync(join(api, "docs", "naming-convention.md"));
-    const ts = await dry("typescript");
-    assert.deepEqual(await dry("go"), ts);
+    const ts = await dry();
     assert.equal(ts.incomplete, undefined);
     assert.deepEqual(
       ts.candidates.filter((c) => c.action === "retire").map((c) => c.key),
@@ -420,8 +400,8 @@ if (!goToolchain()) {
     const saved = importer.SCAN_LIMITS.maxEntries;
     importer.SCAN_LIMITS.maxEntries = 3;
     try {
-      const ts = await dry("typescript");
-      const viaGo = await dry("go");
+      const ts = await dry();
+      const viaGo = await dry();
       assert.deepEqual(viaGo, ts);
       assert.ok(ts.incomplete && ts.incomplete.length > 0, "reported incomplete");
       for (const c of ts.candidates.filter((x) => x.action === "retire"))
@@ -437,8 +417,7 @@ if (!goToolchain()) {
   test("revoked or disabled repositories are neither scanned nor retired", async () => {
     await repositories.upsert("kb-worker", { enabled: false });
     try {
-      const ts = await dry("typescript");
-      assert.deepEqual(await dry("go"), ts);
+      const ts = await dry();
       assert.ok(
         !ts.candidates.some((c) => c.key.startsWith("kb-worker.")),
         "not scanned, not retired",
@@ -450,7 +429,6 @@ if (!goToolchain()) {
   });
 
   test("concurrent imports are serialized: no duplicate versions, no unique violations", async () => {
-    engine("go");
     put(join(root("kb-api"), "docs", "concurrent-convention.md"), "# Concurrent\n\nOnce.\n");
     const [a, b] = await Promise.all([
       importer.importFromRepositories(),
@@ -504,21 +482,13 @@ if (!goToolchain()) {
     rmSync(link);
   });
 
-  test("fallback: unreachable or slow platform-go → TypeScript discovery; a refused credential is raised", async () => {
-    const expected = importer.discoverKnowledge(repoArgs(), userDir);
-    engine("go");
+  test("an unreachable or slow platform-go fails the scan with its reason; a refused credential is raised", async () => {
     const url = config.retrieval.semantic.url;
     try {
       config.retrieval.semantic.url = "http://127.0.0.1:9";
-      const before = goKnowledgeStats.fallbacks.unreachable ?? 0;
-      assert.equal(await goKnowledgeScan(repoArgs(), userDir), null);
-      assert.equal(goKnowledgeStats.fallbacks.unreachable, before + 1);
-      const scan = await importer.scanRepositories();
-      assert.deepEqual(
-        [...scan.scanned].sort(),
-        [...expected.scanned].sort(),
-        "TypeScript answered",
-      );
+      const before = goKnowledgeStats.failures.unreachable ?? 0;
+      await assert.rejects(goKnowledgeScan(repoArgs(), userDir), /Knowledge scan is unavailable/);
+      assert.equal(goKnowledgeStats.failures.unreachable, before + 1);
       config.retrieval.semantic.url = url;
       const token = process.env.RETRIEVAL_INTERNAL_TOKEN;
       process.env.RETRIEVAL_INTERNAL_TOKEN = "x".repeat(64);
@@ -535,9 +505,9 @@ if (!goToolchain()) {
       importer.SCAN_LIMITS.deadlineMs = 200; // request timeout = deadline + 10 s
       try {
         const t = Date.now();
-        assert.equal(await goKnowledgeScan(repoArgs(), userDir), null);
+        await assert.rejects(goKnowledgeScan(repoArgs(), userDir), /Knowledge scan is unavailable/);
         assert.ok(Date.now() - t < 15_000);
-        assert.ok((goKnowledgeStats.fallbacks.timeout ?? 0) >= 1);
+        assert.ok((goKnowledgeStats.failures.timeout ?? 0) >= 1);
       } finally {
         importer.SCAN_LIMITS.deadlineMs = deadline;
         hang.close();

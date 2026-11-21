@@ -35,7 +35,7 @@ import { setStepAgent } from "../workflow/engine.ts";
 import { attemptContext, findSnapshot } from "../context/repository.ts";
 import { engineeringAnalytics } from "./analytics/index.ts";
 import { analyticsEngineStats } from "./analytics/engine.ts";
-import { updateIncidentLifecycle } from "./analytics/health.ts";
+import { updateIncidentLifecycle } from "./analytics/incidents.ts";
 import {
   publishBuiltinSuite,
   listSuites,
@@ -1323,23 +1323,19 @@ export const routes: Route[] = [
       };
     },
   ],
-  // Analytics engine (ADR 0003): which engine served, fallbacks by reason, and platform-go's analytics pool.
+  // Analytics (ADR 0003, platform-go): requests served, failures by reason, and platform-go's analytics pool.
   [
     "GET",
     /^\/api\/admin\/analytics\/engine$/,
     async (c) => {
       requireAdmin(c.actor);
-      const res =
-        config.analytics.engine === "go" && process.env.RETRIEVAL_INTERNAL_TOKEN
-          ? await retrievalService("/internal/v1/analytics/stats", undefined, 5000).catch(
-              () => null,
-            )
-          : null;
+      const res = process.env.RETRIEVAL_INTERNAL_TOKEN
+        ? await retrievalService("/internal/v1/analytics/stats", undefined, 5000).catch(() => null)
+        : null;
       return {
-        engine: config.analytics.engine,
-        served: { go: analyticsEngineStats.go, typescript: analyticsEngineStats.typescript },
-        fallbacks: { ...analyticsEngineStats.fallbacks },
-        rejected: analyticsEngineStats.rejected,
+        engine: "go",
+        served: analyticsEngineStats.go,
+        failures: { ...analyticsEngineStats.failures },
         service: res?.ok ? await res.json().catch(() => null) : null,
       };
     },

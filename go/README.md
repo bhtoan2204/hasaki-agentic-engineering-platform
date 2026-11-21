@@ -152,7 +152,7 @@ retry) with that message, since an indexing job never reads outside the trusted 
 | `CODE_INDEX_JOBS` | `1` | indexing jobs at a time (callers beyond it wait: backpressure) |
 | `ANALYTICS_MAX_CONCURRENT` | `2` | 1–8: connections of the separate read-only analytics pool = statements at once |
 | `ANALYTICS_TIMEOUT_MS` | `15000` | analytics request deadline (slot wait included) and the pool's `statement_timeout` |
-| `PROD_ERRORS_ENGINE` | `typescript` | `go`: claim and run production error scans (requires `PLATFORM_INTERNAL_URL`) |
+| `PROD_ERRORS_ENGINE` | `typescript` | `go`: claim and run production error scans (requires `PLATFORM_INTERNAL_URL`); the platform always passes `go` |
 | `PLATFORM_INTERNAL_URL` | | loopback URL of the supervising platform server (its provider gateway); set by the supervisor |
 | `PROD_SCAN_WORKERS` | `1` | 1–4 scans at once |
 | `PROD_SCAN_POLL_MS` | `60000` | fallback claim poll; TypeScript wakes the runner when it queues a scan |

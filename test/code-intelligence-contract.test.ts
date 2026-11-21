@@ -43,7 +43,7 @@ test("the request carries this platform's index version, which Go must reproduce
   );
 });
 
-test("CODE_SEARCH_ENGINE=go sends code-intelligence-v1 SearchRequests for every operation", () => {
+test("code search sends code-intelligence-v1 SearchRequests for every operation", () => {
   const resolved = {
     repositories: [
       {

@@ -9,10 +9,6 @@ test("A failed grammar load is visible, source-safe and retryable after assets a
     throw new Error("private source or path must not be logged");
   });
   await assert.rejects(extract("retry.go", "package retry\nfunc Recovered() {}"), ParserLoadError);
-  assert.equal(
-    diagnostic(new ParserLoadError("go", new Error("secret"))),
-    "Parser unavailable (go); check installed WASM assets",
-  );
   loader.mock.restore();
   assert.ok(
     (await extract("retry.go", "package retry\nfunc Recovered() {}"))!.symbols.some(

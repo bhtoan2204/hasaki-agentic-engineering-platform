@@ -1,30 +1,13 @@
 import { createHash } from "node:crypto";
-import { execution } from "../auth/execution.ts";
-import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { config } from "../config.ts";
-import { pool, q, one, withTx, type Db } from "../db/pool.ts";
+import { pool, q, one, type Db } from "../db/pool.ts";
 import { currentUserId } from "../auth/execution.ts";
-import {
-  activeScan,
-  claimScan,
-  enqueueScan,
-  finishScan,
-  firstToday,
-  heartbeat,
-  initialProgress,
-  LEASE_SECONDS,
-  recoverScans,
-  windowOf,
-  type ScanJob,
-  type ScanTrigger,
-} from "./jobs.ts";
+import { activeScan, enqueueScan, firstToday, recoverScans, type ScanTrigger } from "./jobs.ts";
 import { settings } from "../db.ts";
-import { splunkConnected, splunkExpired, splunkSearch } from "../integrations/splunk.ts";
+import { splunkConnected, splunkExpired } from "../integrations/splunk.ts";
 import {
   signozEnabled,
-  signozErrorSpanGroups,
-  signozSlowRequestGroups,
-  signozTraceGaps,
+  type signozTraceGaps,
   type SlowRequestGroup,
   signozStatus,
   type SpanErrorGroup,
@@ -105,7 +88,6 @@ import {
   indexOf,
   MAX_CUSTOM_HOURS,
   SCAN_PRESETS,
-  scanNamespaces,
   zoned,
   type ScanOptions,
   type ScanWindow,
@@ -518,12 +500,9 @@ export interface ScanProgress {
   startedAt: string;
 }
 
-/** This instance's identity in scan leases. */
-const leaseOwner = () => `${config.instanceId}:${process.pid}`;
-
 /**
- * Queue a scan (one at a time across all instances). Options are validated before anything is stored. The
- * TypeScript engine runs it in this process; with PROD_ERRORS_ENGINE=go platform-go claims it.
+ * Queue a scan (one at a time across all instances). Options are validated before anything is stored; platform-go
+ * claims and runs it.
  */
 export async function startScan(
   trigger: ScanTrigger,
@@ -532,90 +511,27 @@ export async function startScan(
 ) {
   const requestedBy = input.requestedBy ?? currentUserId() ?? null;
   const r = await enqueueScan(trigger, opts, { requestedBy, dedupeKey: input.dedupeKey });
-  if (r.started && r.job?.engine === "typescript") void runQueuedScans();
   return { started: r.started, running: r.running, ...(r.job ? { scan_id: r.job.id } : {}) };
 }
 
-let draining: Promise<void> | null = null;
-/** Run every due TypeScript job this instance can claim (one at a time; the queue holds at most one anyway). */
-export function runQueuedScans() {
-  draining ??= (async () => {
-    try {
-      for (;;) {
-        const job = await claimScan(leaseOwner());
-        if (!job) return;
-        await executeClaimed(job).catch((e) =>
-          console.error("prod error scan:", (e as Error).message),
-        );
-      }
-    } finally {
-      draining = null;
-    }
-  })();
-  return draining;
-}
-
-/** Run a claimed job as the user who requested it, with that user's own integrations. */
-async function executeClaimed(job: ScanJob) {
-  const userId = job.requested_by;
-  if (!userId) return executeScan(job);
-  return execution.run({ userId, kind: "user" }, async () => {
-    const user = await one(pool, "SELECT active FROM users WHERE id = $1", [userId]);
-    if (!user?.active) {
-      await finishScan(job, {
-        status: "failed",
-        error: "the requesting user is missing or inactive",
-      });
-      return;
-    }
-    await loadPersonalIntegrations();
-    return executeScan(job);
-  });
-}
-
 /**
- * Scan now in this process and wait for the result (tests, CLI): queued and claimed in one statement, so it still
- * takes the global one-scan slot and the same fenced publication as a queued scan.
+ * Queue a scan and wait until platform-go finishes it (tests, CLI). Rejects with the scan's error when it failed.
  */
 export async function runScan(trigger: ScanTrigger, now = new Date(), opts: ScanOptions = {}) {
-  const r = await enqueueScan(trigger, opts, {
-    requestedBy: currentUserId() ?? null,
-    now,
-    engine: "typescript",
-    claimBy: leaseOwner(),
-  });
+  const r = await enqueueScan(trigger, opts, { requestedBy: currentUserId() ?? null, now });
   if (!r.job) throw Object.assign(new Error("một lượt quét khác đang chạy"), { status: 409 });
-  return executeScan(r.job);
-}
-
-/** Latency groups for the scan; the slowest few get their untraced gaps. Failures only add a note. */
-async function slowRows(w: ScanWindow, ns: string[], hasBaseline: boolean, notes: string[]) {
-  const threshold = config.prodErrors.slowThresholdMs;
-  if (!threshold) return [];
-  try {
-    const win = { start: w.start * 1000, end: w.end * 1000 };
-    const slow = await signozSlowRequestGroups(
-      win,
-      { start: w.baseStart * 1000, end: w.baseEnd * 1000 },
-      ns,
-      threshold,
+  const deadline = Date.now() + (config.prodErrors.timeoutSeconds + 120) * 1000;
+  for (;;) {
+    const row = await one<{ status: string; error: string | null; groups: number | null }>(
+      pool,
+      "SELECT status, error, groups FROM prod_error_scans WHERE id = $1",
+      [r.job.id],
     );
-    const rows = signozSlowRows(slow.today, slow.yesterday, slow.samples, threshold);
-    if (!hasBaseline) for (const r of rows) r.no_baseline = true;
-    // The five largest groups' gap analyses are independent trace reads: fetched concurrently.
-    const top = rows
-      .sort((a, b) => Number(b.today) - Number(a.today))
-      .slice(0, 5)
-      .filter((r) => r.trace_id && r.slow);
-    await Promise.all(
-      top.map(async (r) => {
-        r.slow!.gaps = maskGaps(await signozTraceGaps(win, r.trace_id!).catch(() => []));
-      }),
-    );
-    return rows;
-  } catch (e) {
-    notes.push(`SigNoz (request chậm): ${(e as Error).message}`);
-    return [];
+    if (row?.status === "succeeded") return { ok: true, groups: row.groups ?? 0 };
+    if (row && row.status !== "queued" && row.status !== "running")
+      throw new Error(row.error ?? `scan ${row.status}`);
+    if (Date.now() > deadline) throw new Error(`scan ${r.job.id} did not finish in time`);
+    await new Promise((res) => setTimeout(res, 100));
   }
 }
 
@@ -628,6 +544,11 @@ export const maskGaps = (gaps: Awaited<ReturnType<typeof signozTraceGaps>>) =>
     gap_ms: g.gap_ms,
     share: g.share,
   }));
+
+export const SIGNOZ_TRUNCATED =
+  "SigNoz: quá nhiều nhóm trace lỗi, chỉ lấy các nhóm nhiều nhất; các nhóm nhỏ có thể bị bỏ sót";
+export const SIGNOZ_NO_BASELINE =
+  "SigNoz: chưa có trace của kỳ so sánh (hôm qua cùng khung giờ), các nhóm chỉ từ SigNoz không được đánh giá mới/tăng";
 
 /** Groups of one scan, upserted only over groups no newer scan has written (a stale worker never wins). */
 export async function publishGroups(c: Db, scanId: number, groups: ReturnType<typeof toGroups>) {
@@ -662,172 +583,8 @@ export async function publishGroups(c: Db, scanId: number, groups: ReturnType<ty
   );
 }
 
-class LeaseLost extends Error {}
-
 /**
- * The TypeScript engine: collect from Splunk and SigNoz with the requesting user's integrations, group, publish
- * under the fence, notify. A heartbeat keeps the lease and the shared progress; a lost lease stops the scan
- * before anything is written, and a cancellation request ends it as canceled.
- */
-export async function executeScan(job: ScanJob) {
-  const w = windowOf(job.request);
-  const trigger = job.trigger;
-  const namespaces = scanNamespaces(job.request.namespaces);
-  const progress = (job.progress as unknown as ScanProgress) ?? (initialProgress() as ScanProgress);
-  const setPhase = (phase: ScanProgress["phase"], pct: number) => {
-    Object.assign(progress, { phase, pct: Math.max(progress.pct, pct) });
-    lastWrite = 0;
-    publishProgress();
-  };
-  let lost = false;
-  let canceled = false;
-  const abort = new AbortController();
-  const beat = async () => {
-    const r = await heartbeat(job, progress).catch(() => undefined);
-    if (r === null) lost = true;
-    if (r?.cancel) canceled = true;
-    if (lost || canceled) abort.abort();
-  };
-  const timer = setInterval(() => void beat(), (LEASE_SECONDS * 1000) / 3);
-  timer.unref();
-  // Progress is shared through the row: written when it changes, at most every 200 ms (the page polls).
-  let lastWrite = 0;
-  const publishProgress = () => {
-    if (Date.now() - lastWrite < 200) return;
-    lastWrite = Date.now();
-    void beat();
-  };
-  const checkpoint = () => {
-    if (lost) throw new LeaseLost("scan lease lost");
-    if (canceled) throw new Error("canceled");
-  };
-  try {
-    const useSplunk = splunkConnected();
-    const useSignoz = signozEnabled();
-    if (!useSplunk && !useSignoz)
-      throw new Error(
-        splunkExpired()
-          ? "phiên Splunk hết hạn và chưa kết nối SigNoz — dán cookie Splunk mới hoặc kết nối SigNoz ở trang Integrations"
-          : "chưa kết nối Splunk hay SigNoz — kết nối ít nhất một nguồn ở trang Integrations",
-      );
-    const notes: string[] = [];
-    if (!useSplunk)
-      notes.push(
-        splunkExpired()
-          ? "Splunk: phiên hết hạn, chỉ quét SigNoz"
-          : "Splunk: chưa kết nối, chỉ quét SigNoz",
-      );
-    const signoz = useSignoz
-      ? collectSignoz(
-          w,
-          namespaces.map((n) => n.namespace),
-          notes,
-        ).catch((e) => {
-          notes.push(`SigNoz: ${(e as Error).message}`);
-          return null;
-        })
-      : Promise.resolve(null);
-    const splunk = useSplunk
-      ? splunkSearch(
-          {
-            query: buildScanSpl(w, namespaces),
-            since_minutes: w.minutes,
-            until_minutes: w.untilMinutes,
-            max_results: 300,
-            timeout_seconds: config.prodErrors.timeoutSeconds,
-          },
-          (p) => {
-            // the Splunk search is most of the wall time: 5% → 90%
-            Object.assign(progress, {
-              phase: "search",
-              searchPct: p.pct,
-              splunkState: p.state,
-              scanned: p.scanned,
-              matched: p.matched,
-              pct: Math.max(progress.pct, 5 + Math.round(p.pct * 0.85)),
-            });
-            publishProgress();
-          },
-        ).catch((e) => {
-          if (!useSignoz) throw e;
-          notes.push(`Splunk: ${(e as Error).message}`);
-          return null;
-        })
-      : Promise.resolve(null);
-    if (!useSplunk) setPhase("search", 30);
-    const [r, signozResult] = await Promise.all([splunk, signoz]);
-    checkpoint();
-    if (!r && !signozResult) throw new Error(notes.join("; ") || "không quét được nguồn log nào");
-    setPhase("group", 92);
-    const groups = toGroups(
-      mergeSourceRows(
-        ...(r ? [{ source: "splunk" as const, rows: r.results as unknown as SourceRow[] }] : []),
-        ...(signozResult
-          ? [
-              { source: "signoz" as const, rows: signozResult.errors },
-              { source: "signoz" as const, rows: signozResult.slow },
-            ]
-          : []),
-      ),
-      w.day,
-    );
-    setPhase("save", 95);
-    await withTx(async (c) => {
-      // Fence: only the current lease holder publishes; the row lock orders it against recovery.
-      const owner = await one(
-        c,
-        "SELECT 1 FROM prod_error_scans WHERE id=$1 AND fencing_token=$2 AND status='running' FOR UPDATE",
-        [job.id, job.fencing_token],
-      );
-      if (!owner) throw new LeaseLost("scan lease lost before publishing");
-      await publishGroups(c, job.id, groups);
-      await q(c, "UPDATE prod_error_scans SET stage='published' WHERE id=$1", [job.id]);
-    });
-    const warnings =
-      [...(r?.messages ?? []).filter((m: string) => !/^INFO/.test(m)), ...notes].join("; ") || null;
-    setPhase("notify", 98);
-    const notified = await finalizeScan(job.id, trigger, w);
-    await finishScan(job, {
-      status: "succeeded",
-      error: warnings,
-      groups: groups.length,
-      events: groups.reduce((a, g) => a + g.today_count, 0),
-      notified,
-    });
-    return { ok: true, groups: groups.length };
-  } catch (e) {
-    if (e instanceof LeaseLost || lost) throw e; // the new owner decides; this worker writes nothing
-    const msg = canceled ? "canceled" : (e as Error).message;
-    if (await finishScan(job, { status: canceled ? "canceled" : "failed", error: msg }))
-      if (trigger === "schedule" && !canceled) await notifyFailure(w.day, w.hm, msg);
-    throw e;
-  } finally {
-    clearInterval(timer);
-  }
-}
-
-/** SigNoz error traces, then latency groups (the slow query reuses the error query's baseline check). */
-async function collectSignoz(w: ScanWindow, ns: string[], notes: string[]) {
-  const spans = await signozErrorSpanGroups(
-    { start: w.start * 1000, end: w.end * 1000 },
-    { start: w.baseStart * 1000, end: w.baseEnd * 1000 },
-    ns,
-  );
-  if (spans.truncated) notes.push(SIGNOZ_TRUNCATED);
-  if (!spans.hasBaseline) notes.push(SIGNOZ_NO_BASELINE);
-  return {
-    errors: signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline),
-    slow: await slowRows(w, ns, spans.hasBaseline, notes),
-  };
-}
-
-export const SIGNOZ_TRUNCATED =
-  "SigNoz: quá nhiều nhóm trace lỗi, chỉ lấy các nhóm nhiều nhất; các nhóm nhỏ có thể bị bỏ sót";
-export const SIGNOZ_NO_BASELINE =
-  "SigNoz: chưa có trace của kỳ so sánh (hôm qua cùng khung giờ), các nhóm chỉ từ SigNoz không được đánh giá mới/tăng";
-
-/**
- * After publication (both engines): Telegram for scheduled scans, then policy intake. Idempotent per group: a group
+ * After publication (by platform-go, through the gateway): Telegram for scheduled scans, then policy intake. Idempotent per group: a group
  * is announced once per day (notified_day) and ingested once (intake keys), so a finalize retried after a crash
  * does not repeat either.
  */
@@ -1007,7 +764,6 @@ export async function scheduleTick(now = new Date()) {
     ))!;
     if (tick.active) {
       await recoverScans();
-      await runQueuedScans(); // claims TypeScript jobs only (queued here, recovered, or handed over from Go)
     }
     const userId = config.prodErrors.userId;
     if (!userId) return;

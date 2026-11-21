@@ -2,6 +2,8 @@
 
 Status: accepted, behind `CODE_INTELLIGENCE_ENGINE=go` (default `typescript`) · Date: 2026-11-20
 
+> **Update 2026-11-21:** the TypeScript engine was removed; platform-go is the only engine (no flag, no fallback, no rollback switch).
+
 ## Context
 
 `src/codeIntelligence/` indexes repositories into the `code_intelligence` schema: per-commit base snapshots,

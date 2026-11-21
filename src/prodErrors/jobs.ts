@@ -5,11 +5,10 @@
  * two instances (or a double click, or two schedule ticks) can never scan at once, and an expired lease (crash,
  * kill -9, lost network) is recovered by whichever instance notices first.
  *
- * Engines: `typescript` jobs run in this process (src/prodErrors/scan.ts executeScan); `go` jobs are claimed by
- * platform-go (go/internal/proderrors), which reaches the providers only through this process's internal gateway
- * (src/prodErrors/gateway.ts), so credentials and authorization never leave TypeScript.
+ * Every job is claimed and run by platform-go (go/internal/proderrors), which reaches the providers only through
+ * this process's internal gateway (src/prodErrors/gateway.ts), so credentials and authorization never leave
+ * TypeScript. (The `engine` column is kept for old rows; new jobs are always `go`.)
  */
-import { config } from "../config.ts";
 import { pool, one, q } from "../db/pool.ts";
 import { retrievalService } from "../retrieval/semantic.ts";
 import { scanNamespaces, scanWindow, type ScanOptions, type ScanWindow } from "./window.ts";
@@ -45,10 +44,6 @@ export interface ScanJob {
   progress: Record<string, unknown> | null;
 }
 
-export const LEASE_SECONDS = 30;
-/** A queued Go job nobody claimed for this long is handed to the TypeScript engine (platform-go is down). */
-export const GO_CLAIM_GRACE_SECONDS = 120;
-
 const ts = (e: number) => new Date(e * 1000).toISOString();
 
 /** The scan window as the collectors need it now: relative Splunk bounds are recomputed from the fixed window. */
@@ -69,8 +64,6 @@ export function windowOf(r: ScanRequest, now = new Date()): ScanWindow {
   };
 }
 
-export const engineFor = (): ScanEngine => config.prodErrors.engine;
-
 /**
  * Queue a scan. Options are validated before anything is stored (400 on a bad window or namespace). Returns
  * `started: false` when another scan is queued or running anywhere, or when `dedupeKey` was already used.
@@ -82,8 +75,6 @@ export async function enqueueScan(
     requestedBy: number | null;
     now?: Date;
     dedupeKey?: string;
-    engine?: ScanEngine;
-    claimBy?: string;
   },
 ): Promise<{ started: boolean; running: boolean; duplicate?: boolean; job?: ScanJob }> {
   const w = scanWindow(opts, input.now);
@@ -99,18 +90,12 @@ export async function enqueueScan(
     baseStart: w.baseStart,
     baseEnd: w.baseEnd,
   };
-  const engine = input.engine ?? engineFor();
-  // claimBy: the caller runs it right away (inline TypeScript scan), so it is inserted already leased.
-  const claimed = input.claimBy != null;
   try {
     const job = await one<ScanJob>(
       pool,
       `INSERT INTO prod_error_scans (trigger, preset, namespaces, window_start, window_end, baseline_start, baseline_end,
-         status, engine, requested_by, request, dedupe_key, attempts, fencing_token, lease_owner, lease_expires_at, heartbeat_at,
-         started_at, progress)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::int,$13::int,$14,
-         CASE WHEN $14::text IS NULL THEN NULL ELSE now() + make_interval(secs => $15) END,
-         CASE WHEN $14::text IS NULL THEN NULL ELSE now() END, now(), $16)
+         status, engine, requested_by, request, dedupe_key, progress)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'queued','go',$8,$9,$10,$11)
        RETURNING *`,
       [
         trigger,
@@ -120,18 +105,13 @@ export async function enqueueScan(
         ts(w.end),
         ts(w.baseStart),
         ts(w.baseEnd),
-        claimed ? "running" : "queued",
-        engine,
         input.requestedBy,
         JSON.stringify(request),
         input.dedupeKey ?? null,
-        claimed ? 1 : 0,
-        input.claimBy ?? null,
-        LEASE_SECONDS,
         JSON.stringify(initialProgress()),
       ],
     );
-    if (!claimed && engine === "go") wakeGo();
+    wakeGo();
     return { started: true, running: true, job: job! };
   } catch (e) {
     const err = e as { code?: string; constraint?: string };
@@ -159,41 +139,9 @@ function wakeGo() {
     .catch(() => {});
 }
 
-/** Claim the oldest due TypeScript job (attempt + 1, new fencing token, lease to this instance). */
-export async function claimScan(owner: string, id?: number) {
-  return one<ScanJob>(
-    pool,
-    `UPDATE prod_error_scans SET status='running', attempts=attempts+1, fencing_token=fencing_token+1,
-       lease_owner=$1, lease_expires_at=now()+make_interval(secs => $2), heartbeat_at=now(),
-       started_at=CASE WHEN attempts=0 THEN now() ELSE started_at END,
-       progress=COALESCE(progress, $4::jsonb)
-     WHERE id=(SELECT id FROM prod_error_scans WHERE engine='typescript' AND status='queued' AND available_at<=now()
-                 AND ($3::bigint IS NULL OR id=$3) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1)
-     RETURNING *`,
-    [owner, LEASE_SECONDS, id ?? null, JSON.stringify(initialProgress())],
-  );
-}
-
-/**
- * Extend the lease and store progress. Returns null when the lease is lost (another owner, finished, expired and
- * recovered): the caller must stop and publish nothing. `cancel` reports a requested cancellation.
- */
-export async function heartbeat(job: Pick<ScanJob, "id" | "fencing_token">, progress?: unknown) {
-  const row = await one<{ cancel_requested: boolean }>(
-    pool,
-    `UPDATE prod_error_scans SET lease_expires_at=now()+make_interval(secs => $3), heartbeat_at=now(),
-       progress=COALESCE($4::jsonb, progress)
-     WHERE id=$1 AND fencing_token=$2 AND status='running' RETURNING cancel_requested`,
-    [job.id, job.fencing_token, LEASE_SECONDS, progress == null ? null : JSON.stringify(progress)],
-  );
-  return row ? { cancel: row.cancel_requested } : null;
-}
-
 /**
  * Expired leases (crashed or partitioned workers, any engine): requeue with capped exponential backoff and full
- * jitter while attempts remain, otherwise fail. Queued Go jobs nobody claimed within the grace period, and every
- * queued Go job after a rollback to the TypeScript engine, are handed to TypeScript: a queued job has no owner,
- * so moving it never gives one scan two owners.
+ * jitter while attempts remain, otherwise fail.
  */
 export async function recoverScans() {
   const failed = await q<{ id: number; trigger: ScanTrigger; request: ScanRequest }>(
@@ -207,13 +155,7 @@ export async function recoverScans() {
        error=CASE WHEN attempts<max_attempts THEN error ELSE 'interrupted: the worker lease expired '||attempts||' times' END
      WHERE status='running' AND lease_expires_at<now() RETURNING id, trigger, request, status`,
   );
-  const moved = await q(
-    pool,
-    `UPDATE prod_error_scans SET engine='typescript'
-     WHERE status='queued' AND engine='go' AND ($1 OR queued_at<now()-make_interval(secs => $2)) RETURNING id`,
-    [engineFor() === "typescript", GO_CLAIM_GRACE_SECONDS],
-  );
-  return { recovered: failed.length, handedToTypescript: moved.length };
+  return { recovered: failed.length };
 }
 
 /** Fenced terminal update. False when the lease was lost: nothing is written. */

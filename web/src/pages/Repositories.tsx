@@ -189,7 +189,7 @@ export function RepositoriesPage({
   query,
   me,
 }: { name?: string; query: string; me?: { role?: string } | null }) {
-  const { t, status: statusText } = useI18n();
+  const { t } = useI18n();
   const isAdmin = me?.role === "admin";
   const params = new URLSearchParams(query);
   const view = params.get("view");
@@ -528,7 +528,7 @@ export function RepositoriesPage({
                             <dl className="repo-kv">
                               <div>
                                 <dt>{t("repo.ci.status")}</dt>
-                                <dd>{state?.status ? (statusText(state.status) || state.status) : t("repo.ci.notIndexed")}</dd>
+                                <dd>{state?.status ? t(`repo.ci.state.${state.status}`) : t("repo.ci.notIndexed")}</dd>
                               </div>
                               <div>
                                 <dt>{t("repo.ci.progress")}</dt>
@@ -561,6 +561,7 @@ export function RepositoriesPage({
                             {state?.last_indexing_error && (
                               <p className="muted small">{state.last_indexing_error}</p>
                             )}
+                            <div className="repo-ci-actions">
                             {isAdmin && (
                               <button
                                 className="ghost sm"
@@ -606,6 +607,7 @@ export function RepositoriesPage({
                                   {t("repo.ci.cancel")}
                                 </button>
                               )}
+                            </div>
                           </>
                         );
                       })()

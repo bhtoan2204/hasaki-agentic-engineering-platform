@@ -2,6 +2,8 @@
 
 Status: accepted, behind `PROD_ERRORS_ENGINE=go` (default `typescript`) · Date: 2026-11-20
 
+> **Update 2026-11-21:** the TypeScript engine was removed; platform-go is the only engine (no flag, no fallback, no rollback switch).
+
 ## Context
 
 Three TypeScript workers poll external systems: production error scans (`src/prodErrors/scan.ts`), pull request

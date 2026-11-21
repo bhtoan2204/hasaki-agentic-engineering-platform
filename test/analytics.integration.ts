@@ -4,18 +4,27 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { pool, one } from "../src/db/pool.ts";
 import { analyticsFixtures } from "./analytics.fixtures.ts";
-import { parseAnalyticsFilters } from "../src/api/analytics/filters.ts";
 import {
-  usageAnalytics,
-  performanceAnalytics,
-  workflowAnalytics,
-} from "../src/api/analytics/execution.ts";
-import {
-  healthAnalytics,
-  healthServiceAnalytics,
-  updateIncidentLifecycle,
-} from "../src/api/analytics/health.ts";
+  parseAnalyticsFilters,
+  type AnalyticsFilters,
+  type AnalyticsScope,
+} from "../src/api/analytics/filters.ts";
+import { loadDashboard } from "../src/api/analytics/engine.ts";
+import { updateIncidentLifecycle } from "../src/api/analytics/incidents.ts";
 import { handle } from "../src/http/app.ts";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
+import type { Untyped } from "../src/untyped.ts";
+
+// The dashboards are read by platform-go (the only engine): these semantics run against it.
+const dashboard =
+  (name: Parameters<typeof loadDashboard>[0]) => (f: AnalyticsFilters, scope: AnalyticsScope) =>
+    loadDashboard(name, f, scope) as Promise<Untyped>;
+const usageAnalytics = dashboard("usage");
+const performanceAnalytics = dashboard("performance");
+const workflowAnalytics = dashboard("workflows");
+const healthAnalytics = dashboard("health");
+const healthServiceAnalytics = dashboard("health-service");
+let go: Awaited<ReturnType<typeof startPlatformGo>>;
 let fixture: Awaited<ReturnType<typeof analyticsFixtures>>;
 let server: Server, base: string;
 const params = "from=2026-11-01&to=2026-11-03&timezone=UTC";
@@ -23,11 +32,13 @@ const filters = (extra = "") => parseAnalyticsFilters(new URLSearchParams(params
 const scope = () => ({ ownerId: fixture.owner.id, all: false });
 before(async () => {
   fixture = await analyticsFixtures();
+  go = await startPlatformGo();
   server = createServer(handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(async () => {
+  go?.stop();
   server?.close();
   await pool.end();
 });
@@ -39,7 +50,7 @@ test("SQL totals preserve partial sessions, provider models, reported zero and o
   assert.equal(data.summary.missing_reported_cost_usd, 3);
   assert.equal(Number(data.summary.cost_per_successful_run), 0.2);
   assert.equal(Number(data.summary.cost_per_verified_task), 0.4);
-  assert.ok(!data.details.some((r) => r.run_id === fixture.hidden.id));
+  assert.ok(!data.details.some((r: Untyped) => r.run_id === fixture.hidden.id));
   const codex = await usageAnalytics(filters("&provider=codex"), scope());
   assert.equal(codex.summary.reported_cost_usd, null);
   assert.equal(codex.summary.cache_creation_tokens, null);
@@ -80,7 +91,9 @@ test("date-only timezone boundaries are half-open and equivalent to explicit off
     y = await usageAnalytics(b, scope());
   assert.equal(x.summary.invocations, y.summary.invocations);
   assert.equal(x.summary.invocations, 3);
-  assert.ok(!x.details.some((r) => [fixture.before.id, fixture.codex.id].includes(r.run_id)));
+  assert.ok(
+    !x.details.some((r: Untyped) => [fixture.before.id, fixture.codex.id].includes(r.run_id)),
+  );
 });
 test("performance distinguishes completion from verified tasks and reports measured context", async () => {
   const p = await performanceAnalytics(filters(), scope());
@@ -92,7 +105,7 @@ test("performance distinguishes completion from verified tasks and reports measu
   assert.equal(p.summary.queue_ms, null);
   assert.equal(p.failures[0].category, "RATE_LIMIT");
   assert.ok(p.comparison.length >= 1);
-  const claude = p.details.find((r) => r.provider === "claude");
+  const claude = p.details.find((r: Untyped) => r.provider === "claude");
   assert.equal(claude?.step_type, "coding_agent");
   assert.match(String(claude?.model), /claude-test/);
   const paged = await performanceAnalytics(filters("&page=2&page_size=1"), scope());
@@ -112,16 +125,19 @@ test("health deduplicates repeated scans, preserves unknown lifecycle and protec
   assert.equal(h.summary.missing_resolved, 2);
   assert.equal(Number(h.trend[0].events), 24);
   assert.equal(
-    h.details.find((r) => r.fingerprint === fixture.foreignFingerprint)?.work_item_id,
+    h.details.find((r: Untyped) => r.fingerprint === fixture.foreignFingerprint)?.work_item_id,
     null,
   );
-  assert.equal(h.details.find((r) => r.fingerprint === fixture.foreignFingerprint)?.runs.length, 0);
   assert.equal(
-    h.details.find((r) => r.fingerprint === fixture.fingerprint)?.runs[0].status,
+    h.details.find((r: Untyped) => r.fingerprint === fixture.foreignFingerprint)?.runs.length,
+    0,
+  );
+  assert.equal(
+    h.details.find((r: Untyped) => r.fingerprint === fixture.fingerprint)?.runs[0].status,
     "COMPLETED",
   );
   assert.equal(
-    h.details.find((r) => r.fingerprint === fixture.fingerprint)?.lifecycle_status,
+    h.details.find((r: Untyped) => r.fingerprint === fixture.fingerprint)?.lifecycle_status,
     "open",
   );
 });
@@ -160,21 +176,24 @@ test("service partitions preserve unknown attribution, namespace identity, share
     const h = await healthAnalytics(filters(), scope());
     assert.equal(Number(h.summary.total_errors), 33);
     assert.equal(
-      h.services.reduce((n: number, r) => n + Number(r.events), 0),
+      h.services.reduce((n: number, r: Untyped) => n + Number(r.events), 0),
       Number(h.summary.total_errors),
     );
     assert.ok(
-      Math.abs(h.services.reduce((n: number, r) => n + Number(r.error_share_pct), 0) - 100) < 0.001,
+      Math.abs(
+        h.services.reduce((n: number, r: Untyped) => n + Number(r.error_share_pct), 0) - 100,
+      ) < 0.001,
     );
     assert.ok(
       h.services.some(
-        (r) => r.namespace === "test-ns" && r.service === "unknown" && Number(r.events) === 6,
+        (r: Untyped) =>
+          r.namespace === "test-ns" && r.service === "unknown" && Number(r.events) === 6,
       ),
     );
-    assert.equal(h.services.filter((r) => r.service === "oms-api").length, 2);
+    assert.equal(h.services.filter((r: Untyped) => r.service === "oms-api").length, 2);
     assert.ok(
       h.services.some(
-        (r) => r.namespace === "oms" && r.service === "oms-api" && Number(r.events) === 24,
+        (r: Untyped) => r.namespace === "oms" && r.service === "oms-api" && Number(r.events) === 24,
       ),
     );
     const service = await healthServiceAnalytics(
@@ -393,7 +412,7 @@ test("anomalies require labeled provider/model peers and empty pages retain tota
       JSON.stringify(metrics),
     ]);
     const data = await usageAnalytics(filters(), scope());
-    assert.equal(data.details.filter((r) => r.token_anomaly).length, 1);
+    assert.equal(data.details.filter((r: Untyped) => r.token_anomaly).length, 1);
     const empty = await usageAnalytics(filters("&page=999"), scope());
     assert.equal(empty.details.length, 0);
     assert.equal(empty.summary.invocations, 9);

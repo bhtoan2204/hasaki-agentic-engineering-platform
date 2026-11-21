@@ -1,10 +1,9 @@
 /**
- * PROD_ERRORS_ENGINE=go (ADR 0004): production error scans claimed and run by real platform-go processes, which
- * reach fake Splunk and SigNoz servers only through this process's internal gateway. Covers parity with the
- * TypeScript engine on identical provider data, two platform-go instances plus the TypeScript engine competing
- * for one job, duplicate submissions and schedule ticks, stale leases and fencing, a crashed worker, restart
- * recovery, HTTP 429 with Retry-After, partial provider failure, provider timeouts, cancellation, permission
- * revocation, rollback and the contract. Fails without a Go toolchain (PLATFORM_ALLOW_MISSING_GO=1 skips it).
+ * Production error scans (ADR 0004) claimed and run by real platform-go processes, which reach fake Splunk and
+ * SigNoz servers only through this process's internal gateway. Covers what a scan stores, two platform-go
+ * instances competing for one job, duplicate submissions and schedule ticks, stale leases and fencing, a crashed
+ * worker, restart recovery, HTTP 429 with Retry-After, partial provider failure, provider timeouts, cancellation,
+ * permission revocation and the contract. Fails without a Go toolchain (PLATFORM_ALLOW_MISSING_GO=1 skips it).
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -215,7 +214,7 @@ if (!goToolchain()) {
       ms,
     );
   const enqueue = (opts = custom(2)) =>
-    asAdmin(() => jobs.enqueueScan("manual", opts, { requestedBy: admin.id, engine: "go" }));
+    asAdmin(() => jobs.enqueueScan("manual", opts, { requestedBy: admin.id }));
 
   before(async () => {
     await migrate();
@@ -242,7 +241,6 @@ if (!goToolchain()) {
       });
     });
     gos.push(await startPlatformGo(goEnv()));
-    config.prodErrors.engine = "go";
   });
   after(async () => {
     for (const g of gos) g.stop();
@@ -276,23 +274,16 @@ if (!goToolchain()) {
     ),
   });
 
-  test("parity: the Go engine stores exactly what the TypeScript engine stores for the same provider data", async () => {
-    const ts = await asAdmin(() => scan.runScan("manual", new Date(), custom(2)));
-    assert.equal(ts.ok, true);
-    const tsId = (await one(pool, "SELECT max(id) AS id FROM prod_error_scans")).id;
-    const a = await snapshot(tsId);
+  test("a scan stores the merged Splunk and SigNoz groups, PII masked", async () => {
     const r = await enqueue();
     const done = await finished(r.job!.id);
     assert.equal(done.status, "succeeded", done.error);
     const b = await snapshot(r.job!.id);
-    assert.ok(a.groups.length >= 3, "splunk, signoz and their merged group");
-    assert.deepEqual(b.observations, a.observations);
-    assert.deepEqual(b.groups, a.groups);
-    assert.deepEqual(
-      { ...b.scan, engine: undefined, attempts: undefined },
-      { ...a.scan, engine: undefined, attempts: undefined },
-    );
+    assert.ok(b.groups.length >= 3, "splunk, signoz and their merged group");
+    assert.equal(b.scan.ok, true);
     assert.equal(b.scan.engine, "go");
+    assert.equal(b.scan.groups, b.groups.length);
+    assert.ok(b.observations.length >= b.groups.length);
     const g = await one(
       pool,
       "SELECT sample, detail FROM prod_error_groups WHERE service='payment-zalopay'",
@@ -300,7 +291,7 @@ if (!goToolchain()) {
     assert.doesNotMatch(g.sample, /0912345678/, "PII is masked by TypeScript before Go sees it");
   });
 
-  test("one job, one owner: two platform-go instances and the TypeScript engine, duplicate submissions", async () => {
+  test("one job, one owner: two platform-go instances, duplicate submissions", async () => {
     gos.push(await startPlatformGo(goEnv()));
     const searches = splunk.searches;
     const results = await Promise.all(
@@ -310,7 +301,6 @@ if (!goToolchain()) {
     );
     assert.equal(results.filter((x) => x.started).length, 1, JSON.stringify(results));
     const id = results.find((x) => x.started)!.scan_id!;
-    await scan.runQueuedScans(); // the TypeScript engine never takes a Go job
     const done = await finished(id);
     assert.equal(done.status, "succeeded");
     assert.equal(done.engine, "go");
@@ -478,11 +468,17 @@ if (!goToolchain()) {
     } finally {
       splunk.hold = false;
     }
-    const queued = await asAdmin(() =>
-      jobs.enqueueScan("manual", custom(2), { requestedBy: admin.id, engine: "typescript" }),
+    // A queued job no worker takes (an old TypeScript row, which platform-go never claims) is canceled at once.
+    const queued = await one(
+      pool,
+      `INSERT INTO prod_error_scans (trigger, preset, namespaces, window_start, window_end, baseline_start,
+         baseline_end, status, engine, requested_by, request, progress)
+       SELECT trigger, preset, namespaces, window_start, window_end, baseline_start, baseline_end, 'queued',
+         'typescript', requested_by, request, progress FROM prod_error_scans WHERE id=$1 RETURNING id`,
+      [(await one(pool, "SELECT max(id) AS id FROM prod_error_scans")).id],
     );
-    assert.deepEqual(await jobs.cancelScan(queued.job!.id), {
-      id: queued.job!.id,
+    assert.deepEqual(await jobs.cancelScan(queued.id), {
+      id: queued.id,
       status: "canceled",
     });
   });
@@ -512,23 +508,6 @@ if (!goToolchain()) {
       await q(pool, "UPDATE users SET role='admin' WHERE id=$1", [admin.id]);
     }
     void member;
-  });
-
-  test("rollback: with the TypeScript flag, queued Go scans are handed to TypeScript and run there", async () => {
-    gos[0].stop();
-    gos.length = 0;
-    const r = await enqueue();
-    config.prodErrors.engine = "typescript";
-    try {
-      assert.equal((await jobs.recoverScans()).handedToTypescript, 1);
-      await asAdmin(() => scan.runQueuedScans());
-      const done = await finished(r.job!.id);
-      assert.equal(done.status, "succeeded");
-      assert.equal(done.engine, "typescript");
-    } finally {
-      config.prodErrors.engine = "go";
-      gos.push(await startPlatformGo(goEnv()));
-    }
   });
 
   test("the gateway contract: auth, loopback, fence, errors", async () => {

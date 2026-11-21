@@ -96,7 +96,7 @@ test("API handlers use repositories while the stream and analytics retain direct
   const graph = graphOf({
     "src/api/routes.ts": `import "../db/pool.ts"; import "../workitems/repository.ts"; import("pg");`,
     "src/api/stream.ts": `import "pg";`,
-    "src/api/analytics/execution.ts": `import "../../db/pool.ts";`,
+    "src/api/analytics/incidents.ts": `import "../../db/pool.ts";`,
     "src/db/pool.ts": "",
     "src/workitems/repository.ts": "",
   });

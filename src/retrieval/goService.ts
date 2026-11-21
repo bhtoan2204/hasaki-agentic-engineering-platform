@@ -81,24 +81,19 @@ function build(bin: string) {
 }
 
 /**
- * Supervises platform-go next to the server when semantic retrieval, Go indexing or Go analytics is enabled and its
- * URL is on this machine. Any failure only logs: retrieval then stays lexical, Go indexing jobs fail and retry, and
- * analytics falls back to TypeScript (bounded).
+ * Supervises platform-go next to the server when its
+ * URL is on this machine. Any failure only logs: retrieval then stays lexical, and the features served by platform-go
+ * (analytics, code intelligence, knowledge scans, production error scans) answer "unavailable" until it is back.
  */
 export function startGoService() {
   const url = new URL(config.retrieval.semantic.url);
   let child: ChildProcess | null = null;
   let stopping = false;
   const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
-  // Semantic retrieval, Go indexing and Go analytics are all served by platform-go; each flag needs it on its own.
   if (config.supervision.engine === "go" && !process.env.PLATFORM_SUPERVISE_BIN)
     void ensureSupervisor();
-  const needed =
-    config.retrieval.semantic.enabled ||
-    config.codeIntelligence.engine === "go" ||
-    config.analytics.engine === "go" ||
-    config.prodErrors.engine === "go";
-  if (needed && local) {
+  // Analytics, code intelligence, knowledge scans and production error scans all run in platform-go: always start it.
+  if (local) {
     let bin = "";
     let delay = 1000;
     const run = () => {
@@ -110,7 +105,7 @@ export function startGoService() {
           PLATFORM_GO_ADDR: `${url.hostname}:${url.port || 80}`,
           DATABASE_POOL_MAX: "4",
           // Production error scans (ADR 0004) reach the providers through this server's internal gateway.
-          PROD_ERRORS_ENGINE: config.prodErrors.engine,
+          PROD_ERRORS_ENGINE: "go",
           PLATFORM_INTERNAL_URL: `http://127.0.0.1:${config.port}`,
           PLATFORM_GO_EXIT_ON_STDIN_EOF: "true",
           // Code search and knowledge scans read only below these (ADR 0006, 0007), whatever a request names.

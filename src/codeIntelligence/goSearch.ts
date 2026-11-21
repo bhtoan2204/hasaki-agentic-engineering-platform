@@ -1,5 +1,5 @@
 /**
- * CODE_SEARCH_ENGINE=go (ADR 0006): searches, dependency/reference lookups, exact search and code context answered
+ * Code search (ADR 0006): searches, dependency/reference lookups, exact search and code context answered
  * by platform-go (go/internal/codeintelligence/search.go, contract go/contracts/code-intelligence-v1.schema.json
  * SearchRequest). This module is the trust boundary: it authorizes the scope, resolves every repository through
  * localScope (registration, read permission, run ownership, worktree identity) ONCE per call — in parallel, keeping
@@ -24,7 +24,10 @@ interface SearchScope {
   provision?: boolean;
 }
 
-export const goSearchStats = { calls: 0, fallbacks: {} as Record<string, number> };
+export const goSearchStats = { calls: 0, failures: {} as Record<string, number> };
+
+/** platform-go could not answer (there is no second engine): the search fails with the reason. */
+export class CodeSearchUnavailable extends Error {}
 
 /** Repositories of the scope's run that have a workspace (one lookup per call). */
 const runRepos = async (scope: SearchScope) =>
@@ -117,32 +120,30 @@ export function goSearchRequest(
   };
 }
 
-/**
- * One platform-go call. Returns null when the TypeScript engine must answer instead (availability failures only).
- * `provision` is the provisioning policy of the TypeScript path being replaced.
- */
+/** One platform-go search call; `provision` lets an authorized scope clone what it needs. */
 export async function goSearch<H, E>(
   op: Op,
   scope: SearchScope,
   provision: boolean,
   query: Query,
-): Promise<GoSearchResponse<H, E> | null> {
-  if (config.codeIntelligence.searchEngine !== "go") return null;
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallback("missing_token");
+): Promise<GoSearchResponse<H, E>> {
+  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) unavailable("missing_token");
   return call<H, E>(op, scope, await resolveScope(scope, provision), query);
 }
 
-const fallback = (reason: string) => {
-  goSearchStats.fallbacks[reason] = (goSearchStats.fallbacks[reason] ?? 0) + 1;
-  return null;
-};
+function unavailable(reason: string): never {
+  goSearchStats.failures[reason] = (goSearchStats.failures[reason] ?? 0) + 1;
+  throw new CodeSearchUnavailable(
+    `Code search is unavailable (platform-go: ${reason}); retry shortly`,
+  );
+}
 
 async function call<H, E>(
   op: Op,
   scope: SearchScope,
   resolved: Awaited<ReturnType<typeof resolveScope>>,
   query: Query,
-): Promise<GoSearchResponse<H, E> | null> {
+): Promise<GoSearchResponse<H, E>> {
   const roots = await Promise.all(
     [config.reposRoot, config.dataDir].map((p) => realpath(p).catch(() => p)),
   );
@@ -152,7 +153,7 @@ async function call<H, E>(
     goSearchRequest(op, query, resolved, roots),
     Math.min(config.codeIntelligence.timeoutMs, 60_000),
   );
-  if (!res.ok) return fallback(res.reason);
+  if (!res.ok) unavailable(res.reason);
   const body = res.body as unknown as GoSearchResponse<H, E>;
   goSearchStats.calls++;
   // Indexing stays a TypeScript queue: schedule what platform-go found unindexed.
@@ -163,18 +164,15 @@ async function call<H, E>(
 }
 
 /**
- * searchCodeExact through platform-go with the sequential loop's semantics: repositories are authorized four at a
- * time in scope order and searched only until the limit is filled; a repository the loop would have reached and
- * that fails authorization raises its error there, as localScope does in the TypeScript loop. Returns null when the
- * TypeScript engine must answer (the whole call: partial results are dropped, the search is read-only).
+ * Exact search through platform-go: repositories are authorized four at a time in scope order and searched only until
+ * the limit is filled; a repository reached that fails authorization raises its error there.
  */
 export async function goExactSearch<H extends { repository: string }>(
   scope: SearchScope,
   provision: boolean,
   query: { pattern: string; limit: number; any_file: boolean },
-): Promise<H[] | null> {
-  if (config.codeIntelligence.searchEngine !== "go") return null;
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallback("missing_token");
+): Promise<H[]> {
+  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) unavailable("missing_token");
   const inRun = await runRepos(scope);
   const hits: H[] = [];
   for (let i = 0; i < scope.repositories.length && hits.length < query.limit; i += 4) {
@@ -186,7 +184,6 @@ export async function goExactSearch<H extends { repository: string }>(
           limit: query.limit - hits.length,
         })
       : { hits: [] as H[] };
-    if (!res) return null;
     for (const name of names) {
       const refused = resolved.unavailable.find((u) => u.name === name);
       if (refused) throw new Error(refused.error);

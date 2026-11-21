@@ -23,17 +23,6 @@ export interface CodeIntelligenceConfig {
   excludes: string[];
   /** Both use the bundled SQL grammar; unsupported dialect syntax is skipped, never translated. */
   sqlDialect: "postgresql" | "generic";
-  /**
-   * Which implementation runs indexing jobs: "typescript" (in-process) or "go" (platform-go, same extraction and
-   * index version, so switching back needs no reindex). The queue, leases and authorization stay here either way.
-   */
-  engine: "typescript" | "go";
-  /**
-   * Which implementation answers searches, dependency/reference lookups and code context (ADR 0006): "typescript"
-   * (in-process) or "go" (platform-go, one request per call). Authorization and scope resolution stay here either way.
-   * Set by CODE_SEARCH_ENGINE.
-   */
-  searchEngine: "typescript" | "go";
   weights: {
     exact: number;
     qualified: number;
@@ -54,11 +43,8 @@ export interface SupervisionLimits {
 }
 
 export interface AnalyticsConfig {
-  engine: "typescript" | "go";
   /** Deadline of one dashboard read in platform-go (queueing for an analytics slot included). */
   timeoutMs: number;
-  /** TypeScript fallbacks allowed at once when platform-go is unavailable; more are rejected with 503. */
-  maxFallbackConcurrency: number;
 }
 
 export type SlopSeverity = "low" | "medium" | "high";
@@ -110,8 +96,6 @@ export const SSH_HOST_KEY =
 export interface Config {
   knowledge: {
     ponytail: { enabled: boolean; mapChars: number };
-    /** Repository knowledge scan: typescript (default) | go (platform-go, ADR 0007). Governance stays in TypeScript. */
-    importEngine: "typescript" | "go";
   };
   /** Semantic re-ranking by the Go retrieval service (ADR 0001); the token comes only from RETRIEVAL_INTERNAL_TOKEN. */
   retrieval: {
@@ -567,11 +551,6 @@ export interface Config {
     timeoutSeconds: number;
     /** A request (root span) slower than this is counted in a SigNoz latency group; 0 disables latency groups. */
     slowThresholdMs: number;
-    /**
-     * Which engine runs queued scans (ADR 0004): "typescript" (this process) or "go" (platform-go claims them and
-     * reaches Splunk/SigNoz through this process's internal gateway). Set by PROD_ERRORS_ENGINE.
-     */
-    engine: "typescript" | "go";
   };
   jira: {
     /** e.g. https://hasaki.atlassian.net. Empty = Jira import disabled. */
@@ -638,7 +617,7 @@ const LIVE = process.env.PLATFORM_TEST !== "1";
 const ENGINE = LIVE ? ("go" as const) : ("typescript" as const);
 
 const defaults: Config = {
-  knowledge: { ponytail: { enabled: false, mapChars: 2000 }, importEngine: ENGINE },
+  knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
   retrieval: {
     semantic: {
       enabled: LIVE,
@@ -648,7 +627,7 @@ const defaults: Config = {
       minSimilarity: 0.45,
     },
   },
-  analytics: { engine: ENGINE, timeoutMs: 15000, maxFallbackConcurrency: 2 },
+  analytics: { timeoutMs: 15000 },
   codeIntelligence: {
     enabled: LIVE,
     includeGenerated: false,
@@ -663,8 +642,6 @@ const defaults: Config = {
     retentionDays: 7,
     excludes: [],
     sqlDialect: "postgresql",
-    engine: ENGINE,
-    searchEngine: ENGINE,
     weights: {
       exact: 2,
       qualified: 2,
@@ -871,7 +848,6 @@ const defaults: Config = {
     schedule: ["09:00", "14:00", "17:00"],
     timeoutSeconds: 1800,
     slowThresholdMs: 1000,
-    engine: ENGINE,
   },
   learning: {
     detectChanges: true,
@@ -906,7 +882,6 @@ function load(): Config {
     ...fromFile,
     knowledge: {
       ponytail: { ...defaults.knowledge.ponytail, ...(fromFile.knowledge?.ponytail ?? {}) },
-      importEngine: fromFile.knowledge?.importEngine ?? defaults.knowledge.importEngine,
     },
     retrieval: {
       semantic: { ...defaults.retrieval.semantic, ...(fromFile.retrieval?.semantic ?? {}) },
@@ -1006,41 +981,14 @@ function load(): Config {
     throw new Error("slop.mode must be disabled, advisory or enforcement");
   if (!["postgresql", "generic"].includes(cfg.codeIntelligence.sqlDialect))
     throw new Error("Unsupported SQL dialect");
-  if (process.env.CODE_INTELLIGENCE_ENGINE)
-    cfg.codeIntelligence.engine = process.env
-      .CODE_INTELLIGENCE_ENGINE as CodeIntelligenceConfig["engine"];
-  if (!["typescript", "go"].includes(cfg.codeIntelligence.engine))
-    throw new Error("CODE_INTELLIGENCE_ENGINE must be typescript or go");
   if (process.env.PROCESS_SUPERVISION_ENGINE)
     cfg.supervision.engine = process.env
       .PROCESS_SUPERVISION_ENGINE as Config["supervision"]["engine"];
   if (!["typescript", "go"].includes(cfg.supervision.engine))
     throw new Error("PROCESS_SUPERVISION_ENGINE must be typescript or go");
-  if (process.env.ANALYTICS_ENGINE)
-    cfg.analytics.engine = process.env.ANALYTICS_ENGINE as AnalyticsConfig["engine"];
-  if (!["typescript", "go"].includes(cfg.analytics.engine))
-    throw new Error("ANALYTICS_ENGINE must be typescript or go");
   if (process.env.ANALYTICS_TIMEOUT_MS)
     cfg.analytics.timeoutMs = Number(process.env.ANALYTICS_TIMEOUT_MS);
   cfg.analytics.timeoutMs = positiveInt("analytics.timeoutMs", cfg.analytics.timeoutMs);
-  cfg.analytics.maxFallbackConcurrency = positiveInt(
-    "analytics.maxFallbackConcurrency",
-    cfg.analytics.maxFallbackConcurrency,
-  );
-  if (process.env.CODE_SEARCH_ENGINE)
-    cfg.codeIntelligence.searchEngine = process.env
-      .CODE_SEARCH_ENGINE as CodeIntelligenceConfig["searchEngine"];
-  if (!["typescript", "go"].includes(cfg.codeIntelligence.searchEngine))
-    throw new Error("CODE_SEARCH_ENGINE must be typescript or go");
-  if (process.env.KNOWLEDGE_IMPORT_ENGINE)
-    cfg.knowledge.importEngine = process.env
-      .KNOWLEDGE_IMPORT_ENGINE as Config["knowledge"]["importEngine"];
-  if (!["typescript", "go"].includes(cfg.knowledge.importEngine))
-    throw new Error("KNOWLEDGE_IMPORT_ENGINE must be typescript or go");
-  if (process.env.PROD_ERRORS_ENGINE)
-    cfg.prodErrors.engine = process.env.PROD_ERRORS_ENGINE as Config["prodErrors"]["engine"];
-  if (!["typescript", "go"].includes(cfg.prodErrors.engine))
-    throw new Error("PROD_ERRORS_ENGINE must be typescript or go");
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)

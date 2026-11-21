@@ -3,6 +3,8 @@
 Status: accepted · publication changes on both engines; Go scan behind `KNOWLEDGE_IMPORT_ENGINE=go` (default
 `typescript`) · Date: 2026-11-21
 
+> **Update 2026-11-21:** the TypeScript engine was removed; platform-go is the only engine (no flag, no fallback, no rollback switch).
+
 ## Context
 
 `importFromRepositories` (`src/knowledge/importer.ts`; admin API `POST /api/knowledge/import-repos`, CLI

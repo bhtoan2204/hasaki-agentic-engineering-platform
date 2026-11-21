@@ -20,6 +20,7 @@ import {
 } from "../src/knowledge/importer.ts";
 import { knowledge } from "../src/knowledge/service.ts";
 import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 
 const child = resolve(import.meta.dirname, "fixtures/knowledgeImportChild.ts");
 const env = {
@@ -31,7 +32,8 @@ const env = {
 };
 const start = (mode: string, extra: Record<string, string> = {}) => {
   const p = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", child, mode], {
-    env: { ...process.env, ...extra },
+    // The discovery runs in platform-go: the children reach the same instance.
+    env: { ...process.env, RETRIEVAL_SEMANTIC_URL: config.retrieval.semantic.url, ...extra },
     stdio: ["ignore", "pipe", "inherit"],
   });
   const lines = createInterface({ input: p.stdout! });
@@ -46,8 +48,10 @@ const start = (mode: string, extra: Record<string, string> = {}) => {
 const versions = async () =>
   Number((await q(pool, "SELECT count(*)::int AS n FROM knowledge_versions"))[0].n);
 
+let go: Awaited<ReturnType<typeof startPlatformGo>>;
 before(async () => {
   await migrate();
+  go = await startPlatformGo();
   await shareAllRepositoriesForTests();
   for (const name of ["kc-one", "kc-two"]) {
     const root = join(config.reposRoot, name);
@@ -59,7 +63,10 @@ before(async () => {
     await repositories.upsert(name, { projects: ["KC"] });
   }
 });
-after(() => pool.end());
+after(async () => {
+  go?.stop();
+  await pool.end();
+});
 
 test("two processes with a one-connection pool import at once: serialized, each item created once", async () => {
   const a = start("import", { DATABASE_POOL_MAX: "1" });

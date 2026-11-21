@@ -1,12 +1,12 @@
 /**
- * The code intelligence suite (code-intelligence.integration.ts) again, with CODE_INTELLIGENCE_ENGINE=go: indexing
+ * The code intelligence suite (code-intelligence.integration.ts) again: indexing
  * jobs run in a real platform-go built from go/ against this file's database. Fails without a Go toolchain
  * (PLATFORM_ALLOW_MISSING_GO=1 skips it explicitly outside CI).
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync } from "node:fs";
+import { cpSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { config } from "../src/config.ts";
 import { goToolchain, requireGoToolchain, startPlatformGo } from "./fixtures/platformGo.ts";
@@ -16,11 +16,8 @@ if (!goToolchain()) {
 } else {
   const go = await startPlatformGo();
   after(go.stop);
-  config.codeIntelligence.engine = "go";
-  await import("./code-intelligence.integration.ts");
   const { pool, one, q } = await import("../src/db/pool.ts");
   const { repositories } = await import("../src/repos/service.ts");
-  const { indexRepository } = await import("../src/codeIntelligence/indexer.ts");
   const { retrievalService } = await import("../src/retrieval/semantic.ts");
   const { parserVersion } = await import("../src/codeIntelligence/parser.ts");
   const fixtures = resolve(
@@ -47,40 +44,6 @@ if (!goToolchain()) {
     await repositories.upsert(name, { projects: ["CI"] });
     return { root, git };
   };
-  const counts = async () =>
-    (await one(
-      pool,
-      `SELECT (SELECT count(*) FROM code_intelligence.extractions)::int AS extractions,
-              (SELECT count(*) FROM code_intelligence.snapshots)::int AS snapshots`,
-    ))!;
-
-  test("rollback: either engine reuses the other's snapshot and extractions, with no reindex", async () => {
-    await repo("ci-go-rollback");
-    const go = await indexRepository("ci-go-rollback");
-    const { Ajv2020 } = await import("ajv/dist/2020.js");
-    const ajv = new Ajv2020({ strict: false });
-    ajv.addSchema(
-      JSON.parse(
-        readFileSync(
-          resolve(import.meta.dirname, "../go/contracts/code-intelligence-v1.schema.json"),
-          "utf8",
-        ),
-      ),
-    );
-    assert.ok(ajv.validate("code-intelligence-v1#/$defs/IndexResponse", go), ajv.errorsText());
-    assert.ok(go.metrics.parse_workers, "indexed by platform-go");
-    assert.ok(go.metrics.indexed_files > 0);
-    const before = await counts();
-    config.codeIntelligence.engine = "typescript";
-    try {
-      const ts = await indexRepository("ci-go-rollback");
-      assert.equal(ts.snapshot.id, go.snapshot.id, "the TypeScript engine finds the Go snapshot");
-      assert.deepEqual(await counts(), before, "nothing was reindexed");
-    } finally {
-      config.codeIntelligence.engine = "go";
-    }
-  });
-
   test("a stale fence publishes nothing, and a canceled job leaves no snapshot", async () => {
     const { root, git } = await repo("ci-go-fence");
     const id = (await repositories.get("ci-go-fence"))!.id;
@@ -140,11 +103,4 @@ if (!goToolchain()) {
   });
 
   // Registered after the suite, so it runs last: the queued jobs above went through platform-go.
-  test("indexing jobs ran in platform-go", async () => {
-    const row = await one(
-      pool,
-      "SELECT count(*)::int AS n FROM code_intelligence.runs WHERE status='done' AND metrics ? 'parse_workers'",
-    );
-    assert.ok(row!.n > 0, "no job carries platform-go metrics");
-  });
 }

@@ -10,7 +10,6 @@ import { codeRetrievalKey, roleBudget } from "../src/context/pack.ts";
 import { evidenceSummary } from "../src/agent/evidence.ts";
 import { codexEnabledTools } from "../src/agent/codex/run.ts";
 import { CONTEXT_TOOLS } from "../src/agent/contextToolSchemas.ts";
-import { eligibleText } from "../src/codeIntelligence/search.ts";
 
 test("measurement: duplicate tool calls, repeated file reads and time to the first useful location come from tool_use events", () => {
   const m = newMetrics("model");
@@ -141,22 +140,10 @@ test("dedup never drops high-risk items: contradicted evidence and unresolved sc
   assert.ok((s.truncated_items ?? 0) > 0, "ordinary overflow is still reported");
 });
 
-test("code intelligence first: Codex may call the native index tools; exact search never reads secret files", () => {
+test("code intelligence first: Codex may call the native index tools", () => {
   for (const mode of ["coding", "analysis"] as const)
     for (const t of ["search_code", "get_symbol", "find_dependencies", "get_step_output"])
       assert.ok(codexEnabledTools(mode).includes(t), `${mode}: ${t}`);
   assert.ok(CONTEXT_TOOLS.every((t) => codexEnabledTools("coding").includes(t.name)));
   assert.ok(!codexEnabledTools("analysis").includes("commit_changes"));
-  for (const p of ["app.yaml", "config/payment.toml", "logs/app.log", "README.md"])
-    assert.ok(eligibleText(p), p);
-  for (const p of [
-    ".env",
-    "deploy/.env.production",
-    "certs/server.pem",
-    "keys/id_rsa",
-    "config/secrets.yaml",
-    "node_modules/x/a.js",
-    ".git/config",
-  ])
-    assert.ok(!eligibleText(p), p);
 });

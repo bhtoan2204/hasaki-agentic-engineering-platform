@@ -1,4 +1,8 @@
-import { test, after, before } from "node:test";
+/**
+ * Production error scans: the pure grouping/scoring helpers, and scans run end to end by a real platform-go process
+ * (the only engine) through this process's internal gateway, against fake Splunk, SigNoz and Telegram servers.
+ */
+import { test as nodeTest, after, before } from "node:test";
 import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
@@ -7,6 +11,11 @@ import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
 import { seedTemplates } from "../src/workflow/definitions.ts";
 import { checkSpl, clearSplunkCookie, setSplunkCookie } from "../src/integrations/splunk.ts";
+import { execution } from "../src/auth/execution.ts";
+import { createUser } from "../src/auth/users.ts";
+import { loadPersonalIntegrations } from "../src/integrations/loadPersonal.ts";
+import { handle } from "../src/http/app.ts";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 import {
   assess,
   buildScanSpl,
@@ -23,6 +32,18 @@ import {
   setIgnored,
   toGroups,
 } from "../src/prodErrors/scan.ts";
+
+// Scans run as an admin (manual) or the configured schedule user, each with their own Splunk/SigNoz integrations.
+let admin = 0;
+const test = (name: string, fn: () => unknown) =>
+  nodeTest(name, () =>
+    execution.run({ userId: admin, kind: "user" }, async () => {
+      await loadPersonalIntegrations(true);
+      await fn();
+    }),
+  );
+let platform: Server;
+let go: Awaited<ReturnType<typeof startPlatformGo>>;
 
 // All values are fake.
 const COOKIE = "splunkd_8000=SESSIONabc; splunkweb_csrf_token_8000=CSRF123";
@@ -108,6 +129,17 @@ before(async () => {
   await new Promise<void>((r) => splunk.listen(0, "127.0.0.1", r));
   await new Promise<void>((r) => tg.listen(0, "127.0.0.1", r));
   config.splunk.baseUrl = `http://127.0.0.1:${(splunk.address() as AddressInfo).port}`;
+  admin = (
+    await createUser({ username: `prod-admin-${Date.now()}`, password: "scan-password", role: "admin" })
+  ).id;
+  config.prodErrors.userId = admin;
+  platform = createServer(handle);
+  await new Promise<void>((r) => platform.listen(0, "127.0.0.1", r));
+  go = await startPlatformGo({
+    PROD_ERRORS_ENGINE: "go",
+    PLATFORM_INTERNAL_URL: `http://127.0.0.1:${(platform.address() as AddressInfo).port}`,
+    PROD_SCAN_POLL_MS: "1000",
+  });
   Object.assign(config.telegram, {
     botToken: "TEST:TOKEN",
     chatId: "42",
@@ -115,6 +147,8 @@ before(async () => {
   });
 });
 after(async () => {
+  go?.stop();
+  platform?.close();
   splunk.close();
   tg.close();
   await pool.end();

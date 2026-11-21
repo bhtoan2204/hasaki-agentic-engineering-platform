@@ -1,55 +1,23 @@
 /**
- * Which implementation loads an analytics dashboard (ADR 0003). ANALYTICS_ENGINE=go reads it from platform-go
- * (go/internal/analytics, contract go/contracts/analytics-v1.schema.json); the in-process TypeScript loaders are the
- * default and the fallback. Authorization, support auditing, caching and the public response envelope stay in
- * src/api/analytics/index.ts for both engines.
- *
- * Fallback is for availability only (unreachable, timeout, overload, 5xx, malformed response). A 4xx from Go is a
- * validation or authentication failure and is raised, never retried in TypeScript. Fallbacks are bounded: at most
- * config.analytics.maxFallbackConcurrency run at once (the rest get 503), and after a failure Go is skipped for a
- * short cool-down so an outage does not add a timeout to every request.
+ * Analytics dashboards are read by platform-go (go/internal/analytics, contract go/contracts/analytics-v1.schema.json;
+ * ADR 0003). Authorization, support auditing, caching and the public response envelope stay in
+ * src/api/analytics/index.ts. A 4xx from Go is a validation or authentication failure; an unreachable, slow or
+ * malformed platform-go is reported as 503 (there is no second implementation to fall back to).
  */
 import { config } from "../../config.ts";
 import { HttpError } from "../../http/error.ts";
 import { retrievalService } from "../../retrieval/semantic.ts";
 import { safeDiagnostics } from "../../agent/telemetry.ts";
 import type { AnalyticsFilters, AnalyticsScope } from "./filters.ts";
-import { usageAnalytics, performanceAnalytics, workflowAnalytics } from "./execution.ts";
-import { healthAnalytics, healthServiceAnalytics } from "./health.ts";
-import { optionsAnalytics } from "./options.ts";
 
 export type Dashboard =
   "usage" | "performance" | "workflows" | "health" | "health-service" | "options";
 
-export const typescriptLoaders: Record<
-  Dashboard,
-  (f: AnalyticsFilters, scope: AnalyticsScope) => Promise<object>
-> = {
-  usage: usageAnalytics,
-  performance: performanceAnalytics,
-  workflows: workflowAnalytics,
-  health: healthAnalytics,
-  "health-service": healthServiceAnalytics,
-  options: (_f, scope) => optionsAnalytics(scope),
-};
-
-/** Counters since process start (GET /api/metrics/cache-style diagnostics, benchmarks, tests). */
+/** Counters since process start (diagnostics, tests). */
 export const analyticsEngineStats = {
   go: 0,
-  typescript: 0,
-  fallbacks: {} as Record<string, number>,
-  rejected: 0,
+  failures: {} as Record<string, number>,
 };
-const COOL_DOWN_MS = 10_000;
-let goDownUntil = 0;
-let activeFallbacks = 0;
-const lastLogged = new Map<string, number>();
-
-/** Test hook: forget a previous outage. */
-export function resetAnalyticsEngine() {
-  goDownUntil = 0;
-  activeFallbacks = 0;
-}
 
 class Unavailable extends Error {
   readonly reason: string;
@@ -136,46 +104,23 @@ async function viaGo(
   return data;
 }
 
-function recordFallback(reason: string, detail: string) {
-  analyticsEngineStats.fallbacks[reason] = (analyticsEngineStats.fallbacks[reason] ?? 0) + 1;
-  const now = Date.now();
-  if (now - (lastLogged.get(reason) ?? 0) >= 60_000) {
-    lastLogged.set(reason, now);
-    console.warn(`platform-go analytics unavailable (${detail}); using the TypeScript engine`);
-  }
-}
-
-/** Loads one dashboard with the configured engine. Never widens `scope`: it comes from the authenticated actor. */
+/** Loads one dashboard from platform-go. Never widens `scope`: it comes from the authenticated actor. */
 export async function loadDashboard(
   dashboard: Dashboard,
   f: AnalyticsFilters,
   scope: AnalyticsScope,
   signal?: AbortSignal,
 ): Promise<object> {
-  if (config.analytics.engine === "go") {
-    if (Date.now() >= goDownUntil) {
-      try {
-        const data = await viaGo(dashboard, f, scope, signal);
-        analyticsEngineStats.go++;
-        return data;
-      } catch (e) {
-        if (!(e instanceof Unavailable)) throw e;
-        goDownUntil = Date.now() + COOL_DOWN_MS;
-        recordFallback(e.reason, e.message);
-      }
-    } else recordFallback("cool_down", "recent failure");
-    if (activeFallbacks >= config.analytics.maxFallbackConcurrency) {
-      analyticsEngineStats.rejected++;
-      throw new HttpError(503, "Analytics is temporarily unavailable; retry shortly");
-    }
-    activeFallbacks++;
-    try {
-      analyticsEngineStats.typescript++;
-      return await typescriptLoaders[dashboard](f, scope);
-    } finally {
-      activeFallbacks--;
-    }
+  try {
+    const data = await viaGo(dashboard, f, scope, signal);
+    analyticsEngineStats.go++;
+    return data;
+  } catch (e) {
+    if (!(e instanceof Unavailable)) throw e;
+    analyticsEngineStats.failures[e.reason] = (analyticsEngineStats.failures[e.reason] ?? 0) + 1;
+    throw new HttpError(
+      503,
+      `Analytics is temporarily unavailable (platform-go: ${e.reason}); retry shortly`,
+    );
   }
-  analyticsEngineStats.typescript++;
-  return typescriptLoaders[dashboard](f, scope);
 }

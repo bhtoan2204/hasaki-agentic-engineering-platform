@@ -707,3 +707,11 @@
   vertical-align: top;
   overflow-wrap: anywhere;
 }
+
+/* Code intelligence card: actions separated from the facts above. */
+.repo-ci-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}

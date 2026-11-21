@@ -2,6 +2,8 @@
 
 Status: accepted, behind `ANALYTICS_ENGINE=go` (default `typescript`) · Date: 2026-11-20
 
+> **Update 2026-11-21:** the TypeScript engine was removed; platform-go is the only engine (no flag, no fallback, no rollback switch).
+
 ## Context
 
 `src/api/analytics/` serves the engineering dashboards: usage and cost, provider/model performance, workflow
