@@ -972,9 +972,14 @@ func (st *search) exactRepo(ctx context.Context, name, pattern string, limit int
 			Snapshot: Provenance{Commit: head, Generation: before, RunID: run},
 			Snippet:  ptr(redactSecrets(sliceUTF16(lines[n-1], 400))), ContentHash: ptr(sha256Hex(*source))})
 	}
+	// A line longer than the buffer is a failed read, like maxBuffer overflowing in the TypeScript search.
+	scanErr := sc.Err()
 	// Enough matches (or the output cap): stop ripgrep instead of letting it finish.
 	cancel()
 	_ = cmd.Wait()
+	if scanErr != nil {
+		return nil, errors.New("Bounded exact search unavailable")
+	}
 	if rctx.Err() == context.DeadlineExceeded && ctx.Err() == nil && len(hits) < limit {
 		return nil, errors.New("Bounded exact search unavailable")
 	}

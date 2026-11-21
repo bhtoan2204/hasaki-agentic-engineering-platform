@@ -14,7 +14,6 @@ var (
 	decodeUTF8       = jsstr.DecodeUTF8
 	sha256Hex        = jsstr.Sha256Hex
 	sliceUTF16       = jsstr.SliceUTF16
-	jsSpace          = jsstr.Space
 	jsTrim           = jsstr.Trim
 	jsLineTerminator = jsstr.LineTerminator
 )

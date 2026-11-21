@@ -27,8 +27,7 @@ func BenchmarkExtractRepository(b *testing.B) {
 	r.Close()
 	p := Parsers{}
 	defer p.Close()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for j, f := range files {
 			if _, err := p.Extract(ctx, f.Path, srcs[j], lim); err != nil {
 				b.Fatal(err)
