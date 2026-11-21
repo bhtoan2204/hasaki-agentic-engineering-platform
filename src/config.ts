@@ -484,6 +484,21 @@ export interface Config {
     requiredChecks: Record<string, string[]>;
   };
   /**
+   * LSP semantic navigation (P1-B, ADR 0009): definition/references/symbols/diagnostics/incoming calls from gopls and
+   * the TypeScript language service, over an authorized checkout or run worktree. Off by default (LSP_ENABLED=1).
+   * Servers run in the OS sandbox; without one only when allowUnsandboxed (operator opt-in). gopls: binary override.
+   */
+  lsp: {
+    enabled: boolean;
+    allowUnsandboxed: boolean;
+    gopls: string;
+    maxSessions: number;
+    idleMs: number;
+    requestTimeoutMs: number;
+    startupTimeoutMs: number;
+    maxResults: number;
+  };
+  /**
    * CodeAct (P1-A, ADR 0008): read-only programmatic tool calling. A short JavaScript program runs in the OS sandbox
    * (no network, no credentials) and reaches read-only registry tools only through the parent broker. Off by default;
    * unavailable whenever the isolation runtime is (never runs in the worker process). CODEACT_ENABLED=1 turns it on.
@@ -812,6 +827,16 @@ const defaults: Config = {
     botUsernames: [],
     requiredChecks: {},
   },
+  lsp: {
+    enabled: false,
+    allowUnsandboxed: false,
+    gopls: "",
+    maxSessions: 4,
+    idleMs: 300000,
+    requestTimeoutMs: 15000,
+    startupTimeoutMs: 30000,
+    maxResults: 50,
+  },
   codeAct: {
     enabled: false,
     timeoutMs: 20000,
@@ -948,6 +973,7 @@ function load(): Config {
     investigation: { ...defaults.investigation, ...(fromFile.investigation ?? {}) },
     prLifecycle: { ...defaults.prLifecycle, ...(fromFile.prLifecycle ?? {}) },
     codeAct: { ...defaults.codeAct, ...(fromFile.codeAct ?? {}) },
+    lsp: { ...defaults.lsp, ...(fromFile.lsp ?? {}) },
     isolation: {
       ...defaults.isolation,
       ...(fromFile.isolation ?? {}),
@@ -1018,6 +1044,7 @@ function load(): Config {
     cfg.analytics.timeoutMs = Number(process.env.ANALYTICS_TIMEOUT_MS);
   cfg.analytics.timeoutMs = positiveInt("analytics.timeoutMs", cfg.analytics.timeoutMs);
   if (process.env.CODEACT_ENABLED) cfg.codeAct.enabled = process.env.CODEACT_ENABLED === "1";
+  if (process.env.LSP_ENABLED) cfg.lsp.enabled = process.env.LSP_ENABLED === "1";
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)
