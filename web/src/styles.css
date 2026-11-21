@@ -2424,3 +2424,11 @@ details>summary {
 .handoff-history {
   margin-top: 12px;
 }
+/* Error boundary of the routed page (PageBoundary.tsx): the shell stays usable. */
+.page-failed {
+  max-width: 560px;
+  margin: var(--sp-6, 32px) auto;
+  display: grid;
+  gap: var(--sp-3, 12px);
+  justify-items: start;
+}

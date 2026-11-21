@@ -44,6 +44,7 @@ import { BrandLogo } from "./brand/BrandLogo.tsx";
 import { GlobalChibiCompanion } from "./office/GlobalChibiCompanion.tsx";
 import { legacyProductionRoute } from "./pages/prodErrors/routes.ts";
 import { useI18n } from "./i18n/index.tsx";
+import { PageBoundary } from "./PageBoundary.tsx";
 import type { UiLocale } from "./i18n/messages.ts";
 
 // Pages load on first visit: the shell stays small and each route is its own chunk.
@@ -574,7 +575,9 @@ export function App() {
           className={full ? "page full" : "page"}
           key={`${me.id}:${support}`}
         >
-          <Suspense fallback={<Loading />}>{page}</Suspense>
+          <PageBoundary key={pathPart}>
+            <Suspense fallback={<Loading />}>{page}</Suspense>
+          </PageBoundary>
         </main>
       </div>
     </div>

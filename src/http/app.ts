@@ -83,6 +83,14 @@ async function serveStatic(url: URL, req: IncomingMessage, res: ServerResponse) 
       ),
       true
     );
+  // A hashed build file that is gone (a tab still on the previous build after a rebuild) is a 404: serving the HTML
+  // shell instead makes the browser reject it as a module and the page goes blank. The client reloads on that error.
+  if (rel.startsWith("assets/")) {
+    res
+      .writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" })
+      .end("Not found: this file belongs to another build of the UI; reload the page.");
+    return true;
+  }
   const index = join(webDist, "index.html");
   if (existsSync(index)) return (await serveFile(req, res, index), true);
   res
@@ -274,7 +282,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         "Cache-Control": "private, max-age=3600",
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'none'; sandbox",
-        ...(a.kind === "document" ? { "Content-Disposition": `attachment; filename="${name}"` } : {}),
+        ...(a.kind === "document"
+          ? { "Content-Disposition": `attachment; filename="${name}"` }
+          : {}),
       });
       return res.end(a.content);
     }
