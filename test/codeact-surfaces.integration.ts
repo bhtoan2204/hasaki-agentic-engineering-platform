@@ -309,3 +309,28 @@ test("chat: code.execute runs in INVESTIGATE mode with the owner's audit and its
     JSON.stringify(audits),
   );
 });
+
+test("workflow: a program cannot widen the repository scope of a nested call", async () => {
+  config.codeAct.enabled = true;
+  const ci = config.codeIntelligence.enabled;
+  config.codeIntelligence.enabled = true;
+  const { registerBuiltinTools } = await import("../src/agent/toolRegistry.ts");
+  registerBuiltinTools();
+  try {
+    const env = await attemptEnv();
+    const r = JSON.parse(
+      await dispatchPlatformTool(
+        "platform.execute_code",
+        {
+          code: `return await platform.callTool("code_intelligence.search", {
+            query: "RefundService", repositories: ["another-teams-repo"] }).then(() => "searched", (e) => e.message);`,
+        },
+        env,
+      ),
+    );
+    assert.equal(r.ok, true);
+    assert.match(r.value, /Unauthorized repository/);
+  } finally {
+    config.codeIntelligence.enabled = ci;
+  }
+});
