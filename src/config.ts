@@ -484,6 +484,22 @@ export interface Config {
     requiredChecks: Record<string, string[]>;
   };
   /**
+   * CodeAct (P1-A, ADR 0008): read-only programmatic tool calling. A short JavaScript program runs in the OS sandbox
+   * (no network, no credentials) and reaches read-only registry tools only through the parent broker. Off by default;
+   * unavailable whenever the isolation runtime is (never runs in the worker process). CODEACT_ENABLED=1 turns it on.
+   */
+  codeAct: {
+    enabled: boolean;
+    timeoutMs: number;
+    maxCodeBytes: number;
+    maxOutputBytes: number;
+    maxCalls: number;
+    maxResultBytes: number;
+    maxConcurrency: number;
+    callTimeoutMs: number;
+    memoryMb: number;
+  };
+  /**
    * OS isolation of agent processes (bubblewrap). "off" = legacy trusted single-operator mode: agents run as the worker
    * user with the tool policy only; it is never reported as isolated and never authorizes unattended (AUTONOMOUS/AUTOPILOT)
    * work. "enforce" = every agent step runs in a sandbox (private HOME/tmp, hidden credentials and other runs, no network
@@ -796,6 +812,17 @@ const defaults: Config = {
     botUsernames: [],
     requiredChecks: {},
   },
+  codeAct: {
+    enabled: false,
+    timeoutMs: 20000,
+    maxCodeBytes: 16384,
+    maxOutputBytes: 16000,
+    maxCalls: 20,
+    maxResultBytes: 2000000,
+    maxConcurrency: 4,
+    callTimeoutMs: 15000,
+    memoryMb: 256,
+  },
   isolation: {
     mode: "off",
     egress: { claude: ["api.anthropic.com:443"] },
@@ -920,6 +947,7 @@ function load(): Config {
     splunk: { ...defaults.splunk, ...(fromFile.splunk ?? {}) },
     investigation: { ...defaults.investigation, ...(fromFile.investigation ?? {}) },
     prLifecycle: { ...defaults.prLifecycle, ...(fromFile.prLifecycle ?? {}) },
+    codeAct: { ...defaults.codeAct, ...(fromFile.codeAct ?? {}) },
     isolation: {
       ...defaults.isolation,
       ...(fromFile.isolation ?? {}),
@@ -989,6 +1017,7 @@ function load(): Config {
   if (process.env.ANALYTICS_TIMEOUT_MS)
     cfg.analytics.timeoutMs = Number(process.env.ANALYTICS_TIMEOUT_MS);
   cfg.analytics.timeoutMs = positiveInt("analytics.timeoutMs", cfg.analytics.timeoutMs);
+  if (process.env.CODEACT_ENABLED) cfg.codeAct.enabled = process.env.CODEACT_ENABLED === "1";
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)
