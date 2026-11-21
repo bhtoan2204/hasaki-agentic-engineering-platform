@@ -9,6 +9,9 @@ import { redactContextValue } from "../context/redact.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { chatRepository } from "./repository.ts";
 import { emitChatEvent } from "./events.ts";
+import { classifyArguments, type Classification } from "../agent/taint.ts";
+import { qcPreauthorized } from "../integrations/qcHttp.ts";
+import { kafkaPreauthorized } from "../integrations/kafka.ts";
 
 /**
  * Mutating integration calls from chat. The model can only *propose* one: the platform validates the schema and the
@@ -31,6 +34,7 @@ export interface OperationRow {
   result: unknown;
   error: string | null;
   auto: boolean;
+  provenance: Pick<Classification, "decision" | "fields" | "reasons"> | null;
   verification: {
     verified: boolean;
     tool_call_id: number;
@@ -85,6 +89,62 @@ async function validate(ownerId: number, tool: string, rawArgs: unknown) {
   };
 }
 
+const SOURCE_ROWS = 200;
+const SOURCE_CHARS = 200_000;
+/**
+ * Where an operation's argument values come from (ADR 0010): the owner's own messages in this conversation (control
+ * authority) against everything observed in it — tool results (CodeAct included) and attached documents. Only this
+ * owner's records of this conversation are read; a target inside the operator's pre-authorized scope is trusted.
+ */
+export async function operationProvenance(
+  binding: { userId: number; conversationId: number },
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<Classification> {
+  const [messages, observed, documents] = await Promise.all([
+    q<{ id: number; content: string }>(
+      pool,
+      `SELECT m.id, m.content FROM chat_messages m JOIN chat_conversations c ON c.id = m.conversation_id
+       WHERE m.conversation_id = $1 AND c.owner_id = $2 AND m.role = 'user' AND NOT m.superseded
+       ORDER BY m.id DESC LIMIT $3`,
+      [binding.conversationId, binding.userId, SOURCE_ROWS],
+    ),
+    q<{ id: number; text: string }>(
+      pool,
+      `SELECT id, left(result::text, $3) AS text FROM chat_tool_calls
+       WHERE conversation_id = $1 AND owner_id = $2 AND result IS NOT NULL ORDER BY id DESC LIMIT $4`,
+      [binding.conversationId, binding.userId, SOURCE_CHARS, SOURCE_ROWS],
+    ),
+    q<{ id: number; text: string }>(
+      pool,
+      `SELECT id, left(extraction::text, $3) AS text FROM chat_attachments
+       WHERE conversation_id = $1 AND owner_id = $2 AND extraction IS NOT NULL ORDER BY id DESC LIMIT $4`,
+      [binding.conversationId, binding.userId, SOURCE_CHARS, SOURCE_ROWS],
+    ),
+  ]);
+  return classifyArguments(tool, args, {
+    trusted: messages.map((m) => ({ ref: `message:${m.id}`, text: m.content })),
+    untrusted: [
+      ...observed.map((o) => ({
+        ref: `chat:${binding.conversationId}:tool:${o.id}`,
+        text: o.text,
+      })),
+      ...documents.map((d) => ({ ref: `document:${d.id}`, text: d.text })),
+    ],
+    // The operator's pre-authorized scope (the same rules that allow running without confirmation).
+    configured: (field) =>
+      tool === "kafka.publish"
+        ? (field === "topic" || field === "cluster") &&
+          kafkaPreauthorized(
+            String(args.topic ?? ""),
+            args.cluster ? String(args.cluster) : undefined,
+          )
+        : tool === "qc_http.request" &&
+          field === "url" &&
+          qcPreauthorized(String(args.method ?? "").toUpperCase(), String(args.url ?? "")),
+  });
+}
+
 /**
  * Called by the chat `tools.call` tool for a mutating integration tool. A pre-authorized low-risk QC call runs now
  * through the same confirmation path (idempotency, re-validation, audit); anything else waits for the owner.
@@ -95,6 +155,22 @@ export async function proposeOperation(
   rawArgs: unknown,
 ) {
   const { args, target } = await validate(binding.userId, tool, rawArgs);
+  // Runtime provenance (ADR 0010): an observation can never choose the target, nor skip the owner's confirmation.
+  const provenance = await operationProvenance(binding, tool, args);
+  await audit(
+    binding.userId,
+    "chat.operation.taint",
+    "chat_conversation",
+    String(binding.conversationId),
+    {
+      turn_id: binding.turnId,
+      tool,
+      decision: provenance.decision,
+      fields: provenance.fields,
+    },
+  );
+  if (provenance.decision === "deny")
+    throw new Error(`operation refused: ${provenance.reasons.join("; ")}`);
   const used = await one<{ n: number }>(
     pool,
     "SELECT count(*)::int AS n FROM chat_operations WHERE turn_id = $1 AND status NOT IN ('rejected', 'expired', 'duplicate')",
@@ -119,8 +195,9 @@ export async function proposeOperation(
     };
   const row = await one<OperationRow & { inserted: boolean }>(
     pool,
-    `INSERT INTO chat_operations (conversation_id, owner_id, turn_id, tool, arguments, target, idempotency_key, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8))
+    `INSERT INTO chat_operations (conversation_id, owner_id, turn_id, tool, arguments, target, idempotency_key, expires_at,
+       provenance)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9)
      ON CONFLICT (conversation_id, idempotency_key) WHERE status = 'pending'
        DO UPDATE SET expires_at = EXCLUDED.expires_at
      RETURNING *, (xmax = 0) AS inserted`,
@@ -133,6 +210,11 @@ export async function proposeOperation(
       JSON.stringify(target),
       key,
       OPERATION_TTL_MS / 1000,
+      JSON.stringify({
+        decision: provenance.decision,
+        fields: provenance.fields,
+        reasons: provenance.reasons,
+      }),
     ],
   );
   if (row!.inserted)
@@ -142,7 +224,10 @@ export async function proposeOperation(
       target,
       idempotency_key: key,
     });
-  const preauthorized = row!.inserted && !!mutatingTool(tool)?.preauthorized?.(args as never);
+  const preauthorized =
+    row!.inserted &&
+    provenance.decision === "allow" &&
+    !!mutatingTool(tool)?.preauthorized?.(args as never);
   if (preauthorized) {
     await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row!.id]);
     await audit(binding.userId, "chat.operation.preauthorized", "chat_operation", String(row!.id), {
@@ -176,8 +261,10 @@ export async function proposeOperation(
     operation_id: row!.id,
     tool,
     target,
+    ...(provenance.reasons.length ? { needs_confirmation_because: provenance.reasons } : {}),
     message:
-      "Not executed. The user must confirm this operation in the chat UI; tell them what it will do.",
+      "Not executed. The user must confirm this operation in the chat UI; tell them what it will do" +
+      (provenance.reasons.length ? " and that some of its values come from untrusted data." : "."),
   };
 }
 
