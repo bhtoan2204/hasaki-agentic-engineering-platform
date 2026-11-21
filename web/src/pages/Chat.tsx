@@ -244,7 +244,21 @@ function clientMessageId() {
 
 type T = (k: string, p?: Record<string, string | number>) => string;
 
-function Reasoning({ trace, summary, live }: { trace: TraceItem[]; summary: string; live?: boolean }) {
+/**
+ * The reasoning panel. Tool entries carry the call's `#seq`, the number the answer cites as `[tool #seq]`; traces saved
+ * before the trace recorded it take it from the turn's tool calls.
+ */
+function Reasoning({
+  trace,
+  summary,
+  live,
+  tools,
+}: {
+  trace: TraceItem[];
+  summary: string;
+  live?: boolean;
+  tools?: ToolCall[];
+}) {
   const { t } = useI18n();
   return (
     <details className={`chat-reasoning${live ? " is-live" : ""}`}>
@@ -274,6 +288,10 @@ function Reasoning({ trace, summary, live }: { trace: TraceItem[]; summary: stri
             </div>
           ) : (
             <div key={i} className={`chat-tool${["ok", "running"].includes(item.status) ? "" : " is-err"}`}>
+              {(() => {
+                const seq = item.seq ?? tools?.find((tc) => tc.id === item.id)?.seq;
+                return seq != null ? `#${seq} ` : "";
+              })()}
               {item.tool} — {item.status}
               {item.ms != null ? ` (${Math.round(item.ms)} ms)` : ""}
             </div>
@@ -405,7 +423,7 @@ const ChatMessages = memo(function ChatMessages({
                 <span>{ago(m.created_at)}</span>
               </div>
               {m.role === "assistant" && !!turn?.trace?.length && (
-                <Reasoning trace={turn.trace} summary={traceSummary(turn, t)} />
+                <Reasoning trace={turn.trace} summary={traceSummary(turn, t)} tools={tools} />
               )}
               {m.role === "assistant" ? (
                 <Markdown text={m.content} />

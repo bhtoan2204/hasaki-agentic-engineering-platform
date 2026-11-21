@@ -2,7 +2,7 @@
 export type TraceItem =
   | { k: "reasoning"; text: string }
   | { k: "activity"; label: string }
-  | { k: "tool"; id: number; tool: string; status: string; ms?: number }
+  | { k: "tool"; id: number; seq?: number; tool: string; status: string; ms?: number }
   | {
       k: "knowledge";
       key: string;
@@ -87,7 +87,16 @@ export function applyChatEvent(
       l = { ...l, text: "", key: null, pending: [] };
       return {
         ...l,
-        trace: [...l.trace, { k: "tool", id: Number(d.tool_call_id), tool, status: "running" }],
+        trace: [
+          ...l.trace,
+          {
+            k: "tool",
+            id: Number(d.tool_call_id),
+            ...(d.seq != null ? { seq: Number(d.seq) } : {}),
+            tool,
+            status: "running",
+          },
+        ],
         status: READING.test(tool) ? "reading" : "tools",
       };
     }

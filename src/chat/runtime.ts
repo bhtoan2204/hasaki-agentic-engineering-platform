@@ -679,7 +679,7 @@ async function executeTurn(
         tool: call.tool,
         arguments: (call.arguments ?? {}) as Record<string, unknown>,
       });
-      stream.tool(row.id, call.tool, "running");
+      stream.tool(row.id, call.tool, "running", undefined, seq);
       await emitChatEvent({
         ...ids,
         kind: "tool.started",

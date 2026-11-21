@@ -107,7 +107,7 @@ export interface TurnRow {
 export type TraceItem =
   | { k: "reasoning"; text: string }
   | { k: "activity"; label: string }
-  | { k: "tool"; id: number; tool: string; status: string; ms?: number }
+  | { k: "tool"; id: number; seq?: number; tool: string; status: string; ms?: number }
   | {
       k: "knowledge";
       key: string;

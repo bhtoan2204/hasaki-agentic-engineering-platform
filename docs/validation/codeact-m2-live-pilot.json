@@ -1,0 +1,577 @@
+{
+  "meta": {
+    "level": "live-provider",
+    "sandbox": "os-sandbox",
+    "provider": "claude",
+    "model": null,
+    "generated_at": "2026-11-21T23:22:45.843Z",
+    "variable": "codeAct.enabled (code.execute disclosed and callable) — everything else identical",
+    "dataset": "src/eval/codeactTasks.ts (10 tasks, deterministic fake incident window)",
+    "eligibility": "two or more deterministic read-only lookups whose results must be combined, or one large result whose useful content is an aggregate",
+    "notes": [
+      "LIVE PROVIDER: tokens/cost as reported by the provider; null where it did not report."
+    ]
+  },
+  "samples": 7,
+  "pairs": 3,
+  "variants": {
+    "direct": {
+      "n": 4,
+      "completed": 4,
+      "correct": 2,
+      "success_ci95": {
+        "low": 0.15003570882017148,
+        "high": 0.8499642911798285,
+        "method": "Wilson 95%",
+        "n": 4
+      },
+      "unsupported_conclusions": 0,
+      "metrics": {
+        "completions": {
+          "known": 4,
+          "of": 4,
+          "mean": 1,
+          "median": 1
+        },
+        "tool_calls": {
+          "known": 4,
+          "of": 4,
+          "mean": 6.25,
+          "median": 6.5
+        },
+        "prompt_chars_total": {
+          "known": 4,
+          "of": 4,
+          "mean": 3283,
+          "median": 3255
+        },
+        "prompt_chars_max": {
+          "known": 4,
+          "of": 4,
+          "mean": 3283,
+          "median": 3255
+        },
+        "tool_result_chars": {
+          "known": 4,
+          "of": 4,
+          "mean": 12860.25,
+          "median": 16608
+        },
+        "latency_ms": {
+          "known": 4,
+          "of": 4,
+          "mean": 18678.75,
+          "median": 19734
+        },
+        "input_tokens": {
+          "known": 4,
+          "of": 4,
+          "mean": 10,
+          "median": 11
+        },
+        "output_tokens": {
+          "known": 4,
+          "of": 4,
+          "mean": 1391,
+          "median": 1621.5
+        },
+        "cost_usd": {
+          "known": 4,
+          "of": 4,
+          "mean": 0.14703624999999998,
+          "median": 0.156901
+        }
+      }
+    },
+    "codeact": {
+      "n": 3,
+      "completed": 3,
+      "correct": 3,
+      "success_ci95": {
+        "low": 0.43849391955098227,
+        "high": 1,
+        "method": "Wilson 95%",
+        "n": 3
+      },
+      "unsupported_conclusions": 0,
+      "metrics": {
+        "completions": {
+          "known": 3,
+          "of": 3,
+          "mean": 1,
+          "median": 1
+        },
+        "tool_calls": {
+          "known": 3,
+          "of": 3,
+          "mean": 6.333333333333333,
+          "median": 7
+        },
+        "prompt_chars_total": {
+          "known": 3,
+          "of": 3,
+          "mean": 3301,
+          "median": 3281
+        },
+        "prompt_chars_max": {
+          "known": 3,
+          "of": 3,
+          "mean": 3301,
+          "median": 3281
+        },
+        "tool_result_chars": {
+          "known": 3,
+          "of": 3,
+          "mean": 11240,
+          "median": 15495
+        },
+        "latency_ms": {
+          "known": 3,
+          "of": 3,
+          "mean": 16463.333333333332,
+          "median": 17069
+        },
+        "input_tokens": {
+          "known": 3,
+          "of": 3,
+          "mean": 10.666666666666666,
+          "median": 10
+        },
+        "output_tokens": {
+          "known": 3,
+          "of": 3,
+          "mean": 1346.6666666666667,
+          "median": 1350
+        },
+        "cost_usd": {
+          "known": 3,
+          "of": 3,
+          "mean": 0.145339,
+          "median": 0.152459
+        }
+      }
+    }
+  },
+  "paired_codeact_minus_direct": {
+    "completions": {
+      "n": 3,
+      "mean": 0,
+      "ci95": null
+    },
+    "tool_calls": {
+      "n": 3,
+      "mean": 0,
+      "ci95": null
+    },
+    "prompt_chars_total": {
+      "n": 3,
+      "mean": 0,
+      "ci95": null
+    },
+    "prompt_chars_max": {
+      "n": 3,
+      "mean": 0,
+      "ci95": null
+    },
+    "tool_result_chars": {
+      "n": 3,
+      "mean": -425.3333333333333,
+      "ci95": null
+    },
+    "latency_ms": {
+      "n": 3,
+      "mean": -757,
+      "ci95": null
+    },
+    "input_tokens": {
+      "n": 3,
+      "mean": 1.3333333333333333,
+      "ci95": null
+    },
+    "output_tokens": {
+      "n": 3,
+      "mean": 57.333333333333336,
+      "ci95": null
+    },
+    "cost_usd": {
+      "n": 3,
+      "mean": 0.002406666666666668,
+      "ci95": null
+    }
+  },
+  "per_task": {
+    "T01-single-lookup": {
+      "eligible": false,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "completions": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "prompt_chars_total": {
+        "direct": 3159,
+        "codeact": 3159
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "T03-trace-log-correlation": {
+      "eligible": true,
+      "correct": {
+        "direct": 0,
+        "codeact": 1,
+        "of": 1
+      },
+      "completions": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "prompt_chars_total": {
+        "direct": 3281,
+        "codeact": 3281
+      },
+      "truncated_results": {
+        "direct": 2,
+        "codeact": 2
+      }
+    },
+    "T06-refund-timeout": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "completions": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "prompt_chars_total": {
+        "direct": 3463,
+        "codeact": 3463
+      },
+      "truncated_results": {
+        "direct": 1,
+        "codeact": 1
+      }
+    },
+    "T08-large-aggregation": {
+      "eligible": true,
+      "correct": {
+        "direct": 0,
+        "codeact": 0,
+        "of": 1
+      },
+      "completions": {
+        "direct": 1,
+        "codeact": null
+      },
+      "prompt_chars_total": {
+        "direct": 3229,
+        "codeact": null
+      },
+      "truncated_results": {
+        "direct": 1,
+        "codeact": null
+      }
+    }
+  },
+  "adoption": {
+    "eligible_turns": 2,
+    "eligible_turns_using_codeact": 1,
+    "eligible_turns_direct_only": 1,
+    "ineligible_turns_using_codeact": 0,
+    "executions": 2,
+    "failed_executions": 1,
+    "repairs": 0,
+    "composed_tools": {
+      "eval.traces": 1
+    },
+    "evidence_complete_turns": 1,
+    "evidence_incomplete_turns": 0
+  },
+  "stopped": "budget 1 USD reached (known spend 1.0242)",
+  "known_spend_usd": 1.024162,
+  "raw_samples": [
+    {
+      "task_id": "T01-single-lookup",
+      "category": "single read-only lookup",
+      "eligible": false,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "status": true
+      },
+      "completions": 1,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "repairs": 0,
+      "composed_tools": [],
+      "prompt_chars_total": 3159,
+      "prompt_chars_max": 3159,
+      "estimated_prompt_tokens": 790,
+      "tool_result_chars": 397,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 350,
+      "cache_read_tokens": 30605,
+      "cache_creation_tokens": 26215,
+      "cost_usd": 0.11166,
+      "provider_ms": 9264,
+      "sandbox_ms": 0,
+      "latency_ms": 12193,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T01-single-lookup",
+      "category": "single read-only lookup",
+      "eligible": false,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "status": true
+      },
+      "completions": 1,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "repairs": 0,
+      "composed_tools": [],
+      "prompt_chars_total": 3159,
+      "prompt_chars_max": 3159,
+      "estimated_prompt_tokens": 790,
+      "tool_result_chars": 397,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 330,
+      "cache_read_tokens": 31415,
+      "cache_creation_tokens": 26620,
+      "cost_usd": 0.113161,
+      "provider_ms": 8219,
+      "sandbox_ms": 0,
+      "latency_ms": 8294,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "category": "SigNoz trace and Splunk log correlation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "turn_status": "completed",
+      "correct": false,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "order_ids": false,
+        "count": true
+      },
+      "completions": 1,
+      "tool_calls": 7,
+      "integration_calls": 3,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "repairs": 0,
+      "composed_tools": [],
+      "prompt_chars_total": 3281,
+      "prompt_chars_max": 3281,
+      "estimated_prompt_tokens": 821,
+      "tool_result_chars": 17828,
+      "truncated_results": 2,
+      "input_tokens": 10,
+      "output_tokens": 1547,
+      "cache_read_tokens": 94906,
+      "cache_creation_tokens": 32310,
+      "cost_usd": 0.154454,
+      "provider_ms": 20040,
+      "sandbox_ms": 0,
+      "latency_ms": 20077,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "category": "SigNoz trace and Splunk log correlation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "order_ids": true,
+        "count": true
+      },
+      "completions": 1,
+      "tool_calls": 7,
+      "integration_calls": 3,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "repairs": 0,
+      "composed_tools": [],
+      "prompt_chars_total": 3281,
+      "prompt_chars_max": 3281,
+      "estimated_prompt_tokens": 821,
+      "tool_result_chars": 17828,
+      "truncated_results": 2,
+      "input_tokens": 10,
+      "output_tokens": 1350,
+      "cache_read_tokens": 96931,
+      "cache_creation_tokens": 32253,
+      "cost_usd": 0.152459,
+      "provider_ms": 16991,
+      "sandbox_ms": 0,
+      "latency_ms": 17069,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "category": "payment/refund timeout investigation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_operation": true,
+        "slow_refund_orders": true,
+        "db_pool_warning_overlap": true
+      },
+      "completions": 1,
+      "tool_calls": 10,
+      "integration_calls": 7,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "repairs": 0,
+      "composed_tools": [],
+      "prompt_chars_total": 3463,
+      "prompt_chars_max": 3463,
+      "estimated_prompt_tokens": 866,
+      "tool_result_chars": 16771,
+      "truncated_results": 1,
+      "input_tokens": 12,
+      "output_tokens": 1971,
+      "cache_read_tokens": 128411,
+      "cache_creation_tokens": 32448,
+      "cost_usd": 0.162683,
+      "provider_ms": 19310,
+      "sandbox_ms": 0,
+      "latency_ms": 19391,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "category": "payment/refund timeout investigation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_operation": true,
+        "slow_refund_orders": true,
+        "db_pool_warning_overlap": true
+      },
+      "completions": 1,
+      "tool_calls": 10,
+      "integration_calls": 5,
+      "codeact_executions": 2,
+      "codeact_failed": 1,
+      "nested_calls": 6,
+      "repairs": 0,
+      "composed_tools": [
+        "eval.traces"
+      ],
+      "prompt_chars_total": 3463,
+      "prompt_chars_max": 3463,
+      "estimated_prompt_tokens": 866,
+      "tool_result_chars": 15495,
+      "truncated_results": 1,
+      "input_tokens": 16,
+      "output_tokens": 2360,
+      "cache_read_tokens": 201537,
+      "cache_creation_tokens": 31593,
+      "cost_usd": 0.170397,
+      "provider_ms": 23964,
+      "sandbox_ms": 257,
+      "latency_ms": 24027,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T08-large-aggregation",
+      "category": "large tool response requiring aggregation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "turn_status": "completed",
+      "correct": false,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "distinct_orders": false,
+        "events": false
+      },
+      "completions": 1,
+      "tool_calls": 6,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "repairs": 0,
+      "composed_tools": [],
+      "prompt_chars_total": 3229,
+      "prompt_chars_max": 3229,
+      "estimated_prompt_tokens": 808,
+      "tool_result_chars": 16445,
+      "truncated_results": 1,
+      "input_tokens": 12,
+      "output_tokens": 1696,
+      "cache_read_tokens": 124994,
+      "cache_creation_tokens": 32409,
+      "cost_usd": 0.159348,
+      "provider_ms": 22997,
+      "sandbox_ms": 0,
+      "latency_ms": 23054,
+      "evidence_complete": null
+    }
+  ]
+}

@@ -85,12 +85,13 @@ test("client stream state: ordered deltas, revisions, new calls, tool steps and 
   assert.deepEqual([l!.text, l!.status], ["Hello world", "generating"]);
   l = applyChatEvent(l, delta(6, "there"));
   assert.equal(l!.text, "Hello there", "a provider revision replaces from its offset");
-  l = applyChatEvent(l, ev("tool.started", { tool_call_id: 3, tool: "code.read_file" }));
+  l = applyChatEvent(l, ev("tool.started", { tool_call_id: 3, seq: 2, tool: "code.read_file" }));
   assert.deepEqual([l!.text, l!.status], ["", "reading"]);
   l = applyChatEvent(l, ev("tool.completed", { tool_call_id: 3, status: "ok", duration_ms: 12 }));
   assert.deepEqual(l!.trace.at(-1), {
     k: "tool",
     id: 3,
+    seq: 2,
     tool: "code.read_file",
     status: "ok",
     ms: 12,

@@ -111,11 +111,11 @@ export class TurnStream {
     );
   };
 
-  tool(id: number, tool: string, status: string, ms?: number) {
+  tool(id: number, tool: string, status: string, ms?: number, seq?: number) {
     const found = this.trace.find((t) => t.k === "tool" && t.id === id);
     if (found && found.k === "tool")
       Object.assign(found, { status, ...(ms != null ? { ms } : {}) });
-    else this.push({ k: "tool", id, tool, status });
+    else this.push({ k: "tool", id, ...(seq != null ? { seq } : {}), tool, status });
   }
 
   knowledge(ref: {
