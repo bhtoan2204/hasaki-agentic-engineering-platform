@@ -17,6 +17,10 @@ test("config defaults keep CodeAct off with the documented limits", () => {
     maxConcurrency: 4,
     callTimeoutMs: 15000,
     memoryMb: 256,
+    maxQueuedCalls: 16,
+    maxCallResultBytes: 1000000,
+    maxProtocolMessages: 1000,
+    maxListTools: 10,
   });
 });
 

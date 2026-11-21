@@ -513,6 +513,14 @@ export interface Config {
     maxConcurrency: number;
     callTimeoutMs: number;
     memoryMb: number;
+    /** Nested calls waiting for a concurrency slot; more are refused at once. */
+    maxQueuedCalls: number;
+    /** One nested tool result larger than this is refused (not forwarded, not counted). */
+    maxCallResultBytes: number;
+    /** Protocol lines from the program (malformed ones included) before the execution is stopped. */
+    maxProtocolMessages: number;
+    /** listTools() calls per execution. */
+    maxListTools: number;
   };
   /**
    * OS isolation of agent processes (bubblewrap). "off" = legacy trusted single-operator mode: agents run as the worker
@@ -847,6 +855,10 @@ const defaults: Config = {
     maxConcurrency: 4,
     callTimeoutMs: 15000,
     memoryMb: 256,
+    maxQueuedCalls: 16,
+    maxCallResultBytes: 1000000,
+    maxProtocolMessages: 1000,
+    maxListTools: 10,
   },
   isolation: {
     mode: "off",
