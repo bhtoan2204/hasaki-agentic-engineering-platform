@@ -37,6 +37,7 @@
     "bench:dependencies": "node --disable-warning=ExperimentalWarning src/cli/bench-dependencies.ts",
     "bench:cache": "node --disable-warning=ExperimentalWarning --expose-gc src/cli/benchCache.ts",
     "bench:api": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/benchApi.ts",
+    "bench:lsp": "node --disable-warning=ExperimentalWarning src/cli/benchLsp.ts",
     "bench:codeact": "node --disable-warning=ExperimentalWarning src/cli/benchCodeAct.ts",
     "bench:code-intelligence": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/code-intelligence.bench.ts",
     "build:go": "cd go && CGO_ENABLED=1 go build -trimpath -o bin/ ./cmd/platform-go ./cmd/platform-supervise",

@@ -388,3 +388,66 @@ test("without the OS sandbox a language server starts only with the explicit ope
     await closeAllSessions();
   }
 });
+
+test("surfaces: workflow navigate_code and Chat code.navigate answer within their own repository scope", async () => {
+  const { executeContextTool } = await import("../src/agent/contextTools.ts");
+  const { toolsForMode } = await import("../src/chat/tools.ts");
+  const { advertisedContextTools } = await import("../src/agent/contextToolSchemas.ts");
+  assert.ok(advertisedContextTools().some((t) => t.name === "navigate_code"));
+  const b = files["lsp-ts"]["src/b.ts"];
+  const env = { allowed: ["lsp-ts"], selected: ["lsp-ts"], runId: 0 } as never;
+  const wf = (await executeContextTool(
+    "navigate_code",
+    {
+      repository: "lsp-ts",
+      path: "src/b.ts",
+      operation: "definition",
+      ...at(b, "calc(2)"),
+    } as never,
+    env,
+  )) as NavResult;
+  assert.equal(wf.status, "ok", wf.error ?? "");
+  assert.deepEqual(paths(wf), ["src/a.ts:1"]);
+  const outside = (await executeContextTool(
+    "navigate_code",
+    { repository: "lsp-go", path: "main.go", operation: "document_symbols" } as never,
+    env,
+  )) as NavResult;
+  assert.equal(outside.status, "unauthorized");
+
+  const tool = toolsForMode("ASK").find((t) => t.name === "code.navigate")!;
+  const ctx = {
+    binding: { userId: 1, conversationId: 1, turnId: 1, mode: "ASK", repositories: [] },
+    readable: ["lsp-ts"],
+    scoped: [],
+    signal: new AbortController().signal,
+  } as never;
+  const chatAnswer = (await tool.run(
+    tool.args.parse({
+      repository: "lsp-ts",
+      path: "src/a.ts",
+      operation: "references",
+      symbol: "compute",
+    }),
+    ctx,
+  )) as { data: NavResult };
+  assert.equal(chatAnswer.data.status, "ok");
+  assert.equal(chatAnswer.data.locations.length, 6);
+  await assert.rejects(
+    tool.run(
+      tool.args.parse({ repository: "lsp-go", path: "main.go", operation: "document_symbols" }),
+      ctx,
+    ),
+    /not accessible/,
+  );
+
+  config.lsp.enabled = false;
+  try {
+    assert.ok(
+      !advertisedContextTools().some((t) => t.name === "navigate_code"),
+      "not advertised when off",
+    );
+  } finally {
+    config.lsp.enabled = true;
+  }
+});

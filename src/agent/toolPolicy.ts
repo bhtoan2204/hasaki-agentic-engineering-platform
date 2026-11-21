@@ -215,16 +215,9 @@ const protectedDenial = (hit: string) =>
 const allow: Decision = { allow: true };
 const deny = (reason: string): Decision => ({ allow: false, reason });
 
-/** Secret files in a protected checkout stay unreadable. `.env.example` is source, not a secret. */
-export function isSecretPath(path: string): boolean {
-  const base = path.split(/[/\\]/).pop() ?? "";
-  if (base === ".env.example" || base === ".env.sample") return false;
-  if (base === ".env" || base.startsWith(".env.")) return true;
-  return (
-    /^(config\.json|credentials\.json|auth\.json|id_rsa|id_ed25519)$/i.test(base) ||
-    /\.(pem|key)$/i.test(base)
-  );
-}
+// A leaf module, so code-intelligence readers can use it without importing the policy engine.
+export { isSecretPath } from "./secretPaths.ts";
+import { isSecretPath } from "./secretPaths.ts";
 
 function secretPathViolation(paths: string[], ctx: PolicyContext): string | null {
   const roots = ctx.protectedRoots ?? [];

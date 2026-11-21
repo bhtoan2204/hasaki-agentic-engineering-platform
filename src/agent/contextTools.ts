@@ -21,6 +21,7 @@ import type { ContextPack } from "../context/pack.ts";
 
 import { CONTEXT_TOOLS, contextToolSupported } from "./contextToolSchemas.ts";
 import { runCodeForRun } from "../codeact/surfaces.ts";
+import { navigate, type NavOperation } from "../codeIntelligence/lsp/navigate.ts";
 export { CONTEXT_TOOLS, contextTool } from "./contextToolSchemas.ts";
 export const MAX_CONTEXT_RESULT_CHARS = 24000;
 export function boundedContextJson(value: unknown): string {
@@ -166,6 +167,10 @@ interface ContextToolArgs {
   questions?: Array<{ question: string; context?: string; options?: string[] }>;
   code?: string;
   timeout_ms?: number;
+  repository?: string;
+  path?: string;
+  line?: number;
+  character?: number;
 }
 export async function executeContextTool(
   name: string,
@@ -440,6 +445,18 @@ export async function executeContextTool(
         })),
       };
     }
+    case "navigate_code":
+      return navigate(
+        {
+          repository: args.repository ?? "",
+          path: args.path ?? "",
+          operation: args.operation as unknown as NavOperation,
+          line: args.line,
+          character: args.character,
+          symbol: args.symbol,
+        },
+        { allowed: env.allowed, runId: env.runId ?? undefined },
+      );
     case "execute_code":
       return runCodeForRun({ code: args.code ?? "", timeoutMs: args.timeout_ms }, env, {
         integrationTools,

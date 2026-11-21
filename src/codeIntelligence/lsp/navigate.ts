@@ -17,8 +17,9 @@ import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "../../config.ts";
 import { localScope } from "../indexer.ts";
+import { workspacesOf } from "../../git/provider.ts";
 import { readSource } from "../git.ts";
-import { isSecretPath } from "../../agent/toolPolicy.ts";
+import { isSecretPath } from "../../agent/secretPaths.ts";
 import { LspError, type Diagnostic, type Location, type Range } from "./client.ts";
 import { getSession, LspUnavailable, type Language } from "./sessions.ts";
 
@@ -170,8 +171,13 @@ export async function navigate(
 
   let root: string;
   let primary: string;
+  // A run's own worktree when it has one for this repository; otherwise the authorized base checkout.
+  const runId =
+    scope.runId && (await workspacesOf(scope.runId)).some((w) => w.repo === req.repository)
+      ? scope.runId
+      : undefined;
   try {
-    ({ root, primary } = await localScope(req.repository, scope.runId, false, scope.workspacePath));
+    ({ root, primary } = await localScope(req.repository, runId, false, scope.workspacePath));
   } catch (e) {
     return empty("unauthorized", (e as Error).message);
   }

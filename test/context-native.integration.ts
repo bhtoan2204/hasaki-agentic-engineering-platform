@@ -596,6 +596,7 @@ test("Claude dispatch and real Codex/Cursor stdio bridges expose the same bound 
   for (const t of advertisedContextTools())
     assert.ok(bridgeToolsFor("analysis").some((b) => b.name === t.name));
   config.codeAct.enabled = true;
+  config.lsp.enabled = true;
   try {
     for (const t of CONTEXT_TOOLS)
       assert.ok(
@@ -604,6 +605,7 @@ test("Claude dispatch and real Codex/Cursor stdio bridges expose the same bound 
       );
   } finally {
     config.codeAct.enabled = false;
+    config.lsp.enabled = false;
   }
 });
 async function client(user: string) {

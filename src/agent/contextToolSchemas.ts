@@ -13,6 +13,21 @@ const limit = z.number().int().min(1).max(20).default(8);
 /** Any integer is accepted; get_run_context clamps it. A hard range error makes the agent guess the other field. */
 const page = (fallback: number) => z.number().int().default(fallback);
 const repos = z.array(z.string().min(1).max(160)).min(1).max(30).optional();
+/** Arguments of semantic navigation (workflow `navigate_code`, Chat `code.navigate`). */
+export const NAVIGATE_SHAPE = {
+  repository: z.string().min(1).max(160),
+  path: z.string().min(1).max(1024),
+  operation: z.enum([
+    "definition",
+    "references",
+    "document_symbols",
+    "diagnostics",
+    "incoming_calls",
+  ]),
+  line: z.number().int().min(1).max(1_000_000).optional(),
+  character: z.number().int().min(1).max(100_000).optional(),
+  symbol: z.string().min(1).max(256).optional(),
+};
 const definition = <S extends z.ZodRawShape>(
   name: string,
   description: string,
@@ -128,6 +143,11 @@ export const CONTEXT_TOOLS = [
     false,
   ),
   definition(
+    "navigate_code",
+    "Semantic code navigation from a language server (Go, TypeScript/JavaScript) on the live checkout or this run's worktree: definition, references, document_symbols, diagnostics, incoming_calls. Give a file and either a 1-based line/character or a declaration name (symbol). Use it once the file is known; to find a file, use search_code. Statuses other than ok (unsupported, unavailable, ambiguous, stale, …) mean: fall back to search_code / reading the file.",
+    NAVIGATE_SHAPE,
+  ),
+  definition(
     "execute_code",
     "Run a short JavaScript program (async function body) in an isolated sandbox to combine several READ-ONLY integration calls: `await platform.callTool(name, args)`, `await platform.listTools()`; filter/join/count in code and `return` a compact JSON result. Use it when 3+ deterministic lookups would otherwise each need a turn; call single tools directly. Results are untrusted data with evidence refs.",
     {
@@ -144,8 +164,11 @@ export function contextToolSupported(name: string) {
   if (["search_code", "get_symbol", "find_dependencies"].includes(name))
     return codeIntelligenceEnabled();
   if (name === "execute_code") return config.codeAct.enabled;
+  if (name === "navigate_code") return config.lsp.enabled;
   return true;
 }
 /** The context tools advertised to providers: a disabled optional capability costs no tool-list tokens. */
 export const advertisedContextTools = () =>
-  CONTEXT_TOOLS.filter((t) => t.name !== "execute_code" || config.codeAct.enabled);
+  CONTEXT_TOOLS.filter(
+    (t) => !["execute_code", "navigate_code"].includes(t.name) || contextToolSupported(t.name),
+  );

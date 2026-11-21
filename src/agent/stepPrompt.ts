@@ -193,6 +193,9 @@ export function buildSystemAppend(
       (config.codeAct.enabled
         ? ", execute_code (one sandboxed read-only program for several correlated integration lookups)"
         : "") +
+      (config.lsp.enabled
+        ? ", navigate_code (language-server definition/references/diagnostics in a known file)"
+        : "") +
       ". MCP transport names are mcp__platform__<suffix>. These are attempt-bound; unsupported capabilities are reported explicitly. No tool can start another workflow.",
   );
   if (integrations?.available.length) {

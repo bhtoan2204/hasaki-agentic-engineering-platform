@@ -149,11 +149,14 @@ test("code intelligence first: Codex may call the native index tools", () => {
   assert.ok(advertisedContextTools().every((t) => codexEnabledTools("coding").includes(t.name)));
   assert.ok(!codexEnabledTools("coding").includes("execute_code"), "CodeAct off: not advertised");
   config.codeAct.enabled = true;
+  config.lsp.enabled = true;
   try {
     assert.ok(codexEnabledTools("analysis").includes("execute_code"));
+    assert.ok(codexEnabledTools("analysis").includes("navigate_code"));
     assert.ok(CONTEXT_TOOLS.every((t) => codexEnabledTools("coding").includes(t.name)));
   } finally {
     config.codeAct.enabled = false;
+    config.lsp.enabled = false;
   }
   assert.ok(!codexEnabledTools("analysis").includes("commit_changes"));
 });

@@ -1,6 +1,7 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { z } from "zod";
+import { config } from "../config.ts";
 import { execution } from "../auth/execution.ts";
 import { audit } from "../authz/access.ts";
 import { searchCodeExact, searchSymbols } from "../codeIntelligence/search.ts";
@@ -20,6 +21,8 @@ import { readKnowledge, searchKnowledge } from "./knowledge.ts";
 import { proposeOperation, verifyOperation } from "./operations.ts";
 import { learnProcedure } from "./memory.ts";
 import { runCodeForChat } from "../codeact/surfaces.ts";
+import { navigate } from "../codeIntelligence/lsp/navigate.ts";
+import { NAVIGATE_SHAPE } from "../agent/contextToolSchemas.ts";
 import { background } from "../workflow/background.ts";
 import { LIMITS } from "./policy.ts";
 import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
@@ -319,6 +322,24 @@ const TOOLS: ToolDef[] = [
           symbol: h.qualified_name ?? h.symbol_name,
           snippet: h.snippet ? cut(h.snippet, 400) : undefined,
         })),
+      };
+    },
+  },
+  {
+    name: "code.navigate",
+    group: "repo",
+    description:
+      "Semantic navigation from a language server (Go, TypeScript/JavaScript): definition, references, document_symbols, diagnostics, incoming_calls in a file you already know, by 1-based line/character or a declaration name. To find the file first, use code.search. A status other than ok means: fall back to code.search / code.read_file.",
+    usage:
+      '{"repository": "repo", "path": "src/a.ts", "operation": "references", "symbol": "compute"}',
+    args: z.object(NAVIGATE_SHAPE).strict(),
+    async run(a, ctx) {
+      const [repository] = pickRepositories(ctx, [a.repository]);
+      await checkoutRoot(repository);
+      return {
+        label: `${a.operation} ${repository}/${a.path}`,
+        repositories: [repository],
+        data: await navigate({ ...a, repository }, { allowed: ctx.readable, signal: ctx.signal }),
       };
     },
   },
@@ -629,9 +650,14 @@ const TOOLS: ToolDef[] = [
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 
+/** Optional capabilities that are off cost no catalog tokens and cannot be called. */
+const OPTIONAL: Record<string, () => boolean> = {
+  "code.execute": () => config.codeAct.enabled,
+  "code.navigate": () => config.lsp.enabled,
+};
 export function toolsForMode(mode: ManualChatMode) {
   const groups = MODE_GROUPS[mode];
-  return TOOLS.filter((t) => groups.includes(t.group));
+  return TOOLS.filter((t) => groups.includes(t.group) && (OPTIONAL[t.name]?.() ?? true));
 }
 
 /**
