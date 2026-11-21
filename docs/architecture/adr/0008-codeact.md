@@ -53,3 +53,41 @@ token savings on real tasks remain to be shown with evaluation runs.
 - Nested results reach the program in full (bounded by the byte budget); the program, not the platform, decides what
   it returns. Taint handling of derived values is ADR 0010 (P1-C).
 - Integration budgets inside tools (Splunk/SigNoz per run/step) still apply per nested call.
+
+## Hardening (2026-11-22)
+
+**Cancellation.** The workflow surface now passes the attempt's execution signal (`PlatformToolEnv.signal` =
+the scheduler's `ctx.signal`: run cancellation, lease loss, attempt timeout); Chat already passed its turn signal.
+`executeCode` honours it before and during the sandbox launch (nothing is spawned), while the program runs (the
+process group is killed) and for nested calls: running calls get an aborted signal, queued calls are dropped, late
+results are discarded and never recorded, and the result keeps the cancellation reason (`category: "canceled"`,
+distinct from `timeout` and `internal`). `ToolCallContext.signal` carries the nested call's signal into `callTool`,
+which never starts a handler after the abort and never reports a result that arrived after it.
+
+*Limitation:* no integration handler forwards `ctx.signal` to its HTTP client yet, so an in-flight Splunk/SigNoz/…
+request runs to completion (bounded by its own timeout) after a cancellation; its result is discarded. Handlers can
+adopt it individually.
+
+**Scheduling.** At most `maxConcurrency` (4) nested calls run, up to `maxQueuedCalls` (16) wait FIFO, more are refused
+at once (`budget_exceeded`). A call's deadline (`callTimeoutMs`) starts when the program issues it, waiting included;
+a call never starts at or after its deadline. Ending an execution resolves every waiter (no dangling promises).
+
+**IPC and memory.** Program → parent lines: at most 2 × `maxOutputBytes` + 64 KiB each and `maxProtocolMessages`
+(1000) in all, malformed lines included; request ids must be fresh positive integers (a duplicate or invalid id ends
+the execution as `invalid_input`); `listTools` is id-matched and limited to `maxListTools` (10). A nested result is
+serialized once; above `maxCallResultBytes` (1 MB) it is refused, and the delivered total never exceeds
+`maxResultBytes` (2 MB) — concurrent large results are refused rather than forwarded. stderr keeps a 2 KB tail.
+
+**Structured overflow.** A result above `maxOutputBytes` comes back as `truncated: true`, `original_bytes`, a `note`
+on how to narrow it, and `value` = a valid JSON preview built by the runner (strings cut, arrays and objects shortened
+with markers, small fields kept); the parent re-checks the preview's size and refuses a forged one. Cyclic and
+non-serializable results fail as `internal`. Program output stays `untrusted`; the dispatcher still redacts it.
+
+**Persistence.** The terminal transition only updates a `running` row (a status is never rewritten); nested-call rows
+in flight are written before the execution is finalized; rows left `running` by a dead worker (older than
+`timeoutMs` + 120 s) are reconciled as `error/internal` before each new execution (index: migration 091).
+
+**Measured** (`npm run bench:codeact`, OS sandbox, 10 runs each, same script on both versions): program p50
+114 ms before → 113–126 ms after (noise); 20 nested calls at 5 ms each p50 134 → 138–144 ms (+3–7 %: a timer and an
+AbortSignal per call); peak in-flight 4 → 4; cancellation 0.2 ms → 0.2 ms; parent RSS delta 3.3 → 3.4 MB; bytes
+returned to the model 66 → 66.

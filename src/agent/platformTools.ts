@@ -62,6 +62,8 @@ export interface PlatformToolEnv {
   submittedThisTurn?: boolean;
   contextPreparation?: boolean;
   attemptAllowedTools?: string[] | null;
+  /** The attempt's execution signal: run cancellation, lease loss, attempt timeout (absent in a bridge process). */
+  signal?: AbortSignal;
   runId: number;
   snapshotId?: number;
   recordMetrics?: (m: Record<string, unknown>) => Promise<void>;
@@ -882,6 +884,7 @@ export function envFromExecution(
     disclosure: ctx.context?.disclosure ?? [],
     upstream: ctx.input?.upstream ?? {},
     stepType: ctx.step.type,
+    signal: ctx.signal,
     policy,
     metrics,
     log: (kind, content, data) => ctx.log(kind, content, data),

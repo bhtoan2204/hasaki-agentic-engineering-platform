@@ -70,6 +70,57 @@ for (let i = 0; i < runs; i++) {
   answer = JSON.stringify(r.value);
 }
 times.sort((a, b) => a - b);
+const launch = arg("--unsandboxed") ? { launch: plain } : {};
+const p50 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+
+// Scheduling: 20 nested calls issued at once to a tool that answers after 5 ms (limits as configured).
+let live = 0;
+let peak = 0;
+const fanTimes: number[] = [];
+const rssBefore = process.memoryUsage().rss;
+for (let i = 0; i < runs; i++) {
+  const r = await executeCode(
+    {
+      code: `return (await Promise.all(Array.from({ length: 20 }, (_, i) => platform.callTool("traces", { i })))).length;`,
+    },
+    {
+      tools: () => TOOLS,
+      call: async () => {
+        live++;
+        peak = Math.max(peak, live);
+        await new Promise((res) => setTimeout(res, 5));
+        live--;
+        return { ok: true, result: { n: 1 } };
+      },
+      ...launch,
+    },
+  );
+  if (!r.ok) throw new Error(`fan-out: ${r.category}: ${r.error}`);
+  fanTimes.push(r.stats.duration_ms);
+}
+const rssAfter = process.memoryUsage().rss;
+
+// Cancellation: abort while a nested call is pending; time until the result is settled.
+const cancelMs: number[] = [];
+for (let i = 0; i < runs; i++) {
+  const ac = new AbortController();
+  let started = false;
+  const pending = executeCode(
+    { code: `await platform.callTool("traces", {}); return 1;` },
+    {
+      tools: () => TOOLS,
+      signal: ac.signal,
+      call: () => ((started = true), new Promise(() => {})),
+      ...launch,
+    },
+  );
+  while (!started) await new Promise((res) => setTimeout(res, 2));
+  const t0 = performance.now();
+  ac.abort();
+  const r = await pending;
+  if (r.category !== "canceled") throw new Error(`cancel: ${r.category}`);
+  cancelMs.push(performance.now() - t0);
+}
 console.log(
   JSON.stringify(
     {
@@ -89,6 +140,17 @@ console.log(
         runtime: arg("--unsandboxed") ? "plain child process" : "OS sandbox",
         wall_ms: { p50: times[Math.floor(times.length / 2)], max: times.at(-1) },
         limits: config.codeAct,
+      },
+      scheduling: {
+        nested_calls: 20,
+        tool_latency_ms: 5,
+        wall_ms_p50: p50(fanTimes),
+        peak_in_flight: peak,
+        parent_rss_delta_mb: Math.round(((rssAfter - rssBefore) / 1048576) * 10) / 10,
+      },
+      cancellation_ms: {
+        p50: Math.round(p50(cancelMs) * 10) / 10,
+        max: Math.round(Math.max(...cancelMs) * 10) / 10,
       },
     },
     null,

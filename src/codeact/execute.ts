@@ -63,8 +63,11 @@ export interface CallRecord {
 }
 export interface CodeActResult {
   ok: boolean;
+  /** The program's JSON value; when `truncated`, a valid JSON preview of it (never cut JSON text). */
   value?: unknown;
   truncated?: boolean;
+  /** Serialized size of the full value when it was too large to return. */
+  original_bytes?: number;
   error?: string;
   category?: Category;
   calls: CallRecord[];
@@ -144,7 +147,30 @@ export const sandboxLauncher: Launcher = async (node, args) => {
   };
 };
 
-/** Run one program. Never throws: every outcome is a CodeActResult with a category. */
+/** The reason an AbortSignal carries, as text (an Error's message, a string, or a default). */
+const reasonOf = (signal: AbortSignal | undefined, fallback: string) => {
+  const r = signal?.reason as unknown;
+  if (r instanceof Error && r.name !== "AbortError") return r.message;
+  return typeof r === "string" && r ? r : fallback;
+};
+
+/**
+ * Run one program. Never throws: every outcome is a CodeActResult with a category.
+ *
+ * Lifecycle. The caller's signal (workflow attempt, chat turn) is honoured from the first line: before and during the
+ * sandbox launch (nothing is spawned when it fires), while the program runs (the process group is killed), and for
+ * every nested call (the call's own signal aborts, queued calls are dropped, late results are discarded). The result
+ * is produced once, after any in-flight persistence of nested calls has settled.
+ *
+ * Scheduling. At most `maxConcurrency` nested calls run; up to `maxQueuedCalls` more wait in FIFO order; anything
+ * beyond is refused at once. A call's deadline (`callTimeoutMs`) starts when the program issues it, so time spent
+ * waiting counts: a call whose deadline passes in the queue never starts.
+ *
+ * Budgets. Program → parent lines are bounded in size (2 × maxOutputBytes + 64 KiB) and number
+ * (`maxProtocolMessages`, malformed lines included); request ids must be fresh positive integers (anything else is a
+ * protocol violation that ends the execution); listTools is limited to `maxListTools`. A nested result is serialized
+ * once; above `maxCallResultBytes` it is refused, and the delivered total never exceeds `maxResultBytes`.
+ */
 export async function executeCode(
   req: { code: string; timeoutMs?: number },
   deps: {
@@ -170,12 +196,13 @@ export async function executeCode(
     },
   });
   const fail = (category: Category, error: string) => outcome({ ok: false, category, error });
+  const canceled = () => fail("canceled", reasonOf(deps.signal, "execution canceled"));
 
   if (typeof req.code !== "string" || !req.code.trim())
     return fail("invalid_input", "code is empty");
   if (Buffer.byteLength(req.code) > lim.maxCodeBytes)
     return fail("invalid_input", `code exceeds ${lim.maxCodeBytes} bytes`);
-  if (deps.signal?.aborted) return fail("canceled", "execution canceled before it started");
+  if (deps.signal?.aborted) return canceled();
   const timeoutMs = Math.max(100, Math.min(req.timeoutMs ?? lim.timeoutMs, lim.timeoutMs));
 
   const nodeArgs = [
@@ -194,6 +221,15 @@ export async function executeCode(
       (e as Error).message,
     );
   }
+  // Canceled while the sandbox was being prepared: release it and never spawn the program.
+  if (deps.signal?.aborted) {
+    try {
+      inv.cleanup?.();
+    } catch {
+      /* best effort: a private temp HOME */
+    }
+    return canceled();
+  }
 
   const child = spawn(inv.command, inv.args, {
     env: inv.env,
@@ -201,10 +237,14 @@ export async function executeCode(
     detached: true,
   });
   const nested = new AbortController();
+  const records = new Set<Promise<void>>();
+  const usedIds = new Set<number>();
   let settled = false;
+  let messages = 0;
+  let lists = 0;
   let issued = 0;
   let inflight = 0;
-  const waiting: Array<() => void> = [];
+  const queue: Array<{ grant: (ok: boolean) => void }> = [];
   let stderrTail = "";
 
   return await new Promise<CodeActResult>((resolve) => {
@@ -220,23 +260,27 @@ export async function executeCode(
       settled = true;
       clearTimeout(timer);
       deps.signal?.removeEventListener("abort", onAbort);
-      nested.abort();
+      nested.abort(
+        new Error(r.category === "canceled" ? (r.error ?? "canceled") : "execution ended"),
+      );
+      for (const w of queue.splice(0)) w.grant(false);
       kill();
       try {
         inv.cleanup?.();
       } catch {
         /* best effort: a private temp HOME */
       }
-      resolve(r);
+      // Nested-call rows already being written land before the caller finalizes the execution.
+      void Promise.allSettled([...records]).then(() => resolve(r));
     };
-    const send = (m: unknown) => {
-      if (!settled && child.stdin.writable) child.stdin.write(`${JSON.stringify(m)}\n`);
+    const write = (line: string) => {
+      if (!settled && child.stdin.writable) child.stdin.write(`${line}\n`);
     };
     const timer = setTimeout(
       () => finish(fail("timeout", `the program exceeded ${timeoutMs} ms`)),
       timeoutMs,
     );
-    const onAbort = () => finish(fail("canceled", "execution canceled"));
+    const onAbort = () => finish(canceled());
     deps.signal?.addEventListener("abort", onAbort, { once: true });
 
     child.on("error", (e) => finish(fail("dependency_unavailable", e.message)));
@@ -254,18 +298,38 @@ export async function executeCode(
     );
 
     let buffer = "";
-    const lineLimit = lim.maxResultBytes + lim.maxOutputBytes + 65536;
+    const lineLimit = 2 * lim.maxOutputBytes + 65536;
     child.stdout.on("data", (b: Buffer) => {
+      if (settled) return;
       buffer += b.toString();
       let nl: number;
-      while ((nl = buffer.indexOf("\n")) >= 0) {
+      while (!settled && (nl = buffer.indexOf("\n")) >= 0) {
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
+        if (line.length > lineLimit)
+          return finish(fail("budget_exceeded", "a protocol message exceeded the size limit"));
+        if (++messages > lim.maxProtocolMessages)
+          return finish(fail("budget_exceeded", "the program sent too many protocol messages"));
         handle(line);
       }
       if (buffer.length > lineLimit)
-        finish(fail("budget_exceeded", "the program wrote more output than allowed"));
+        finish(fail("budget_exceeded", "a protocol message exceeded the size limit"));
     });
+
+    const violation = (what: string) =>
+      finish(fail("invalid_input", `protocol violation: ${what}`));
+    const freshId = (id: unknown): id is number => {
+      if (!Number.isSafeInteger(id) || (id as number) <= 0) {
+        violation("request ids must be positive integers");
+        return false;
+      }
+      if (usedIds.has(id as number)) {
+        violation(`request id ${id} was already used`);
+        return false;
+      }
+      usedIds.add(id as number);
+      return true;
+    };
 
     const handle = (line: string) => {
       let m: {
@@ -275,51 +339,125 @@ export async function executeCode(
         args?: unknown;
         value?: unknown;
         error?: unknown;
-        category?: unknown;
+        truncated?: unknown;
+        original_bytes?: unknown;
       };
       try {
         m = JSON.parse(line);
       } catch {
-        return; // not protocol: ignored
+        return; // not protocol: ignored (but counted)
       }
-      if (m.t === "list")
-        send({
-          t: "tools",
-          tools: deps
-            .tools()
-            .filter((t) => t.readOnly)
-            .map(({ name, summary }) => ({ name, summary })),
-        });
-      else if (m.t === "call") void brokerCall(m.id, m.name, m.args);
-      else if (m.t === "done") {
+      if (!m || typeof m !== "object") return;
+      if (m.t === "list") {
+        if (!freshId(m.id)) return;
+        if (++lists > lim.maxListTools)
+          return write(
+            JSON.stringify({
+              t: "tools",
+              id: m.id,
+              error: `listTools is limited to ${lim.maxListTools} calls`,
+            }),
+          );
+        write(
+          JSON.stringify({
+            t: "tools",
+            id: m.id,
+            tools: deps
+              .tools()
+              .filter((t) => t.readOnly)
+              .map(({ name, summary }) => ({ name, summary })),
+          }),
+        );
+      } else if (m.t === "call") {
+        if (freshId(m.id)) void brokerCall(m.id, m.name, m.args);
+      } else if (m.t === "done") {
         const text = JSON.stringify(m.value ?? null);
-        if (text.length > lim.maxOutputBytes)
-          finish(outcome({ ok: true, value: text.slice(0, lim.maxOutputBytes), truncated: true }));
+        if (m.truncated === true) {
+          const original = Number(m.original_bytes);
+          if (!(original > lim.maxOutputBytes) || Buffer.byteLength(text) > lim.maxOutputBytes)
+            return finish(
+              fail("budget_exceeded", "the program's result exceeded the output limit"),
+            );
+          finish(
+            outcome({
+              ok: true,
+              value: m.value ?? null,
+              truncated: true,
+              original_bytes: original,
+            }),
+          );
+        } else if (Buffer.byteLength(text) > lim.maxOutputBytes)
+          finish(fail("budget_exceeded", "the program's result exceeded the output limit"));
         else finish(outcome({ ok: true, value: m.value ?? null }));
       } else if (m.t === "fail")
         finish(fail("internal", String(m.error ?? "the program failed").slice(0, 2000)));
     };
 
-    const brokerCall = async (id: unknown, name: unknown, args: unknown) => {
+    /** A concurrency slot, FIFO; false when the deadline passes in the queue or the execution ends. */
+    const acquire = (deadline: number): Promise<boolean> | "overflow" => {
+      if (inflight < lim.maxConcurrency) {
+        inflight++;
+        return Promise.resolve(true);
+      }
+      if (queue.length >= lim.maxQueuedCalls) return "overflow";
+      return new Promise<boolean>((done) => {
+        const entry = {
+          grant: (ok: boolean) => {
+            clearTimeout(expiry);
+            done(ok);
+          },
+        };
+        const expiry = setTimeout(
+          () => {
+            const i = queue.indexOf(entry);
+            if (i >= 0) queue.splice(i, 1);
+            done(false);
+          },
+          Math.max(0, deadline - Date.now()),
+        );
+        queue.push(entry);
+      });
+    };
+    const release = () => {
+      const next = queue.shift();
+      if (next && !settled)
+        next.grant(true); // the slot passes on: inflight unchanged
+      else {
+        inflight--;
+        next?.grant(false);
+      }
+    };
+
+    const brokerCall = async (id: number, name: unknown, args: unknown) => {
       const seq = ++issued;
+      const issuedAt = Date.now();
+      const deadline = issuedAt + lim.callTimeoutMs;
       const toolName = typeof name === "string" ? name : String(name);
       const input_sha256 = sha256(`${toolName}\n${canonicalJson(args ?? {})}`);
-      const reply = (ok: boolean, payload: { result?: unknown; error?: string }) =>
-        send({ t: "result", id, ok, ...payload });
-      const deny = async (error: string, category: Category, readOnly = false) => {
-        const rec: CallRecord = {
-          seq,
-          tool: toolName.slice(0, 200),
-          status: "denied",
-          category,
-          ms: 0,
-          input_sha256,
-          bytes: 0,
-          read_only: readOnly,
-        };
+      const reply = (error: string) => write(JSON.stringify({ t: "result", id, ok: false, error }));
+      const keep = (rec: CallRecord, result: unknown, error?: string) => {
         calls[seq - 1] = rec;
-        await deps.record?.(rec, undefined, error);
-        reply(false, { error });
+        if (!deps.record) return;
+        const p = Promise.resolve(deps.record(rec, result, error)).catch(() => {});
+        records.add(p);
+        void p.finally(() => records.delete(p));
+      };
+      const deny = (error: string, category: Category, readOnly = false) => {
+        keep(
+          {
+            seq,
+            tool: toolName.slice(0, 200),
+            status: "denied",
+            category,
+            ms: 0,
+            input_sha256,
+            bytes: 0,
+            read_only: readOnly,
+          },
+          undefined,
+          error,
+        );
+        reply(error);
       };
       if (seq > lim.maxCalls)
         return deny(`call budget of ${lim.maxCalls} nested calls reached`, "budget_exceeded");
@@ -328,16 +466,42 @@ export async function executeCode(
       const tool = deps.tools().find((t) => t.name === name);
       if (!tool) return deny(`unknown tool "${toolName.slice(0, 100)}"`, "invalid_input");
       if (!tool.readOnly)
-        return deny(
-          `${tool.name} changes external state; CodeAct is read-only`,
-          "unauthorized",
-          false,
-        );
+        return deny(`${tool.name} changes external state; CodeAct is read-only`, "unauthorized");
 
-      if (inflight >= lim.maxConcurrency) await new Promise<void>((r) => waiting.push(r));
-      inflight++;
+      const slot = acquire(deadline);
+      if (slot === "overflow")
+        return deny(
+          `too many nested calls at once: ${lim.maxConcurrency} running and ${lim.maxQueuedCalls} queued`,
+          "budget_exceeded",
+          true,
+        );
+      const granted = await slot;
+      // A slot handed over at (or after) the deadline is not used: the call never starts late.
+      if (granted && Date.now() >= deadline) release();
+      if (!granted || Date.now() >= deadline) {
+        if (settled) return;
+        keep(
+          {
+            seq,
+            tool: tool.name,
+            status: "timeout",
+            category: "timeout",
+            ms: Date.now() - issuedAt,
+            input_sha256,
+            bytes: 0,
+            read_only: true,
+          },
+          undefined,
+          `${tool.name} waited past its ${lim.callTimeoutMs} ms deadline`,
+        );
+        return reply(`${tool.name} exceeded ${lim.callTimeoutMs} ms (waiting for a free slot)`);
+      }
+      if (settled) return release();
+      const signal = AbortSignal.any([
+        nested.signal,
+        AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      ]);
       const t0 = Date.now();
-      const signal = AbortSignal.any([nested.signal, AbortSignal.timeout(lim.callTimeoutMs)]);
       let r: { ok: boolean; result?: unknown; error?: string };
       try {
         r = await Promise.race([
@@ -356,38 +520,44 @@ export async function executeCode(
               : (e as Error).message,
         };
       } finally {
-        inflight--;
-        waiting.shift()?.();
+        release();
       }
-      if (settled) return;
+      if (settled) return; // a late completion: discarded, not recorded
       const timedOut = !r.ok && signal.aborted && !nested.signal.aborted;
-      const text = r.ok ? JSON.stringify(r.result ?? null) : undefined;
+      const text = r.ok ? (JSON.stringify(r.result ?? null) ?? "null") : undefined;
       const bytes = text ? Buffer.byteLength(text) : 0;
-      resultBytes += bytes;
-      const overBudget = resultBytes > lim.maxResultBytes;
-      const rec: CallRecord = {
-        seq,
-        tool: tool.name,
-        status: r.ok ? (overBudget ? "error" : "ok") : timedOut ? "timeout" : "error",
-        ...(overBudget
-          ? { category: "budget_exceeded" as const }
-          : timedOut
-            ? { category: "timeout" as const }
-            : {}),
-        ms: Date.now() - t0,
-        input_sha256,
-        ...(text ? { output_sha256: sha256(text) } : {}),
-        bytes,
-        read_only: true,
-      };
-      calls[seq - 1] = rec;
-      await deps.record?.(rec, r.ok ? r.result : undefined, r.error);
-      if (overBudget)
-        reply(false, { error: `result budget of ${lim.maxResultBytes} bytes exceeded` });
-      else if (r.ok) reply(true, { result: r.result ?? null });
-      else reply(false, { error: String(r.error ?? "tool call failed").slice(0, 2000) });
+      const refusal = !text
+        ? undefined
+        : bytes > lim.maxCallResultBytes
+          ? `result of ${tool.name} is ${bytes} bytes, above the ${lim.maxCallResultBytes}-byte limit per call: narrow the query`
+          : resultBytes + bytes > lim.maxResultBytes
+            ? `result budget of ${lim.maxResultBytes} bytes exceeded: narrow the queries`
+            : undefined;
+      if (text && !refusal) resultBytes += bytes;
+      keep(
+        {
+          seq,
+          tool: tool.name,
+          status: r.ok ? (refusal ? "error" : "ok") : timedOut ? "timeout" : "error",
+          ...(refusal
+            ? { category: "budget_exceeded" as const }
+            : timedOut
+              ? { category: "timeout" as const }
+              : {}),
+          ms: Date.now() - t0,
+          input_sha256,
+          ...(text ? { output_sha256: sha256(text) } : {}),
+          bytes: refusal ? 0 : bytes,
+          read_only: true,
+        },
+        r.ok && !refusal ? r.result : undefined,
+        refusal ?? r.error,
+      );
+      if (refusal) reply(refusal);
+      else if (r.ok) write(`{"t":"result","id":${id},"ok":true,"result":${text}}`);
+      else reply(String(r.error ?? "tool call failed").slice(0, 2000));
     };
 
-    send({ t: "start", code: req.code });
+    write(JSON.stringify({ t: "start", code: req.code, maxOutputBytes: lim.maxOutputBytes }));
   });
 }

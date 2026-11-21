@@ -91,6 +91,11 @@ export interface ToolCallContext {
   stepKey?: string;
   /** Set only by the chat operation flow after the owner confirmed this exact call; `confirm` tools need it. */
   confirmedOperation?: { id: number; idempotencyKey: string };
+  /**
+   * Cancellation of the caller (CodeAct nested call, attempt). A handler may pass it to its I/O; whether or not it
+   * does, callTool never starts after the abort and never reports a result that arrived after it.
+   */
+  signal?: AbortSignal;
 }
 
 export interface IntegrationTool<S extends z.ZodObject = z.ZodObject> {
@@ -300,11 +305,27 @@ export async function callTool(
       error: `invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
       ms: 0,
     };
+  if (ctx.signal?.aborted) return { ok: false, error: "canceled", ms: 0 };
+  const signal = ctx.signal;
+  let onAbort: (() => void) | undefined;
   try {
-    const result = await t.handler(parsed.data, ctx);
+    const work = t.handler(parsed.data, ctx);
+    const result = signal
+      ? await Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            onAbort = () => reject(new Error("canceled"));
+            signal.addEventListener("abort", onAbort, { once: true });
+          }),
+        ])
+      : await work;
+    if (signal?.aborted) return { ok: false, error: "canceled", ms: Date.now() - t0 };
     return { ok: true, result, ms: Date.now() - t0 };
   } catch (e) {
+    if (signal?.aborted) return { ok: false, error: "canceled", ms: Date.now() - t0 };
     return { ok: false, error: (e as Error).message, ms: Date.now() - t0 };
+  } finally {
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
   }
 }
 
