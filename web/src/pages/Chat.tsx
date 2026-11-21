@@ -17,6 +17,8 @@ import {
   Trash2,
   Workflow,
   AlertTriangle,
+  ImagePlus,
+  X,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { AGENT_PROVIDERS, agentKey, asProvider } from "../agentProvider.tsx";
@@ -83,8 +85,35 @@ type Message = {
   content: string;
   citations?: Array<{ label: string; tool?: string; ref: string; repository?: string }>;
   withheld?: boolean;
+  attachments?: Array<{ id: number; media_type: string; bytes: number }>;
   created_at: string;
 };
+
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const IMAGE_BYTES = 5 * 1024 * 1024;
+const IMAGES_PER_MESSAGE = 4;
+/** Base64 of a file (the upload body); the bytes are validated again by the server. */
+const base64Of = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
+    r.onerror = () => reject(r.error ?? new Error("could not read the image"));
+    r.readAsDataURL(file);
+  });
+
+/** Thumbnails of a message's images; each opens the original through the authenticated route. */
+function Thumbs({ items, label }: { items: Array<{ key: string | number; src: string }>; label: string }) {
+  if (!items.length) return null;
+  return (
+    <div className="chat-thumbs">
+      {items.map((i) => (
+        <a key={i.key} href={i.src} target="_blank" rel="noopener noreferrer" title={label} aria-label={label}>
+          <img src={i.src} alt="" loading="lazy" />
+        </a>
+      ))}
+    </div>
+  );
+}
 
 type ToolCall = {
   id: number;
@@ -93,6 +122,7 @@ type ToolCall = {
   tool: string;
   status: string;
   duration_ms: number | null;
+  result?: unknown;
 };
 
 type Turn = {
@@ -333,6 +363,10 @@ const ChatMessages = memo(function ChatMessages({
               ) : (
                 <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
               )}
+              <Thumbs
+                items={(m.attachments ?? []).map((a) => ({ key: a.id, src: `/api/chat/attachments/${a.id}` }))}
+                label={t("chat.attach.open")}
+              />
               {!!tools?.length && !turn?.trace?.length && (
                 <details className="chat-tools">
                   <summary>{t("chat.tools", { n: tools.length })}</summary>
@@ -436,6 +470,26 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const [detailErr, setDetailErr] = useState("");
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [draft, setDraft] = useState("");
+  const [images, setImages] = useState<Array<{ url: string; file: File }>>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const addImages = (files: File[]) => {
+    const ok: Array<{ url: string; file: File }> = [];
+    for (const f of files) {
+      if (!IMAGE_TYPES.includes(f.type)) toast(t("chat.attach.type"), "err");
+      else if (f.size > IMAGE_BYTES) toast(t("chat.attach.size"), "err");
+      else ok.push({ url: URL.createObjectURL(f), file: f });
+    }
+    setImages((cur) => {
+      const room = IMAGES_PER_MESSAGE - cur.length;
+      if (ok.length > room) toast(t("chat.attach.limit", { n: IMAGES_PER_MESSAGE }), "err");
+      for (const extra of ok.slice(Math.max(0, room))) URL.revokeObjectURL(extra.url);
+      return [...cur, ...ok.slice(0, Math.max(0, room))];
+    });
+  };
+  const removeImage = (url: string) => {
+    URL.revokeObjectURL(url);
+    setImages((cur) => cur.filter((i) => i.url !== url));
+  };
   const [busy, setBusy] = useState(false);
   const [liveNote, setLiveNote] = useState("");
   const [live, setLive] = useState<LiveTurn | null>(null);
@@ -577,6 +631,12 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
         else if (kind === "provider.fallback")
           setLiveNote(t("chat.live.fallback"));
         else if (kind === "tool.started") setLiveNote(t("chat.live.tool", { tool: p.data?.tool ?? "" }));
+        else if (kind === "repositories.resolved")
+          setLiveNote(
+            t("chat.live.sources", {
+              repos: ((p.data?.repositories ?? []) as Array<{ name: string }>).map((r) => r.name).join(", "),
+            }),
+          );
         else if (kind === "routing.completed")
           setLiveNote(t("chat.live.route", { route: p.data?.route ?? "" }));
         else if (
@@ -710,13 +770,27 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     repositories: repoScope,
   });
 
-  const deliver = async (conversationId: number, cid: string, content: string) => {
+  const deliver = async (conversationId: number, cid: string, content: string, pendingImages?: PendingMessage) => {
     setBusy(true);
     setLiveNote(t("chat.live.thinking"));
     try {
+      // Images are uploaded once; a retry of the same message reuses their ids.
+      let attachments = pendingImages?.attachmentIds;
+      if (!attachments && pendingImages?.images?.length) {
+        attachments = [];
+        for (const img of pendingImages.images) {
+          const up = await api<{ id: number }>(`/api/chat/conversations/${conversationId}/attachments`, {
+            data: await base64Of(img.file),
+          });
+          attachments.push(up.id);
+        }
+        const ids = attachments;
+        setPending((p) => markPending(p, cid, { attachmentIds: ids }));
+      }
       await api(`/api/chat/conversations/${conversationId}/messages`, {
         content,
         client_message_id: cid,
+        ...(attachments?.length ? { attachments } : {}),
         ...selectionBody(),
       });
       await loadDetail(conversationId);
@@ -730,22 +804,28 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   };
 
   const send = () => {
-    if (!activeId || !draft.trim() || busy || detail?.active_turn) return;
+    if (!activeId || (!draft.trim() && !images.length) || busy || detail?.active_turn) return;
     const content = draft.trim();
     const cid = clientMessageId();
+    const message: PendingMessage = {
+      cid,
+      conversationId: activeId,
+      content,
+      ...(images.length ? { images } : {}),
+      status: "sending",
+      at: new Date().toISOString(),
+    };
     // Rendered before the request: the server reconciles by this same client_message_id.
-    setPending((p) => [
-      ...p,
-      { cid, conversationId: activeId, content, status: "sending", at: new Date().toISOString() },
-    ]);
+    setPending((p) => [...p, message]);
     setDraft("");
+    setImages([]);
     stickBottom.current = true;
-    void deliver(activeId, cid, content);
+    void deliver(activeId, cid, content, message);
   };
 
   const retrySend = (m: PendingMessage) => {
     setPending((p) => markPending(p, m.cid, { status: "sending", error: undefined }));
-    void deliver(m.conversationId, m.cid, m.content);
+    void deliver(m.conversationId, m.cid, m.content, m);
   };
 
   const decideOperation = async (id: number, decision: "confirm" | "reject") => {
@@ -877,13 +957,28 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     };
   }, [menuId]);
 
-  const openDelegation = async (kind: "task" | "investigation" | "plan" | "delegate") => {
+  type DelegationKind = "task" | "investigation" | "plan" | "delegate";
+  const openDelegation = async (
+    request: DelegationKind | { kind: DelegationKind; title?: string; repositories?: string[] },
+  ) => {
     if (!activeId) return;
+    const body = typeof request === "string" ? { kind: request } : request;
     const p = await act(() =>
-      api<NonNullable<typeof preview>>(`/api/chat/conversations/${activeId}/delegation/preview`, { kind }),
+      api<NonNullable<typeof preview>>(`/api/chat/conversations/${activeId}/delegation/preview`, body),
     );
     if (p) setPreview(p);
   };
+  // A task the agent proposed in the latest turn (work.delegate): reviewed and started through the same preview.
+  const proposal = useMemo(() => {
+    // Turns arrive newest first; take the highest id rather than trust the order.
+    const last = (detail?.turns ?? []).reduce<Turn | undefined>((a, b) => (!a || b.id > a.id ? b : a), undefined);
+    const call = [...(detail?.tool_calls ?? [])]
+      .reverse()
+      .find((c) => c.tool === "work.delegate" && c.status === "ok" && c.turn_id === last?.id);
+    const request = (call?.result as { request?: { kind: DelegationKind; title: string; repositories: string[] } } | undefined)
+      ?.request;
+    return request && !detail?.active_turn ? request : null;
+  }, [detail?.turns, detail?.tool_calls, detail?.active_turn]);
 
   const confirmDelegation = async () => {
     if (!activeId || !preview) return;
@@ -1127,6 +1222,10 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                         <span>{p.status === "sending" ? t("chat.sending") : t("chat.sendFailed")}</span>
                       </div>
                       <div style={{ whiteSpace: "pre-wrap" }}>{p.content}</div>
+                      <Thumbs
+                        items={(p.images ?? []).map((i) => ({ key: i.url, src: i.url }))}
+                        label={t("chat.attach.open")}
+                      />
                     </article>
                     {p.status === "failed" && (
                       <div className="chat-failure" role="alert">
@@ -1290,8 +1389,51 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   )}
                 </div>
               )}
+              {proposal && (
+                <div className="chat-proposal" role="status">
+                  <Workflow size={15} />
+                  <span>{t("chat.proposal", { title: proposal.title })}</span>
+                  <button className="sm" onClick={() => void openDelegation(proposal)}>
+                    {t("chat.proposal.review")}
+                  </button>
+                </div>
+              )}
+              {images.length > 0 && (
+                <div className="chat-thumbs is-composer">
+                  {images.map((i) => (
+                    <span key={i.url} className="chat-thumb">
+                      <img src={i.url} alt="" />
+                      <button
+                        type="button"
+                        className="ghost xs"
+                        aria-label={t("chat.attach.remove")}
+                        title={t("chat.attach.remove")}
+                        onClick={() => removeImage(i.url)}
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <textarea
                 value={draft}
+                onPaste={(e) => {
+                  const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+                  if (!files.length) return;
+                  // A pasted screenshot is an attachment; pasted text keeps its default behaviour.
+                  if (!e.clipboardData.getData("text")) e.preventDefault();
+                  addImages(files);
+                }}
+                onDragOver={(e) => {
+                  if (Array.from(e.dataTransfer.items).some((i) => i.kind === "file")) e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+                  if (!files.length) return;
+                  e.preventDefault();
+                  addImages(files);
+                }}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder={t("chat.placeholder")}
                 onCompositionStart={() => (composing.current = true)}
@@ -1324,9 +1466,32 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     <Square size={15} /> {t("chat.stop")}
                   </button>
                 ) : (
-                  <button onClick={() => void send()} disabled={!draft.trim() || busy}>
-                    <Send size={15} /> {t("chat.send")}
-                  </button>
+                  <>
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      accept={IMAGE_TYPES.join(",")}
+                      multiple
+                      hidden
+                      onChange={(e) => {
+                        addImages(Array.from(e.target.files ?? []));
+                        e.target.value = "";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      aria-label={t("chat.attach")}
+                      title={t("chat.attach")}
+                      onClick={() => fileInput.current?.click()}
+                      disabled={images.length >= IMAGES_PER_MESSAGE}
+                    >
+                      <ImagePlus size={15} />
+                    </button>
+                    <button onClick={() => void send()} disabled={(!draft.trim() && !images.length) || busy}>
+                      <Send size={15} /> {t("chat.send")}
+                    </button>
+                  </>
                 )}
               </div>
             </div>

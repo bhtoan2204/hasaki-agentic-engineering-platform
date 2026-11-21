@@ -248,6 +248,32 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         ? send(res, 200, slice, { "Cache-Control": "no-store" })
         : send(res, 404, { error: "not found" });
     }
+    // Chat images: the upload body is bounded here (5 MB image as base64 + JSON), the bytes are served only to the
+    // owner of the conversation, as an image of the sniffed type, never as a path or a public URL.
+    const upload =
+      method === "POST" && url.pathname.match(/^\/api\/chat\/conversations\/(\d+)\/attachments$/);
+    if (upload) {
+      const { uploadAttachment } = await import("../chat/attachments.ts");
+      return send(
+        res,
+        200,
+        await uploadAttachment(actor.id, Number(upload[1]), await readJson(req, 7_200_000)),
+      );
+    }
+    const image = method === "GET" && url.pathname.match(/^\/api\/chat\/attachments\/(\d+)$/);
+    if (image) {
+      const { readAttachment } = await import("../chat/attachments.ts");
+      const a = await readAttachment(actor.id, Number(image[1]));
+      if (!a) return send(res, 404, { error: "not found" });
+      res.writeHead(200, {
+        "Content-Type": a.media_type,
+        "Content-Length": a.content.length,
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'",
+      });
+      return res.end(a.content);
+    }
     const raw = method === "GET" && url.pathname.match(/^\/api\/artifacts\/(\d+)\/raw$/);
     if (raw) {
       const { requireArtifact } = await import("../authz/access.ts");

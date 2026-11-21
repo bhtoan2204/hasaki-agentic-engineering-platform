@@ -1,9 +1,17 @@
 import { config } from "../config.ts";
 import { withTx } from "../db/pool.ts";
 import { background } from "../workflow/background.ts";
-import { completeForRun, completionAgent, type CompletionRunner } from "../agent/complete.ts";
+import {
+  completeForRun,
+  completionAgent,
+  NATIVE_TOOL_PROVIDERS,
+  VISION_PROVIDERS,
+  type CompletionRunner,
+  type NativeTools,
+} from "../agent/complete.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
-import type { AgentProvider } from "../agent/provider.ts";
+import { AGENT_PROVIDERS, type AgentProvider } from "../agent/provider.ts";
+import { imagesForTurn } from "./attachments.ts";
 import { invalidateSharedAgentHealth, rememberProviderQuota } from "../agent/health.ts";
 import { boundedContextJson } from "../agent/contextTools.ts";
 import { chatRepository } from "./repository.ts";
@@ -28,7 +36,9 @@ import {
   resolveMentions,
   type ResolvedMention,
 } from "./context.ts";
-import { executeChatTool, readableRepositories, toolCatalog, type ChatBinding } from "./tools.ts";
+import { executeChatTool, nativeToolDefs, toolCatalog, type ChatBinding } from "./tools.ts";
+import { listAccessibleRepositories } from "../repos/access.ts";
+import { resolveRepositories } from "./repoResolver.ts";
 import { stallGuard, TurnStream } from "./streaming.ts";
 import { turnScheduled, turnSettled } from "./turnActivity.ts";
 import { estimateTokens } from "../context/plan.ts";
@@ -55,6 +65,11 @@ import type {
 
 type Providers = Record<AgentProvider, CompletionRunner>;
 let providerSeam: Providers | undefined;
+/** Native tool calls unless CHAT_NATIVE_TOOLS=off (then every provider uses the chat-tool block protocol). */
+const nativeToolsFor = (provider: string) =>
+  process.env.CHAT_NATIVE_TOOLS !== "off" &&
+  (NATIVE_TOOL_PROVIDERS as readonly string[]).includes(provider);
+
 export function setChatProviders(p: Providers | undefined) {
   providerSeam = p;
 }
@@ -411,6 +426,19 @@ async function executeTurn(
   await phase(turn, "validating_provider");
   const attempts: ProviderAttempt[] = [];
   const avoid = new Set<string>();
+  // Images go to a provider that can read them: AUTO only admits vision providers, a manual choice that cannot is refused.
+  const images = await imagesForTurn(turn.owner_id, conversation.id, userMessage.id);
+  if (images.length) {
+    if (strategy === "manual" && preferred && !VISION_PROVIDERS.includes(preferred as AgentProvider))
+      throw new ChatTurnError(
+        chatFailure(
+          "PROVIDER_CAPABILITY",
+          `${preferred} cannot read images in chat. Switch the provider to AUTO or to ${VISION_PROVIDERS.join(", ")}, then retry; the images stay attached.`,
+          { provider: preferred, retryable: false, actions: ["retry_other_provider"] },
+        ),
+      );
+    for (const p of AGENT_PROVIDERS) if (!VISION_PROVIDERS.includes(p)) avoid.add(p);
+  }
   // One configuration document for the whole turn: admission, agent resolution and every completion use it.
   const cfg = await loadAgentConfiguration();
   let admission = await admitProvider({
@@ -459,13 +487,26 @@ async function executeTurn(
     phase: "preparing_context",
   });
 
-  const readable = await readableRepositories(turn.owner_id);
-  const repositories = [
+  const accessible = (await listAccessibleRepositories(turn.owner_id)).map((r) => r.repository);
+  const readable = accessible.map((r) => r.name);
+  let repositories = [
     ...new Set([
       ...conversation.repositories.filter((r) => readable.includes(r)),
       ...mentions.filter((m) => m.resolved && m.repository).map((m) => m.repository!),
     ]),
   ];
+  // No explicit scope and no mention: infer it from the request over what the user can already read.
+  const inferred = !repositories.length
+    ? resolveRepositories(userMessage.content, accessible)
+    : [];
+  if (inferred.length) {
+    repositories = inferred.map((r) => r.name);
+    await emitChatEvent({
+      ...ids,
+      kind: "repositories.resolved",
+      data: { repositories: inferred.map(({ name, reasons }) => ({ name, reasons })) },
+    });
+  }
 
   const history = withholdRevoked(
     (await chatRepository.historyFor(conversation.id, conversation.summary_through)).filter(
@@ -503,6 +544,7 @@ async function executeTurn(
     turnId: turn.id,
     mode: effectiveMode,
     repositories,
+    inferred: inferred.length > 0,
   };
   const usage = emptyUsage();
   const steps: Array<Record<string, unknown>> = [];
@@ -603,6 +645,88 @@ async function executeTurn(
     let catalogDelivered = false;
     // Tool results of earlier steps are compacted for stateless providers; this marks where the latest batch starts.
     let latestFrom = Number.MAX_SAFE_INTEGER;
+    /** One tool call: recorded, authorized and executed (executeChatTool), streamed, cited and kept as evidence. */
+    const runCall = async (call: { tool: string; arguments: unknown }) => {
+      const key = JSON.stringify([call.tool, call.arguments]);
+      seq++;
+      const row = await chatRepository.insertToolCall({
+        turnId: turn.id,
+        conversationId: conversation.id,
+        ownerId: turn.owner_id,
+        seq,
+        tool: call.tool,
+        arguments: (call.arguments ?? {}) as Record<string, unknown>,
+      });
+      stream.tool(row.id, call.tool, "running");
+      await emitChatEvent({
+        ...ids,
+        kind: "tool.started",
+        data: { tool_call_id: row.id, seq, tool: call.tool },
+      });
+      const t0 = Date.now();
+      const outcome = seen.has(key)
+        ? {
+            status: "denied" as const,
+            result: { error: "duplicate call: same tool and arguments already ran in this turn" },
+            repositories: [] as string[],
+            label: call.tool,
+          }
+        : await executeChatTool(binding, call.tool, call.arguments, signal);
+      seen.add(key);
+      const evidenceRef =
+        outcome.status === "ok" ? `chat:${conversation.id}:tool:${row.id}` : null;
+      const durationMs = Date.now() - t0;
+      await chatRepository.finishToolCall(row.id, {
+        status: outcome.status,
+        result: outcome.result,
+        repositories: outcome.repositories,
+        evidenceRef,
+        durationMs,
+      });
+      usage.tool_calls++;
+      stream.tool(row.id, call.tool, outcome.status, durationMs);
+      const read = outcome.result as { key?: string; version?: number; title?: string; owner?: string } | null;
+      if (call.tool === "knowledge.get" && outcome.status === "ok" && read?.key && read.version != null)
+        stream.knowledge({ key: read.key, version: read.version, title: read.title ?? read.key, owner: read.owner ?? "shared" });
+      await emitChatEvent({
+        ...ids,
+        kind: outcome.status === "ok" ? "tool.completed" : "tool.failed",
+        data: {
+          tool_call_id: row.id,
+          seq,
+          tool: call.tool,
+          status: outcome.status,
+          label: outcome.label,
+          duration_ms: durationMs,
+        },
+      });
+      if (evidenceRef) {
+        const citation: Citation = {
+          tool_call_id: row.id,
+          tool: call.tool,
+          ref: evidenceRef,
+          label: outcome.label,
+          ...(outcome.repositories.length === 1
+            ? { repository: outcome.repositories[0] }
+            : {}),
+        };
+        citations.push(citation);
+        for (const r of outcome.repositories.slice(1))
+          citations.push({ ...citation, repository: r });
+        await emitChatEvent({ ...ids, kind: "evidence.added", data: { ...citation } });
+      }
+      const body = boundedContextJson(outcome.result);
+      toolResults.push({
+        seq,
+        tool: call.tool,
+        status: outcome.status,
+        body:
+          body.length > LIMITS.toolResultChars
+            ? `${body.slice(0, LIMITS.toolResultChars)}… [truncated]`
+            : body,
+      });
+      return toolResults[toolResults.length - 1];
+    };
     try {
       await phase(turn, "preparing_context");
       for (let step = 0; step < LIMITS.maxSteps && final == null; step++) {
@@ -630,14 +754,33 @@ async function executeTurn(
           history: window,
           mentions,
           catalog,
-          message: userMessage.content,
+          message:
+            userMessage.content ||
+            "(The user sent only the attached image(s): analyse what they show and what it means for the request.)",
           toolResults: deltaContext() ? compactToolResults(toolResults, latestFrom) : toolResults,
           repositories,
           memories,
           knowledge: promptKnowledge,
           continuation: resume,
           canEscalate: routing.path === "direct" && !escalated && step < LIMITS.maxSteps - 1,
+          nativeTools: !!catalog && nativeToolsFor(admission.provider),
+          images: images.length,
         });
+        // Native tool calls (Claude): the provider runs the loop inside this step; each call is the same runCall.
+        const native: NativeTools | undefined =
+          catalog && nativeToolsFor(admission.provider)
+            ? {
+                tools: nativeToolDefs(effectiveMode),
+                maxTurns: Math.max(2, LIMITS.maxToolCalls - seq + 1),
+                call: async (name, args) => {
+                  if (seq >= LIMITS.maxToolCalls)
+                    return "Tool budget reached: answer now with the evidence you have and list what is missing.";
+                  signal.throwIfAborted();
+                  const r = await runCall({ tool: name, arguments: args });
+                  return `tool #${r.seq} ${name} (${r.status})\n${r.body}`;
+                },
+              }
+            : undefined;
         if (step === 0 && attempt === 0)
           await emitChatEvent({
             ...ids,
@@ -648,6 +791,8 @@ async function executeTurn(
         await phase(turn, "calling_provider", { provider: admission.provider, step });
         await stream.begin(attempt, step, catalog != null);
         const send = async (text: string, resume: string | null) => {
+          // Images go with every complete prompt; a kept session already holds them.
+          const extras = { images: resume ? undefined : images, nativeTools: native };
           const guard = stallGuard(LIMITS.firstActivityMs, LIMITS.streamIdleMs);
           stallRef.current = guard;
           return completeForRun(
@@ -661,6 +806,7 @@ async function executeTurn(
               stream.onEvent(ev);
             },
             { keep: deltaContext(), resume },
+            extras,
           ).finally(() => guard.dispose());
         };
         const delta = session
@@ -724,85 +870,7 @@ async function executeTurn(
         for (const call of calls.slice(0, LIMITS.maxToolCallsPerStep)) {
           if (seq >= LIMITS.maxToolCalls) break;
           signal.throwIfAborted();
-          const key = JSON.stringify([call.tool, call.arguments]);
-          seq++;
-          const row = await chatRepository.insertToolCall({
-            turnId: turn.id,
-            conversationId: conversation.id,
-            ownerId: turn.owner_id,
-            seq,
-            tool: call.tool,
-            arguments: (call.arguments ?? {}) as Record<string, unknown>,
-          });
-          stream.tool(row.id, call.tool, "running");
-          await emitChatEvent({
-            ...ids,
-            kind: "tool.started",
-            data: { tool_call_id: row.id, seq, tool: call.tool },
-          });
-          const t0 = Date.now();
-          const outcome = seen.has(key)
-            ? {
-                status: "denied" as const,
-                result: { error: "duplicate call: same tool and arguments already ran in this turn" },
-                repositories: [] as string[],
-                label: call.tool,
-              }
-            : await executeChatTool(binding, call.tool, call.arguments, signal);
-          seen.add(key);
-          if (outcome.status === "ok") progressed = true;
-          const evidenceRef =
-            outcome.status === "ok" ? `chat:${conversation.id}:tool:${row.id}` : null;
-          const durationMs = Date.now() - t0;
-          await chatRepository.finishToolCall(row.id, {
-            status: outcome.status,
-            result: outcome.result,
-            repositories: outcome.repositories,
-            evidenceRef,
-            durationMs,
-          });
-          usage.tool_calls++;
-          stream.tool(row.id, call.tool, outcome.status, durationMs);
-          const read = outcome.result as { key?: string; version?: number; title?: string; owner?: string } | null;
-          if (call.tool === "knowledge.get" && outcome.status === "ok" && read?.key && read.version != null)
-            stream.knowledge({ key: read.key, version: read.version, title: read.title ?? read.key, owner: read.owner ?? "shared" });
-          await emitChatEvent({
-            ...ids,
-            kind: outcome.status === "ok" ? "tool.completed" : "tool.failed",
-            data: {
-              tool_call_id: row.id,
-              seq,
-              tool: call.tool,
-              status: outcome.status,
-              label: outcome.label,
-              duration_ms: durationMs,
-            },
-          });
-          if (evidenceRef) {
-            const citation: Citation = {
-              tool_call_id: row.id,
-              tool: call.tool,
-              ref: evidenceRef,
-              label: outcome.label,
-              ...(outcome.repositories.length === 1
-                ? { repository: outcome.repositories[0] }
-                : {}),
-            };
-            citations.push(citation);
-            for (const r of outcome.repositories.slice(1))
-              citations.push({ ...citation, repository: r });
-            await emitChatEvent({ ...ids, kind: "evidence.added", data: { ...citation } });
-          }
-          const body = boundedContextJson(outcome.result);
-          toolResults.push({
-            seq,
-            tool: call.tool,
-            status: outcome.status,
-            body:
-              body.length > LIMITS.toolResultChars
-                ? `${body.slice(0, LIMITS.toolResultChars)}… [truncated]`
-                : body,
-          });
+          if ((await runCall(call)).status === "ok") progressed = true;
         }
         if (!progressed && step > 0) {
           stopReason = "no progress";

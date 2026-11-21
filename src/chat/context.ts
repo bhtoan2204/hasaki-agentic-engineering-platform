@@ -191,6 +191,10 @@ export interface PromptSections {
   continuation?: string | null;
   /** Direct path: the model may ask for tools instead of answering. */
   canEscalate?: boolean;
+  /** The provider receives the tools as native tool definitions (no chat-tool catalog in the prompt). */
+  nativeTools?: boolean;
+  /** Images attached to this request (sent to the provider as image blocks with the prompt). */
+  images?: number;
   /** Owner-private chat memory relevant to this message (preferences, corrections, verified procedures). */
   memories?: Array<{ key: string; kind: string; text: string }>;
 }
@@ -217,7 +221,15 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
     `Developer: ${p.user.name} (id ${p.user.id}). Conversation #${p.conversation.id}${p.conversation.title ? ` "${p.conversation.title}"` : ""}. Repository scope: ${p.repositories.join(", ") || "none selected"}.`,
     Infinity,
   );
-  if (p.catalog)
+  if (p.catalog && p.nativeTools)
+    add(
+      "tools",
+      [
+        "Platform tools are available as native tool calls (a dot in a tool name is written as `_`, e.g. code_read_file). Call them directly; their results come back to you, each starting with its `tool #<seq>`. State-changing integration tools only create an operation the user confirms. Investigate before answering: discover repositories, list manifests, read files, search knowledge and integrations as needed, without asking the user for what the platform can find. Cite evidence as [tool #<seq>].",
+      ].join("\n"),
+      Infinity,
+    );
+  else if (p.catalog)
     add(
       "tools",
       [
@@ -228,6 +240,12 @@ export function buildPrompt(p: PromptSections): { prompt: string; stats: Context
         `At most ${LIMITS.maxToolCallsPerStep} calls per reply. The platform runs them and sends the results back. When you have enough, reply with the final answer (no chat-tool block). Cite evidence as [tool #<seq>].`,
         p.catalog,
       ].join("\n"),
+      Infinity,
+    );
+  if (p.images)
+    add(
+      "images",
+      `${p.images} image(s) are attached to this request (the user's screenshot or file). Read them directly; quote what you see when it is evidence.`,
       Infinity,
     );
   add(

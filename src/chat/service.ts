@@ -22,6 +22,7 @@ import { chatFailure } from "./failures.ts";
 import { fallbackTitle, scheduleTitleGeneration } from "./title.ts";
 import { decideOperation, operationsOf } from "./operations.ts";
 import { chatMemories } from "./memory.ts";
+import { ATTACHMENT_LIMITS, attachToMessage, attachmentsOf } from "./attachments.ts";
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body ?? {});
@@ -61,7 +62,9 @@ const ConversationPatch = ConversationCreate.extend({
 
 const MessagePost = z
   .object({
-    content: z.string().min(1).max(LIMITS.messageChars),
+    content: z.string().max(LIMITS.messageChars).default(""),
+    /** Uploaded image ids (POST /api/chat/conversations/:id/attachments); a message may be images only. */
+    attachments: z.array(z.number().int().positive()).max(ATTACHMENT_LIMITS.imagesPerMessage).optional(),
     client_message_id: z
       .string()
       .min(8)
@@ -81,7 +84,10 @@ const MessagePost = z
     reasoning_effort: z.string().max(40).nullable().optional(),
     repositories: z.array(z.string().min(1).max(200)).max(20).optional(),
   })
-  .strict();
+  .strict()
+  .refine((m) => m.content.trim().length > 0 || (m.attachments?.length ?? 0) > 0, {
+    message: "a message needs text or at least one image",
+  });
 
 async function assertRepos(userId: number, names: string[] | undefined) {
   if (!names?.length) return [] as string[];
@@ -231,7 +237,13 @@ export const chat = {
         chatRepository.delegationsOf(id),
         operationsOf(id, actor.id),
       ]);
-    const messages = withholdRevoked(messageRows, readable);
+    const attached = await attachmentsOf(messageRows.map((m) => m.id));
+    const messages = withholdRevoked(messageRows, readable).map((m) => ({
+      ...m,
+      attachments: attached
+        .filter((a) => a.message_id === m.id)
+        .map(({ id, media_type, bytes }) => ({ id, media_type, bytes })),
+    }));
     const tools = toolRows.map((t) => ({
       id: t.id,
       turn_id: t.turn_id,
@@ -418,13 +430,20 @@ export const chat = {
         },
         c,
       );
+      const attachments = await attachToMessage(
+        c,
+        actor.id,
+        conversationId,
+        message.id,
+        input.attachments ?? [],
+      );
       await chatRepository.touch(conversationId, c);
       let shouldGenerateTitle = false;
       if (
         conversation.title_source === "none" ||
         (!conversation.title.trim() && conversation.title_source !== "manual")
       ) {
-        const fb = fallbackTitle(input.content);
+        const fb = fallbackTitle(input.content.trim() || "Image");
         await chatRepository.updateConversation(
           conversationId,
           actor.id,
@@ -433,7 +452,7 @@ export const chat = {
         );
         shouldGenerateTitle = true;
       }
-      return { turn, message, shouldGenerateTitle };
+      return { turn, message: { ...message, attachments }, shouldGenerateTitle };
     });
 
     scheduleTurn(created.turn.id);

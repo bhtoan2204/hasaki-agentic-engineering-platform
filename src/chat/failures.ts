@@ -15,6 +15,8 @@ export const CHAT_FAILURE_CODES = [
   "INCOMPLETE_OUTPUT",
   "TOOL_BUDGET_EXHAUSTED",
   "PERMISSION_DENIED",
+  /** The chosen provider cannot take this input (images); another provider or AUTO can. */
+  "PROVIDER_CAPABILITY",
   "CANCELED",
   "INTERRUPTED",
   "INTERNAL_ERROR",

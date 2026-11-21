@@ -37,7 +37,9 @@ export type ChatEventKind =
   | "turn.completed"
   | "turn.failed"
   | "turn.canceled"
-  | "conversation.updated";
+  | "conversation.updated"
+  | "repositories.resolved"
+  | "delegation.proposed";
 
 export interface ConversationRow {
   id: number;

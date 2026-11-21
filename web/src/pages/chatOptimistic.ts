@@ -7,6 +7,9 @@ export interface PendingMessage {
   cid: string;
   conversationId: number;
   content: string;
+  /** Images chosen in the composer: object URLs for the bubble, files until uploaded, ids once uploaded (a retry reuses them). */
+  images?: Array<{ url: string; file: File }>;
+  attachmentIds?: number[];
   status: "sending" | "failed";
   error?: string;
   at: string;

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { execution } from "../auth/execution.ts";
 import { audit } from "../authz/access.ts";
 import { searchCodeExact, searchSymbols } from "../codeIntelligence/search.ts";
-import { localScope } from "../codeIntelligence/indexer.ts";
+import { checkoutRoot, listRepositoryFiles } from "./sourceAccess.ts";
 import { listAccessibleRepositories } from "../repos/access.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { isSecretPath } from "../agent/toolPolicy.ts";
@@ -37,6 +37,8 @@ export interface ChatBinding {
   mode: ManualChatMode;
   /** Repositories the conversation is scoped to (plus repositories explicitly mentioned in this turn). */
   repositories: string[];
+  /** The scope was inferred from the request (repoResolver), not chosen: other readable repositories stay discoverable. */
+  inferred?: boolean;
 }
 
 export class ChatToolDenied extends Error {}
@@ -217,7 +219,8 @@ const TOOLS: ToolDef[] = [
     args: z.object({}).strict(),
     async run(_a, ctx) {
       const all = await listAccessibleRepositories(ctx.binding.userId);
-      const names = new Set(ctx.scoped.length ? ctx.scoped : ctx.readable);
+      // An inferred scope is a starting point: every readable repository stays listed, the inferred ones flagged.
+      const names = new Set(ctx.scoped.length && !ctx.binding.inferred ? ctx.scoped : ctx.readable);
       return {
         label: "repositories",
         data: all
@@ -225,7 +228,10 @@ const TOOLS: ToolDef[] = [
           .map((r) => ({
             name: r.repository.name,
             projects: r.repository.projects,
+            services: r.repository.services,
+            description: cut(r.repository.description ?? "", 160),
             default_branch: r.repository.default_branch,
+            ...(ctx.binding.inferred && ctx.scoped.includes(r.repository.name) ? { in_scope: true } : {}),
           })),
       };
     },
@@ -246,6 +252,8 @@ const TOOLS: ToolDef[] = [
       .strict(),
     async run(a, ctx) {
       const repositories = pickRepositories(ctx, a.repositories);
+      // A registered remote without a checkout is prepared first (bounded, see sourceAccess.ts).
+      await Promise.all(repositories.map((r) => checkoutRoot(r)));
       const scope = { repositories, allowed: ctx.readable, provision: false };
       const limit = a.limit ?? 15;
       const hits = a.exact
@@ -283,6 +291,63 @@ const TOOLS: ToolDef[] = [
         label: `${repository}/${a.path}`,
         repositories: [repository],
         data: await readRepositoryFile(repository, a.path, a.start_line, a.end_line),
+      };
+    },
+  },
+  {
+    name: "code.list_files",
+    group: "repo",
+    description:
+      "List tracked files of a readable repository. Without a filter: its build, dependency, container, CI, deployment and architecture files (go.mod, package.json, Dockerfile, CI, Helm, docs) — start here for a tech stack.",
+    usage: '{"repository": "repo", "filter?": "src/payment", "limit?": 200}',
+    args: z
+      .object({
+        repository: z.string().min(1).max(200),
+        filter: z.string().min(1).max(200).optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+      })
+      .strict(),
+    async run(a, ctx) {
+      const [repository] = pickRepositories(ctx, [a.repository]);
+      return {
+        label: `${repository} files${a.filter ? ` "${cut(a.filter, 40)}"` : ""}`,
+        repositories: [repository],
+        data: await listRepositoryFiles(repository, a.filter, a.limit ?? 200),
+      };
+    },
+  },
+  {
+    name: "work.delegate",
+    group: "platform",
+    description:
+      "For an implementation, bug fix, refactor, tests or a pull request: hand the request to the platform's coding workflow (Agent Harness: isolated worktree, sandbox, review gates, validation, PR when authorized). Returns a proposal the user reviews and starts in the chat; it never starts work by itself. Investigate first so the request names the repository and the problem.",
+    usage: '{"title": "Fix refund timeout in payment-paypal", "kind?": "task", "repositories?": ["payment-paypal"]}',
+    args: z
+      .object({
+        title: z.string().min(3).max(200),
+        kind: z.enum(["task", "investigation", "plan", "delegate"]).optional(),
+        repositories: repoArg,
+      })
+      .strict(),
+    async run(a, ctx) {
+      const repositories = a.repositories?.length ? pickRepositories(ctx, a.repositories) : ctx.scoped;
+      const conversation = await chatRepository.getConversation(ctx.binding.conversationId, ctx.binding.userId);
+      if (!conversation) throw new ChatToolDenied("conversation not found");
+      // Loaded lazily: delegation.ts depends on this module.
+      const { buildDelegationPreview } = await import("./delegation.ts");
+      const request = { kind: a.kind ?? "task", title: a.title, repositories };
+      const preview = await buildDelegationPreview(conversation, request);
+      return {
+        label: `proposed task "${cut(a.title, 60)}"`,
+        repositories,
+        data: {
+          status: "awaiting_user_confirmation",
+          request,
+          workflow: preview.workflow ? { key: preview.workflow.key, name: preview.workflow.name } : null,
+          risk: preview.risk,
+          warnings: preview.warnings,
+          note: "Not started. The user reviews this proposal in the chat and starts the run; say so instead of claiming the work is done.",
+        },
       };
     },
   },
@@ -453,6 +518,18 @@ export function toolsForMode(mode: ManualChatMode) {
   return TOOLS.filter((t) => groups.includes(t.group));
 }
 
+/**
+ * The same tools as native tool definitions (schema from each tool's own argument validator). Calls still go through
+ * executeChatTool: binding, mode, arguments, repository scope, audit and operation confirmation are unchanged.
+ */
+export function nativeToolDefs(mode: ManualChatMode) {
+  return toolsForMode(mode).map((t) => ({
+    name: t.name,
+    description: `${t.description} Example arguments: ${t.usage}`,
+    shape: (t.args as z.ZodObject<Record<string, z.ZodType>>).shape,
+  }));
+}
+
 /** The catalog text placed in the prompt (no schema internals, just names, purpose and argument examples). */
 /**
  * Tool groups worth describing for an intent. Only the catalog text narrows: authorization stays MODE_GROUPS, so an
@@ -476,8 +553,7 @@ export function toolCatalog(mode: ManualChatMode, route?: string | null) {
 export async function readRepositoryFile(repository: string, path: string, start?: number, end?: number) {
   if (isAbsolute(path) || path.split(/[\\/]/).includes("..")) throw new ChatToolDenied("path must be relative to the repository");
   if (isSecretPath(path)) throw new ChatToolDenied("secret files are not readable from chat");
-  const { root } = await localScope(repository, undefined, false);
-  const base = await realpath(root);
+  const base = await realpath(await checkoutRoot(repository));
   const abs = await realpath(join(base, path)).catch(() => null);
   if (!abs) throw new ChatToolDenied(`file not found: ${path}`);
   const rel = relative(base, abs);

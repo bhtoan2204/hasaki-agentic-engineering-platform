@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { assertModelAllowed } from "./modelPolicy.ts";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { z } from "zod";
 import { config } from "../config.ts";
 import { agentEnvironment, paidClaudeAuth, paidClaudeAuthMessage } from "./environment.ts";
 import { accumulateMetrics, newMetrics } from "./metrics.ts";
@@ -61,6 +62,28 @@ export interface CompletionSession {
   resume?: string | null;
 }
 
+/** An image block of the request (bytes as base64; never written to logs or telemetry). */
+export interface CompletionImage {
+  media_type: "image/png" | "image/jpeg" | "image/webp";
+  data: string;
+}
+/** Providers whose completion path accepts image blocks. Others get a capability error, never a silently dropped image. */
+export const VISION_PROVIDERS: readonly AgentProvider[] = ["claude"];
+/** Providers whose completion path offers native structured tool calls (see `NativeTools`). */
+export const NATIVE_TOOL_PROVIDERS: readonly AgentProvider[] = ["claude"];
+export class ProviderCapabilityError extends Error {}
+
+/**
+ * Platform tools offered as native tool calls (Claude: an in-process MCP server of the Agent SDK). Only these tools exist
+ * in the session: built-in file, shell and web tools stay disabled, and `call` is the caller's own authorization,
+ * validation and audit path. The provider runs the tool loop; `call` returns the text the model sees.
+ */
+export interface NativeTools {
+  tools: Array<{ name: string; description: string; shape: Record<string, z.ZodType> }>;
+  call: (name: string, args: unknown) => Promise<string>;
+  maxTurns: number;
+}
+
 export interface CompletionOptions {
   signal?: AbortSignal;
   model: string;
@@ -68,7 +91,11 @@ export interface CompletionOptions {
   timeoutMs: number;
   onStream?: CompletionStreamListener;
   session?: CompletionSession;
+  images?: CompletionImage[];
+  nativeTools?: NativeTools;
 }
+/** MCP tool names allow [a-zA-Z0-9_-]: `code.read_file` is offered as `code_read_file`. */
+export const nativeToolName = (name: string) => name.replace(/[^a-zA-Z0-9_-]/g, "_");
 export type CompletionRunner = (
   prompt: string,
   options: CompletionOptions,
@@ -90,9 +117,30 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
   let sessionId: string | null = null;
   const stream = options.onStream;
   const session = options.session?.keep ? options.session : null;
+  const native = options.nativeTools;
+  const byNative = new Map(native?.tools.map((t) => [nativeToolName(t.name), t.name]) ?? []);
+  // Images go as content blocks of one user message (the SDK's streaming input); text-only keeps the plain prompt.
+  const input = options.images?.length
+    ? (async function* (): AsyncGenerator<SDKUserMessage> {
+        yield {
+          type: "user",
+          parent_tool_use_id: null,
+          message: {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              ...options.images!.map((i) => ({
+                type: "image" as const,
+                source: { type: "base64" as const, media_type: i.media_type, data: i.data },
+              })),
+            ],
+          },
+        } as SDKUserMessage;
+      })()
+    : prompt;
   try {
     for await (const msg of query({
-      prompt,
+      prompt: input,
       options: {
         ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
           ? {
@@ -102,7 +150,25 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
           : {}),
         env: agentEnvironment(process.env, "claude"),
         tools: [],
-        maxTurns: 1,
+        maxTurns: native ? native.maxTurns : 1,
+        ...(native
+          ? {
+              mcpServers: {
+                platform: createSdkMcpServer({
+                  name: "platform",
+                  version: "1.0.0",
+                  tools: native.tools.map((t) =>
+                    tool(nativeToolName(t.name), t.description, t.shape, async (args) => ({
+                      content: [{ type: "text" as const, text: await native.call(t.name, args) }],
+                    })),
+                  ),
+                }),
+              },
+              allowedTools: [...byNative.keys()].map((n) => `mcp__platform__${n}`),
+              // Anything not listed above is refused without a prompt (no built-in tool can be approved).
+              permissionMode: "dontAsk" as const,
+            }
+          : {}),
         model: options.model || undefined,
         ...(options.effort
           ? { effort: options.effort as "low" | "medium" | "high" | "xhigh" | "max" }
@@ -126,6 +192,8 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
       }
       if (stream) {
         if (msg.type === "system" && msg.subtype === "init") stream({ type: "started" });
+        // Each assistant message of a tool loop streams on its own; the final answer is the last one.
+        else if (msg.type === "stream_event" && msg.event.type === "message_start") partial = "";
         else if (msg.type === "stream_event" && msg.event.type === "content_block_delta") {
           const d = msg.event.delta;
           if (d.type === "text_delta") stream({ type: "text", text: (partial += d.text) });
@@ -175,6 +243,7 @@ export async function completeForRun(
   agent: CompletionAgentOverride = {},
   onStream?: CompletionStreamListener,
   session?: CompletionSession,
+  extras: { images?: CompletionImage[]; nativeTools?: NativeTools } = {},
 ): Promise<Completion> {
   signal?.throwIfAborted();
   const runnerMap = providers ?? runners;
@@ -183,6 +252,10 @@ export async function completeForRun(
       ? { ...run, agent_configuration: await loadAgentConfiguration() }
       : run;
   const resolved = completionAgent(configured, agent);
+  if (extras.images?.length && !VISION_PROVIDERS.includes(resolved.provider))
+    throw new ProviderCapabilityError(
+      `${resolved.provider} cannot read images in chat; choose a vision-capable provider (${VISION_PROVIDERS.join(", ")}) or AUTO`,
+    );
   const timeoutMs = Math.min(resolved.timeout_ms ?? 600_000, 600_000);
   const deadline = AbortSignal.timeout(timeoutMs);
   const started = Date.now();
@@ -193,6 +266,10 @@ export async function completeForRun(
     signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     ...(onStream ? { onStream } : {}),
     ...(session ? { session } : {}),
+    ...(extras.images?.length ? { images: extras.images } : {}),
+    ...(extras.nativeTools && NATIVE_TOOL_PROVIDERS.includes(resolved.provider)
+      ? { nativeTools: extras.nativeTools }
+      : {}),
   });
   // Whatever model the provider reports (an account default included) is checked, not only what was requested.
   assertModelAllowed(result.model || resolved.model, `${resolved.provider} completion`);

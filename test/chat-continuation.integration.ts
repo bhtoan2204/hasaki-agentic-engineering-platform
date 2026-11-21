@@ -167,7 +167,13 @@ test("dynamic escalation: a direct answer that needs platform data asks for tool
   const r = await say(c.id, "mình có gì?", "cont-escalate-1");
   assert.equal(r.turn.route, "DIRECT_ANSWER");
   assert.match(prompts[0], /reply with exactly ```chat-escalate```/);
-  assert.match(prompts[1], /```chat-tool/, "the tool catalog is attached after the escalation");
+  // Claude gets the tools as native tool calls (the prompt says so); other providers get the chat-tool catalog.
+  assert.match(
+    prompts[1],
+    /```chat-tool|available as native tool calls/,
+    "the tools are offered after the escalation",
+  );
+  assert.doesNotMatch(prompts[0], /available as native tool calls/, "not before it");
   assert.equal((r.turn.metrics as { escalated?: boolean }).escalated, true);
   assert.deepEqual(
     r.d.tool_calls.filter((t) => t.turn_id === r.turn.id).map((t) => [t.tool, t.status]),
