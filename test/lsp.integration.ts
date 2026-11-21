@@ -93,6 +93,8 @@ const paths = (r: NavResult) => r.locations.map((l) => `${l.path}:${l.line}`).so
 
 before(async () => {
   await migrate();
+  // Before registering: the fixture sets the shared level as the column default (cached rows keep what they had).
+  await shareAllRepositoriesForTests();
   for (const [repo, tree] of Object.entries(files)) {
     for (const [p, body] of Object.entries(tree)) {
       mkdirSync(join(root(repo), p, ".."), { recursive: true });
@@ -103,7 +105,6 @@ before(async () => {
     git(root(repo), "commit", "-qm", "fixture");
     await repositories.upsert(repo, { projects: ["LSP"] });
   }
-  await shareAllRepositoriesForTests();
   config.lsp.enabled = true;
   if (!(await probeIsolation(true)).available) config.lsp.allowUnsandboxed = true;
 });
@@ -450,4 +451,43 @@ test("surfaces: workflow navigate_code and Chat code.navigate answer within thei
   } finally {
     config.lsp.enabled = true;
   }
+});
+
+test("a run's own worktree is navigated, not the base checkout or another run's worktree", async () => {
+  const { definitions } = await import("../src/workflow/definitions.ts");
+  const { startRun } = await import("../src/workflow/engine.ts");
+  const { recordWorkspace } = await import("../src/git/provider.ts");
+  await definitions.create({
+    key: "lsp-worktree",
+    spec: {
+      name: "LSP worktree",
+      steps: [{ key: "hold", type: "human_input", config: { question: "hold" } }],
+    },
+  });
+  const runs: number[] = [];
+  for (const n of ["A", "B"]) {
+    const r = await startRun({
+      definitionKey: "lsp-worktree",
+      title: `LSP ${n}`,
+      repositories: ["lsp-ts"],
+      inputs: {},
+      start: false,
+    });
+    const path = join(config.dataDir, `lsp-wt-${n}`);
+    git(root("lsp-ts"), "worktree", "add", "-qb", `lsp-${n}`, path);
+    await recordWorkspace(r.id, { repo: "lsp-ts", path, branch: `lsp-${n}`, created_from: "base" });
+    // Run A moved `compute` down by four lines, uncommitted; run B did not touch it.
+    if (n === "A") writeFileSync(join(path, "src/a.ts"), "\n\n\n\n" + files["lsp-ts"]["src/a.ts"]);
+    runs.push(r.id);
+  }
+  const b = files["lsp-ts"]["src/b.ts"];
+  const ask = (runId?: number) =>
+    navigate(
+      { repository: "lsp-ts", path: "src/b.ts", operation: "definition", ...at(b, "calc(2)") },
+      { allowed: ["lsp-ts"], runId },
+    );
+  const [a, other, base] = await Promise.all([ask(runs[0]), ask(runs[1]), ask()]);
+  assert.deepEqual([paths(a), a.provenance?.root_kind], [["src/a.ts:5"], "worktree"]);
+  assert.deepEqual([paths(other), other.provenance?.root_kind], [["src/a.ts:1"], "worktree"]);
+  assert.deepEqual([paths(base), base.provenance?.root_kind], [["src/a.ts:1"], "checkout"]);
 });
