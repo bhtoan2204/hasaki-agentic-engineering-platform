@@ -16,8 +16,10 @@ import {
 import { LIMITS } from "./policy.ts";
 import { emitChatEvent } from "./events.ts";
 import { abortLocal, recoverStaleTurns, scheduleTurn, withholdRevoked } from "./runtime.ts";
-import { readableRepositories } from "./tools.ts";
+import { readableRepositories, setDelegationPreview } from "./tools.ts";
 import { buildDelegationPreview, DelegationRequest, executeDelegation } from "./delegation.ts";
+
+setDelegationPreview(buildDelegationPreview);
 import { chatFailure } from "./failures.ts";
 import { fallbackTitle, scheduleTitleGeneration } from "./title.ts";
 import { decideOperation, operationsOf } from "./operations.ts";

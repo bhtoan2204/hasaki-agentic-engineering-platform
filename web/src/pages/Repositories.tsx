@@ -42,6 +42,7 @@ import { dialog } from "../dialog/index.ts";
 import { useI18n } from "../i18n/index.tsx";
 import "./Repositories.css";
 import { BitbucketState, RepositoryAccessAdmin } from "./RepositoryAccess.tsx";
+import { RepositoryWorkspace } from "./RepositoryWorkspace.tsx";
 
 const LISTS = [
   "projects",
@@ -750,6 +751,7 @@ export function RepositoriesPage({
         }
       />
       {manage && <RepositoryAccessAdmin />}
+      {!manage && <RepositoryWorkspace />}
       <div className="repo-stats">
         <StatCard icon={FolderGit2} label={t("repo.title")} value={all.length} tone="brand" />
         <StatCard

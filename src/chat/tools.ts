@@ -45,6 +45,23 @@ export interface ChatBinding {
 
 export class ChatToolDenied extends Error {}
 
+/**
+ * The delegation preview (delegation.ts), provided by the chat service: delegation.ts itself depends on this module, so
+ * importing it here would make a cycle.
+ */
+type DelegationPreview = (
+  conversation: import("./types.ts").ConversationRow,
+  request: { kind: "task" | "investigation" | "plan" | "delegate"; title: string; repositories: string[] },
+) => Promise<{
+  workflow: { key: string; name: string } | null;
+  risk: unknown;
+  warnings: string[];
+}>;
+let delegationPreview: DelegationPreview | null = null;
+export function setDelegationPreview(fn: DelegationPreview) {
+  delegationPreview = fn;
+}
+
 interface ToolContext {
   binding: ChatBinding;
   /** Readable ∩ conversation scope (or all readable when the conversation has no scope). Re-read per call. */
@@ -335,8 +352,8 @@ const TOOLS: ToolDef[] = [
       const repositories = a.repositories?.length ? pickRepositories(ctx, a.repositories) : ctx.scoped;
       const conversation = await chatRepository.getConversation(ctx.binding.conversationId, ctx.binding.userId);
       if (!conversation) throw new ChatToolDenied("conversation not found");
-      // Loaded lazily: delegation.ts depends on this module.
-      const { buildDelegationPreview } = await import("./delegation.ts");
+      if (!delegationPreview) throw new ChatToolDenied("delegation is not available");
+      const buildDelegationPreview = delegationPreview;
       const request = { kind: a.kind ?? "task", title: a.title, repositories };
       const preview = await buildDelegationPreview(conversation, request);
       return {

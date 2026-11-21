@@ -18,6 +18,7 @@ import {
   type Snapshot,
 } from "./store.ts";
 import { parserVersion, ParserLoadError } from "./parser.ts";
+import { backgroundDelegate, canSyncFor } from "../repos/backgroundGit.ts";
 
 export async function enqueue(repoName: string, runId?: number) {
   if (!codeIntelligenceEnabled()) return null;
@@ -34,11 +35,17 @@ export async function enqueue(repoName: string, runId?: number) {
     if (run?.worker_instance !== config.instanceId || !run.allowed_repositories.includes(repoName))
       throw new Error("Unauthorized index worktree");
   }
+  // Nobody asked in person (startup, idle, search refresh): run as a user who consented to background Git sync.
+  const requester = currentUserId() ?? (runId ? null : await backgroundDelegate(repo));
+  const delegated = !currentUserId() && requester != null;
   return one(
     pool,
-    `INSERT INTO code_intelligence.runs(repository_id,instance_id,run_id,scope_key,requested_by) VALUES($1,$2,$3,$4,$5)
-    ON CONFLICT(repository_id,instance_id,scope_key) WHERE status IN ('queued','running') DO UPDATE SET requested_at=now(),requested_by=excluded.requested_by RETURNING id,status`,
-    [repo.id, config.instanceId, runId ?? null, runId ? `run:${runId}` : "base", currentUserId()],
+    `INSERT INTO code_intelligence.runs(repository_id,instance_id,run_id,scope_key,requested_by,delegated) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(repository_id,instance_id,scope_key) WHERE status IN ('queued','running') DO UPDATE SET requested_at=now(),
+      requested_by=COALESCE(excluded.requested_by, code_intelligence.runs.requested_by),
+      delegated=CASE WHEN excluded.requested_by IS NULL THEN code_intelligence.runs.delegated ELSE excluded.delegated END
+    RETURNING id,status`,
+    [repo.id, config.instanceId, runId ?? null, runId ? `run:${runId}` : "base", requester, delegated],
   );
 }
 export async function localScope(
@@ -84,6 +91,8 @@ export async function indexRepository(
   signal?: AbortSignal,
   fence?: { id: number; token: number },
   workspacePath?: string,
+  /** false: index the checkout already in the platform workspace, without contacting the remote (no credentials). */
+  provision = true,
 ) {
   const start = Date.now();
   const metrics: Record<string, number> = {
@@ -92,7 +101,7 @@ export async function indexRepository(
     parse_failures: 0,
     index_cache_hits: 0,
   };
-  const scope = await localScope(repoName, runId, true, workspacePath);
+  const scope = await localScope(repoName, runId, provision, workspacePath);
   const progress = async (processed: number, total: number) => {
     if (!fence) return;
     const row = await one(
@@ -303,6 +312,7 @@ interface IndexRunJob {
   repository_id: number;
   run_id: number | null;
   requested_by: number | null;
+  delegated?: boolean;
   fencing_token: number;
   request_marker: string;
 }
@@ -351,17 +361,27 @@ export async function runIndexOnce(signal?: AbortSignal) {
     const repo = await one(pool, "SELECT name FROM repositories WHERE id=$1", [
       claimed.repository_id,
     ]);
-    const owner = claimed.run_id
+    let owner = claimed.run_id
       ? (await one(pool, "SELECT owner_id FROM workflow_runs WHERE id=$1", [claimed.run_id]))
           ?.owner_id
       : claimed.requested_by;
     if (owner && !(await one(pool, "SELECT id FROM users WHERE id=$1 AND active", [owner])))
       throw new Error("Index requester is inactive");
+    // A delegated job uses the consent of then: still consented, token present and read access now, else no account.
+    if (owner && claimed.delegated && !claimed.run_id) {
+      const row = await repositories.get(repo!.name);
+      if (!row || !(await canSyncFor(Number(owner), row))) owner = null;
+    }
+    // Without an account the remote is never contacted: the checkout already in the workspace is indexed as it is.
     const execute = () =>
-      indexRepository(repo!.name, claimed.run_id ?? undefined, ac.signal, {
-        id: claimed.id,
-        token: claimed.fencing_token,
-      });
+      indexRepository(
+        repo!.name,
+        claimed.run_id ?? undefined,
+        ac.signal,
+        { id: claimed.id, token: claimed.fencing_token },
+        undefined,
+        !!owner,
+      );
     const out = owner
       ? await execution.run(
           {
@@ -411,6 +431,13 @@ export function diagnostic(e: unknown) {
   if (e instanceof ParserLoadError) return `${e.message}; check installed WASM assets`;
   if ((e as NodeJS.ErrnoException)?.code === "EACCES") return "Indexing source permission denied";
   const message = (e as Error)?.message ?? "";
+  // A job without a requesting user has no Git credentials (another member's token is never borrowed).
+  if (/authentication required|no .*credential/i.test(message))
+    return "Indexing needs Git credentials: queue the reindex from the repository page so it runs with your Integrations token";
+  if (/unavailable locally/i.test(message))
+    return "Not in the platform workspace yet and no account for background sync: press Sync on the repository page, or enable background sync in Integrations";
+  if (/GitLab host>|repository URL|Use https:\/\//i.test(message))
+    return "Indexing needs a valid repository URL: fix it on the repository page";
   for (const name of [
     "limit exceeded",
     "timeout",

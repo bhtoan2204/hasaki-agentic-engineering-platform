@@ -1,7 +1,8 @@
 import { availableParallelism, totalmem } from "node:os";
 import { execution } from "./auth/execution.ts";
 import { isOwned } from "./platform/operatorState.ts";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { persistentInstanceId } from "./instanceIdentity.ts";
@@ -628,20 +629,28 @@ const BUDGET = supervisionBudget(
   process.env,
 );
 
+/**
+ * Running platform (not the test suites): the platform-go engines, code intelligence and semantic retrieval are on by
+ * default, so an installation needs no feature flags in .env. Each engine still falls back or rolls back with its
+ * variable (`…_ENGINE=typescript`). Tests keep the TypeScript defaults and opt into Go per suite.
+ */
+const LIVE = process.env.PLATFORM_TEST !== "1";
+const ENGINE = LIVE ? ("go" as const) : ("typescript" as const);
+
 const defaults: Config = {
-  knowledge: { ponytail: { enabled: false, mapChars: 2000 }, importEngine: "typescript" },
+  knowledge: { ponytail: { enabled: false, mapChars: 2000 }, importEngine: ENGINE },
   retrieval: {
     semantic: {
-      enabled: false,
+      enabled: LIVE,
       url: "http://127.0.0.1:4646",
       timeoutMs: 1500,
       topK: 30,
       minSimilarity: 0.45,
     },
   },
-  analytics: { engine: "typescript", timeoutMs: 15000, maxFallbackConcurrency: 2 },
+  analytics: { engine: ENGINE, timeoutMs: 15000, maxFallbackConcurrency: 2 },
   codeIntelligence: {
-    enabled: false,
+    enabled: LIVE,
     includeGenerated: false,
     includeDependencies: false,
     maxFileBytes: 512 * 1024,
@@ -654,8 +663,8 @@ const defaults: Config = {
     retentionDays: 7,
     excludes: [],
     sqlDialect: "postgresql",
-    engine: "typescript",
-    searchEngine: "typescript",
+    engine: ENGINE,
+    searchEngine: ENGINE,
     weights: {
       exact: 2,
       qualified: 2,
@@ -818,7 +827,7 @@ const defaults: Config = {
     limits: { memoryMb: 4096, pids: 512, cpuSeconds: 3600, fileSizeMb: 1024, openFiles: 4096 },
   },
   supervision: {
-    engine: "typescript",
+    engine: ENGINE,
     // Budgeted against this host (supervisionBudget): the services keep their share, and the limits of all slots of
     // both classes together stay within the rest. A cap is not a reservation; the memory-pressure gate also defers
     // starts when the host is actually short (and refuses them past the admission timeout).
@@ -862,7 +871,7 @@ const defaults: Config = {
     schedule: ["09:00", "14:00", "17:00"],
     timeoutSeconds: 1800,
     slowThresholdMs: 1000,
-    engine: "typescript",
+    engine: ENGINE,
   },
   learning: {
     detectChanges: true,
@@ -1154,6 +1163,18 @@ function load(): Config {
   if (process.env.PORT) cfg.port = Number(process.env.PORT);
   if (!cfg.publicUrl) cfg.publicUrl = `http://localhost:${cfg.port}`;
   mkdirSync(cfg.dataDir, { recursive: true });
+  if (LIVE) {
+    // The Claude CLI bundled with the Agent SDK (skips the SDK's per-query musl detection) unless one is configured.
+    const bundled = join(import.meta.dirname, "..", "node_modules", "@anthropic-ai", "claude-agent-sdk-linux-x64", "claude");
+    if (!cfg.agent.claudeBin && !process.env.CLAUDE_CODE_EXECUTABLE && existsSync(bundled))
+      cfg.agent.claudeBin = bundled;
+    // The token between this server and platform-go: generated once per data directory (0600), not kept in .env.
+    if (!process.env.RETRIEVAL_INTERNAL_TOKEN) {
+      const file = join(cfg.dataDir, "internal-token");
+      if (!existsSync(file)) writeFileSync(file, randomBytes(32).toString("hex"), { mode: 0o600 });
+      process.env.RETRIEVAL_INTERNAL_TOKEN = readFileSync(file, "utf8").trim();
+    }
+  }
   return cfg;
 }
 

@@ -454,3 +454,10 @@
   flex: 1;
   min-width: 0;
 }
+
+.ig-check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}

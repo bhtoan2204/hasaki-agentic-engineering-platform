@@ -295,6 +295,7 @@ import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
 import { runtimeMetricsSnapshot } from "../runtimeMetrics.ts";
+import { backgroundGitStatus, setBackgroundGit, workspaceRepositories } from "../repos/backgroundGit.ts";
 import { metricsSummary, poolGauges, runMetrics } from "./metrics.ts";
 import { dependencyMetrics } from "../git/nodeDependencies.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
@@ -2155,6 +2156,8 @@ export const routes: Route[] = [
       });
       if (p[1] === "test-connection") return testRepositoryConnection(repository);
       await prepareRepository(repository, p[1] === "refresh");
+      // A fresh checkout is indexed next, as the caller (their account, their access).
+      await enqueueCodeIndex(repository.name).catch(() => null);
       return workspaceStatus(repository);
     },
   ],
@@ -2518,6 +2521,15 @@ export const routes: Route[] = [
     /^\/api\/integrations\/telegram\/adopt-env$/,
     ({ actor }) => (requireAdmin(actor), adoptEnv("telegram")),
   ],
+  // Background Git sync by consent (repos/backgroundGit.ts): the caller's own switch, stored with the caller's secrets.
+  ["GET", /^\/api\/integrations\/background-git$/, ({ actor }) => backgroundGitStatus(actor.id)],
+  [
+    "POST",
+    /^\/api\/integrations\/background-git$/,
+    ({ actor, body }) => setBackgroundGit(actor.id, body.enabled === true),
+  ],
+  // The platform workspace on this instance: readable repositories, their checkout state and latest index.
+  ["GET", /^\/api\/workspace\/repositories$/, ({ actor }) => workspaceRepositories(actor.id)],
   ["GET", /^\/api\/integrations\/bitbucket$/, ({ actor }) => bitbucketStatus(actor.id)],
   ["POST", /^\/api\/integrations\/bitbucket$/, ({ body, actor }) => setBitbucket(body, actor.id)],
   ["POST", /^\/api\/integrations\/bitbucket\/clear$/, ({ actor }) => clearBitbucket(actor.id)],

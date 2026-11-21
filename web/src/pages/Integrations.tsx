@@ -1663,6 +1663,40 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
   );
 }
 
+/**
+ * Background Git sync by consent: indexing and workspace refreshes nobody started in person run with this account's own
+ * Git tokens (above), for the repositories this account can read. Off by default; stored with this account only.
+ */
+function BackgroundGit(p: { open: boolean; onToggle: (id: string) => void }) {
+  const { t } = useI18n();
+  const { data: st, reload } = useApi<{ enabled: boolean; hosts: string[] }>("/api/integrations/background-git");
+  const toggle = async (enabled: boolean) => {
+    if (await act(() => api("/api/integrations/background-git", { enabled }), t("ig.bg.saved"))) void reload();
+  };
+  return (
+    <Row
+      id="background-git"
+      icon={RefreshCw}
+      title={t("ig.bg.title")}
+      health={!st ? "loading" : st.enabled ? (st.hosts.length ? "ok" : "partial") : "off"}
+      summary={st?.enabled ? st.hosts.join(", ") || t("ig.bg.noToken") : t("ig.bg.offSummary")}
+      {...p}
+    >
+      <p className="small">{t("ig.bg.explain")}</p>
+      <label className="ig-check">
+        <input
+          type="checkbox"
+          checked={!!st?.enabled}
+          disabled={!st}
+          onChange={(e) => void toggle(e.target.checked)}
+        />{" "}
+        {t("ig.bg.allow")}
+      </label>
+      {st?.enabled && !st.hosts.length && <p className="small err">{t("ig.bg.noToken")}</p>}
+    </Row>
+  );
+}
+
 function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<TelegramStatus>("/api/integrations/telegram");
@@ -2007,6 +2041,7 @@ export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {})
           <Bitbucket {...row("bitbucket")} />
           <GitHubAccount {...row("github")} />
           <GitLabAccount {...row("gitlab")} />
+          <BackgroundGit {...row("background-git")} />
           <Telegram {...row("telegram")} />
         </div>
       </section>

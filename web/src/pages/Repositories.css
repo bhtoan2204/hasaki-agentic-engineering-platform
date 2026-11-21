@@ -678,3 +678,32 @@
     flex-wrap: wrap;
   }
 }
+
+/* Platform workspace panel (RepositoryWorkspace.tsx). */
+.repo-ws {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  background: var(--surface);
+}
+.repo-ws summary {
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.repo-ws-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.repo-ws-table th,
+.repo-ws-table td {
+  text-align: left;
+  padding: 4px 6px;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
