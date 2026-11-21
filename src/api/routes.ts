@@ -294,6 +294,7 @@ import {
 import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
+import { runtimeMetricsSnapshot } from "../runtimeMetrics.ts";
 import { metricsSummary, poolGauges, runMetrics } from "./metrics.ts";
 import { dependencyMetrics } from "../git/nodeDependencies.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
@@ -749,6 +750,16 @@ export const routes: Route[] = [
         singleflightInflight: singleflightInflight(),
         pool: poolGauges(),
       };
+    },
+  ],
+  // Runtime latency metrics (fixed names, no run/user/repository values): SQL, transactions, pool waits, queue wait,
+  // provider-health reuse, replay decisions, checkpoint bytes, response sizes, event loop. Admin only.
+  [
+    "GET",
+    /^\/api\/metrics\/runtime$/,
+    (c) => {
+      requireAdmin(c.actor);
+      return runtimeMetricsSnapshot();
     },
   ],
   // Dependency readiness: validation/install timings, cache hit rate, full vs incremental, I/O and event loop lag. Admin only.

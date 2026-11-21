@@ -1,4 +1,5 @@
-import { handoffReadiness } from "./handoff.ts";
+import { handoffReadiness, readinessSeamVersion } from "./handoff.ts";
+import { count } from "../runtimeMetrics.ts";
 import {
   AGENT_PROVIDERS,
   parseAgentProvider,
@@ -104,18 +105,23 @@ export async function probeAgentHealth(
  * unavailable or unauthenticated, and by an explicit health refresh.
  */
 export const HEALTH_REUSE_MS = 10_000;
-let shared: { at: number; rows: Promise<AgentHealth[]> } | null = null;
+let shared: { at: number; seam: number; rows: Promise<AgentHealth[]> } | null = null;
 let prober: () => Promise<AgentHealth[]> = () => probeAgentHealth();
 
 export async function sharedAgentHealth(): Promise<AgentHealth[]> {
-  if (!shared || Date.now() - shared.at > HEALTH_REUSE_MS) {
+  if (
+    !shared ||
+    Date.now() - shared.at > HEALTH_REUSE_MS ||
+    shared.seam !== readinessSeamVersion()
+  ) {
+    count("health.shared_probes");
     const rows = prober();
-    const entry = { at: Date.now(), rows };
+    const entry = { at: Date.now(), seam: readinessSeamVersion(), rows };
     shared = entry;
     rows.catch(() => {
       if (shared === entry) shared = null;
     });
-  }
+  } else count("health.shared_reused");
   const rows = await shared.rows;
   return rows.map((h) =>
     h.quota !== "exhausted" && rememberedQuota(h.provider) === "exhausted"
@@ -125,12 +131,13 @@ export async function sharedAgentHealth(): Promise<AgentHealth[]> {
 }
 
 export function invalidateSharedAgentHealth() {
+  if (shared) count("health.invalidated");
   shared = null;
 }
 
 /** A fresh probe made elsewhere (the provider status page, "Refresh health") becomes the shared reading. */
 export function primeSharedAgentHealth(rows: AgentHealth[]) {
-  shared = { at: Date.now(), rows: Promise.resolve(rows) };
+  shared = { at: Date.now(), seam: readinessSeamVersion(), rows: Promise.resolve(rows) };
 }
 
 /** Benchmarks and tests: replace what a shared probe runs (the reuse above still applies). */

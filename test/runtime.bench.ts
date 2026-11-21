@@ -11,6 +11,8 @@
  *   chat_concurrent    8 conversations at once, same provider
  *   workflow_run       a 12-step run of stub agent steps (10 ms each): start → COMPLETED, scheduler overhead per step
  *   checkpoint_replay  re-execute the root of that run (context-only replay of 12 descendants) → COMPLETED
+ *   workflow_scheduled the same run executed by the production scheduler loops (2 workers + 1 light worker, 1 s idle
+ *                      poll) instead of drain(): adds the queue wait between a job becoming runnable and its claim
  * Measured per scenario: p50/p95/p99 latency, SQL statements, Node CPU, event-loop delay p99/max, peak RSS, and the
  * host's PSI (cpu/memory/io "some" stall time during the scenario). Writes docs/architecture/runtime-e2e*.json.
  */
@@ -41,7 +43,7 @@ const titles = await import("../src/chat/title.ts");
 const { setChatTitleComplete } = titles;
 const { definitions } = await import("../src/workflow/definitions.ts");
 const { startRun, getRun, reexecuteStep } = await import("../src/workflow/engine.ts");
-const { drain } = await import("../src/workflow/scheduler.ts");
+const { drain, startScheduler } = await import("../src/workflow/scheduler.ts");
 const { registerExecutor } = await import("../src/workflow/executors/registry.ts");
 const { conditionExecutor } = await import("../src/workflow/executors/builtin.ts");
 const { settleBackground } = await import("../src/workflow/background.ts");
@@ -70,7 +72,10 @@ const spawnedHealth = async () => {
   await run("claude", ["auth", "status", "--json"], { timeout: 15_000 }).catch(() => {});
   return allHealthy();
 };
+let currentHealth: typeof instantHealth | null = null;
 const useHealth = (fn: typeof instantHealth) => {
+  if (currentHealth === fn) return; // keep the shared reading (and its reuse) across iterations
+  currentHealth = fn;
   const prober = (admission as { setChatHealthProber?: (f: typeof fn | undefined) => void })
     .setChatHealthProber;
   if (prober) {
@@ -79,6 +84,24 @@ const useHealth = (fn: typeof instantHealth) => {
   } else setChatHealthProbe(fn);
 };
 useHealth(instantHealth);
+/** Workflow scenarios: the real readiness checks (CLI status commands, no model call), counted per shared probe. */
+const { probeAgentHealth } = await import("../src/agent/health.ts");
+const realHealth = async () => {
+  probes++;
+  return (await probeAgentHealth()) as ReturnType<typeof allHealthy>;
+};
+const withRealHealth =
+  <T,>(fn: () => Promise<T>) =>
+  async () => {
+    useHealth(realHealth);
+    return fn();
+  };
+const withInstantHealth =
+  <T,>(fn: () => Promise<T>) =>
+  async () => {
+    useHealth(instantHealth);
+    return fn();
+  };
 const streamer = async (_p: string, opts: { onStream?: (e: unknown) => void }) => {
   opts.onStream?.({ type: "started" });
   let text = "";
@@ -292,11 +315,11 @@ const turn = async (conversation: number, tag: string) => {
 };
 let seq = 0;
 const scenarios = {
-  chat_turn: async () => {
+  chat_turn: withInstantHealth(async () => {
     const c = await chat.create(actor, { mode: "ASK", provider: "claude" });
     return turn(c.id, `runtime-bench-${seq++}`);
-  },
-  chat_concurrent: async () => {
+  }),
+  chat_concurrent: withInstantHealth(async () => {
     const cs = await Promise.all(
       Array.from({ length: 8 }, () => chat.create(actor, { mode: "ASK", provider: "claude" })),
     );
@@ -307,7 +330,7 @@ const scenarios = {
       turn_ms: Math.max(...r.map((x) => x.turn_ms)),
       all_ms: performance.now() - t0,
     };
-  },
+  }),
   /**
    * 8 new conversations at once, production-like: every admission pays a real readiness probe and every first message
    * schedules a title that costs what a real one does (see modeledTitle). Also measured: when every title has settled.
@@ -340,7 +363,7 @@ const scenarios = {
       setChatTitleComplete(stubTitle);
     }
   },
-  workflow_run: async () => {
+  workflow_run: withRealHealth(async () => {
     const t0 = performance.now();
     const run = await startRun({ definitionKey: "runtime-bench", inputs: { enabled: true } });
     await drain();
@@ -348,15 +371,46 @@ const scenarios = {
     const ms = performance.now() - t0;
     lastRun = run.id;
     return { run_ms: ms, overhead_per_step_ms: (ms - STEPS * 10) / STEPS };
-  },
-  checkpoint_replay: async () => {
+  }),
+  checkpoint_replay: withRealHealth(async () => {
     const t0 = performance.now();
     await reexecuteStep(lastRun, "root");
     await drain();
     if ((await getRun(lastRun)).status !== "COMPLETED") throw new Error("replay did not complete");
     return { replay_ms: performance.now() - t0 };
-  },
+  }),
+  workflow_scheduled: withRealHealth(async () => {
+    scheduler ??= startScheduler({
+      workers: 2,
+      lightWorkers: 1,
+      leaseSeconds: 120,
+      heartbeatSeconds: 10,
+      pollMs: 1000,
+    });
+    // Idle between runs, as a production instance would be: the workers are asleep when the run arrives.
+    await sleep(1200);
+    const t0 = performance.now();
+    const run = await startRun({ definitionKey: "runtime-bench", inputs: { enabled: true } });
+    for (;;) {
+      const [r] = await q<{ status: string }>(observer as never, "SELECT status FROM workflow_runs WHERE id = $1", [
+        run.id,
+      ]);
+      if (["COMPLETED", "FAILED", "CANCELED"].includes(r.status)) {
+        if (r.status !== "COMPLETED") throw new Error(`run ${r.status}`);
+        break;
+      }
+      await sleep(5);
+    }
+    const ms = performance.now() - t0;
+    const [w] = await q<{ total: number; max: number }>(
+      observer as never,
+      "SELECT sum(telemetry_queue_duration_ms)::float AS total, max(telemetry_queue_duration_ms)::float AS max FROM workflow_step_attempts WHERE run_id = $1",
+      [run.id],
+    );
+    return { run_ms: ms, queue_wait_total_ms: w.total, queue_wait_max_ms: w.max };
+  }),
 };
+let scheduler: ReturnType<typeof startScheduler> | null = null;
 let lastRun = 0;
 const titleBusy = () =>
   (titles as { titleBacklog?: () => number }).titleBacklog?.() ??
@@ -375,13 +429,21 @@ const result: Record<string, unknown> = {
 };
 const only = process.env.BENCH_SCENARIOS?.split(",");
 const selected = Object.entries(scenarios).filter(([n]) => !only || only.includes(n));
-for (const [name, fn] of selected)
+const stopScheduler = async () => {
+  await scheduler?.stop();
+  scheduler = null;
+};
+for (const [name, fn] of selected) {
   (result.alone as Record<string, unknown>)[name] = await scenario(name, N, fn);
+  await stopScheduler();
+}
 loading = true;
 const load = backgroundLoad();
 await sleep(500);
-for (const [name, fn] of process.env.BENCH_SKIP_LOAD ? [] : selected)
+for (const [name, fn] of process.env.BENCH_SKIP_LOAD ? [] : selected) {
   (result.under_load as Record<string, unknown>)[name] = await scenario(`${name} (load)`, N, fn);
+  await stopScheduler();
+}
 loading = false;
 await load;
 result.background_load_cycles = loadOps;

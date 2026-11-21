@@ -41,9 +41,12 @@ import {
   healthSkipReason,
   isUsableAgent,
   nextHealthyProvider,
+  invalidateSharedAgentHealth,
   probeAgentHealth,
   rememberProviderQuota,
+  sharedAgentHealth,
 } from "../agent/health.ts";
+import { count, observe } from "../runtimeMetrics.ts";
 import { fallbackPolicy } from "../agent/stepAgent.ts";
 import {
   resolveStepAgent,
@@ -801,7 +804,9 @@ async function reexecuteTx(
   const blocked = target.depends_on.filter((d) => !DONE.includes(byKey.get(d)!.status));
   if (blocked.length) throw new EngineError(`upstream steps not complete: ${blocked.join(", ")}`);
 
+  const planning = performance.now();
   const plan = await planReplay(c, steps, target, force);
+  observe("workflow.replay_plan_ms", performance.now() - planning);
   const blockedReplay = plan.find((item) => item.action === "RECONCILE");
   if (blockedReplay) throw new EngineError(`Reconcile step "${blockedReplay.key}" before replaying its dependencies`, 409);
   for (const item of plan) {
@@ -824,24 +829,37 @@ async function reexecuteTx(
       },
     });
   }
-  const aborted: number[] = [];
-  const invalidate = async (s: StepRow, to: "PENDING" | "READY", forced: boolean, candidate?: number) => {
-    aborted.push(...(await cancelStepJobs(c, s.id, `invalidated by re-execution of ${stepKey}`)));
-    await q(
-      c,
-      "UPDATE workflow_step_attempts SET status = 'CANCELED', finished_at = now() WHERE step_id = $1 AND status = 'RUNNING'",
-      [s.id],
-    );
-    await q(
-      c,
-      "UPDATE workflow_step_attempts SET invalidated_at = now() WHERE step_id = $1 AND invalidated_at IS NULL",
-      [s.id],
-    );
-    await q(
-      c,
-      "UPDATE workflow_questions SET status = 'dismissed' WHERE step_id = $1 AND status = 'open'",
-      [s.id],
-    );
+  // Every invalidated dependant, then the target, in plan order. Their jobs, running attempts and open questions are
+  // fenced in one statement each (same transaction, run locked); each step's own transition and event follow in order.
+  const invalidated = [
+    ...plan
+      .filter((item) => item.invalidated && item.key !== stepKey)
+      .map((item) => ({
+        s: byKey.get(item.key)!,
+        to: "PENDING" as const,
+        forced: item.action === "FORCE_REEXECUTE",
+        candidate: item.source_attempt_id as number | undefined,
+      })),
+    { s: target, to: target.requires_approval ? ("PENDING" as const) : ("READY" as const), forced: true, candidate: undefined },
+  ];
+  const ids = invalidated.map(({ s }) => s.id);
+  const aborted = await cancelStepJobs(c, ids, `invalidated by re-execution of ${stepKey}`);
+  await q(
+    c,
+    "UPDATE workflow_step_attempts SET status = 'CANCELED', finished_at = now() WHERE step_id = ANY($1::bigint[]) AND status = 'RUNNING'",
+    [ids],
+  );
+  await q(
+    c,
+    "UPDATE workflow_step_attempts SET invalidated_at = now() WHERE step_id = ANY($1::bigint[]) AND invalidated_at IS NULL",
+    [ids],
+  );
+  await q(
+    c,
+    "UPDATE workflow_questions SET status = 'dismissed' WHERE step_id = ANY($1::bigint[]) AND status = 'open'",
+    [ids],
+  );
+  for (const { s, to, forced, candidate } of invalidated)
     await setStepStatus(
       c,
       s,
@@ -861,12 +879,6 @@ async function reexecuteTx(
       },
       s === target ? why : `invalidated by ${stepKey}${candidate ? "; compare result at dispatch" : ""}`,
     );
-  };
-  for (const item of plan) {
-    if (item.invalidated && item.key !== stepKey)
-      await invalidate(byKey.get(item.key)!, "PENDING", item.action === "FORCE_REEXECUTE", item.source_attempt_id);
-  }
-  await invalidate(target, target.requires_approval ? "PENDING" : "READY", true);
   if (run.status !== "PAUSED") await setRunStatus(c, run, "RUNNING");
   afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
   await advance(c, run.id, afterCommit);
@@ -1640,31 +1652,44 @@ export interface BegunAttempt {
   context: ResolvedContext;
 }
 
+/** What the worker needs to know about a claimed job before the attempt starts (read once, outside the run lock). */
+export interface JobPreview {
+  type: string;
+  config: Record<string, unknown> & { delegation?: { enabled?: unknown } | null };
+  agent_override: Record<string, unknown> | null;
+  agent_provider: string | null;
+  profile: string | null;
+  agent_configuration: RunRow["agent_configuration"];
+}
+export function previewJob(jobId: number) {
+  return one<JobPreview>(
+    pool,
+    `SELECT s.type, s.config, s.agent_override, r.agent_provider, r.profile, r.agent_configuration
+       FROM workflow_jobs j
+       JOIN workflow_steps s ON s.id = j.step_id
+       JOIN workflow_runs r ON r.id = j.run_id
+      WHERE j.id = $1`,
+    [jobId],
+  );
+}
+
 /** Probe outside the run lock. A disconnected or quota-exhausted agent is replaced before the attempt starts. */
-async function healthyProviderSwitch(jobId: number) {
+async function healthyProviderSwitch(jobId: number, known?: JobPreview | null) {
   try {
-    const preview = await one<{
-      type: string;
-      config: Record<string, unknown> & { delegation?: { enabled?: unknown } | null };
-      agent_override: Record<string, unknown> | null;
-      agent_provider: string | null;
-      profile: string | null;
-      agent_configuration: RunRow["agent_configuration"];
-    }>(
-      pool,
-      `SELECT s.type, s.config, s.agent_override, r.agent_provider, r.profile, r.agent_configuration
-         FROM workflow_jobs j
-         JOIN workflow_steps s ON s.id = j.step_id
-         JOIN workflow_runs r ON r.id = j.run_id
-        WHERE j.id = $1`,
-      [jobId],
-    );
+    const preview = known === undefined ? await previewJob(jobId) : known;
     if (!preview || !preview.agent_configuration || !["agent", "coding_agent"].includes(preview.type)) return null;
     if (preview.config?.delegation?.enabled) return null;
     const policy = fallbackPolicy(preview);
     if (policy.mode === "disabled" || !policy.auto_health) return null;
     const effective = resolveStepAgent(preview, preview);
     if (!effective) return null;
+    // The reading shared with chat admission (singleflight, reused up to HEALTH_REUSE_MS, invalidated by provider
+    // failures) is enough to keep the chosen provider: the attempt itself still fails closed if it is not ready.
+    // Switching away is decided on a fresh probe, never on a reused reading.
+    const providers = new Set<string>(policy.providers);
+    const shared = (await sharedAgentHealth()).filter((h) => providers.has(h.provider));
+    if (isUsableAgent(shared.find((h) => h.provider === effective.provider))) return null;
+    count("health.switch_probes");
     const health = await probeAgentHealth(policy.providers);
     const mine = health.find((h) => h.provider === effective.provider);
     if (isUsableAgent(mine)) return null;
@@ -1677,8 +1702,12 @@ async function healthyProviderSwitch(jobId: number) {
 }
 
 /** Claim-time validation + attempt creation. Returns null when the job is stale (nothing to do). */
-export async function beginAttempt(job: JobRow, worker: string): Promise<BegunAttempt | null> {
-  const healthSwitch = await healthyProviderSwitch(job.id);
+export async function beginAttempt(
+  job: JobRow,
+  worker: string,
+  preview?: JobPreview | null,
+): Promise<BegunAttempt | null> {
+  const healthSwitch = await healthyProviderSwitch(job.id, preview);
   return withTx(async (c) => {
     const run = await lockRun(c, job.run_id);
     if (run.worker_instance !== config.instanceId || !(await ownsInstance(c))) return null;
@@ -2333,13 +2362,16 @@ export async function finishAttempt(
   attemptId: number,
   result: ExecResult,
   handoff?: PreparedHandoff,
+  /** The attempt's run when the caller has it (an attempt never changes run); read from the attempt otherwise. */
+  runId?: number,
 ) {
   return withTx(async (c, afterCommit) => {
-    const attempt0 = await one<AttemptRow>(
-      c,
-      "SELECT run_id FROM workflow_step_attempts WHERE id = $1",
-      [attemptId],
-    );
+    const attempt0 =
+      runId != null
+        ? { run_id: runId }
+        : await one<AttemptRow>(c, "SELECT run_id FROM workflow_step_attempts WHERE id = $1", [
+            attemptId,
+          ]);
     if (!attempt0) return { applied: false, reason: "attempt not found" };
     const run = await lockRun(c, attempt0.run_id);
     const j = await one<JobRow>(c, "SELECT * FROM workflow_jobs WHERE id = $1 FOR UPDATE", [jobId]);
@@ -2639,6 +2671,10 @@ export async function prepareProviderPause(
   );
   if (!["agent", "coding_agent"].includes(b.step.type)) return;
   const failure = await providerFailure(b.attempt.id, result);
+  // A login, quota or availability failure makes the shared readiness reading suspect: the next admission (chat or
+  // workflow) probes again instead of reusing it.
+  if (failure && ["AUTHENTICATION", "QUOTA_EXHAUSTED", "PROVIDER_UNAVAILABLE"].includes(failure))
+    invalidateSharedAgentHealth();
   const policy = fallbackPolicy(b.step);
   const retry =
     result.kind === "failed"

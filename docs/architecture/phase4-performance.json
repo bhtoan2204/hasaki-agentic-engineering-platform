@@ -1,0 +1,685 @@
+{
+  "generated_at": "2026-11-21",
+  "conditions": {
+    "host": "WSL2, local PostgreSQL 17, 0 ms injected latency",
+    "executors": "stub (10 ms agent steps), stub chat providers; real readiness CLIs in workflow scenarios",
+    "iterations": 10,
+    "browser": "headless Chromium 1148, production bundle; medians of 3 runs",
+    "before": "badb5d0 with the same benchmark files",
+    "after": "this change"
+  },
+  "backend": {
+    "alone": {
+      "chat_turn": {
+        "before": {
+          "first_delta_ms": {
+            "p50": 20.7,
+            "p95": 42.1,
+            "p99": 42.1
+          },
+          "turn_ms": {
+            "p50": 486.4,
+            "p95": 533.8,
+            "p99": 533.8
+          },
+          "sql_statements_per_op": 64.9,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 102.9,
+          "event_loop_p99_ms": 6.2,
+          "peak_rss_mb": 179.7,
+          "psi_stall_ms": {
+            "cpu": 13.6,
+            "memory": 0,
+            "io": 0.3
+          }
+        },
+        "after": {
+          "first_delta_ms": {
+            "p50": 24.7,
+            "p95": 43.9,
+            "p99": 43.9
+          },
+          "turn_ms": {
+            "p50": 496.4,
+            "p95": 529,
+            "p99": 529
+          },
+          "sql_statements_per_op": 64.1,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 125.5,
+          "event_loop_p99_ms": 6.6,
+          "peak_rss_mb": 178.1,
+          "psi_stall_ms": {
+            "cpu": 16.4,
+            "memory": 0,
+            "io": 1.7
+          }
+        }
+      },
+      "chat_concurrent": {
+        "before": {
+          "first_delta_ms": {
+            "p50": 34.7,
+            "p95": 48,
+            "p99": 48
+          },
+          "turn_ms": {
+            "p50": 500.8,
+            "p95": 525.3,
+            "p99": 525.3
+          },
+          "all_ms": {
+            "p50": 500.9,
+            "p95": 525.4,
+            "p99": 525.4
+          },
+          "sql_statements_per_op": 505.3,
+          "pool_waiting_max": 3,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 184.3,
+          "event_loop_p99_ms": 6.2,
+          "peak_rss_mb": 181.3,
+          "psi_stall_ms": {
+            "cpu": 14.6,
+            "memory": 0,
+            "io": 0.2
+          }
+        },
+        "after": {
+          "first_delta_ms": {
+            "p50": 36.4,
+            "p95": 54.4,
+            "p99": 54.4
+          },
+          "turn_ms": {
+            "p50": 505.6,
+            "p95": 539.4,
+            "p99": 539.4
+          },
+          "all_ms": {
+            "p50": 505.6,
+            "p95": 539.5,
+            "p99": 539.5
+          },
+          "sql_statements_per_op": 508,
+          "pool_waiting_max": 8,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 207.4,
+          "event_loop_p99_ms": 6.4,
+          "peak_rss_mb": 180.6,
+          "psi_stall_ms": {
+            "cpu": 15.9,
+            "memory": 0,
+            "io": 0.1
+          }
+        }
+      },
+      "chat_new_titles": {
+        "before": {
+          "first_delta_ms": {
+            "p50": 80,
+            "p95": 111.3,
+            "p99": 111.3
+          },
+          "turn_ms": {
+            "p50": 551.2,
+            "p95": 580.2,
+            "p99": 580.2
+          },
+          "all_ms": {
+            "p50": 551.4,
+            "p95": 580.3,
+            "p99": 580.3
+          },
+          "titles_settled_ms": {
+            "p50": 14585.7,
+            "p95": 14617.6,
+            "p99": 14617.6
+          },
+          "sql_statements_per_op": 519.5,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 1,
+          "node_cpu_ms_per_op": 658.2,
+          "event_loop_p99_ms": 5.9,
+          "peak_rss_mb": 183.4,
+          "psi_stall_ms": {
+            "cpu": 359.7,
+            "memory": 0,
+            "io": 13.8
+          }
+        },
+        "after": {
+          "first_delta_ms": {
+            "p50": 77.8,
+            "p95": 91.1,
+            "p99": 91.1
+          },
+          "turn_ms": {
+            "p50": 554,
+            "p95": 564.1,
+            "p99": 564.1
+          },
+          "all_ms": {
+            "p50": 554.1,
+            "p95": 564.1,
+            "p99": 564.1
+          },
+          "titles_settled_ms": {
+            "p50": 14591.9,
+            "p95": 14615.6,
+            "p99": 14615.6
+          },
+          "sql_statements_per_op": 517.6,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 1,
+          "node_cpu_ms_per_op": 781.1,
+          "event_loop_p99_ms": 6.1,
+          "peak_rss_mb": 183.3,
+          "psi_stall_ms": {
+            "cpu": 399.8,
+            "memory": 0,
+            "io": 11.7
+          }
+        }
+      },
+      "workflow_run": {
+        "before": {
+          "run_ms": {
+            "p50": 928,
+            "p95": 4192.9,
+            "p99": 4192.9
+          },
+          "sql_statements_per_op": 935.3,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 269,
+          "event_loop_p99_ms": 6,
+          "peak_rss_mb": 185.7,
+          "psi_stall_ms": {
+            "cpu": 44.1,
+            "memory": 0,
+            "io": 0.9
+          }
+        },
+        "after": {
+          "run_ms": {
+            "p50": 536.1,
+            "p95": 3714.8,
+            "p99": 3714.8
+          },
+          "sql_statements_per_op": 846.3,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0.1,
+          "node_cpu_ms_per_op": 239.8,
+          "event_loop_p99_ms": 6,
+          "peak_rss_mb": 168.6,
+          "psi_stall_ms": {
+            "cpu": 29,
+            "memory": 0,
+            "io": 0.6
+          }
+        }
+      },
+      "checkpoint_replay": {
+        "before": {
+          "replay_ms": {
+            "p50": 1042.5,
+            "p95": 1522.3,
+            "p99": 1522.3
+          },
+          "sql_statements_per_op": 995.7,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 251.2,
+          "event_loop_p99_ms": 6,
+          "peak_rss_mb": 186,
+          "psi_stall_ms": {
+            "cpu": 31.5,
+            "memory": 0,
+            "io": 0.4
+          }
+        },
+        "after": {
+          "replay_ms": {
+            "p50": 642,
+            "p95": 740.5,
+            "p99": 740.5
+          },
+          "sql_statements_per_op": 858,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0.1,
+          "node_cpu_ms_per_op": 201,
+          "event_loop_p99_ms": 6.1,
+          "peak_rss_mb": 167.4,
+          "psi_stall_ms": {
+            "cpu": 22.8,
+            "memory": 0,
+            "io": 0.2
+          }
+        }
+      },
+      "workflow_scheduled": {
+        "before": {
+          "run_ms": {
+            "p50": 1323.4,
+            "p95": 2664.8,
+            "p99": 2664.8
+          },
+          "queue_wait_total_ms": {
+            "p50": 1019.8,
+            "p95": 2383.1,
+            "p99": 2383.1
+          },
+          "queue_wait_max_ms": {
+            "p50": 324.2,
+            "p95": 1040.3,
+            "p99": 1040.3
+          },
+          "sql_statements_per_op": 951.7,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0,
+          "node_cpu_ms_per_op": 356,
+          "event_loop_p99_ms": 6.1,
+          "peak_rss_mb": 186.7,
+          "psi_stall_ms": {
+            "cpu": 75.2,
+            "memory": 0,
+            "io": 1.4
+          }
+        },
+        "after": {
+          "run_ms": {
+            "p50": 406.2,
+            "p95": 545.7,
+            "p99": 545.7
+          },
+          "queue_wait_total_ms": {
+            "p50": 125,
+            "p95": 207.3,
+            "p99": 207.3
+          },
+          "queue_wait_max_ms": {
+            "p50": 28.6,
+            "p95": 50.2,
+            "p99": 50.2
+          },
+          "sql_statements_per_op": 929.2,
+          "pool_waiting_max": 0,
+          "health_probes_per_op": 0.2,
+          "node_cpu_ms_per_op": 246.8,
+          "event_loop_p99_ms": 6,
+          "peak_rss_mb": 179.2,
+          "psi_stall_ms": {
+            "cpu": 46.5,
+            "memory": 0,
+            "io": 1.4
+          }
+        }
+      }
+    },
+    "under_load": {
+      "load": "knowledge import of 5 repositories + exact and symbol code search over 3 checkouts of src/ + a 12-step workflow run, in a loop",
+      "note": "before: checkpoint_replay (load) aborted (benchmark race: the background drain() held the replayed job); workflow_scheduled (load) not reached",
+      "scenarios": {
+        "chat_turn": {
+          "before": {
+            "first_delta_ms": {
+              "p50": 22.8,
+              "p95": 51.5,
+              "p99": 51.5
+            },
+            "turn_ms": {
+              "p50": 493.9,
+              "p95": 504.5,
+              "p99": 504.5
+            },
+            "sql_statements_per_op": 254.4,
+            "pool_waiting_max": 0,
+            "health_probes_per_op": 0,
+            "node_cpu_ms_per_op": 148.2,
+            "event_loop_p99_ms": 6.2,
+            "peak_rss_mb": 201.1,
+            "psi_stall_ms": {
+              "cpu": 14.1,
+              "memory": 0,
+              "io": 0.5
+            }
+          },
+          "after": {
+            "first_delta_ms": {
+              "p50": 23.8,
+              "p95": 67.3,
+              "p99": 67.3
+            },
+            "turn_ms": {
+              "p50": 493.9,
+              "p95": 543.3,
+              "p99": 543.3
+            },
+            "sql_statements_per_op": 406.5,
+            "pool_waiting_max": 0,
+            "health_probes_per_op": 0,
+            "node_cpu_ms_per_op": 208.6,
+            "event_loop_p99_ms": 6.3,
+            "peak_rss_mb": 192.8,
+            "psi_stall_ms": {
+              "cpu": 14.7,
+              "memory": 0,
+              "io": 1.2
+            }
+          }
+        },
+        "chat_concurrent": {
+          "before": {
+            "first_delta_ms": {
+              "p50": 45,
+              "p95": 51.5,
+              "p99": 51.5
+            },
+            "turn_ms": {
+              "p50": 516,
+              "p95": 522.2,
+              "p99": 522.2
+            },
+            "all_ms": {
+              "p50": 516.1,
+              "p95": 522.2,
+              "p99": 522.2
+            },
+            "sql_statements_per_op": 596.5,
+            "pool_waiting_max": 2,
+            "health_probes_per_op": 0,
+            "node_cpu_ms_per_op": 193.1,
+            "event_loop_p99_ms": 7.1,
+            "peak_rss_mb": 193.4,
+            "psi_stall_ms": {
+              "cpu": 16.9,
+              "memory": 0,
+              "io": 0.1
+            }
+          },
+          "after": {
+            "first_delta_ms": {
+              "p50": 45.8,
+              "p95": 77.1,
+              "p99": 77.1
+            },
+            "turn_ms": {
+              "p50": 517.7,
+              "p95": 550.8,
+              "p99": 550.8
+            },
+            "all_ms": {
+              "p50": 517.8,
+              "p95": 550.9,
+              "p99": 550.9
+            },
+            "sql_statements_per_op": 591.6,
+            "pool_waiting_max": 2,
+            "health_probes_per_op": 0,
+            "node_cpu_ms_per_op": 187.2,
+            "event_loop_p99_ms": 6.8,
+            "peak_rss_mb": 194.1,
+            "psi_stall_ms": {
+              "cpu": 15.5,
+              "memory": 0,
+              "io": 0.5
+            }
+          }
+        },
+        "chat_new_titles": {
+          "before": {
+            "first_delta_ms": {
+              "p50": 92.2,
+              "p95": 160.1,
+              "p99": 160.1
+            },
+            "turn_ms": {
+              "p50": 564.4,
+              "p95": 646.6,
+              "p99": 646.6
+            },
+            "all_ms": {
+              "p50": 564.5,
+              "p95": 646.7,
+              "p99": 646.7
+            },
+            "titles_settled_ms": {
+              "p50": 14621.2,
+              "p95": 14700.5,
+              "p99": 14700.5
+            },
+            "sql_statements_per_op": 993.8,
+            "pool_waiting_max": 3,
+            "health_probes_per_op": 1,
+            "node_cpu_ms_per_op": 915.4,
+            "event_loop_p99_ms": 6.1,
+            "peak_rss_mb": 199.5,
+            "psi_stall_ms": {
+              "cpu": 394.7,
+              "memory": 0,
+              "io": 9.6
+            }
+          },
+          "after": {
+            "first_delta_ms": {
+              "p50": 94,
+              "p95": 154.8,
+              "p99": 154.8
+            },
+            "turn_ms": {
+              "p50": 567.7,
+              "p95": 628.6,
+              "p99": 628.6
+            },
+            "all_ms": {
+              "p50": 567.8,
+              "p95": 628.6,
+              "p99": 628.6
+            },
+            "titles_settled_ms": {
+              "p50": 14615.6,
+              "p95": 14675.9,
+              "p99": 14675.9
+            },
+            "sql_statements_per_op": 947.8,
+            "pool_waiting_max": 0,
+            "health_probes_per_op": 1,
+            "node_cpu_ms_per_op": 888.9,
+            "event_loop_p99_ms": 6.1,
+            "peak_rss_mb": 198.7,
+            "psi_stall_ms": {
+              "cpu": 379.8,
+              "memory": 0,
+              "io": 8.5
+            }
+          }
+        },
+        "workflow_run": {
+          "before": {
+            "run_ms": {
+              "p50": 1024.1,
+              "p95": 1567.4,
+              "p99": 1567.4
+            },
+            "sql_statements_per_op": 1686.5,
+            "pool_waiting_max": 0,
+            "health_probes_per_op": 0,
+            "node_cpu_ms_per_op": 524.8,
+            "event_loop_p99_ms": 6.3,
+            "peak_rss_mb": 199.8,
+            "psi_stall_ms": {
+              "cpu": 54.5,
+              "memory": 0,
+              "io": 0.3
+            }
+          },
+          "after": {
+            "run_ms": {
+              "p50": 576,
+              "p95": 978.6,
+              "p99": 978.6
+            },
+            "sql_statements_per_op": 1463.4,
+            "pool_waiting_max": 0,
+            "health_probes_per_op": 0.1,
+            "node_cpu_ms_per_op": 404.7,
+            "event_loop_p99_ms": 6.7,
+            "peak_rss_mb": 199.1,
+            "psi_stall_ms": {
+              "cpu": 20.2,
+              "memory": 0,
+              "io": 0.2
+            }
+          }
+        },
+        "checkpoint_replay": {
+          "before": null,
+          "after": {
+            "replay_ms": {
+              "p50": 604.4,
+              "p95": 778.1,
+              "p99": 778.1
+            },
+            "sql_statements_per_op": 1426.1,
+            "pool_waiting_max": 0,
+            "health_probes_per_op": 0.1,
+            "node_cpu_ms_per_op": 356,
+            "event_loop_p99_ms": 6.4,
+            "peak_rss_mb": 201.1,
+            "psi_stall_ms": {
+              "cpu": 22.4,
+              "memory": 0,
+              "io": 0.2
+            }
+          }
+        },
+        "workflow_scheduled": {
+          "before": null,
+          "after": {
+            "run_ms": {
+              "p50": 560.2,
+              "p95": 672.7,
+              "p99": 672.7
+            },
+            "queue_wait_total_ms": {
+              "p50": 189.7,
+              "p95": 287.8,
+              "p99": 287.8
+            },
+            "queue_wait_max_ms": {
+              "p50": 39.2,
+              "p95": 54.8,
+              "p99": 54.8
+            },
+            "sql_statements_per_op": 4406.6,
+            "pool_waiting_max": 0,
+            "health_probes_per_op": 0.2,
+            "node_cpu_ms_per_op": 1360.3,
+            "event_loop_p99_ms": 12.8,
+            "peak_rss_mb": 202.7,
+            "psi_stall_ms": {
+              "cpu": 81,
+              "memory": 0,
+              "io": 0.2
+            }
+          }
+        }
+      }
+    }
+  },
+  "run_detail_frontend": {
+    "sizes": {
+      "small": "13 nodes, 13 attempts, 120 events",
+      "medium": "61 nodes, 366 attempts, 2 321 events",
+      "large": "241 nodes, 2 651 attempts, 11 330 events"
+    },
+    "metrics_before_after": {
+      "small": {
+        "load.load_ms": [316, 452],
+        "load.requests": [87, 45],
+        "load.transfer_kb": [673, 233],
+        "load.run_transfer_kb": [33.4, 3.2],
+        "load.run_payload_kb": [33.4, 33.4],
+        "load.commits": [15, 14],
+        "load.script_ms": [133, 152],
+        "load.long_task_ms": [0, 0],
+        "load.cls": [0.023, 0.023],
+        "load.heap_mb": [8.8, 9.1],
+        "state_change.commits": [8, 9],
+        "state_change.script_ms": [38, 38],
+        "state_change.requests": [7, 7],
+        "state_change.run_reloads": [1, 1],
+        "activity_burst_200.commits": [8, 11],
+        "activity_burst_200.script_ms": [87, 117],
+        "activity_burst_200.requests": [2, 3],
+        "activity_burst_200.run_reloads": [0, 0],
+        "step_switching.open_ms_max": [59, 62],
+        "step_switching.commits": [22, 21],
+        "step_switching.script_ms": [100, 93]
+      },
+      "medium": {
+        "load.load_ms": [312, 283],
+        "load.requests": [87, 45],
+        "load.transfer_kb": [1909, 248],
+        "load.run_transfer_kb": [258.6, 8.7],
+        "load.run_payload_kb": [258.6, 258.6],
+        "load.commits": [15, 13],
+        "load.script_ms": [171, 164],
+        "load.long_task_ms": [0, 0],
+        "load.cls": [0.053, 0.053],
+        "load.heap_mb": [12.1, 11.6],
+        "state_change.commits": [8, 8],
+        "state_change.script_ms": [103, 72],
+        "state_change.requests": [7, 7],
+        "state_change.run_reloads": [1, 1],
+        "activity_burst_200.commits": [11, 10],
+        "activity_burst_200.script_ms": [132, 126],
+        "activity_burst_200.requests": [3, 3],
+        "activity_burst_200.run_reloads": [0, 0],
+        "step_switching.open_ms_max": [85, 70],
+        "step_switching.commits": [21, 21],
+        "step_switching.script_ms": [136, 83]
+      },
+      "large": {
+        "load.load_ms": [504, 420],
+        "load.requests": [87, 45],
+        "load.transfer_kb": [7715, 331],
+        "load.run_transfer_kb": [1495.2, 33.2],
+        "load.run_payload_kb": [1495.2, 1495.2],
+        "load.commits": [16, 15],
+        "load.script_ms": [278, 279],
+        "load.long_task_ms": [343, 319],
+        "load.cls": [0.109, 0.053],
+        "load.heap_mb": [32.7, 33.2],
+        "state_change.commits": [11, 9],
+        "state_change.script_ms": [168, 109],
+        "state_change.requests": [7, 7],
+        "state_change.run_reloads": [1, 1],
+        "activity_burst_200.commits": [11, 9],
+        "activity_burst_200.script_ms": [187, 135],
+        "activity_burst_200.requests": [3, 2],
+        "activity_burst_200.run_reloads": [0, 0],
+        "step_switching.open_ms_max": [177, 58],
+        "step_switching.commits": [22, 21],
+        "step_switching.script_ms": [341, 111]
+      }
+    }
+  },
+  "gates": {
+    "statements_per_step": {
+      "budget": 60,
+      "measured": 53.5
+    },
+    "replay_statements": {
+      "budget": 40,
+      "measured": 28
+    },
+    "empty_claims_per_13_step_run": {
+      "budget": 39,
+      "measured": 27
+    }
+  }
+}

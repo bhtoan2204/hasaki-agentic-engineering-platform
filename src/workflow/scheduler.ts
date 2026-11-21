@@ -10,7 +10,9 @@ import { instanceSession } from "../instances.ts";
 import { config } from "../config.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { execution } from "../auth/execution.ts";
-import { pool, one, q, retryTransient } from "../db/pool.ts";
+import { onCommittedWrite, pool, one, q, retryTransient } from "../db/pool.ts";
+import { JOBS_RUNNABLE } from "./mutations.ts";
+import { count, observe, registerGauge } from "../runtimeMetrics.ts";
 import { purgeVerificationEvidence } from "../agent/verifyEvidence.ts";
 import {
   beginAttempt,
@@ -18,6 +20,7 @@ import {
   finishAttempt,
   heartbeat,
   prepareProviderPause,
+  previewJob,
   reapExpiredLeases,
   processAutomaticHandoff,
 } from "./engine.ts";
@@ -96,6 +99,53 @@ export function registerReconcileTask(task: () => Promise<unknown>) {
   });
 }
 
+/**
+ * Idle workers sleep up to `pollMs`, and wake early when this process commits a job that may be claimable
+ * (JOBS_RUNNABLE): a step finishing on the light lane, the first job of a new run or a sibling branch no longer waits
+ * for the next poll. One idle worker of each lane kind wakes per signal; a worker that claims a job wakes the next idle
+ * one of its kind (parallel branches fan out), one that finds nothing goes back to sleep. The poll remains the fallback
+ * for other instances' writes.
+ */
+type LaneKind = "general" | "light";
+const idleWorkers: Record<LaneKind, Array<() => void>> = { general: [], light: [] };
+const wakeIdle = (kinds: LaneKind[] = ["general", "light"]) => {
+  for (const kind of kinds) {
+    const wake = idleWorkers[kind].shift();
+    if (wake) {
+      count("scheduler.wakes");
+      wake();
+    }
+  }
+};
+let busyWorkers = 0;
+registerGauge("scheduler.busy_workers", () => busyWorkers);
+registerGauge("scheduler.idle_workers", () => idleWorkers.general.length + idleWorkers.light.length);
+const wakeAllIdle = () => {
+  for (const kind of ["general", "light"] as const)
+    for (const wake of idleWorkers[kind].splice(0)) wake();
+};
+/** Signals so far: a worker that saw a signal arrive after its claim began does not sleep (no lost wake-up). */
+let runnableSignals = 0;
+onCommittedWrite((tables) => {
+  if (!tables.has(JOBS_RUNNABLE)) return;
+  runnableSignals++;
+  wakeIdle();
+});
+function idleWait(kind: LaneKind, ms: number, seen: number) {
+  if (runnableSignals !== seen) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const wake = () => {
+      clearTimeout(timer);
+      const list = idleWorkers[kind];
+      const at = list.indexOf(wake);
+      if (at >= 0) list.splice(at, 1);
+      resolve();
+    };
+    const timer = setTimeout(wake, ms);
+    idleWorkers[kind].push(wake);
+  });
+}
+
 let automaticHandoff: Promise<void> | null = null;
 
 /**
@@ -134,6 +184,11 @@ export async function claimJob(
       RETURNING j.*`,
     [leaseOwner(workerId), leaseSeconds, onlyTypes ?? null, config.instanceId, instanceSession],
   );
+  if (job) {
+    count("scheduler.claims");
+    if (job.available_at)
+      observe("scheduler.queue_wait_ms", Math.max(0, Date.now() - new Date(job.available_at).getTime()));
+  } else count("scheduler.claims_empty");
   // Fire-and-forget: tracing must never delay or fail a claim.
   if (job)
     void traceLog({
@@ -179,11 +234,24 @@ export async function processJob(
   workerId: string,
   opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds">,
 ) {
-  const step = await one<{ type: string }>(pool, "SELECT type FROM workflow_steps WHERE id = $1", [
-    job.step_id,
-  ]);
-  if (step && (await deferIfBranchBusy(job, step.type))) return;
-  const begun = await beginAttempt(job, workerId);
+  busyWorkers++;
+  const started = performance.now();
+  try {
+    await runJob(job, workerId, opts);
+  } finally {
+    busyWorkers--;
+    observe("workflow.attempt_ms", performance.now() - started);
+  }
+}
+
+async function runJob(
+  job: JobRow,
+  workerId: string,
+  opts: Pick<SchedulerOptions, "leaseSeconds" | "heartbeatSeconds">,
+) {
+  const preview = await previewJob(job.id);
+  if (preview && (await deferIfBranchBusy(job, preview.type))) return;
+  const begun = await beginAttempt(job, workerId, preview ?? null);
   if (!begun) return;
   const attemptTrace = {
     runId: job.run_id,
@@ -407,7 +475,8 @@ export async function processJob(
       return;
     }
     await retryTransient(
-      () => finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff),
+      () =>
+        finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff, begun.attempt.run_id),
       `finish job ${job.id}`,
     );
     void traceLog({
@@ -489,11 +558,15 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
         while (!stopped) {
           try {
             await reconcileAutomaticHandoff();
+            const seen = runnableSignals;
             const job = await claimJob(workerId, opts.leaseSeconds, lane.types);
-            if (job) await processJob(job, workerId, opts);
+            if (job) {
+              wakeIdle([lane.types ? "light" : "general"]); // more may be runnable: let the next idle worker look
+              await processJob(job, workerId, opts);
+            }
             else if (!lane.types && (await runIndexOnce(indexAbort.signal))) {
               /* optional idle indexing */
-            } else await sleep(opts.pollMs);
+            } else await idleWait(lane.types ? "light" : "general", opts.pollMs, seen);
           } catch (e) {
             console.error(`worker ${workerId}:`, (e as Error).message);
             await sleep(opts.pollMs * 5);
@@ -518,6 +591,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     async stop() {
       stopped = true;
       indexAbort.abort();
+      wakeAllIdle();
       clearInterval(reaper);
       await Promise.all(loops);
     },

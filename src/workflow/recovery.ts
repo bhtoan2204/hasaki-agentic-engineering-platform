@@ -4,9 +4,9 @@ import type pg from "pg";
 import { config } from "../config.ts";
 import { ownsInstance } from "../instances.ts";
 import { outputLocale } from "../agent/language.ts";
-import { pool, q, one, withTx, json } from "../db/pool.ts";
+import { pool, q, one, withTx, json, noteCommitted } from "../db/pool.ts";
 import { runEvents } from "./events.ts";
-import { lockRun, setStepStatus, type AfterCommit } from "./mutations.ts";
+import { JOBS_RUNNABLE, lockRun, setStepStatus, type AfterCommit } from "./mutations.ts";
 import { recordDecision } from "./decisions.ts";
 import { advance } from "./progression.ts";
 import type { AttemptRow, ExecResult, JobRow, RunRow, StepRow } from "./types.ts";
@@ -615,6 +615,7 @@ export async function reapExpiredLeases(applyCompleted: ApplyCompleted) {
           "UPDATE workflow_jobs SET status = 'queued', fencing_token = fencing_token + 1, lease_owner = NULL, lease_expires_at = NULL, last_error = 'lease expired before start' WHERE id = $1",
           [j.id],
         );
+        noteCommitted(c, JOBS_RUNNABLE);
         return;
       }
       void traceLog({

@@ -1,4 +1,5 @@
 import { runEvents } from "./events.ts";
+import { observe } from "../runtimeMetrics.ts";
 import { recordDecision, savingsFrom } from "./decisions.ts";
 import { HttpError } from "../http/error.ts";
 import { createHash } from "node:crypto";
@@ -154,10 +155,10 @@ async function insertCheckpoint(
         ? normalized
         : null,
   };
-  await q(
+  const stored = await one<{ bytes: number | null }>(
     db,
     `INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data,execution,execution_digest,workspace_artifact_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING octet_length(execution::text) AS bytes`,
     [
       source.run_id,
       source.step_id,
@@ -169,7 +170,8 @@ async function insertCheckpoint(
       workspaceArtifactId ?? null,
     ],
   );
-  return execution;
+  // bytes: the envelope as PostgreSQL stores it (jsonb text), returned by the INSERT instead of read back.
+  return { execution, bytes: Number(stored?.bytes ?? 0) };
 }
 
 /** The caller owns the run lock and the status transition that makes this checkpoint recoverable. */
@@ -191,7 +193,7 @@ export async function saveExecutionPause(
     );
     return;
   }
-  return insertCheckpoint(db, source, reason, data, undefined, workspace);
+  return (await insertCheckpoint(db, source, reason, data, undefined, workspace)).execution;
 }
 
 /** Lease expiry, invalidation and cancellation serialize with this insert via the run and job locks. */
@@ -248,11 +250,18 @@ export async function recordExecutorReturn(
           ],
         )
       : undefined;
-    await insertCheckpoint(db, source, "executor_returned", {}, result, workspace, artifact?.id);
-    const size = await one<{ bytes: number | null }>(
+    const size = await insertCheckpoint(
       db,
-      "SELECT octet_length(execution::text) AS bytes FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='executor_returned'",
-      [attemptId],
+      source,
+      "executor_returned",
+      {},
+      result,
+      workspace,
+      artifact?.id,
+    );
+    observe(
+      "workflow.checkpoint_bytes",
+      Number(size?.bytes ?? 0) + (workspace?.encryptedContent?.length ?? 0),
     );
     await recordDecision(db, {
       runId: source.run_id,

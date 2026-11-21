@@ -25,6 +25,8 @@ import {
 import { setPassword } from "../auth/users.ts";
 import { wantsSupport } from "../authz/access.ts";
 import { artifactResponseHeaders } from "./artifactResponse.ts";
+import { compress, compressedStatic, COMPRESS_MIN_BYTES, pickEncoding } from "./compression.ts";
+import { count, observe } from "../runtimeMetrics.ts";
 import { config } from "../config.ts";
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
@@ -38,21 +40,43 @@ const TYPES: Record<string, string> = {
   ".json": "application/json",
 };
 
-function serveFile(res: ServerResponse, file: string, cache = "no-cache") {
+const COMPRESSIBLE = new Set([".html", ".js", ".css", ".svg", ".json"]);
+
+async function serveFile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  file: string,
+  cache = "no-cache",
+) {
+  const body = readFileSync(file);
+  const type = TYPES[extname(file)] ?? "application/octet-stream";
+  const encoding =
+    COMPRESSIBLE.has(extname(file)) && body.length >= 1024
+      ? pickEncoding(req.headers["accept-encoding"])
+      : null;
+  if (!encoding) {
+    res.writeHead(200, { "Content-Type": type, "Cache-Control": cache });
+    return void res.end(body);
+  }
+  const out = await compressedStatic(file, statSync(file).mtimeMs, body, encoding);
   res.writeHead(200, {
-    "Content-Type": TYPES[extname(file)] ?? "application/octet-stream",
+    "Content-Type": type,
     "Cache-Control": cache,
+    "Content-Encoding": encoding,
+    "Content-Length": out.length,
+    Vary: "Accept-Encoding",
   });
-  res.end(readFileSync(file));
+  res.end(out);
 }
 
-function serveStatic(url: URL, res: ServerResponse) {
+async function serveStatic(url: URL, req: IncomingMessage, res: ServerResponse) {
   if (url.pathname.startsWith("/api/")) return false;
   const rel = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, "");
   const file = join(webDist, rel);
   if (rel && file.startsWith(webDist) && existsSync(file) && statSync(file).isFile())
     return (
-      serveFile(
+      await serveFile(
+        req,
         res,
         file,
         rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
@@ -60,7 +84,7 @@ function serveStatic(url: URL, res: ServerResponse) {
       true
     );
   const index = join(webDist, "index.html");
-  if (existsSync(index)) return (serveFile(res, index), true);
+  if (existsSync(index)) return (await serveFile(req, res, index), true);
   res
     .writeHead(503, { "Content-Type": "text/plain; charset=utf-8" })
     .end("UI not built yet: run `npm run build` (npm start does it automatically).");
@@ -86,6 +110,34 @@ async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unkn
 function send(res: ServerResponse, status: number, body: unknown, extra?: Record<string, string>) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", ...extra });
   res.end(JSON.stringify(body));
+}
+
+/** A GET route's result, compressed when it is large and the client accepts it (see compression.ts). */
+async function sendResult(req: IncomingMessage, res: ServerResponse, body: unknown) {
+  const text = JSON.stringify(body);
+  const raw = Buffer.byteLength(text);
+  count("http.responses");
+  count("http.bytes_raw", raw);
+  observe("http.response_bytes", raw);
+  const encoding =
+    req.method === "GET" && raw >= COMPRESS_MIN_BYTES
+      ? pickEncoding(req.headers["accept-encoding"])
+      : null;
+  if (!encoding) {
+    count("http.bytes_sent", raw);
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    return void res.end(text);
+  }
+  const out = await compress(Buffer.from(text), encoding);
+  count("http.responses_compressed");
+  count("http.bytes_sent", out.length);
+  res.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Encoding": encoding,
+    "Content-Length": out.length,
+    Vary: "Accept-Encoding",
+  });
+  res.end(out);
 }
 
 /** Identical concurrent GETs share one execution, and its cancellation (src/http/sharedAbort.ts). */
@@ -152,7 +204,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         res.writeHead(302, { Location: `${pub.origin}${url.pathname}${url.search}` });
         return res.end();
       }
-      if (serveStatic(url, res)) return;
+      if (await serveStatic(url, req, res)) return;
     }
 
     const actor = await sessionFromRequest(req);
@@ -255,9 +307,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
               await loadPersonalIntegrations();
             return handler(ctx);
           });
+        const routeStarted = performance.now();
         const out = method === "GET" ? await singleflight(flightKey, execute) : await execute();
+        observe("http.route_ms", performance.now() - routeStarted);
         if (claim) await claim.finish(200, out ?? null);
-        return send(res, 200, out ?? null);
+        return await sendResult(req, res, out ?? null);
       } catch (e) {
         if (claim)
           await claim

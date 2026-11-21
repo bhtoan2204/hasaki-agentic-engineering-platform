@@ -253,10 +253,14 @@ export async function buildHandoffPackage(
 let testReadiness:
   | ((a: EffectiveAgent) => Promise<{ ok: boolean; error?: string; quota: string; cost: string }>)
   | undefined;
+let readinessSeam = 0;
 export function setHandoffReadinessForTests(value: typeof testReadiness) {
   if (process.env.PLATFORM_TEST !== "1") throw new Error("Test readiness override disabled");
   testReadiness = value;
+  readinessSeam++;
 }
+/** Changes when tests replace readiness: a shared health reading taken before the change is not reused after it. */
+export const readinessSeamVersion = () => readinessSeam;
 export async function handoffReadiness(a: EffectiveAgent) {
   if (testReadiness) return testReadiness(a);
   try {

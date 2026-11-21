@@ -198,26 +198,49 @@ async function attemptRows(runIds: number[], db: Db = pool): Promise<AttemptCost
   );
 }
 
+/** The same reported cost as summing attemptRows(), without the per-attempt columns the view derives. */
+async function runSpend(runId: number, db: Db) {
+  const r = await one<{ c: string | null }>(
+    db,
+    "SELECT sum(reported_cost_usd) AS c FROM execution_attempt_telemetry WHERE run_id = $1",
+    [runId],
+  );
+  return Number(r?.c ?? 0);
+}
 const sumCost = (rows: AttemptCostRow[]) => rows.reduce((n, r) => n + Number(r.cost ?? 0), 0);
 const num = (v: unknown) => (v == null ? null : Number(v));
 
-/** Budget lines of one run and its work item, from the costs already spent. */
-export async function budgetsForRun(runId: number, db: Db = pool, rows?: AttemptCostRow[]) {
-  const run = await one<{
-    budget_usd: string | null;
-    work_item_id: number | null;
-    wi_budget: string | null;
-  }>(
-    db,
-    "SELECT r.budget_usd, r.work_item_id, w.budget_usd AS wi_budget FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1",
-    [runId],
-  );
+/**
+ * Budget lines of one run and its work item, from the costs already spent. The budget gates call this before and
+ * after every attempt: without `rows`, the run's spend is read only when a run limit applies (a line without a limit
+ * gates nothing, and its `used_usd` is then 0), and as one sum rather than every attempt's telemetry row.
+ */
+export async function budgetsForRun(
+  runId: number,
+  db: Db = pool,
+  rows?: AttemptCostRow[],
+  /** The run row the caller holds locked (`SELECT *`): without a work item there is nothing left to read. */
+  locked?: { budget_usd?: string | null; work_item_id: number | null },
+) {
+  const run =
+    locked && locked.budget_usd !== undefined && locked.work_item_id == null
+      ? { budget_usd: locked.budget_usd, work_item_id: null, wi_budget: null }
+      : await one<{
+          budget_usd: string | null;
+          work_item_id: number | null;
+          wi_budget: string | null;
+        }>(
+          db,
+          "SELECT r.budget_usd, r.work_item_id, w.budget_usd AS wi_budget FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id WHERE r.id = $1",
+          [runId],
+        );
   if (!run) return null;
   const own = num(run.budget_usd);
+  const runLimit = own ?? config.costBudget.runUsd;
   const runLine = budgetLine(
-    own ?? config.costBudget.runUsd,
+    runLimit,
     own != null ? "own" : config.costBudget.runUsd != null ? "default" : null,
-    sumCost(rows ?? (await attemptRows([runId], db))),
+    rows ? sumCost(rows) : runLimit == null ? 0 : await runSpend(runId, db),
   );
   let wiLine: BudgetLine | null = null;
   if (run.work_item_id) {

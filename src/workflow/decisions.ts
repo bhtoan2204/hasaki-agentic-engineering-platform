@@ -1,4 +1,5 @@
 import { pool, q, one, json, insertDeferred, type Db } from "../db/pool.ts";
+import { countDecision } from "../runtimeMetrics.ts";
 import { redactSecrets } from "../integrations/redact.ts";
 
 /**
@@ -76,6 +77,7 @@ const finite = (v: unknown) => (v == null || !Number.isFinite(Number(v)) ? null 
 
 /** Inside withTx the row is written with the transaction (deferred insert); otherwise at once. */
 export async function recordDecision(db: Db, d: Decision) {
+  countDecision(d.action);
   await insertDeferred(
     db,
     "execution_decisions",

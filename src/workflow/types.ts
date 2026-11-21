@@ -162,6 +162,8 @@ export interface RunRow {
   definition_version_id: number;
   definition_key: string;
   work_item_id: number | null;
+  /** numeric, as pg returns it */
+  budget_usd?: string | null;
   title: string;
   status: RunStatus;
   inputs: Record<string, unknown>;
@@ -286,6 +288,7 @@ export interface JobRow {
   fencing_token: number;
   claims: number;
   force: boolean;
+  available_at?: Date | string;
 }
 
 export interface QuestionInput {

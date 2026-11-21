@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps 
 import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
-import { Background, ControlButton, Controls, ReactFlow, type Node } from "@xyflow/react";
+import { Background, ControlButton, Controls, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import {
   Activity,
   AlertTriangle,
@@ -46,6 +46,7 @@ import {
   nodeTypes,
   placeSteps,
   toEdges,
+  useStableById,
   type StepLike,
   type StepNodeData,
 } from "../graph.tsx";
@@ -375,22 +376,31 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     }
   };
   const hasSavedLayout = !!run?.graph.steps?.some((s) => s.ui);
-  const { nodes, edges } = useMemo(() => {
-    if (!run) return { nodes: [], edges: [] };
+  // Graph built from the run alone (no selection): a step switch does not rebuild it, and a reload keeps the objects of
+  // nodes and edges whose content did not change (React Flow then re-renders only the steps that changed).
+  const stableNodes = useStableById<Node<StepNodeData>>();
+  const stableEdges = useStableById<Edge>();
+  const graph = useMemo(() => {
+    if (!run) return { nodes: [] as Node<StepNodeData>[], edges: [] as Edge[] };
     const specSteps = run.graph.steps;
     const placed = arranged && hasSavedLayout ? autoLayout(specSteps) : placeSteps(specSteps);
     const st = new Map(run.steps.map((s) => [s.key, s] as const));
     const openQ: Record<string, number> = {};
     for (const q of run.questions)
       if (q.status === "open") openQ[q.step_key] = (openQ[q.step_key] ?? 0) + 1;
+    // One pass over the attempts (ordered by id): count and latest per step.
     const attempts: Record<string, number> = {};
-    for (const a of run.attempts) attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
+    const latest = new Map<string, RunDetail["attempts"][number]>();
+    for (const a of run.attempts) {
+      attempts[a.step_key] = (attempts[a.step_key] ?? 0) + 1;
+      latest.set(a.step_key, a);
+    }
     const lastReplan = run.inputs?.replans?.at(-1);
     const decided = latestStepDecisions(run.decisions, run.steps);
     const rerun = new Set<string>(lastReplan?.invalidated ?? []);
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
-      const latestAttempt = [...run.attempts].reverse().find((a) => a.step_key === s.key);
+      const latestAttempt = latest.get(s.key);
       const effectiveAgent = latestAttempt
         ? {
             provider:
@@ -407,7 +417,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         type: "step",
         className: "nopan",
         position: placed[s.key],
-        selected: s.key === stepKey,
+        selected: false,
         data: {
           step: {
             ...s,
@@ -421,7 +431,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           status: row?.status,
           attempts: attempts[s.key],
           openQuestions: openQ[s.key],
-          selected: s.key === stepKey,
+          selected: false,
           generation: row?.generation,
           replan: lastReplan
             ? rerun.has(s.key)
@@ -438,19 +448,32 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
         },
       };
     });
-    return { nodes, edges: toEdges(specSteps, (k) => st.get(k)?.status, placed) };
-  }, [run, stepKey, pickStep, arranged, hasSavedLayout, replayPreview]);
+    return {
+      nodes: stableNodes(nodes),
+      edges: stableEdges(toEdges(specSteps, (k) => st.get(k)?.status, placed)),
+    };
+  }, [run, pickStep, arranged, hasSavedLayout, replayPreview, stableNodes, stableEdges]);
+  const edges = graph.edges;
+  const nodes = useMemo(
+    () =>
+      stepKey
+        ? graph.nodes.map((n) =>
+            n.id === stepKey ? { ...n, selected: true, data: { ...n.data, selected: true } } : n,
+          )
+        : graph.nodes,
+    [graph.nodes, stepKey],
+  );
   const fitViewOptions = useMemo(
     () => ({
       padding: 0.25,
       maxZoom: 1,
       minZoom: 0.7,
       nodes: focusNodes(
-        nodes.map((n) => n.id),
+        graph.nodes.map((n) => n.id),
         stepKey,
       ),
     }),
-    [nodes, stepKey],
+    [graph.nodes, stepKey],
   );
   const flowLabels = useMemo(
     () => ({

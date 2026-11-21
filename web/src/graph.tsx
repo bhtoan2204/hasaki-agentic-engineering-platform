@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback, useRef } from "react";
 import { Handle, Position, type Edge, type Node, type NodeProps, MarkerType } from "@xyflow/react";
 import {
   Bot,
@@ -359,4 +359,33 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
 
 /** Memoized: progress events only re-render nodes whose data object changed. */
 export const StepNode = memo(StepNodeImpl);
+
+const callbacksOf = (x: object) =>
+  [...Object.values(x), ...Object.values((x as { data?: object }).data ?? {})].filter(
+    (v) => typeof v === "function",
+  );
+/**
+ * Returns a function that keeps the previous object of each id while its content is unchanged (same JSON, same
+ * callbacks). A reload that rebuilds every node then hands React Flow the same objects for the steps that did not
+ * change, and only the changed ones re-render.
+ */
+export function useStableById<T extends { id: string }>() {
+  const prev = useRef(new Map<string, { item: T; sig: string; fns: unknown[] }>());
+  return useCallback((items: T[]) => {
+    const next = new Map<string, { item: T; sig: string; fns: unknown[] }>();
+    const out = items.map((item) => {
+      const sig = JSON.stringify(item);
+      const fns = callbacksOf(item);
+      const old = prev.current.get(item.id);
+      const kept =
+        old && old.sig === sig && old.fns.length === fns.length && old.fns.every((f, i) => f === fns[i])
+          ? old.item
+          : item;
+      next.set(item.id, { item: kept, sig, fns });
+      return kept;
+    });
+    prev.current = next;
+    return out;
+  }, []);
+}
 export const nodeTypes = { step: StepNode };

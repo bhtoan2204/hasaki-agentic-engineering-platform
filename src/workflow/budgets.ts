@@ -22,7 +22,7 @@ export async function budgetPreflight(c: Db, run: RunRow, s: StepRow): Promise<b
     )
   )
     return true;
-  const b = await budgetsForRun(run.id, c).catch(() => null);
+  const b = await budgetsForRun(run.id, c, undefined, run).catch(() => null);
   if (!b || (b.run.limit_usd == null && !b.work_item?.limit_usd)) return true;
   const prior = await one<{ max: number | null }>(
     c,
@@ -114,7 +114,7 @@ export async function budgetPreflight(c: Db, run: RunRow, s: StepRow): Promise<b
  * acknowledgement: the run is not paused again for the same budget. A failing check never blocks the workflow.
  */
 export async function enforceBudget(c: Db, run: RunRow, stepId: number, attemptId: number) {
-  const b = await budgetsForRun(run.id, c).catch(() => null);
+  const b = await budgetsForRun(run.id, c, undefined, run).catch(() => null);
   if (!b) return;
   const fired = new Set(
     (

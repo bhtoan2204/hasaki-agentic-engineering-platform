@@ -1,6 +1,7 @@
 import type { Untyped } from "../untyped.ts";
 import pg from "pg";
 import { config } from "../config.ts";
+import { count, observe, registerGauge } from "../runtimeMetrics.ts";
 
 // BIGINT ids/counters fit in a JS number for this platform; returning numbers keeps API payloads simple.
 pg.types.setTypeParser(20, (v) => Number(v));
@@ -19,6 +20,9 @@ export const pool = new pg.Pool({
   allowExitOnIdle: process.env.PLATFORM_TEST === "1",
 });
 watchPoolErrors(pool);
+registerGauge("db.pool_total", () => pool.totalCount);
+registerGauge("db.pool_idle", () => pool.idleCount);
+registerGauge("db.pool_waiting", () => pool.waitingCount);
 
 /** Idle clients can error after a restart, a network blip, or DROP DATABASE ... FORCE in test teardown. */
 export function watchPoolErrors(target: pg.Pool) {
@@ -110,11 +114,21 @@ function emitWrites(tables: Set<string>) {
     }
   }
 }
+/**
+ * Report a named change together with this transaction's table writes: after COMMIT (a rollback reports nothing), or
+ * at once outside a transaction. Listeners that only know table names ignore it.
+ */
+export function noteCommitted(db: Db, signal: string) {
+  const set = txWrites.get(db);
+  if (set) set.add(signal);
+  else emitWrites(new Set([signal]));
+}
 /** Did this transaction (still open) write `table`? Caches bypass themselves then: the tx must see its own writes. */
 export const txWrote = (db: Db, table: string) => txWrites.get(db)?.has(table) ?? false;
 export const inTx = (db: Db) => txWrites.has(db);
 
 async function run(db: Db, sql: string, params: unknown[]) {
+  count("db.statements");
   const m = WRITE_RE.exec(sql);
   const r = await db.query(sql, params);
   if (m) {
@@ -194,7 +208,11 @@ export async function withTx<T>(
   fn: (c: pg.PoolClient, afterCommit: (cb: () => unknown) => void) => Promise<T>,
   db: pg.Pool = pool,
 ): Promise<T> {
+  const connecting = performance.now();
   const c = await db.connect();
+  const begun = performance.now();
+  observe("db.pool_connect_wait_ms", begun - connecting);
+  count("db.transactions");
   const after: Array<() => unknown> = [];
   let committed = false;
   let out!: T;
@@ -210,6 +228,7 @@ export async function withTx<T>(
     emitWrites(txWrites.get(c) ?? new Set());
   } catch (e) {
     if (!committed) {
+      count("db.transactions_rolled_back");
       try {
         await c.query("ROLLBACK");
       } catch (rollbackErr) {
@@ -222,6 +241,7 @@ export async function withTx<T>(
     buffered.delete(c);
     txWrites.delete(c);
     c.release(destroy);
+    observe("db.transaction_ms", performance.now() - begun);
   }
   for (const cb of after) {
     try {

@@ -199,3 +199,7 @@ Also check whether the VPN path adds latency (100 ms Vietnam → Singapore is hi
 
 * Run and step detail. They change on every step, and the page already costs a single round trip.
 * Write paths. Write-through makes writes no faster, and write-behind would lose durable engine state.
+
+## Phase 4 (2026-11)
+
+Workflow engine, replay, Run Detail and runtime metrics: [`phase4-performance.md`](phase4-performance.md).

@@ -1,4 +1,4 @@
-import { q, one, json, type Db } from "../db/pool.ts";
+import { q, one, json, noteCommitted, type Db } from "../db/pool.ts";
 import { notify } from "../notify.ts";
 import { isEvaluationRun as isEvaluationTelegramRun } from "../eval/scope.ts";
 import { background } from "./background.ts";
@@ -82,6 +82,8 @@ export async function setRunStatus(
     [run.id, to, error],
   );
   run.status = to;
+  // Queued jobs of a paused or pending run become claimable without a job write.
+  if (to === "RUNNING") noteCommitted(c, JOBS_RUNNABLE);
   await runEvents.add(c, run.id, "status", `run: ${from} → ${to}`);
   if (afterCommit && (to === "COMPLETED" || to === "FAILED" || to === "WAITING")) {
     const icon = { COMPLETED: "✅", FAILED: "❌", WAITING: "⏸️" }[to];
@@ -106,6 +108,13 @@ export async function setRunStatus(
     afterCommit(() => background(`run ${run.id} effects`, () => dispatchRunEffects()));
 }
 
+/**
+ * Committed-write signal: a job may have become claimable (enqueued now, handed back, or its run resumed). The
+ * scheduler wakes its idle workers on it instead of waiting for the next poll; the poll stays the fallback (writes by
+ * another instance, transactions outside withTx).
+ */
+export const JOBS_RUNNABLE = "workflow_jobs:runnable";
+
 export async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
   await q(
     c,
@@ -119,15 +128,20 @@ export async function ensureJob(c: Db, step: StepRow, delaySeconds = 0) {
       delaySeconds,
     ],
   );
+  if (!delaySeconds) noteCommitted(c, JOBS_RUNNABLE);
 }
 
 /** Cancel live jobs of a step and fence out whoever holds them. Returns ids for local abort. */
-export async function cancelStepJobs(c: Db, stepId: number, reason: string): Promise<number[]> {
+export async function cancelStepJobs(
+  c: Db,
+  stepId: number | number[],
+  reason: string,
+): Promise<number[]> {
   const rows = await q<{ id: number }>(
     c,
     `UPDATE workflow_jobs SET status = 'canceled', fencing_token = fencing_token + 1, last_error = $2, updated_at = now()
-      WHERE step_id = $1 AND status IN ('queued', 'running') RETURNING id`,
-    [stepId, reason],
+      WHERE step_id = ANY($1::bigint[]) AND status IN ('queued', 'running') RETURNING id`,
+    [Array.isArray(stepId) ? stepId : [stepId], reason],
   );
   return rows.map((r) => r.id);
 }
