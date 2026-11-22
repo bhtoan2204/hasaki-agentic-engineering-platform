@@ -208,3 +208,34 @@ test("a sample that cannot run leaves an incomplete pair: kept, costed, excluded
   ]);
   assert.equal(r.spend.known_usd, 0.25, "an incomplete pair's cost is not dropped");
 });
+
+test("an invalid pair stops the evaluation before more spend: variants on different provider-reported models", async () => {
+  const telemetry = (model: string) => ({
+    model_turns: 1,
+    assistant_messages: 1,
+    provider_tool_uses: 0,
+    provider_tool_errors: 0,
+    session_model: model,
+    api_models: [model],
+    provider_duration_ms: 1,
+    reasoning_tokens: null,
+  });
+  const run = await runEvaluation(
+    { repetitions: 1, tasks: ["T01-single-lookup", "T10-codeact-unnecessary"] },
+    {
+      actor: actor(),
+      provider: "claude",
+      runnerFor: (task, variant) => {
+        const policy = simulatedPolicy(task);
+        const model = variant === "direct" ? "claude-sonnet-5-5" : "claude-opus-5-5";
+        return async (prompt, options) => ({
+          ...(await policy(prompt, options)),
+          telemetry: telemetry(model),
+        });
+      },
+      turnTimeoutMs: 60_000,
+    },
+  );
+  assert.equal(run.samples.length, 2, "the second pair never starts");
+  assert.match(run.stopped ?? "", /invalid pair T01-single-lookup#0: model mismatch/);
+});

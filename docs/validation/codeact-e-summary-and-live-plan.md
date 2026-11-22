@@ -9,6 +9,22 @@ Branch `feat/codeact-diagnostics-eval-reliability` from `main` @ `56824d6`.
 | C Pair-aware evaluation and isolation | `f4d2c5c` | [codeact-c-paired-evaluation.md](codeact-c-paired-evaluation.md), [codeact-c-fixture-sandbox.json](codeact-c-fixture-sandbox.json) |
 | D Selection and recovery guidance | `f20b721` | [codeact-d-selection-guidance.md](codeact-d-selection-guidance.md) |
 
+## Broader regression (after all milestones)
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `npm test` | 0 | 1169/1169 |
+| `npm run test:integration` | 1 | 945/948, 0 skipped |
+| `tsc` (root, web), `npm run lint`, `npm run arch:check` | 0 | clean; 5 cycles / 6 violations (unchanged baseline) |
+
+The 3 failures are the known pre-existing ones, unrelated to this branch:
+- `evaluation.integration.ts` "Fixture evaluations use existing jobs…" and "Two evaluations can execute
+  concurrently…" were reproduced identically on `f666c65` before this work.
+- `repository-remotes` "legacy dry-run…" comes from a host `~/.gitconfig` `insteadOf` rule.
+
+Added after the full run: the automatic invalid-pair stop. It was verified with `codeact-pairing` and `codeact-effect`
+(16/16), `tsc` and `lint`.
+
 **LIVE PROVIDER: NOT RUN — awaiting budget authorization.** The previous $1 pilot does not authorize another run.
 Every result on this branch is a unit, integration or runtime (OS sandbox) result with fixture data and a simulated or
 scripted provider. None shows how a real model behaves.
@@ -46,7 +62,8 @@ npm run eval:codeact -- --live --provider claude --model claude-sonnet-5-5 --eff
   - Report adoption on eligible tasks (T03, T06, T08, T09) and unnecessary use on T01/T10.
   - Usage outcomes are observational.
   - Claim no benefit unless it repeats across tasks and repetitions. No significance claim at this size.
-- **Stop conditions.**
-  - Budget or sample limit (automatic).
-  - A sample that cannot run (automatic, pair kept as incomplete).
-  - An invalid pair (capability leak) or a model mismatch, which make the comparison meaningless.
+- **Stop conditions (all automatic).**
+  - Budget or sample limit.
+  - A sample that cannot run (pair kept as incomplete).
+  - An invalid pair: a capability leak, or variants on different provider-reported models or efforts. This is checked
+    after every pair, before more spend.

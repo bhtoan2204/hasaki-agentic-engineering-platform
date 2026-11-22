@@ -529,6 +529,24 @@ export async function runEvaluation(plan: EvaluationPlan, o: RunOptions) {
         spent = usd(spent + (s.cost_usd ?? 0));
       }
       pair.complete = pair.variants.length === 2;
+      // A pair that cannot be a controlled comparison makes further spend pointless: stop at once.
+      const last = samples.slice(-2);
+      const d = last.find((x) => x.variant === "direct")!;
+      const c = last.find((x) => x.variant === "codeact")!;
+      const invalid = !pair.complete
+        ? null
+        : d.codeact_offered || !c.codeact_offered
+          ? "capability leak (Direct offered code.execute or CodeAct not offered)"
+          : d.model_resolution === "provider_reported" &&
+              c.model_resolution === "provider_reported" &&
+              (d.provider_models.join("+") !== c.provider_models.join("+") || d.effort !== c.effort)
+            ? `model mismatch (${d.provider_models.join("+")}/${d.effort ?? "default"} vs ${c.provider_models.join("+")}/${c.effort ?? "default"})`
+            : null;
+      if (invalid) {
+        pair.reason = `invalid pair ${task.id}#${rep}: ${invalid}`;
+        stopped = pair.reason;
+        break outer;
+      }
     }
   if (!stopped && plan.budgetUsd != null && spent >= plan.budgetUsd)
     stopped = `budget ${plan.budgetUsd} USD reached (known spend ${spent.toFixed(4)})`;

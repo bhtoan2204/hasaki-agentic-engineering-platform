@@ -28,6 +28,8 @@ simulated or scripted providers (no paid call).
     - The first pair runs on an unknown estimate.
     - An admitted pair is completed, and any overshoot is reported.
     - A sample that cannot run leaves an incomplete pair (kept, with its cost) and stops the evaluation.
+    - An invalid pair (capability leak, or variants on different provider-reported models or efforts) stops the
+      evaluation before more spend.
   - Returns `pairs` and `budget` (`limit_usd`, `known_spend_usd`, `overshoot_usd`, `unknown_cost_samples`,
     `enforcement: best-effort`).
   - `summarize` adds:
