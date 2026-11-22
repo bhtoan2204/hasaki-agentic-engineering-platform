@@ -1474,8 +1474,8 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["regression_test"],
           config: { mode: "approval", content_from: "implement" },
         },
-        qcMerge("pr"),
-        cleanup("qc_merge"),
+        // The platform's own repository has only `main`: there is no release/qc branch to merge into.
+        cleanup("pr"),
       ],
     },
   },
