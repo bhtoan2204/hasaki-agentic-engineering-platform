@@ -859,7 +859,9 @@ test("no submit_result or output missing contract keys fails the step; retry kee
   await retryStep(run.id, "analyze").catch(() => {});
   await drain();
   atts = await attemptsOf(run.id, "analyze");
-  assert.match(atts.at(-1)!.error?.message ?? "", /without calling submit_result/);
+  // It did call submit_result; the contract rejected it. Reported as such (with the reason), not as "never submitted".
+  assert.match(atts.at(-1)!.error?.message ?? "", /submit_result was rejected by the step's output contract/);
+  assert.equal(atts.at(-1)!.error?.details?.failure_code, "CONTRACT_INVALID");
   assert.equal((await one(pool, "SELECT count(*)::int AS n FROM workflow_checkpoints WHERE run_id=$1 AND reason='submit_result'", [run.id])).n, 0, "invalid submissions are refused before they are recorded");
   assert.equal((await getRun(run.id)).agent_provider, "codex");
 });

@@ -1,9 +1,22 @@
 import type { ExecResult } from "../../../workflow/types.ts";
+import { one, pool } from "../../../db/pool.ts";
 import type { LifecycleState } from "../state.ts";
 import { workspacesOf } from "../../../git/provider.ts";
 import { missingContractKeys, validateOutputContract } from "../../contract.ts";
 import { evidenceRole, normalizeInvestigationOutput, unavailableSources } from "../../evidence.ts";
 import { runProvenanceEnv, withProvenance } from "../../provenance.ts";
+
+/** Errors of the attempt's latest submit_result when that latest one was rejected (none, or accepted: null). */
+async function lastRejection(attemptId: number): Promise<string[] | null> {
+  const row = await one<{ reason: string; data: { errors?: string[] } }>(
+    pool,
+    "SELECT reason, data FROM workflow_checkpoints WHERE attempt_id = $1 AND reason IN ('submit_result', 'submit_rejected') ORDER BY id DESC LIMIT 1",
+    [attemptId],
+  ).catch(() => null);
+  return row?.reason === "submit_rejected"
+    ? (row.data?.errors ?? ["output contract validation failed"])
+    : null;
+}
 
 /** Output contract validation of the submitted result, coding outcome normalization and investigation evidence normalization. */
 export async function outputStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -22,13 +35,24 @@ export async function outputStage(s: LifecycleState): Promise<ExecResult | void>
               : String(provider);
   if (!independent) {
     if (ctx.step.config?.output_schema || ctx.step.config?.output_contract) {
-      if (!submitted)
+      if (!submitted) {
+        // The agent did submit, but the contract rejected it and it ended the turn: a contract failure, with its
+        // reason — not "never submitted" (which would be retried as a transient error with backoff).
+        const rejected = await lastRejection(ctx.attempt.id);
+        if (rejected)
+          return {
+            kind: "failed",
+            error: `${pName} ended the turn after its submit_result was rejected by the step's output contract: ${rejected.join("; ")}`,
+            retryable: true,
+            details: { failure_code: "CONTRACT_INVALID", errors: rejected },
+          };
         return {
           kind: "failed",
           error: `${pName} finished the turn without calling submit_result; no step output was recorded.`,
           retryable: true,
           details: { failure_code: "INCOMPLETE_OUTPUT" },
         };
+      }
       const missing = missingContractKeys(ctx.step.config.output_contract, submitted);
       if (missing.length)
         return {

@@ -1212,6 +1212,27 @@ export interface LoopResult<S> {
   rounds: VerificationRound[];
   repairs: number;
   stop?: S;
+  /** Why the loop stopped early: `unchanged_source` = the last repair changed nothing, so nothing was re-run. */
+  reason?: "unchanged_source";
+}
+
+/**
+ * Whether every workspace is exactly as it was when `failed` was verified (HEAD and uncommitted content, untracked
+ * files included). Fails closed: a repo without a recorded tested state, a missing workspace or any error is "changed".
+ */
+export async function sourceUnchangedSince(
+  ws: Array<{ repo: string; path: string }>,
+  failed: VerificationRound,
+): Promise<boolean> {
+  if (!failed.repos.length) return false;
+  for (const r of failed.repos) {
+    const w = ws.find((x) => x.repo === r.repo);
+    if (!w || !r.tested_state) return false;
+    const now = await worktreeFingerprint(w.path).catch(() => null);
+    if (!now || now.head !== r.tested_state.head || now.fingerprint !== r.tested_state.fingerprint)
+      return false;
+  }
+  return true;
 }
 
 /**
@@ -1225,6 +1246,11 @@ export async function verificationLoop<S>(opts: {
   verify: (round: number) => Promise<VerificationRound>;
   /** Ask the agent to repair; return a value to stop the loop with it (e.g. waiting_input, agent error). */
   repair: (failed: VerificationRound, repairNo: number) => Promise<S | undefined>;
+  /**
+   * After a repair: true when the source is exactly what `failed` verified (sourceUnchangedSince). Verification is
+   * deterministic in the source, so re-running it cannot change the result: the loop stops as no progress instead.
+   */
+  unchanged?: (failed: VerificationRound) => Promise<boolean>;
 }): Promise<LoopResult<S>> {
   const rounds = [...(opts.prior ?? [])];
   for (;;) {
@@ -1255,6 +1281,8 @@ export async function verificationLoop<S>(opts: {
     const stop = await opts.repair(r, repairs + 1);
     if (opts.signal.aborted) return { outcome: "canceled", rounds, repairs: repairs + 1 };
     if (stop !== undefined) return { outcome: "stopped", rounds, repairs: repairs + 1, stop };
+    if (opts.unchanged && (await opts.unchanged(r).catch(() => false)))
+      return { outcome: "no_progress", rounds, repairs: repairs + 1, reason: "unchanged_source" };
   }
 }
 
@@ -1365,6 +1393,8 @@ export function verificationSummary(cfg: VerifyConfig, res: LoopResult<unknown>)
     max_repairs: cfg.maxRepairs,
     duration_ms: res.rounds.reduce((s, r) => s + r.duration_ms, 0),
     failure_signatures: res.rounds.filter((r) => !r.passed).map((r) => r.signature),
+    /** Why the loop stopped early, when it did (`unchanged_source`: the last repair changed nothing; not re-run). */
+    ...(res.reason ? { stop_reason: res.reason } : {}),
     ...slopSummary(last?.repos ?? []),
     // Cumulative evidence-cache counters (the cache lives for the whole step), from the last round that has them.
     ...(res.rounds.findLast((r) => r.evidence)?.evidence

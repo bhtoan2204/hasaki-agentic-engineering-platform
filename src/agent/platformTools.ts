@@ -469,8 +469,20 @@ async function submitResult(args: ToolArgs, env: PlatformToolEnv): Promise<strin
   if (!output || typeof output !== "object" || Array.isArray(output))
     return "ERROR: submit_result.output must be an object";
   const validation = validateOutputContract(env.outputContract, output);
-  if (!validation.valid)
+  if (!validation.valid) {
+    // Durable, so the harness can tell "submitted but rejected" from "never submitted" (the output is not stored).
+    await q(
+      pool,
+      "INSERT INTO workflow_checkpoints (run_id, step_id, attempt_id, reason, data) VALUES ($1, $2, $3, 'submit_rejected', $4)",
+      [
+        env.runId,
+        env.stepId,
+        env.attemptId,
+        JSON.stringify({ errors: validation.errors.slice(0, 20).map((e) => e.slice(0, 300)) }),
+      ],
+    ).catch(() => {});
     return `ERROR: output contract validation failed: ${validation.errors.join("; ")}`;
+  }
   env.submittedThisTurn = true;
   env.onSubmit?.(output);
   await q(

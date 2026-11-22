@@ -58,6 +58,8 @@ let decompositionOutput: unknown;
 let testSelectors = ["business/TestValue"];
 let producerFeedback: string[] = [];
 let fixSelectorsOnFeedback = false;
+/** Overrides the value the fake implementation writes (null: the step's default). */
+let lifecycleValue: string | null = null;
 const runs: number[] = [];
 const git = (path: string, ...args: string[]) =>
   execFileSync("git", ["-C", path, ...args], { encoding: "utf8", stdio: "pipe" }).trim();
@@ -96,7 +98,8 @@ before(async () => {
   process.env.FAKE_LIFECYCLE_REPO = repo;
   registerExecutor("coding_agent", {
     async execute(ctx) {
-      process.env.FAKE_LIFECYCLE_VALUE = ctx.step.key === "implement-second" ? "3" : "2";
+      process.env.FAKE_LIFECYCLE_VALUE =
+        lifecycleValue ?? (ctx.step.key === "implement-second" ? "3" : "2");
       return claudeExecutor.execute(ctx);
     },
   });
@@ -843,4 +846,33 @@ test("final publication reuses only fully bound verification evidence on the int
   );
   assert.ok(!logsAfter.some((l) => /reused evidence/.test(l)), "an uncommitted change forces a rerun");
   void dirty;
+});
+
+test("a repair that changes nothing stops the verify loop without re-running the tests (real harness and engine)", async () => {
+  process.env.FAKE_LIFECYCLE_ACTION = "edit";
+  process.env.FAKE_LIFECYCLE_REPAIR = "noop";
+  lifecycleValue = "0"; // Value() returns 0: TestValue fails
+  try {
+    const run = await start("FAST");
+    const coding = await reachCoding(run.id);
+    assert.equal(coding.status, "FAILED");
+    assert.match(String(coding.error), /the repair changed no source; verification was not re-run/);
+    const attempt = (await one<{ metrics: { verification?: Record<string, unknown> } }>(
+      pool,
+      "SELECT metrics FROM workflow_step_attempts WHERE step_id = $1 ORDER BY id DESC LIMIT 1",
+      [coding.id],
+    ))!;
+    const v = attempt.metrics.verification!;
+    assert.deepEqual([v.rounds, v.repairs, v.stop_reason], [1, 1, "unchanged_source"]);
+    const decision = await one<{ action: string; reason: string }>(
+      pool,
+      "SELECT action, reason FROM execution_decisions WHERE run_id = $1 AND kind = 'recovery' AND action = 'STOP'",
+      [run.id],
+    );
+    assert.match(String(decision?.reason), /changed no source/);
+    console.log(`EFF-E2E ${JSON.stringify({ run_id: run.id, verification: v, decision })}`);
+  } finally {
+    lifecycleValue = null;
+    delete process.env.FAKE_LIFECYCLE_REPAIR;
+  }
 });

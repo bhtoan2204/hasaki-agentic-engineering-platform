@@ -39,6 +39,7 @@ import {
   diffTestsAgainstBase,
   repairPrompt,
   restoreConflictSkips,
+  sourceUnchangedSince,
   verificationLoop,
   verificationSummary,
   verifyConfig,
@@ -377,6 +378,27 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         rounds.push(r);
         return r;
       },
+      // A repair that changed nothing cannot change the result: stop instead of re-running the whole verification.
+      unchanged: async (failed) => {
+        const same = await sourceUnchangedSince(
+          trees.map((w) => ({ repo: w.repo, path: w.path })),
+          failed,
+        );
+        if (same)
+          await noteDecision({
+            runId: ctx.run.id,
+            stepId: ctx.step.id,
+            attemptId: ctx.attempt.id,
+            generation: ctx.attempt.generation,
+            kind: "recovery",
+            action: "STOP",
+            outcome: "applied",
+            reason: `repair ${failed.round} changed no source (HEAD and uncommitted content identical to the failed verification): not re-run, no progress`,
+            savedMs: failed.duration_ms ?? null,
+            details: { round: failed.round, signature: failed.signature },
+          });
+        return same;
+      },
       repair: async (failed, n) => {
         await ctx.log(
           "system",
@@ -526,7 +548,9 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         );
       const why =
         loop.outcome === "no_progress"
-          ? "made no progress (same failures twice)"
+          ? loop.reason === "unchanged_source"
+            ? "made no progress (the repair changed no source; verification was not re-run)"
+            : "made no progress (same failures twice)"
           : `still failing after ${loop.repairs} repair(s)`;
       return {
         kind: "failed",

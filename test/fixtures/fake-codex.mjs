@@ -5,7 +5,7 @@
 // speaks newline-delimited JSON-RPC to it — the same path the real CLI takes. No model is called.
 import { implementTransportFixture } from "./transport-implementation.mjs";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const mode = process.env.FAKE_CODEX_MODE || "ok";
@@ -247,7 +247,12 @@ if (mode === "lifecycle") {
   const prepared = await tool(mcp, "prepare_branch", { repo });
   const path = /Work ONLY in: ([^\n]+)/.exec(prepared?.content?.[0]?.text || "")?.[1];
   if (!path) throw new Error(JSON.stringify(prepared));
-  if (process.env.FAKE_LIFECYCLE_ACTION !== "noop") {
+  // FAKE_LIFECYCLE_REPAIR=noop: a repair turn that changes nothing (the edit is already there).
+  const alreadyDone =
+    process.env.FAKE_LIFECYCLE_REPAIR === "noop" &&
+    existsSync(path + "/value.go") &&
+    readFileSync(path + "/value.go", "utf8").includes(`return ${process.env.FAKE_LIFECYCLE_VALUE || 2} }`);
+  if (process.env.FAKE_LIFECYCLE_ACTION !== "noop" && !alreadyDone) {
     const label = process.env.FAKE_LIFECYCLE_ACTION === "label";
     const file = path + (label ? `/${process.env.FAKE_LIFECYCLE_SOURCE || "label.go"}` : "/value.go");
     const decision = callHook({ hook_event_name: "PreToolUse", tool_name: "apply_patch",
