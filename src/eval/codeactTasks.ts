@@ -226,7 +226,16 @@ export interface EffectTask {
   question: string;
   /** Reference solution: self-contained (no closures), so it also runs verbatim as a CodeAct program. */
   plan: (call: Call) => Promise<Record<string, unknown>>;
+  /**
+   * How each answer field is compared (default `exact`). `set`: an identifier list whose order carries no meaning —
+   * same members, no duplicates. `ordered`: a ranking — same items in the same order. `count`: a number that must
+   * equal the reference and is also checked against the answer's own list (`of`). The question states the same
+   * semantics, and both variants are graded by them.
+   */
+  grading?: Record<string, FieldRule>;
 }
+export type FieldRule =
+  { kind: "exact" } | { kind: "set" } | { kind: "ordered" } | { kind: "count"; of: string };
 const ANSWER = (shape: string) =>
   `Reply with your conclusion as a fenced block \`\`\`answer containing only JSON of the form ${shape}. Use null for anything you could not determine.`;
 
@@ -251,9 +260,10 @@ export const TASKS: EffectTask[] = [
   },
   {
     id: "T03-trace-log-correlation",
+    grading: { order_ids: { kind: "set" }, count: { kind: "count", of: "order_ids" } },
     category: "SigNoz trace and Splunk log correlation",
     eligible: true,
-    question: `Investigate with eval.traces and eval.logs: which orders have a payment-gateway span of at least 5000 ms AND a payment-gateway log containing "upstream timeout"? ${ANSWER('{"order_ids": [sorted ids], "count": number}')}`,
+    question: `Investigate with eval.traces and eval.logs: which orders have a payment-gateway span of at least 5000 ms AND a payment-gateway log containing "upstream timeout"? ${ANSWER('{"order_ids": [order ids, each once, any order], "count": number}')}`,
     plan: async (call) => {
       const { spans } = await call("eval.traces", {
         service: "payment-gateway",
@@ -294,9 +304,10 @@ export const TASKS: EffectTask[] = [
   },
   {
     id: "T05-common-failures",
+    grading: { top: { kind: "ordered" } },
     category: "extracting common failures from structured logs",
     eligible: true,
-    question: `Investigate with eval.logs: what are the three most frequent error-level log messages across all services, with counts? ${ANSWER('{"top": [{"message": string, "count": number}]}')}`,
+    question: `Investigate with eval.logs: what are the three most frequent error-level log messages across all services, with counts? ${ANSWER('{"top": [{"message": string, "count": number}] ordered by count descending, ties by message ascending}')}`,
     plan: async (call) => {
       const { events } = await call("eval.logs", { level: "error" });
       const counts: Record<string, number> = {};
@@ -345,9 +356,10 @@ export const TASKS: EffectTask[] = [
   },
   {
     id: "T07-cross-source-evidence",
+    grading: { errors: { kind: "set" } },
     category: "related evidence across several sources",
     eligible: true,
-    question: `Investigate order ORD-25 across eval.orders, eval.traces (payment-gateway and payment-provider) and eval.logs: its status, its slowest operation, and its distinct error messages. ${ANSWER('{"status": string, "slowest_operation": string, "errors": [sorted messages]}')}`,
+    question: `Investigate order ORD-25 across eval.orders, eval.traces (payment-gateway and payment-provider) and eval.logs: its status, its slowest operation, and its distinct error messages. ${ANSWER('{"status": string, "slowest_operation": string, "errors": [distinct messages, any order]}')}`,
     plan: async (call) => {
       const id = "ORD-25";
       const [o, gw, pv, logs] = await Promise.all([
@@ -382,9 +394,10 @@ export const TASKS: EffectTask[] = [
   },
   {
     id: "T09-partial-failure",
+    grading: { unavailable: { kind: "set" } },
     category: "tool timeout or partial integration failure",
     eligible: true,
-    question: `Investigate refund-worker: how many distinct orders have a "db pool saturated" warning (eval.logs), and what is refund-worker's slowest operation (eval.traces)? If a source is unavailable, say which. ${ANSWER('{"db_pool_warning_orders": number, "slowest_operation": string|null, "unavailable": [tool names]}')}`,
+    question: `Investigate refund-worker: how many distinct orders have a "db pool saturated" warning (eval.logs), and what is refund-worker's slowest operation (eval.traces)? If a source is unavailable, say which. ${ANSWER('{"db_pool_warning_orders": number, "slowest_operation": string|null, "unavailable": [tool names, any order]}')}`,
     plan: async (call) => {
       const { events } = await call("eval.logs", {
         service: "refund-worker",
@@ -412,9 +425,10 @@ export const TASKS: EffectTask[] = [
   },
   {
     id: "T10-codeact-unnecessary",
+    grading: { services: { kind: "set" } },
     category: "CodeAct unnecessary",
     eligible: false,
-    question: `Investigate with eval.services: which services are registered? ${ANSWER('{"services": [sorted names]}')}`,
+    question: `Investigate with eval.services: which services are registered? ${ANSWER('{"services": [names, any order]}')}`,
     plan: async (call) => ({
       services: (await call("eval.services", {})).services
         .map((s: { name: string }) => s.name)
@@ -460,20 +474,101 @@ const canonical = (v: unknown): string =>
           .join(",")}}`
       : JSON.stringify(v ?? null);
 
+export interface FieldDiagnostic {
+  expected: unknown;
+  actual: unknown;
+  /** Lists: members of the reference absent from the answer, and members the reference does not have. */
+  missing?: unknown[];
+  unexpected?: unknown[];
+  duplicates?: unknown[];
+  /** Same members in a different order (only an error for `ordered` fields). */
+  order_differs?: boolean;
+  /** `count` fields: whether the number agrees with the answer's own list. */
+  consistent_with?: { field: string; distinct: number | null; consistent: boolean };
+}
+
+/** Members of `xs` that occur more than once (by canonical JSON), each reported once. */
+function duplicatesOf(xs: unknown[]) {
+  const seen = new Set<string>();
+  const dup = new Map<string, unknown>();
+  for (const x of xs) {
+    const k = canonical(x);
+    if (seen.has(k)) dup.set(k, x);
+    seen.add(k);
+  }
+  return [...dup.values()];
+}
+function listDiagnostic(expected: unknown, actual: unknown): FieldDiagnostic {
+  const d: FieldDiagnostic = { expected, actual };
+  if (!Array.isArray(expected) || !Array.isArray(actual)) return d;
+  const exp = new Set(expected.map(canonical));
+  const act = new Set(actual.map(canonical));
+  d.missing = expected.filter((x) => !act.has(canonical(x)));
+  d.unexpected = [
+    ...new Map(actual.filter((x) => !exp.has(canonical(x))).map((x) => [canonical(x), x])).values(),
+  ];
+  d.duplicates = duplicatesOf(actual);
+  d.order_differs =
+    !d.missing.length &&
+    !d.unexpected.length &&
+    canonical(expected) !== canonical([...new Map(actual.map((x) => [canonical(x), x])).values()]);
+  return d;
+}
+
 /**
- * Deterministic grading: every expected field must match exactly (identifiers, counts). `unsupported` counts fields
- * the answer asserts (non-null) that are null in the reference — a conclusion the evidence does not support.
+ * Deterministic grading, field by field, under the task's declared rules (`exact` unless stated): identifier sets
+ * compare members and reject duplicates, rankings compare order, counts must match the reference. Each field gets a
+ * diagnosis so a mismatch is inspectable (missing / unexpected / duplicate ids, ordering, count consistency).
+ * `unsupported` counts fields the answer asserts (non-null) that are null in the reference — a conclusion the evidence
+ * does not support. The same rules apply to every variant.
  */
 export function gradeAnswer(
   expected: Record<string, unknown>,
   answer: Record<string, unknown> | null,
+  rules: Record<string, FieldRule> = {},
 ) {
-  if (!answer) return { correct: false, fields: {}, unsupported: 0, answered: false };
+  if (!answer)
+    return { correct: false, fields: {}, unsupported: 0, answered: false, diagnostics: {} };
   const fields: Record<string, boolean> = {};
+  const diagnostics: Record<string, FieldDiagnostic> = {};
   let unsupported = 0;
   for (const [k, v] of Object.entries(expected)) {
-    fields[k] = canonical(answer[k]) === canonical(v);
-    if (v == null && answer[k] != null) unsupported++;
+    const got = answer[k];
+    const rule = rules[k] ?? { kind: "exact" };
+    if (rule.kind === "set" || rule.kind === "ordered") {
+      const d = listDiagnostic(v, got);
+      diagnostics[k] = d;
+      fields[k] =
+        Array.isArray(v) &&
+        Array.isArray(got) &&
+        !d.missing!.length &&
+        !d.unexpected!.length &&
+        !d.duplicates!.length &&
+        (rule.kind === "set" || canonical(v) === canonical(got));
+    } else if (rule.kind === "count") {
+      const list = answer[rule.of];
+      const distinct = Array.isArray(list) ? new Set(list.map(canonical)).size : null;
+      diagnostics[k] = {
+        expected: v,
+        actual: got ?? null,
+        consistent_with: {
+          field: rule.of,
+          distinct,
+          consistent: distinct != null && got === distinct,
+        },
+      };
+      fields[k] = canonical(got) === canonical(v);
+    } else {
+      fields[k] = canonical(got) === canonical(v);
+      if (!fields[k]) diagnostics[k] = { expected: v, actual: got ?? null };
+    }
+    if (v == null && got != null) unsupported++;
   }
-  return { correct: Object.values(fields).every(Boolean), fields, unsupported, answered: true };
+  return {
+    correct: Object.values(fields).every(Boolean),
+    fields,
+    unsupported,
+    answered: true,
+    diagnostics,
+  };
 }

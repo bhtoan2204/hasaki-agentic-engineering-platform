@@ -18,7 +18,7 @@ import {
   investigationReport,
 } from "../../investigation/steps.ts";
 import { approvedScopeFrom } from "../../agent/evidence.ts";
-import { buildEvidenceReport } from "../../agent/evidenceReport.ts";
+import { buildEvidenceReport, type EvidenceObjectives } from "../../agent/evidenceReport.ts";
 import { runProvenanceEnv } from "../../agent/provenance.ts";
 import { requiredTestTargets } from "../../agent/verify.ts";
 import { repoPath } from "../../repos/service.ts";
@@ -1172,9 +1172,11 @@ async function evidenceReportStep(ctx: ExecutionContext): Promise<ExecResult> {
   const source = ctx.input.upstream[from]?.output;
   if (!source || typeof source !== "object")
     return { kind: "failed", error: `no output from step "${from}" to verify`, retryable: false };
+  // Objectives come from the (trusted) workflow definition, never from the agent's output.
   const report = await buildEvidenceReport(
     source as Record<string, unknown>,
     await runProvenanceEnv(ctx.run),
+    (ctx.step.config.objectives ?? {}) as EvidenceObjectives,
   );
   await ctx.log(
     "system",

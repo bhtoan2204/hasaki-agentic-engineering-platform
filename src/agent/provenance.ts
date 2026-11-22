@@ -44,6 +44,8 @@ export interface Provenance {
   verifies: "location" | "source_record" | "observation" | null;
   reason: string | null;
   stale?: boolean;
+  /** The tool that produced a cited platform record, read from the record itself (never from the agent). */
+  source_tool?: string;
 }
 
 export interface ProvenanceEnv {
@@ -52,14 +54,14 @@ export interface ProvenanceEnv {
   /** Ref the cited file is compared with for staleness (worktree HEAD / origin/<base>), or null to skip. */
   currentRef(repo: string): Promise<string | null>;
   /** Tool call of THIS run by id (null = no such record). */
-  toolCall(id: number): Promise<{ status: string } | null>;
+  toolCall(id: number): Promise<{ status: string; tool?: string } | null>;
   /** Artifact of THIS run by id. */
   artifact(id: number): Promise<boolean>;
   /** A CodeAct nested call of THIS run (null = no such record). */
   codeActCall?(
     executionId: number,
     seq: number,
-  ): Promise<{ status: string; finalized: boolean; result: unknown } | null>;
+  ): Promise<{ status: string; finalized: boolean; result: unknown; tool?: string } | null>;
 }
 
 const mark = (
@@ -214,30 +216,36 @@ export async function verifyClaimProvenance(
     const call = env.codeActCall ? await env.codeActCall(cref.execution, cref.seq) : null;
     const ref = `codeact:${cref.execution}:${cref.seq}`;
     if (!call) return mark("CONTRADICTED", `${ref} is not a recorded CodeAct call of this run`);
-    if (!call.finalized) return mark("UNVERIFIED", `${ref} belongs to an unfinished execution`);
-    if (call.status !== "ok") return mark("UNVERIFIED", `${ref} ended ${call.status}`);
+    const tool = call.tool ? { source_tool: call.tool } : {};
+    if (!call.finalized)
+      return mark("UNVERIFIED", `${ref} belongs to an unfinished execution`, null, tool);
+    if (call.status !== "ok") return mark("UNVERIFIED", `${ref} ended ${call.status}`, null, tool);
     const observed = raw?.observed;
     if (!observed || typeof observed !== "object")
-      return mark("VERIFIED_BY_PLATFORM", null, "source_record");
+      return mark("VERIFIED_BY_PLATFORM", null, "source_record", tool);
     const stored = call.result as { result?: unknown; truncated?: boolean } | null;
     if (!stored || stored.truncated || !("result" in stored))
       return mark(
         "UNVERIFIED",
         `${ref}: the recorded result was truncated; the observation cannot be checked`,
+        null,
+        tool,
       );
     const check = checkObservation(stored.result, observed as Record<string, unknown>);
-    if (check.ok === true) return mark("VERIFIED_BY_PLATFORM", null, "observation");
+    if (check.ok === true) return mark("VERIFIED_BY_PLATFORM", null, "observation", tool);
     return check.ok === false
-      ? mark("CONTRADICTED", `${ref}: ${check.reason}`)
-      : mark("UNVERIFIED", `${ref}: ${check.reason}`);
+      ? mark("CONTRADICTED", `${ref}: ${check.reason}`, null, tool)
+      : mark("UNVERIFIED", `${ref}: ${check.reason}`, null, tool);
   }
   const rec = parseRecordRef(raw?.source_ref);
   if (rec) {
     if (rec.kind === "tool_call") {
       const t = await env.toolCall(rec.id);
       if (!t) return mark("CONTRADICTED", `tool call ${rec.id} is not a record of this run`);
-      if (t.status !== "ok") return mark("UNVERIFIED", `tool call ${rec.id} ended ${t.status}`);
-      return mark("VERIFIED_BY_PLATFORM", null, "source_record");
+      const tool = t.tool ? { source_tool: t.tool } : {};
+      if (t.status !== "ok")
+        return mark("UNVERIFIED", `tool call ${rec.id} ended ${t.status}`, null, tool);
+      return mark("VERIFIED_BY_PLATFORM", null, "source_record", tool);
     }
     if (!(await env.artifact(rec.id)))
       return mark("CONTRADICTED", `artifact ${rec.id} is not a record of this run`);
@@ -306,9 +314,9 @@ export async function runProvenanceEnv(run: {
       return `origin/${await repositoryBaseBranch(repo).catch(() => config.baseBranch)}`;
     },
     toolCall: (id) =>
-      one<{ status: string }>(
+      one<{ status: string; tool: string }>(
         pool,
-        "SELECT status FROM agent_context_tool_calls WHERE id = $1 AND run_id = $2",
+        "SELECT status, tool FROM agent_context_tool_calls WHERE id = $1 AND run_id = $2",
         [id, run.id],
       ).then((r) => r ?? null),
     artifact: async (id) =>
@@ -317,15 +325,20 @@ export async function runProvenanceEnv(run: {
         run.id,
       ])),
     codeActCall: (executionId, seq) =>
-      one<{ status: string; result: unknown; execution_status: string }>(
+      one<{ status: string; result: unknown; execution_status: string; tool: string }>(
         pool,
-        `SELECT c.status, c.result, e.status AS execution_status
+        `SELECT c.status, c.result, c.tool, e.status AS execution_status
          FROM code_execution_calls c JOIN code_executions e ON e.id = c.execution_id
          WHERE c.execution_id = $1 AND c.seq = $2 AND e.run_id = $3`,
         [executionId, seq, run.id],
       ).then((r) =>
         r
-          ? { status: r.status, finalized: r.execution_status !== "running", result: r.result }
+          ? {
+              status: r.status,
+              finalized: r.execution_status !== "running",
+              result: r.result,
+              tool: r.tool,
+            }
           : null,
       ),
   };

@@ -36,6 +36,8 @@ function sample(o: Partial<Sample>): Sample {
     answered: true,
     unsupported: 0,
     fields: {},
+    grading: {},
+    answer: null,
     sdk_calls: 1,
     model_turns: 4,
     provider_tool_uses: 3,

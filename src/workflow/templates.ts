@@ -953,7 +953,12 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           type: "integration",
           name: "Verify & Report",
           depends_on: ["investigate"],
-          config: { action: "evidence_report", from: "investigate" },
+          // What the investigation must establish with platform-verified evidence (an outage leaves it incomplete).
+          config: {
+            action: "evidence_report",
+            from: "investigate",
+            objectives: { required_sources: ["trace", "log", "code"], require_root_cause: true },
+          },
         },
       ],
     },

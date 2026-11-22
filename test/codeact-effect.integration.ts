@@ -322,3 +322,112 @@ test("fairness: both variants can page large results; unpaged responses are unch
       `${t.id}: no plan or hint in the question`,
     );
 });
+
+// ------------------------------------------------------------------ P0: T03 correlation and grading semantics
+
+const T03_IDS = [
+  "ORD-101",
+  "ORD-113",
+  "ORD-125",
+  "ORD-137",
+  "ORD-149",
+  "ORD-17",
+  "ORD-29",
+  "ORD-41",
+  "ORD-5",
+  "ORD-53",
+  "ORD-65",
+  "ORD-77",
+  "ORD-89",
+];
+// Same correlation, done the hard way: page through every slow span and every timeout log, then intersect.
+const PAGED_T03 = `
+  const pageAll = async (tool, args, key) => {
+    const out = []; let offset = 0;
+    while (offset != null) {
+      const r = await platform.callTool(tool, { ...args, limit: 50, offset });
+      out.push(...r[key]); offset = r.next_offset;
+    }
+    return out;
+  };
+  const spans = await pageAll("eval.traces", { service: "payment-gateway", min_duration_ms: 5000 }, "spans");
+  const logs = await pageAll("eval.logs", { service: "payment-gateway", contains: "upstream timeout" }, "events");
+  const slow = new Set(spans.map((s) => s.order_id));
+  const ids = [...new Set(logs.map((e) => e.order_id).filter((id) => slow.has(id)))]
+    .sort((a, b) => Number(a.slice(4)) - Number(b.slice(4)));
+  return { order_ids: ids, count: ids.length };`;
+
+test("T03 reference is reconstructed from the fixture data; membership and count hold under any order", async () => {
+  const t03 = TASKS.find((t) => t.id === "T03-trace-log-correlation")!;
+  const ref = await referenceAnswer(t03);
+  assert.deepEqual(ref, { order_ids: T03_IDS, count: 13 });
+  const natural = [...T03_IDS].sort((a, b) => Number(a.slice(4)) - Number(b.slice(4)));
+  assert.equal(gradeAnswer(ref, { order_ids: natural, count: 13 }, t03.grading).correct, true);
+  assert.equal(
+    gradeAnswer(ref, { order_ids: natural.slice(1), count: 12 }, t03.grading).correct,
+    false,
+  );
+});
+
+test("T03: a paginated CodeAct correlation (natural order) is graded correct; diagnosis and answer are kept", async () => {
+  const actor = { ...user, active: true };
+  const task = TASKS.find((t) => t.id === "T03-trace-log-correlation")!;
+  const s = await runSample(task, "codeact", 0, {
+    actor,
+    provider: "claude",
+    runnerFor: (t) => simulatedPolicy(t, { firstProgram: PAGED_T03 }),
+    turnTimeoutMs: 60_000,
+  });
+  assert.equal(s.codeact_executions, 1);
+  assert.ok(s.nested_calls > 2, "the program paged");
+  assert.equal(s.correct, true, JSON.stringify(s.grading));
+  assert.equal(
+    s.grading.order_ids.order_differs,
+    true,
+    "natural order differs from the reference, still correct",
+  );
+  assert.deepEqual((s.answer as { order_ids: string[] }).order_ids[0], "ORD-5");
+  // Direct is graded by the same rules.
+  const d = await runSample(task, "direct", 0, {
+    actor,
+    provider: "claude",
+    runnerFor: (t) => simulatedPolicy(t),
+    turnTimeoutMs: 60_000,
+  });
+  assert.ok(d.grading.order_ids, "direct samples carry the same diagnosis");
+  console.log(`T03-GRADING ${JSON.stringify({ codeact: s.grading, direct: d.grading })}`);
+});
+
+test("an empty intersection is solved and graded exactly (no ids, count 0)", async () => {
+  const actor = { ...user, active: true };
+  const base = TASKS.find((t) => t.id === "T03-trace-log-correlation")!;
+  const empty = {
+    ...base,
+    id: "T03-empty-intersection",
+    question: base.question.replace("upstream timeout", "no such message"),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- fixture results are untyped, as in codeactTasks.ts
+    plan: async (call: (n: string, a: Record<string, unknown>) => Promise<any>) => {
+      const { spans } = await call("eval.traces", {
+        service: "payment-gateway",
+        min_duration_ms: 5000,
+      });
+      const slow = [...new Set(spans.map((s: { order_id: string }) => s.order_id))];
+      const { events } = await call("eval.logs", {
+        service: "payment-gateway",
+        contains: "no such message",
+        order_ids: slow,
+      });
+      const ids = [...new Set(events.map((e: { order_id: string }) => e.order_id))].sort();
+      return { order_ids: ids, count: ids.length };
+    },
+  };
+  assert.deepEqual(await referenceAnswer(empty), { order_ids: [], count: 0 });
+  const s = await runSample(empty, "codeact", 0, {
+    actor,
+    provider: "claude",
+    runnerFor: (t) => simulatedPolicy(t),
+    turnTimeoutMs: 60_000,
+  });
+  assert.equal(s.correct, true, JSON.stringify(s.grading));
+  assert.deepEqual(s.answer, { order_ids: [], count: 0 });
+});

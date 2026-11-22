@@ -31,7 +31,15 @@ import {
   registerEvaluationTools,
   TASKS,
   type EffectTask,
+  type FieldDiagnostic,
 } from "./codeactTasks.ts";
+
+/** The answer block is fixture-derived JSON; it is kept bounded (never the free-text reply). */
+function sanitizedAnswer(answer: Record<string, unknown> | null) {
+  if (!answer) return null;
+  const text = JSON.stringify(answer);
+  return text.length <= 4000 ? answer : { truncated: true, head: text.slice(0, 4000) };
+}
 
 export type Variant = "direct" | "codeact";
 export const VARIANTS: Variant[] = ["direct", "codeact"];
@@ -59,6 +67,10 @@ export interface Sample {
   answered: boolean;
   unsupported: number;
   fields: Record<string, boolean>;
+  /** Per-field grading diagnosis (expected/actual, missing/unexpected/duplicate ids, ordering, count consistency). */
+  grading: Record<string, FieldDiagnostic>;
+  /** The parsed answer block (fixture data only), capped, so a field mismatch can be inspected later. */
+  answer: Record<string, unknown> | null;
   /**
    * SDK calls (provider completions the chat harness made) and the model turns inside them — one SDK call can hold a
    * whole native tool loop. `model_turns` is null when the provider did not report it. Then the top-level chat tool
@@ -374,7 +386,8 @@ export async function runSample(
     [conv.id],
   );
   const answer = parseAnswer(reply?.content ?? "");
-  const grade = gradeAnswer(expected, answer);
+  // Same rules for both variants: the task's declared field semantics.
+  const grade = gradeAnswer(expected, answer, task.grading);
   const n = (v: unknown) => (typeof v === "number" ? v : v == null ? null : Number(v));
   return {
     task_id: task.id,
@@ -397,6 +410,8 @@ export async function runSample(
     answered: grade.answered,
     unsupported: grade.unsupported,
     fields: grade.fields,
+    grading: grade.diagnostics,
+    answer: sanitizedAnswer(answer),
     sdk_calls: Number(usage.completions ?? prompts.length),
     model_turns: n(usage.model_turns),
     provider_tool_uses: n(usage.provider_tool_uses),

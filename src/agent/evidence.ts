@@ -85,6 +85,7 @@ export interface Claim {
     verifies: "location" | "source_record" | "observation" | null;
     reason: string | null;
     stale?: boolean;
+    source_tool?: string;
   };
 }
 
@@ -245,6 +246,9 @@ export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
                   : null,
               reason: typeof prov.reason === "string" ? prov.reason : null,
               ...(prov.stale ? { stale: true } : {}),
+              ...(typeof prov.source_tool === "string"
+                ? { source_tool: prov.source_tool.slice(0, 120) }
+                : {}),
             },
           }
         : {}),
