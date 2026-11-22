@@ -111,6 +111,25 @@ const UNAVAILABLE_TRACES = new Set(["refund-worker"]);
 
 let registered = false;
 /** Register the fixture tools once (read-only; fake data; no network). */
+/**
+ * Bounded paging, available to both variants alike: a capable direct strategy can page or filter instead of receiving
+ * one response the chat truncates. Without limit/offset the response is unchanged (the reference plans use none).
+ */
+const PAGE = {
+  limit: z.number().int().min(1).max(500).optional(),
+  offset: z.number().int().min(0).optional(),
+};
+function page<K extends string, T>(key: K, rows: T[], a: { limit?: number; offset?: number }) {
+  if (a.limit == null && a.offset == null) return { [key]: rows } as Record<K, T[]>;
+  const from = a.offset ?? 0;
+  const to = from + (a.limit ?? 500);
+  return {
+    [key]: rows.slice(from, to),
+    total: rows.length,
+    next_offset: to < rows.length ? to : null,
+  } as Record<K, T[]> & { total: number; next_offset: number | null };
+}
+
 export function registerEvaluationTools() {
   if (registered) return;
   registered = true;
@@ -142,51 +161,58 @@ export function registerEvaluationTools() {
     name: "eval.traces",
     summary: "Fixture SigNoz-style span search",
     description:
-      "Fixture SigNoz-style span search. Args: service (required), optional operation, min_duration_ms, order_ids (max 200).",
+      "Fixture SigNoz-style span search. Args: service (required), optional operation, min_duration_ms, order_ids (max 200); optional limit (1-500) and offset page the result (then `total` and `next_offset` are returned).",
     input: z.object({
       service: z.string(),
       operation: z.string().optional(),
       min_duration_ms: z.number().optional(),
       order_ids: z.array(z.string()).max(200).optional(),
+      ...PAGE,
     }),
     readOnly: true,
     available: () => true,
     handler: async (a) => {
       if (UNAVAILABLE_TRACES.has(a.service))
         throw new Error(`SigNoz unavailable for ${a.service} (HTTP 503)`);
-      return {
-        spans: SPANS.filter(
+      return page(
+        "spans",
+        SPANS.filter(
           (s) =>
             s.service === a.service &&
             (!a.operation || s.operation === a.operation) &&
             (a.min_duration_ms == null || s.duration_ms >= a.min_duration_ms) &&
             (!a.order_ids || a.order_ids.includes(s.order_id)),
         ),
-      };
+        a,
+      );
     },
   });
   registerIntegrationTool({
     name: "eval.logs",
     summary: "Fixture Splunk-style log search",
     description:
-      "Fixture Splunk-style log search. Optional args: service, level, contains (substring of message), order_ids (max 200).",
+      "Fixture Splunk-style log search. Optional args: service, level, contains (substring of message), order_ids (max 200); optional limit (1-500) and offset page the result (then `total` and `next_offset` are returned).",
     input: z.object({
       service: z.string().optional(),
       level: z.enum(["info", "warn", "error"]).optional(),
       contains: z.string().optional(),
       order_ids: z.array(z.string()).max(200).optional(),
+      ...PAGE,
     }),
     readOnly: true,
     available: () => true,
-    handler: async (a) => ({
-      events: EVENTS.filter(
-        (e) =>
-          (!a.service || e.service === a.service) &&
-          (!a.level || e.level === a.level) &&
-          (!a.contains || e.message.includes(a.contains)) &&
-          (!a.order_ids || a.order_ids.includes(e.order_id)),
+    handler: async (a) =>
+      page(
+        "events",
+        EVENTS.filter(
+          (e) =>
+            (!a.service || e.service === a.service) &&
+            (!a.level || e.level === a.level) &&
+            (!a.contains || e.message.includes(a.contains)) &&
+            (!a.order_ids || a.order_ids.includes(e.order_id)),
+        ),
+        a,
       ),
-    }),
   });
 }
 

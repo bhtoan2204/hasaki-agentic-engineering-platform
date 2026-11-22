@@ -12,6 +12,7 @@ import { summarizeValue } from "../context/plan.ts";
 import { externalNotice, isExternal, type ExternalSkillMeta } from "../knowledge/external.ts";
 import { languagePolicy, languageReminder, outputLocale } from "./language.ts";
 import { policyRole, rootCauseDepth, rootCausePolicy } from "./rootCause.ts";
+import { codeActEnabled } from "../codeact/scope.ts";
 
 /**
  * Prompt assembly with an explicit trust boundary:
@@ -190,7 +191,7 @@ export function buildSystemAppend(
     "",
     "## Integration tools",
     "Native logical tools: platform.search_code, get_symbol, find_dependencies, search_knowledge, get_business_rules, search_task_memory, get_work_item, get_step_output, get_run_context, get_production_errors, get_repository_metadata, request_clarification" +
-      (config.codeAct.enabled
+      (codeActEnabled()
         ? ", execute_code (one sandboxed read-only program for several correlated integration lookups)"
         : "") +
       (config.lsp.enabled

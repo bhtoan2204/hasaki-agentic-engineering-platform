@@ -27,6 +27,7 @@ import { background } from "../workflow/background.ts";
 import { LIMITS } from "./policy.ts";
 import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
 import type { ManualChatMode } from "./types.ts";
+import { codeActEnabled } from "../codeact/scope.ts";
 
 /**
  * Chat tool binding. Unlike workflow tools (bound to an attempt lease and fencing token), a chat tool call is bound
@@ -690,7 +691,7 @@ function composableChatTools(binding: ChatBinding): CodeActCapability[] {
 
 /** Optional capabilities that are off cost no catalog tokens and cannot be called. */
 const OPTIONAL: Record<string, () => boolean> = {
-  "code.execute": () => config.codeAct.enabled,
+  "code.execute": () => codeActEnabled(),
   "code.navigate": () => config.lsp.enabled,
 };
 export function toolsForMode(mode: ManualChatMode) {

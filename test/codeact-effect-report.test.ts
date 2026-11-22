@@ -135,3 +135,52 @@ test("an interrupted sample keeps unknown usage: excluded from known counts, nev
   assert.equal(r.paired_codeact_minus_direct.cost_usd.n, 0);
   assert.equal(r.paired_codeact_minus_direct.correct.mean, -1);
 });
+
+test("availability (ITT), adoption and usage outcomes are reported separately; usage is labeled observational", () => {
+  const xs = [
+    sample({ task_id: "A", correct: false }),
+    sample({ task_id: "A", variant: "codeact", codeact_offered: true, codeact_executions: 1 }),
+    sample({ task_id: "B" }),
+    sample({ task_id: "B", variant: "codeact", codeact_offered: true, cost_usd: 0.3 }),
+    sample({ task_id: "C", eligible: false }),
+    sample({ task_id: "C", eligible: false, variant: "codeact", codeact_offered: true }),
+  ];
+  const r = summarize(xs, meta);
+  assert.equal(r.pairs, 3);
+  assert.equal(r.intention_to_treat.pairs, 3);
+  assert.equal(r.intention_to_treat.correct.mean, 1 / 3);
+  assert.equal(r.adoption.eligible_turns, 2);
+  assert.equal(r.adoption.eligible_turns_using_codeact, 1);
+  assert.deepEqual(r.adoption.adoption_rate_ci95 && r.adoption.adoption_rate_ci95.n, 2);
+  assert.equal(
+    r.usage_outcomes.label,
+    "observational: adoption is chosen by the agent, not randomized",
+  );
+  assert.deepEqual(r.usage_outcomes.used, {
+    n: 1,
+    correct: 1,
+    mean_cost_usd: 0.1,
+    mean_latency_ms: 2000,
+    mean_model_turns: 4,
+  });
+  assert.deepEqual(r.usage_outcomes.not_used, {
+    n: 1,
+    correct: 1,
+    mean_cost_usd: 0.3,
+    mean_latency_ms: 2000,
+    mean_model_turns: 4,
+  });
+  assert.deepEqual(r.capability_check, { direct_offered: 0, codeact_not_offered: 0, valid: true });
+  assert.ok(r.meta.notes.some((n) => /Only 3 complete pairs/.test(n)));
+  assert.match(renderMarkdown(r), /Intention-to-treat/);
+  assert.match(renderMarkdown(r), /observational/);
+});
+
+test("a capability leak is detected: a Direct sample that was offered code.execute invalidates the comparison", () => {
+  const r = summarize(
+    [sample({ codeact_offered: true }), sample({ variant: "codeact", codeact_offered: true })],
+    meta,
+  );
+  assert.deepEqual(r.capability_check, { direct_offered: 1, codeact_not_offered: 0, valid: false });
+  assert.match(renderMarkdown(r), /INVALID comparison/);
+});

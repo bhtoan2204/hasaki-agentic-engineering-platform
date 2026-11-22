@@ -145,10 +145,10 @@ test("paired Direct vs CodeAct through the Chat harness (simulated provider)", a
   assert.match(renderMarkdown(report), /fixture-simulated-provider/);
 });
 
-test("the budget stops the evaluation before the next sample", async () => {
+test("the sample limit stops the evaluation before a pair that would not fit", async () => {
   const actor = { ...user, active: true };
   const { samples, stopped } = await runEvaluation(
-    { repetitions: 1, tasks: ["T01-single-lookup", "T10-codeact-unnecessary"], maxSamples: 1 },
+    { repetitions: 1, tasks: ["T01-single-lookup", "T10-codeact-unnecessary"], maxSamples: 3 },
     {
       actor,
       provider: "claude",
@@ -156,7 +156,7 @@ test("the budget stops the evaluation before the next sample", async () => {
       turnTimeoutMs: 60_000,
     },
   );
-  assert.equal(samples.length, 1);
+  assert.equal(samples.length, 2, "one complete pair; the second would exceed the limit");
   assert.match(stopped ?? "", /sample limit/);
 });
 
@@ -294,4 +294,31 @@ test("a provider that reports no telemetry leaves turns and model identity unkno
   assert.equal(s.input_tokens_total, null);
   assert.equal(s.cost_usd, null);
   assert.equal(s.codeact_offered, false);
+});
+
+test("fairness: both variants can page large results; unpaged responses are unchanged", async () => {
+  const { callTool } = await import("../src/agent/toolRegistry.ts");
+  const ctx = { runId: null, allowedRepositories: [], mode: "analysis" as const };
+  const all = (await callTool("eval.logs", { level: "error" }, ctx)).result as {
+    events: unknown[];
+  };
+  const seen: unknown[] = [];
+  let offset: number | null = 0;
+  while (offset != null) {
+    const r = (await callTool("eval.logs", { level: "error", limit: 100, offset }, ctx)).result as {
+      events: unknown[];
+      total: number;
+      next_offset: number | null;
+    };
+    assert.equal(r.total, all.events.length);
+    seen.push(...r.events);
+    offset = r.next_offset;
+  }
+  assert.deepEqual(seen, all.events);
+  assert.deepEqual(Object.keys(all), ["events"], "no paging fields unless asked");
+  for (const t of TASKS)
+    assert.ok(
+      !/platform\.callTool|=>/.test(t.question),
+      `${t.id}: no plan or hint in the question`,
+    );
 });

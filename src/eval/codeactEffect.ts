@@ -13,10 +13,11 @@
  *   its tokens are unknown (only estimated from prompt size), and its adoption is by construction.
  * - a real provider (`claude`, `codex`, …): the platform's own runner, wrapped only to measure prompt sizes.
  */
-import { config } from "../config.ts";
+
 import { pool, q, one } from "../db/pool.ts";
 import { chat } from "../chat/service.ts";
-import { setChatProviders } from "../chat/runtime.ts";
+import { withChatProviders } from "../chat/runtime.ts";
+import { withCodeActScope } from "../codeact/scope.ts";
 import { LIMITS } from "../chat/policy.ts";
 import type { Actor } from "../authz/access.ts";
 import type { AgentProvider } from "../agent/provider.ts";
@@ -245,7 +246,9 @@ async function waitForTurn(actor: Actor, conversationId: number, timeoutMs: numb
 export interface RunOptions {
   actor: Actor;
   provider: AgentProvider;
+  /** Pinned for both variants (null = the account default, which a live run refuses). */
   model?: string | null;
+  effort?: string | null;
   /** Per sample: the runner (simulated policy or a real provider runner). */
   runnerFor: (task: EffectTask, variant: Variant) => CompletionRunner;
   turnTimeoutMs?: number;
@@ -260,24 +263,28 @@ export async function runSample(
 ): Promise<Sample> {
   registerEvaluationTools();
   const expected = await referenceAnswer(task);
-  config.codeAct.enabled = variant === "codeact";
   const { wrapped, prompts, offered } = measured(o.runnerFor(task, variant));
-  setChatProviders(
-    Object.fromEntries(PROVIDERS.map((p) => [p, wrapped])) as Record<
-      AgentProvider,
-      CompletionRunner
-    >,
-  );
+  const providers = Object.fromEntries(PROVIDERS.map((p) => [p, wrapped])) as Record<
+    AgentProvider,
+    CompletionRunner
+  >;
   const conv = await chat.create(o.actor, {
     mode: "INVESTIGATE",
     provider: o.provider,
     ...(o.model ? { model: o.model } : {}),
+    ...(o.effort ? { reasoning_effort: o.effort } : {}),
   });
   const t0 = Date.now();
-  await chat.postMessage(o.actor, conv.id, {
-    content: task.question,
-    client_message_id: `codeact-eval-${task.id}-${variant}-${repetition}-${t0}`,
-  });
+  // The variable under test and the runner live in this sample's async scope (the turn it starts inherits them):
+  // nothing process-wide changes, so concurrent samples and other conversations are unaffected.
+  await withCodeActScope(variant === "codeact", () =>
+    withChatProviders(providers, () =>
+      chat.postMessage(o.actor, conv.id, {
+        content: task.question,
+        client_message_id: `codeact-eval-${task.id}-${variant}-${repetition}-${t0}`,
+      }),
+    ),
+  );
   const status = await waitForTurn(o.actor, conv.id, o.turnTimeoutMs ?? 600_000);
   const latency = Date.now() - t0;
 
@@ -453,40 +460,92 @@ export async function runSample(
 export interface EvaluationPlan {
   tasks?: string[];
   repetitions: number;
-  /** Stop (before the next sample) once known spend reaches this; unknown spend counts against `maxSamples` only. */
+  /**
+   * Best-effort spend limit (no provider offers a hard cap here): a pair starts only when the remaining budget covers
+   * its estimated cost (twice the mean known cost per sample so far); an admitted pair is completed, and any overshoot
+   * is reported. Samples with unknown cost count against `maxSamples` only.
+   */
   budgetUsd?: number;
+  /** A pair starts only when both of its samples fit. */
   maxSamples?: number;
 }
+export interface PairRecord {
+  task_id: string;
+  repetition: number;
+  variants: Variant[];
+  complete: boolean;
+  reason?: string;
+}
 
-/** Paired A/B over tasks × repetitions; the variant order alternates per repetition. */
+const usd = (v: number) => Math.round(v * 1e6) / 1e6;
+
+/**
+ * Paired A/B over tasks × repetitions, scheduled by pair: one Direct and one CodeAct sample of the same task and
+ * repetition, same provider/model/effort/data/tools; the order alternates per repetition. Pairs are admitted against
+ * the sample allowance and the estimated remaining budget; a pair cut short (a sample that could not run) is kept as
+ * incomplete with its cost, and the evaluation stops.
+ */
 export async function runEvaluation(plan: EvaluationPlan, o: RunOptions) {
   const tasks = TASKS.filter((t) => !plan.tasks?.length || plan.tasks.includes(t.id));
   const samples: Sample[] = [];
+  const pairs: PairRecord[] = [];
   let spent = 0;
   let stopped: string | null = null;
-  const enabled = config.codeAct.enabled;
-  try {
-    outer: for (let rep = 0; rep < plan.repetitions; rep++)
-      for (const task of tasks) {
-        for (const variant of rep % 2 ? [...VARIANTS].reverse() : VARIANTS) {
-          if (plan.maxSamples != null && samples.length >= plan.maxSamples) {
-            stopped = `sample limit ${plan.maxSamples} reached`;
-            break outer;
-          }
-          if (plan.budgetUsd != null && spent >= plan.budgetUsd) {
-            stopped = `budget ${plan.budgetUsd} USD reached (known spend ${spent.toFixed(4)})`;
-            break outer;
-          }
-          const s = await runSample(task, variant, rep, o);
-          samples.push(s);
-          spent += s.cost_usd ?? 0;
+  const knownCosts = () => samples.map((s) => s.cost_usd).filter((c): c is number => c != null);
+  outer: for (let rep = 0; rep < plan.repetitions; rep++)
+    for (const task of tasks) {
+      if (plan.maxSamples != null && samples.length + 2 > plan.maxSamples) {
+        stopped = `sample limit ${plan.maxSamples}: ${plan.maxSamples - samples.length} left, a pair needs 2`;
+        break outer;
+      }
+      if (plan.budgetUsd != null) {
+        const remaining = plan.budgetUsd - spent;
+        const costs = knownCosts();
+        const estimate = costs.length
+          ? (2 * costs.reduce((a, b) => a + b, 0)) / costs.length
+          : null;
+        if (remaining <= 0) {
+          stopped = `budget ${plan.budgetUsd} USD reached (known spend ${spent.toFixed(4)})`;
+          break outer;
+        }
+        if (estimate != null && estimate > remaining) {
+          stopped = `budget: estimated pair cost ${estimate.toFixed(4)} USD exceeds the remaining ${remaining.toFixed(4)} USD`;
+          break outer;
         }
       }
-  } finally {
-    config.codeAct.enabled = enabled;
-    setChatProviders(undefined);
-  }
-  return { samples, stopped, known_spend_usd: spent };
+      const pair: PairRecord = { task_id: task.id, repetition: rep, variants: [], complete: false };
+      pairs.push(pair);
+      for (const variant of rep % 2 ? [...VARIANTS].reverse() : VARIANTS) {
+        let s: Sample;
+        try {
+          s = await runSample(task, variant, rep, o);
+        } catch (e) {
+          pair.reason = `${variant} sample failed to run: ${(e as Error).message}`;
+          stopped = pair.reason;
+          break outer;
+        }
+        samples.push(s);
+        pair.variants.push(variant);
+        spent = usd(spent + (s.cost_usd ?? 0));
+      }
+      pair.complete = pair.variants.length === 2;
+    }
+  if (!stopped && plan.budgetUsd != null && spent >= plan.budgetUsd)
+    stopped = `budget ${plan.budgetUsd} USD reached (known spend ${spent.toFixed(4)})`;
+  return {
+    samples,
+    pairs,
+    stopped,
+    known_spend_usd: spent,
+    budget: {
+      limit_usd: plan.budgetUsd ?? null,
+      known_spend_usd: spent,
+      overshoot_usd: plan.budgetUsd != null ? usd(Math.max(0, spent - plan.budgetUsd)) : null,
+      unknown_cost_samples: samples.filter((s) => s.cost_usd == null).length,
+      enforcement:
+        "best-effort (estimate from observed cost before each pair; no provider hard cap)",
+    },
+  };
 }
 
 // ------------------------------------------------------------------------------------------------ reporting
@@ -619,7 +678,7 @@ export function summarize(
         .map((p) => valueOf(p.codeact, k)! - valueOf(p.direct, k)!);
       return [k, pairedDiff(diffs)];
     }),
-  );
+  ) as Record<Metric, ReturnType<typeof pairedDiff>>;
   const perTask = Object.fromEntries(
     [...new Set(samples.map((s) => s.task_id))].map((id) => {
       const xs = samples.filter((s) => s.task_id === id);
@@ -664,6 +723,38 @@ export function summarize(
   );
   const cb = by("codeact");
   const eligible = cb.filter((s) => s.eligible);
+  const incomplete = [...pairs.values()]
+    .filter((p) => !(p.direct && p.codeact))
+    .map((p) => {
+      const have = VARIANTS.filter((v) => p[v]);
+      const first = p[have[0]]!;
+      const costs = have.map((v) => p[v]!.cost_usd).filter((c): c is number => c != null);
+      return {
+        task_id: first.task_id,
+        repetition: first.repetition,
+        have,
+        known_cost_usd: costs.length
+          ? Math.round(costs.reduce((a, b) => a + b, 0) * 1e6) / 1e6
+          : null,
+      };
+    });
+  const knownCost = samples.map((s) => s.cost_usd).filter((c): c is number => c != null);
+  /** Usage outcomes among eligible CodeAct-variant turns, split by whether the agent used CodeAct (observational). */
+  const outcomes = (xs: Sample[]) => {
+    const m = (f: (s: Sample) => number | null) =>
+      mean(xs.map(f).filter((v): v is number => v != null));
+    return {
+      n: xs.length,
+      correct: xs.filter((s) => s.correct).length,
+      mean_cost_usd: m((s) => s.cost_usd),
+      mean_latency_ms: m((s) => s.latency_ms),
+      mean_model_turns: m((s) => s.model_turns),
+    };
+  };
+  const capability = {
+    direct_offered: by("direct").filter((s) => s.codeact_offered).length,
+    codeact_not_offered: cb.filter((s) => !s.codeact_offered).length,
+  };
   const composed: Record<string, number> = {};
   for (const s of cb) for (const t of s.composed_tools) composed[t] = (composed[t] ?? 0) + 1;
   return {
@@ -674,27 +765,55 @@ export function summarize(
       dataset: "src/eval/codeactTasks.ts (10 tasks, deterministic fake incident window)",
       eligibility:
         "two or more deterministic read-only lookups whose results must be combined, or one large result whose useful content is an aggregate",
-      notes:
-        meta.level === "fixture-simulated-provider"
+      notes: (meta.level === "fixture-simulated-provider"
+        ? [
+            "SIMULATED PROVIDER: tokens and cost are unknown (null); estimated_prompt_tokens is chars/4, not a provider count.",
+            "Adoption is by construction (the policy uses CodeAct for every eligible task when offered).",
+            "The policy replays the same reference plan in both variants and never reformulates a query to avoid truncation; truncation effects are an upper bound for a naive direct strategy.",
+            "This is NOT a live-model or production result (verification level ≤ 3).",
+          ]
+        : ["LIVE PROVIDER: tokens/cost as reported by the provider; null where it did not report."]
+      ).concat(
+        complete.length < 10
           ? [
-              "SIMULATED PROVIDER: tokens and cost are unknown (null); estimated_prompt_tokens is chars/4, not a provider count.",
-              "Adoption is by construction (the policy uses CodeAct for every eligible task when offered).",
-              "The policy replays the same reference plan in both variants and never reformulates a query to avoid truncation; truncation effects are an upper bound for a naive direct strategy.",
-              "This is NOT a live-model or production result (verification level ≤ 3).",
+              `Only ${complete.length} complete pairs: differences are descriptive; no confidence interval below 5 pairs and no claim of a statistically meaningful effect.`,
             ]
-          : [
-              "LIVE PROVIDER: tokens/cost as reported by the provider; null where it did not report.",
-            ],
+          : [],
+      ),
     },
     samples: samples.length,
     pairs: complete.length,
+    /** Pairs missing a variant: kept for spend and diagnostics, excluded from every paired statistic. */
+    incomplete_pairs: incomplete,
+    spend: {
+      known_usd: Math.round(knownCost.reduce((a, b) => a + b, 0) * 1e6) / 1e6,
+      unknown_cost_samples: samples.length - knownCost.length,
+    },
     model_check: modelCheck(samples, complete),
+    /** Direct must never be offered code.execute and CodeAct always must; otherwise the comparison is invalid. */
+    capability_check: {
+      ...capability,
+      valid: capability.direct_offered === 0 && capability.codeact_not_offered === 0,
+    },
+    /** A. Effect of making CodeAct available, whether or not the agent used it: paired over complete pairs. */
+    intention_to_treat: { pairs: complete.length, ...paired },
+    /** C. Outcomes of eligible CodeAct-variant turns by actual use. Selected by the agent: not a causal effect. */
+    usage_outcomes: {
+      label: "observational: adoption is chosen by the agent, not randomized",
+      used: outcomes(eligible.filter((s) => s.codeact_executions > 0)),
+      not_used: outcomes(eligible.filter((s) => s.codeact_executions === 0)),
+    },
     variants: { direct: variant("direct"), codeact: variant("codeact") },
     paired_codeact_minus_direct: paired,
     per_task: perTask,
     adoption: {
       eligible_turns: eligible.length,
       eligible_turns_using_codeact: eligible.filter((s) => s.codeact_executions > 0).length,
+      /** B. Whether the agent chooses the capability when it is available and useful (Wilson 95%). */
+      adoption_rate_ci95: wilson(
+        eligible.filter((s) => s.codeact_executions > 0).length,
+        eligible.length,
+      ),
       eligible_turns_direct_only: eligible.filter(
         (s) => s.codeact_executions === 0 && s.integration_calls > 0,
       ).length,
@@ -785,6 +904,16 @@ export function renderMarkdown(r: EffectReport) {
         .map(([k, v]) => `${k}: ${v}`)
         .join(", ") || "none"
     }); after failures: ${r.adoption.recovery.recovery_attempts} recovery attempts, ${r.adoption.recovery.recovered} recovered, ${r.adoption.recovery.fallback_direct} fell back to direct tools, ${r.adoption.recovery.abandoned + r.adoption.recovery.recovery_failed} abandoned, ${r.adoption.recovery.unknown} unknown; ${r.adoption.failed_but_correct_turns} turns with a failed execution still answered correctly; evidence complete in ${r.adoption.evidence_complete_turns} turns, incomplete in ${r.adoption.evidence_incomplete_turns}.`,
+    "",
+    ...(r.capability_check.valid
+      ? []
+      : [
+          `**INVALID comparison**: ${r.capability_check.direct_offered} Direct samples were offered code.execute, ${r.capability_check.codeact_not_offered} CodeAct samples were not.`,
+          "",
+        ]),
+    `Intention-to-treat (A): the paired Δ column above, over ${r.intention_to_treat.pairs} complete pairs, whether or not CodeAct was used.${r.incomplete_pairs.length ? ` Incomplete pairs excluded: ${r.incomplete_pairs.map((p) => `${p.task_id}#${p.repetition} (${p.have.join("+")}, ${fmt(p.known_cost_usd, 4)} USD)`).join(", ")}.` : ""} Known spend ${r.spend.known_usd.toFixed(4)} USD, ${r.spend.unknown_cost_samples} samples with unknown cost.`,
+    "",
+    `Usage outcomes (C, ${r.usage_outcomes.label}): used CodeAct ${r.usage_outcomes.used.correct}/${r.usage_outcomes.used.n} correct, mean cost ${fmt(r.usage_outcomes.used.mean_cost_usd, 4)}, latency ${fmt(r.usage_outcomes.used.mean_latency_ms)} ms; did not use ${r.usage_outcomes.not_used.correct}/${r.usage_outcomes.not_used.n} correct, mean cost ${fmt(r.usage_outcomes.not_used.mean_cost_usd, 4)}, latency ${fmt(r.usage_outcomes.not_used.mean_latency_ms)} ms.`,
     "",
     ...r.meta.notes.map((n) => `- ${n}`),
   ].join("\n");

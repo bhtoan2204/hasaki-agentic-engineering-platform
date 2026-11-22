@@ -3,11 +3,12 @@
  * database (`npm run eval:codeact` preloads test/setup.ts: its own PostgreSQL cluster, never the shared RDS).
  *
  *   npm run eval:codeact -- [--repetitions 3] [--tasks T03-…,T08-…] [--out report.json] [--unsandboxed]
- *   npm run eval:codeact -- --live --provider claude [--model …] --budget-usd 1 --max-samples 4 [--out live.json]
+ *   npm run eval:codeact -- --live --provider claude --model <pinned id> [--effort medium] --budget-usd 1 --max-samples 4 [--out live.json]
  *
  * Default: the SIMULATED provider policy (no model calls, no spend) with programs in the OS sandbox. `--live` calls a
- * real provider with this machine's credentials and needs both `--budget-usd` and `--max-samples` (unknown cost is
- * bounded by the sample count); it never runs without them.
+ * real provider with this machine's credentials and needs `--model` (both variants pinned to the same model),
+ * `--budget-usd` and `--max-samples` (unknown cost is bounded by the sample count); it never runs without them. Pairs
+ * are admitted only when both samples fit the allowance and the estimated remaining budget.
  */
 import { writeFileSync } from "node:fs";
 import { migrate } from "../db/migrate.ts";
@@ -36,8 +37,12 @@ const provider = (opt("--provider") ?? "claude") as AgentProvider;
 const budgetUsd = opt("--budget-usd") ? Number(opt("--budget-usd")) : undefined;
 const maxSamples = opt("--max-samples") ? Number(opt("--max-samples")) : undefined;
 if (!AGENT_PROVIDERS.includes(provider)) throw new Error(`unknown provider ${provider}`);
-if (live && (budgetUsd == null || maxSamples == null || !(budgetUsd > 0) || !(maxSamples > 0)))
-  throw new Error("--live needs --budget-usd and --max-samples (a bounded pilot)");
+if (live && (budgetUsd == null || maxSamples == null || !(budgetUsd > 0) || !(maxSamples >= 2)))
+  throw new Error(
+    "--live needs --budget-usd and --max-samples ≥ 2 (a bounded pilot of complete pairs)",
+  );
+if (live && !opt("--model"))
+  throw new Error("--live needs --model: both variants must run on the same pinned model");
 
 await migrate();
 const sandboxed = !argv.includes("--unsandboxed");
@@ -61,7 +66,7 @@ const user = await createUser({
   password: "codeact-eval",
   role: "member",
 });
-const { samples, stopped, known_spend_usd } = await runEvaluation(
+const { samples, stopped, known_spend_usd, pairs, budget } = await runEvaluation(
   {
     repetitions: Number(opt("--repetitions") ?? 1),
     tasks: opt("--tasks")?.split(","),
@@ -72,6 +77,7 @@ const { samples, stopped, known_spend_usd } = await runEvaluation(
     actor: { ...user, active: true },
     provider,
     model: opt("--model") ?? null,
+    effort: opt("--effort") ?? null,
     runnerFor: (task) => (live ? completionRunners[provider] : simulatedPolicy(task)),
   },
 );
@@ -84,6 +90,8 @@ const report = {
   }),
   stopped,
   known_spend_usd,
+  budget,
+  pair_schedule: pairs,
   raw_samples: samples,
 };
 console.log(renderMarkdown(report));

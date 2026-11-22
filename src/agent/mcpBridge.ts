@@ -1,6 +1,7 @@
 import { advertisedContextTools, CONTEXT_TOOLS } from "./contextToolSchemas.ts";
 import { config } from "../config.ts";
 import { z } from "zod";
+import { codeActEnabled } from "../codeact/scope.ts";
 /**
  * Stdio MCP server core shared by the CLI providers' per-run bridges (Cursor: cursor/bridge.ts, Codex: codex/bridge.ts).
  * It is not a network service. Each bridge supplies how a tool call is executed; the platform tools themselves live in
@@ -155,7 +156,7 @@ export const COMMIT_TOOL: BridgeTool = {
  */
 export function bridgeCapabilityEnv(): Record<string, string> {
   return {
-    CODEACT_ENABLED: config.codeAct.enabled ? "1" : "0",
+    CODEACT_ENABLED: codeActEnabled() ? "1" : "0",
     LSP_ENABLED: config.lsp.enabled ? "1" : "0",
   };
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { codeIntelligenceEnabled, config } from "../config.ts";
+import { codeActEnabled } from "../codeact/scope.ts";
 
 /** Shown to the developer as-is. A one-word probe such as "test" must not pause the step. */
 export function developerQuestionIssue(question: string): string | null {
@@ -163,7 +164,7 @@ export const contextTool = (name: string) =>
 export function contextToolSupported(name: string) {
   if (["search_code", "get_symbol", "find_dependencies"].includes(name))
     return codeIntelligenceEnabled();
-  if (name === "execute_code") return config.codeAct.enabled;
+  if (name === "execute_code") return codeActEnabled();
   if (name === "navigate_code") return config.lsp.enabled;
   return true;
 }

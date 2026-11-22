@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../config.ts";
 import { isolatedEnvironment, probeIsolation, sandboxInvocation } from "../agent/isolation.ts";
+import { codeActEnabled } from "./scope.ts";
 
 export type Category =
   | "unsupported"
@@ -225,7 +226,7 @@ export function setCodeActLauncherForTests(launcher: Launcher | undefined) {
 
 /** Enabled by the operator and the OS sandbox usable on this host right now; otherwise the reason. */
 export async function codeActAvailability(): Promise<true | string> {
-  if (!config.codeAct.enabled) return "CodeAct is disabled on this installation (codeAct.enabled)";
+  if (!codeActEnabled()) return "CodeAct is disabled on this installation (codeAct.enabled)";
   if (testLauncher) return true;
   const runtime = await probeIsolation();
   if (!runtime.available)

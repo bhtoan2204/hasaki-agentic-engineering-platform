@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { config } from "../config.ts";
 import { withTx } from "../db/pool.ts";
 import { background } from "../workflow/background.ts";
@@ -72,6 +73,14 @@ const nativeToolsFor = (provider: string) =>
 
 export function setChatProviders(p: Providers | undefined) {
   providerSeam = p;
+}
+/**
+ * Evaluation only: providers for the chat turns started inside `fn` (the scope follows the async context into
+ * scheduleTurn), so concurrent evaluation samples never replace each other's runner or the process-wide seam.
+ */
+const providerScope = new AsyncLocalStorage<Providers>();
+export function withChatProviders<T>(p: Providers, fn: () => T): T {
+  return providerScope.run(p, fn);
 }
 
 const active = new Map<number, AbortController>();
@@ -238,7 +247,10 @@ async function finishFailed(turn: TurnRow, failure: ChatFailure, metrics?: Recor
     });
 }
 
-export async function runTurn(turnId: number, providers: Providers | undefined = providerSeam) {
+export async function runTurn(
+  turnId: number,
+  providers: Providers | undefined = providerScope.getStore() ?? providerSeam,
+) {
   const claimed = await chatRepository.claimTurn(turnId, config.instanceId);
   if (!claimed) return;
   const turn = claimed;
