@@ -106,9 +106,14 @@ test("self-development registers GitHub, isolates the live tree and stays recove
       profile: "STANDARD",
     });
     assert.deepEqual(implied.selected_repositories, [repo.name]);
+    // One repository, chosen at start: no repository confirmation and no release/qc merge (the repo has only main).
     assert.equal(
-      implied.steps.find((step) => step.key === "confirm_repos")?.config.auto_approve_preselected,
-      true,
+      implied.steps.some((step) => step.key === "confirm_repos"),
+      false,
+    );
+    assert.equal(
+      implied.steps.some((step) => step.key === "qc_merge"),
+      false,
     );
 
     const started = await startRun({

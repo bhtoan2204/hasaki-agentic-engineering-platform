@@ -1390,21 +1390,16 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           depends_on: ["analyze"],
           config: DISCOVER,
         },
-        {
-          key: "confirm_repos",
-          type: "human_approval",
-          name: "Confirm Repositories",
-          depends_on: ["discover"],
-          config: { ...CONFIRM_REPOS, auto_approve_preselected: true },
-        },
+        // No repository confirmation: a self-development run always targets this platform's one repository,
+        // selected when the run starts.
         {
           key: "plan",
           type: "agent",
           name: "Architecture Review & Plan",
-          depends_on: ["confirm_repos"],
+          depends_on: ["discover"],
           config: {
             instructions:
-              "Design the change for the confirmed repositories. Name the modules and dependencies affected, the test strategy " +
+              "Design the change for the selected repository. Name the modules and dependencies affected, the test strategy " +
               "(targeted checks first, full npm test before the pull request), and rollout risks. Do not plan a restart, deploy, " +
               "merge, or migration of the running application's database. Reference concrete files (path:line).",
             output_contract:
