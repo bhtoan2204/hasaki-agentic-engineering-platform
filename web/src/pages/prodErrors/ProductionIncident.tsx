@@ -4,6 +4,7 @@ import { useApi } from "../../api.ts";
 import { EmptyState, ErrorBox } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { DataTable, dateCell, fmt, Panel, type Row } from "../analytics/shared.tsx";
+import { BugHunter } from "./BugHunter.tsx";
 
 interface Slow {
   threshold_ms: number;
@@ -149,6 +150,7 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
         />
         {!rows.length && <div className="an-chart-empty">{t("an.insufficientHistory")}</div>}
       </Panel>
+      <BugHunter fingerprint={fingerprint} />
       <Panel title={t("an.incidentLifecycleHistory")}>
         <DataTable
           rows={data.lifecycle ?? []}

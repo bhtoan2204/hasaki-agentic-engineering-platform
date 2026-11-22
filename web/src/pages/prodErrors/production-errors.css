@@ -518,3 +518,148 @@
   min-width: min(90px, 30%);
   overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------------- Bug Hunter */
+.bh-intro,
+.bh-detail-head,
+.bh-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+.bh-intro p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+.bh-form {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.bh-form fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.bh-form legend {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.bh-form fieldset small {
+  flex-basis: 100%;
+}
+.bh-hunts {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: grid;
+  gap: 4px;
+}
+.bh-hunts button {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+}
+.bh-hunts button.active {
+  border-color: var(--brand);
+}
+.bh-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 12px 0;
+  list-style: none;
+}
+.bh-stages li {
+  display: grid;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-size: var(--fs-xs);
+}
+.bh-stages li[data-status="COMPLETED"] {
+  border-color: var(--st-ok, var(--line));
+}
+.bh-stages li[data-status="RUNNING"] {
+  border-color: var(--brand);
+}
+.bh-stages li[data-status="FAILED"] {
+  border-color: var(--st-err);
+}
+.bh-stages li small {
+  color: var(--muted);
+}
+.bh-section h4 {
+  margin: 16px 0 8px;
+}
+.bh-finding {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--r-md);
+  overflow-wrap: anywhere;
+}
+.bh-finding[data-status="CONFIRMED"] {
+  border-left-color: var(--st-err);
+}
+.bh-finding[data-status="SUSPECTED"] {
+  border-left-color: var(--st-warn, var(--brand));
+}
+.bh-finding header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+}
+.bh-finding dl,
+.bh-coverage dl {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 4px 12px;
+  margin: 8px 0;
+  font-size: var(--fs-sm, 13px);
+}
+.bh-finding dt,
+.bh-coverage dt {
+  color: var(--muted);
+}
+.bh-finding dd,
+.bh-coverage dd {
+  margin: 0;
+  min-width: 0;
+}
+.bh-finding ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.bh-cmd {
+  display: block;
+  margin: 4px 0;
+}
+.bh-error {
+  color: var(--st-err);
+}
+@media (max-width: 640px) {
+  .bh-finding dl,
+  .bh-coverage dl {
+    grid-template-columns: 1fr;
+  }
+}

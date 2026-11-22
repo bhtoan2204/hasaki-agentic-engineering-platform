@@ -1,0 +1,562 @@
+{
+  "sandbox": "bwrap, network disabled",
+  "summary": {
+    "A": {
+      "cases": 9,
+      "completed": 9,
+      "true_positives": 7,
+      "false_positives": 2,
+      "false_negatives": 1,
+      "precision": 0.7777777777777778,
+      "recall": 0.875,
+      "reproduction_success": null,
+      "attribution_accuracy": 0.7777777777777778,
+      "mean_tool_calls": 6,
+      "mean_latency_ms": 620,
+      "tokens_reported": true,
+      "cost_usd": null
+    },
+    "B": {
+      "cases": 10,
+      "completed": 10,
+      "true_positives": 9,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1,
+      "recall": 1,
+      "reproduction_success": 0.8888888888888888,
+      "attribution_accuracy": 1,
+      "mean_tool_calls": 19.2,
+      "mean_latency_ms": 2313,
+      "tokens_reported": true,
+      "cost_usd": null
+    }
+  },
+  "grades": [
+    {
+      "case": "real-bug",
+      "arm": "A",
+      "run_id": 6,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "pricing/discount.go#Apply"
+      ],
+      "attribution": "pricing/discount.go#Apply",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 628,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "real-bug",
+      "arm": "B",
+      "run_id": 7,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "pricing/discount.go#Apply"
+      ],
+      "attribution": "pricing/discount.go#Apply",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2376,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "misleading-stacktrace",
+      "arm": "A",
+      "run_id": 8,
+      "run_status": "COMPLETED",
+      "true_positives": 0,
+      "false_positives": 1,
+      "false_negatives": 1,
+      "reported": [
+        "orders/render.go#Format"
+      ],
+      "attribution": "orders/render.go#Format",
+      "attribution_correct": false,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 612,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "misleading-stacktrace",
+      "arm": "B",
+      "run_id": 9,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "orders/loader.go#Fill"
+      ],
+      "attribution": "orders/loader.go#Fill",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "SUSPECTED": 1,
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2468,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "correct-code-suspected",
+      "arm": "A",
+      "run_id": 10,
+      "run_status": "COMPLETED",
+      "true_positives": 0,
+      "false_positives": 1,
+      "false_negatives": 0,
+      "reported": [
+        "partner/client.go#Parse"
+      ],
+      "attribution": "partner/client.go#Parse",
+      "attribution_correct": false,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 631,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "correct-code-suspected",
+      "arm": "B",
+      "run_id": 11,
+      "run_status": "COMPLETED",
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [],
+      "attribution": null,
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 0
+      },
+      "statuses": {
+        "SUSPECTED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2394,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "retry-amplification",
+      "arm": "A",
+      "run_id": 12,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "retry/retry.go#Do"
+      ],
+      "attribution": "retry/retry.go#Do",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 604,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "retry-amplification",
+      "arm": "B",
+      "run_id": 13,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "retry/retry.go#Do"
+      ],
+      "attribution": "retry/retry.go#Do",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2435,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "race-condition",
+      "arm": "A",
+      "run_id": 14,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "stock/store.go#Reserve"
+      ],
+      "attribution": "stock/store.go#Reserve",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 628,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "race-condition",
+      "arm": "B",
+      "run_id": 15,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "stock/store.go#Reserve"
+      ],
+      "attribution": "stock/store.go#Reserve",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "CONFIRMED": 1,
+        "SUSPECTED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2426,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "idempotency",
+      "arm": "A",
+      "run_id": 16,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "payments/processor.go#Charge"
+      ],
+      "attribution": "payments/processor.go#Charge",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 611,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "idempotency",
+      "arm": "B",
+      "run_id": 17,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "payments/processor.go#Charge"
+      ],
+      "attribution": "payments/processor.go#Charge",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2424,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "nil-edge-case",
+      "arm": "A",
+      "run_id": 18,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "shipping/fee.go#Fee"
+      ],
+      "attribution": "shipping/fee.go#Fee",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 628,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "nil-edge-case",
+      "arm": "B",
+      "run_id": 19,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "shipping/fee.go#Fee"
+      ],
+      "attribution": "shipping/fee.go#Fee",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2394,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "transaction-consistency",
+      "arm": "A",
+      "run_id": 20,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "ledger/transfer.go#Transfer"
+      ],
+      "attribution": "ledger/transfer.go#Transfer",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 600,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "transaction-consistency",
+      "arm": "B",
+      "run_id": 21,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "ledger/transfer.go#Transfer"
+      ],
+      "attribution": "ledger/transfer.go#Transfer",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2375,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "missing-cancellation",
+      "arm": "A",
+      "run_id": 22,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "sync/poll.go#Poll"
+      ],
+      "attribution": "sync/poll.go#Poll",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "latency_ms": 640,
+      "tool_calls": 6,
+      "tokens": {
+        "input": 120,
+        "output": 7
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "missing-cancellation",
+      "arm": "B",
+      "run_id": 23,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "sync/poll.go#Poll"
+      ],
+      "attribution": "sync/poll.go#Poll",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 1,
+        "reproduced": 1
+      },
+      "statuses": {
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": false,
+      "reused": 0,
+      "latency_ms": 2479,
+      "tool_calls": 20,
+      "tokens": {
+        "input": 360,
+        "output": 21
+      },
+      "cost_usd": null
+    },
+    {
+      "case": "recurring-incident",
+      "arm": "B",
+      "run_id": 24,
+      "run_status": "COMPLETED",
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "reported": [
+        "pricing/discount.go#Apply"
+      ],
+      "attribution": "pricing/discount.go#Apply",
+      "attribution_correct": true,
+      "reproductions": {
+        "attempted": 0,
+        "reproduced": 0
+      },
+      "statuses": {
+        "CONFIRMED": 1
+      },
+      "verifier_saw_hunter_output": null,
+      "reused": 1,
+      "latency_ms": 1362,
+      "tool_calls": 12,
+      "tokens": {
+        "input": 240,
+        "output": 14
+      },
+      "cost_usd": null
+    }
+  ]
+}

@@ -186,12 +186,13 @@ export function bwrapArguments(
   cwd: string,
   live: string | null,
   git: Array<{ commonDir: string; adminDir: string }> = [],
+  noNetwork = false,
 ): string[] {
   // Order matters: read-only root, shared /tmp, then the credential masks (shared with the agent sandbox), then the
   // worktree's git metadata (the checkout lives under the masked dataDir too: shared objects/refs read-only, this
   // worktree's admin dir writable for its index), the writable worktree and the read-only live checkout.
   const args = [
-    ...(liveRuntime.getStore() ? ["--unshare-net"] : []),
+    ...(liveRuntime.getStore() || noNetwork ? ["--unshare-net"] : []),
     "--die-with-parent",
     "--unshare-pid",
     "--ro-bind",

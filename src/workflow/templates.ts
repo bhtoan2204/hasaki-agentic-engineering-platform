@@ -772,6 +772,126 @@ const PRODUCTION_INVESTIGATION = {
   ],
 };
 
+/**
+ * Production Bug Hunter (started from a Production Errors incident): the incident-investigation steps (investigate +
+ * evidence report) plus a bounded, evidence-driven bug hunt. Everything is read-only; the only code that runs is the
+ * verifier's focused reproduction test, executed by the platform in a throwaway network-isolated export.
+ *   context → scope ─┐
+ *   context → investigate → evidence
+ *   scope → hunt → triage → verify (independent; hunter output withheld) → reproduce → report
+ */
+const BUG_HUNT_CANDIDATE =
+  "{ repository, commit, file_path, function, line_start: number, line_end: number, category, hypothesis, trigger, expected, actual, supporting_evidence: string[], reproduction_strategy, confidence: number, uncertainty }";
+export const BUG_HUNT_HUNTER = {
+  instructions:
+    "Hunt for REAL, reproducible defects in the code that the bug hunt scope (upstream `scope`) ties to the incident (upstream `context`). READ-ONLY. " +
+    "Start from the scope's functions and lines at the recorded revision; read callers, error handling, retries, state transitions, database transactions, concurrency and cancellation around them. " +
+    "Do not scan the whole repository. Look for: incorrect business logic, race conditions, deadlocks, retry amplification, idempotency violations, incorrect error handling, resource leaks, " +
+    "transaction consistency, incorrect state transitions, boundary conditions, silent data corruption, unexpected nil/null behaviour, missing cancellation propagation. " +
+    "For every candidate give the exact location (repository, commit = the scope revision, file_path, function, line_start, line_end), category " +
+    "(business_logic|race_condition|deadlock|retry_amplification|idempotency|error_handling|resource_leak|transaction_consistency|state_transition|boundary_condition|data_corruption|nil_handling|cancellation|other), " +
+    "the hypothesis, the triggering input or execution condition, expected vs actual behaviour, supporting_evidence (what you read: file:line facts, incident evidence), a reproduction_strategy " +
+    "(the smallest focused test), confidence 0..1 and the uncertainty. Report at most 5 candidates, strongest first; prefer none to a speculative one. " +
+    "A candidate is a hypothesis: never call it a confirmed bug or a confirmed root cause — an independent verifier decides. List inspected_files and what you could not inspect under missing_evidence.",
+  output_contract: `{ summary, candidates: [${BUG_HUNT_CANDIDATE}], inspected_files: string[], missing_evidence?: string[] }`,
+  agent: { max_tool_calls: 80, timeout_ms: 1_200_000, context_tokens: 24000 },
+};
+export const BUG_HUNT_VERIFIER = {
+  // The hunter's reasoning and evidence never reach this step: only the platform-built claims (triage.to_verify).
+  withhold: ["hunt"],
+  instructions:
+    "You are an INDEPENDENT verifier of bug claims (upstream `triage`.to_verify). You did not write them; do not trust them. For EACH claim, independently: " +
+    "(1) read the implementation at the given repository revision; (2) validate the claimed execution path; (3) check the issue is reachable from real inputs; " +
+    "(4) design the smallest safe reproduction: a NEW Go test file in the function's package directory (test_file directly inside package_dir, test_name, complete test_code) that FAILS on the current code because of the defect " +
+    "— fixtures and fakes only, never a real database, broker, network or credential; the platform runs it in an isolated, network-disabled copy and you cannot edit files; " +
+    "(5) decide whether the behaviour violates the intended contract; (6) name alternative explanations; (7) reject unsupported claims. " +
+    "verdict: CONFIRMED only when a failing test or code you quote proves the defect (cite code_evidence with the exact excerpt and its file_path/line_start/line_end, and the execution_path); " +
+    "SUSPECTED when plausible but unproven; REJECTED when the code contradicts the claim; BLOCKED when the code or evidence needed is unavailable. " +
+    "Separately judge incident_link (SUPPORTED|NOT_SUPPORTED|UNKNOWN): whether the persisted incident evidence in `context` connects to THIS defect — a real bug is not automatically the incident's cause.",
+  output_contract:
+    "{ summary, verdicts: [{ id, verdict: 'CONFIRMED'|'SUSPECTED'|'REJECTED'|'BLOCKED', reason, execution_path: string[], code_evidence: [{ file_path, line_start: number, line_end: number, excerpt }], " +
+    "alternative_explanations: string[], incident_link: 'SUPPORTED'|'NOT_SUPPORTED'|'UNKNOWN', incident_link_reason, reproduction?: { test_file, test_name, package_dir, test_code } }] }",
+  agent: { max_tool_calls: 80, timeout_ms: 1_200_000, context_tokens: 24000 },
+};
+export const PRODUCTION_BUG_HUNT = {
+  name: "Production Bug Hunt",
+  description:
+    "Read-only, started from a production incident: persisted incident evidence → bounded code scope (stack frames, LSP / Code Intelligence) → incident investigation + evidence report → bug hunter → triage (dedupe, reuse, budget) → independent verifier → isolated reproduction → report with separate bug and incident-causality verdicts.",
+  category: "Operations / Debugging",
+  execution_mode: "read_only",
+  inputs: {
+    fingerprint: { description: "production incident fingerprint", required: true },
+    request: { description: "the incident, as the investigation's request", required: true },
+  },
+  steps: [
+    { key: "context", type: "integration", name: "Incident Context", config: { action: "bug_hunt_context" } },
+    {
+      key: "scope",
+      type: "integration",
+      name: "Scope Discovery",
+      depends_on: ["context"],
+      config: { action: "bug_hunt_scope" },
+    },
+    {
+      key: "investigate",
+      type: "agent",
+      name: "Collect, Correlate & Diagnose",
+      depends_on: ["context", "scope"],
+      max_attempts: 2,
+      config: INCIDENT_INVESTIGATE,
+    },
+    {
+      key: "evidence",
+      type: "integration",
+      name: "Verify Investigation Evidence",
+      depends_on: ["investigate"],
+      config: {
+        action: "evidence_report",
+        from: "investigate",
+        objectives: { required_sources: ["trace", "log", "code"], require_root_cause: true },
+      },
+    },
+    {
+      key: "hunt",
+      type: "agent",
+      name: "Bug Hunter",
+      depends_on: ["evidence"],
+      max_attempts: 2,
+      config: BUG_HUNT_HUNTER,
+    },
+    {
+      key: "triage",
+      type: "integration",
+      name: "Candidate Triage",
+      depends_on: ["hunt"],
+      config: { action: "bug_hunt_triage" },
+    },
+    {
+      key: "verify",
+      type: "agent",
+      name: "Independent Verification",
+      depends_on: ["triage"],
+      run_if: { step: "triage", path: "verify_needed", equals: true },
+      max_attempts: 2,
+      config: BUG_HUNT_VERIFIER,
+    },
+    {
+      key: "reproduce",
+      type: "integration",
+      name: "Isolated Reproduction",
+      depends_on: ["verify"],
+      config: { action: "bug_hunt_reproduce" },
+    },
+    {
+      key: "report",
+      type: "integration",
+      name: "Bug Hunt Report",
+      depends_on: ["reproduce"],
+      config: { action: "bug_hunt_report" },
+    },
+  ],
+};
+
 export const cleanup = (...after: string[]) => ({
   key: "cleanup",
   type: "integration",
@@ -1250,6 +1370,7 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
     },
   },
   { key: "production-incident-investigation", spec: PRODUCTION_INVESTIGATION },
+  { key: "production-bug-hunt", spec: PRODUCTION_BUG_HUNT },
   {
     key: "platform-self-development",
     spec: {

@@ -38,6 +38,10 @@ export interface VerdictOutput {
 
 export const isIndependent = (cfg: Record<string, unknown> | undefined) => cfg?.independent === true;
 
+/** Ancestor steps whose outputs, attempts and artifacts this step must not see (`config.withhold`). */
+export const withheldSteps = (cfg: Record<string, unknown> | null | undefined): string[] =>
+  Array.isArray(cfg?.withhold) ? cfg.withhold.filter((k): k is string => typeof k === "string") : [];
+
 /**
  * Upstream outputs an independent verifier may see. Coding steps contribute ONLY their platform-generated
  * `verification` record; agent steps downstream of a coding step (other reviews) are dropped; pre-implementation steps

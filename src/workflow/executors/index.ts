@@ -7,8 +7,11 @@ import {
   humanInputExecutor,
   integrationExecutor,
   pullRequestExecutor,
+  registerIntegrationAction,
+  runIsolatedCommand,
   setAiRepositoryRanker,
 } from "./builtin.ts";
+import { registerBugHuntActions } from "../../bugHunt/steps.ts";
 import { registerExecutor } from "./registry.ts";
 import { setMergeModel } from "./branchMerge.ts";
 import { registerBuiltinTools } from "../../agent/toolRegistry.ts";
@@ -32,6 +35,7 @@ export function registerDefaultExecutors() {
   registerExecutor("condition", conditionExecutor);
   registerExecutor("command", commandExecutor);
   registerExecutor("integration", integrationExecutor);
+  registerBugHuntActions(registerIntegrationAction, runIsolatedCommand);
   registerExecutor("git_pull_request", pullRequestExecutor);
   setAiRepositoryRanker(rankRepositoriesWithClaude);
   registerBuiltinTools();

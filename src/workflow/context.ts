@@ -19,7 +19,7 @@ import {
   type UpstreamPlanEntry,
 } from "../context/plan.ts";
 import { projectsOfRepositories, repoPath } from "../repos/service.ts";
-import { independentUpstream, isIndependent } from "../agent/independentReview.ts";
+import { independentUpstream, isIndependent, withheldSteps } from "../agent/independentReview.ts";
 import { memoryFreshness, type MemoryMeta } from "../knowledge/memory.ts";
 import { skillAvailability } from "../knowledge/external.ts";
 import { TEST_COMMAND } from "./templates.ts";
@@ -158,6 +158,8 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
   }
   // Independent verification: the coding agent's own claims never reach the verifier (only platform evidence does).
   if (isIndependent(step.config)) upstream = independentUpstream(liveSteps, upstream);
+  // A step that must judge another step's claims without its reasoning (Bug Hunter verifier) never receives it.
+  for (const key of withheldSteps(step.config)) delete upstream[key];
   const answers = await q(
     c,
     "SELECT question, answer, attempt_id FROM workflow_questions WHERE step_id = $1 AND status = 'answered' ORDER BY id",

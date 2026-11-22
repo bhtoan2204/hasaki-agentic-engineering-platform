@@ -380,6 +380,39 @@ export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps[
   }
 };
 
+/**
+ * A verification-class command with networking cut (Production Bug Hunter reproductions): same slot, sandbox and
+ * environment scrubbing as verification, plus `--unshare-net`. Refuses to run without bubblewrap.
+ */
+export const runIsolatedCommand = async (
+  command: string,
+  cwd: string,
+  env: Record<string, string>,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<CommandResult> => {
+  const release = await acquireVerificationSlot(
+    signal,
+    verificationSlotLimit(
+      process.env,
+      config.supervision.engine === "go" ? config.supervision.slots.verification : undefined,
+    ),
+  );
+  if (!release)
+    return {
+      code: null,
+      output: "[canceled while waiting for a verification slot]",
+      timedOut: false,
+    };
+  try {
+    return await runCommand(command, cwd, env, timeoutMs, signal, undefined, true, {
+      network: false,
+    });
+  } finally {
+    release();
+  }
+};
+
 export async function runCommand(
   command: string,
   cwd: string,
@@ -388,12 +421,19 @@ export async function runCommand(
   signal: AbortSignal,
   onChunk?: (text: string) => void,
   verification = false,
+  opts: { network?: false } = {},
 ) {
   // The sandboxed helper only validates; the worker installs and signs dependencies before any command that calls it.
   if (command.includes("PLATFORM_NODE_DEPENDENCIES") && existsSync(join(cwd, "package.json")))
     await installNodeDependencies(cwd).catch(() => false);
   const proc0 = await commandProcessEnv(cwd, env, verification);
   const useBwrap = proc0.isolation?.mode === "bwrap";
+  if (opts.network === false && !useBwrap)
+    return {
+      code: null,
+      output: "[refused: a network-isolated command needs the bubblewrap sandbox]",
+      timedOut: false,
+    };
   // commandProcessEnv owns the complete environment; never reintroduce scrubbed worker values.
   const childEnv = { ...proc0.env };
   // Verification is a new test invocation, not a recursive child of the worker test harness.
@@ -443,7 +483,12 @@ node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DE
     const proc = superviseSpawn({
       command: useBwrap ? "bwrap" : "bash",
       args: useBwrap
-        ? [...bwrapArguments(cwd, proc0.isolation?.liveRoot ?? null, git), "bash", "-lc", script]
+        ? [
+            ...bwrapArguments(cwd, proc0.isolation?.liveRoot ?? null, git, opts.network === false),
+            "bash",
+            "-lc",
+            script,
+          ]
         : ["-lc", script],
       cwd,
       env: childEnv,
@@ -1206,6 +1251,13 @@ async function cleanupWorkspaces(ctx: ExecutionContext): Promise<ExecResult> {
   };
 }
 
+type IntegrationAction = (ctx: ExecutionContext) => Promise<ExecResult>;
+const extraActions = new Map<string, IntegrationAction>();
+/** Integration actions owned by feature modules, registered at startup (keeps those modules out of this one's imports). */
+export function registerIntegrationAction(name: string, run: IntegrationAction) {
+  extraActions.set(name, run);
+}
+
 export const integrationExecutor: StepExecutor = {
   async execute(ctx) {
     switch (ctx.step.config.action) {
@@ -1236,12 +1288,15 @@ export const integrationExecutor: StepExecutor = {
         return evidenceReportStep(ctx);
       case "noop":
         return { kind: "completed", output: { ok: true } };
-      default:
+      default: {
+        const extra = extraActions.get(String(ctx.step.config.action));
+        if (extra) return extra(ctx);
         return {
           kind: "failed",
           error: `unknown integration action "${ctx.step.config.action}"`,
           retryable: false,
         };
+      }
     }
   },
 };

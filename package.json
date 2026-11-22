@@ -62,6 +62,7 @@
     "smoke:overview-timesheet": "node --disable-warning=ExperimentalWarning test/overview-timesheet.smoke.ts",
     "smoke:chat": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 test/chat.browser.ts",
     "smoke:run-detail": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 test/run-detail.browser.ts",
+    "smoke:bug-hunter": "node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=1 test/bug-hunter.browser.ts",
     "smoke:ui-quality": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts",
     "arch:check": "node --disable-warning=ExperimentalWarning scripts/arch-check.ts",
     "arch:baseline": "node --disable-warning=ExperimentalWarning scripts/arch-check.ts --write-baseline",

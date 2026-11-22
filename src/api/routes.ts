@@ -108,6 +108,7 @@ import {
   type ScanPreset,
 } from "../prodErrors/scan.ts";
 import { cancelScan } from "../prodErrors/jobs.ts";
+import { bugHuntDetail, createFixTask, listBugHunts, startBugHunt } from "../bugHunt/service.ts";
 import {
   bitbucketStatus,
   clearBitbucket,
@@ -293,7 +294,11 @@ import { runChanges } from "../git/changes.ts";
 import { addEvidence, removeEvidence } from "../report/evidenceStore.ts";
 import { schedulerStatus } from "../workflow/scheduler.ts";
 import { runtimeMetricsSnapshot } from "../runtimeMetrics.ts";
-import { backgroundGitStatus, setBackgroundGit, workspaceRepositories } from "../repos/backgroundGit.ts";
+import {
+  backgroundGitStatus,
+  setBackgroundGit,
+  workspaceRepositories,
+} from "../repos/backgroundGit.ts";
 import { metricsSummary, poolGauges, runMetrics } from "./metrics.ts";
 import { dependencyMetrics } from "../git/nodeDependencies.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
@@ -2451,6 +2456,23 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/investigate$/,
     ({ p, actor }) => investigate(p[0], actor.id),
+  ],
+  // Production Bug Hunter: hunts are runs owned by the requester (their repository permissions and provider settings).
+  [
+    "GET",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/bug-hunts$/,
+    (c) => listBugHunts(c.p[0], c.actor, support(c)),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/bug-hunts$/,
+    (c) => startBugHunt(c.p[0], c.actor, c.body),
+  ],
+  ["GET", /^\/api\/bug-hunts\/(\d+)$/, (c) => bugHuntDetail(num(c.p[0]), c.actor, support(c))],
+  [
+    "POST",
+    /^\/api\/bug-hunts\/(\d+)\/findings\/(\d+)\/fix-task$/,
+    (c) => createFixTask(num(c.p[0]), num(c.p[1]), c.actor),
   ],
   [
     "POST",

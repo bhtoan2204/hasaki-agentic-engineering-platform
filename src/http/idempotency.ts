@@ -22,6 +22,8 @@ export const IDEMPOTENT_ROUTES: RegExp[] = [
   /^\/api\/runs\/\d+\/steps\/[a-z0-9_-]+\/evidence$/,
   /^\/api\/work\/pick\/\d+$/,
   /^\/api\/prod-errors\/(scan|[0-9a-f]{20}\/investigate)$/,
+  /^\/api\/prod-errors\/[0-9a-f]{20}\/bug-hunts$/,
+  /^\/api\/bug-hunts\/\d+\/findings\/\d+\/fix-task$/,
   /^\/api\/chat\/conversations$/,
   /^\/api\/chat\/conversations\/\d+\/messages$/,
   /^\/api\/chat\/conversations\/\d+\/delegation\/execute$/,

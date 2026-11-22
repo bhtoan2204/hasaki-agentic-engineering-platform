@@ -33,7 +33,7 @@ import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
 import { repositories, repoPath } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
-import { citedArtifactIds, evidenceExcerpt } from "./independentReview.ts";
+import { citedArtifactIds, evidenceExcerpt, withheldSteps } from "./independentReview.ts";
 import { prepareWorkspace, WorkspaceConflictError, workspacesOf } from "../git/provider.ts";
 import { fusedSearchOrder, scoreKnowledge } from "../context/plan.ts";
 import { semanticRanksByKey } from "../retrieval/semantic.ts";
@@ -75,6 +75,8 @@ export interface PlatformToolEnv {
   snapshotId?: number;
   recordMetrics?: (m: Record<string, unknown>) => Promise<void>;
   independent?: boolean;
+  /** Ancestor steps withheld from this step (`config.withhold`): their outputs, history and artifacts are refused. */
+  withheld?: string[];
   /** Run owner. Tool calls that touch credentials use this, not a process-global user. */
   ownerId?: number | null;
   stepId: number;
@@ -755,8 +757,9 @@ async function readArtifact(
     return "ERROR: independent review can only read artifacts cited by its ancestor outputs";
   const row = await one(
     pool,
-    "SELECT id, kind, name, content, data FROM workflow_artifacts WHERE id = $1 AND run_id = $2",
-    [id, env.runId],
+    `SELECT a.id, a.kind, a.name, a.content, a.data FROM workflow_artifacts a LEFT JOIN workflow_steps s ON s.id = a.step_id
+      WHERE a.id = $1 AND a.run_id = $2 AND NOT (COALESCE(s.key, '') = ANY($3::text[]))`,
+    [id, env.runId, env.withheld ?? []],
   );
   if (!row) return "ERROR: artifact is not part of this run";
   if (row.kind !== "log" && row.kind !== "report")
@@ -801,6 +804,8 @@ export async function citedEvidenceLogs(runId: number, upstream: unknown): Promi
 
 async function readStepOutput(args: ToolArgs, env: PlatformToolEnv): Promise<string> {
   const stepKey = String(args?.step_key ?? "");
+  if (env.withheld?.includes(stepKey))
+    return `ERROR: the output of "${stepKey}" is withheld from this step (independent verification)`;
   if (env.independent) {
     const u = env.upstream[stepKey];
     return u
@@ -827,7 +832,7 @@ async function callIntegration(
   env: PlatformToolEnv,
 ): Promise<string> {
   const toolName = String(args?.name ?? "");
-  if (env.independent && toolName === "run.step_history")
+  if ((env.independent || env.withheld?.length) && toolName === "run.step_history")
     return readStepOutput({ step_key: args?.arguments?.step_key }, env);
   if ((await openQuestions(env.attemptId)) > 0) {
     const desc = describeToolSafe(toolName);
@@ -901,6 +906,7 @@ export function envFromExecution(
     snapshotId: ctx.context?.snapshot_id,
     recordMetrics: (m) => ctx.recordMetrics(m),
     independent: ctx.step.config.independent === true,
+    withheld: withheldSteps(ctx.step.config),
     ownerId: ctx.run.owner_id ?? null,
     stepId: ctx.step.id,
     stepKey: ctx.step.key,
@@ -967,6 +973,7 @@ export async function envFromDatabase(
     runId: run.id,
     snapshotId: attempt.context_snapshot_id ?? undefined,
     independent: step.config?.independent === true,
+    withheld: withheldSteps(step.config),
     ownerId: run.owner_id ?? null,
     stepId: step.id,
     stepKey: step.key,
