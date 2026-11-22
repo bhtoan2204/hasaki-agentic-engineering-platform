@@ -19,6 +19,7 @@ export const DECISION_KINDS = [
   "checkpoint",
   "autonomy",
   "investigation",
+  "source_revision",
 ] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 

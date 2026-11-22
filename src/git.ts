@@ -88,6 +88,8 @@ export async function prepareBranch(
     skipFetch?: boolean;
     /** Cut a new branch from this existing branch instead of the base (stacked on a parent task's branch). */
     from?: string;
+    /** The run's pinned base commit: a new branch starts here instead of the current tip of origin/<base>. */
+    baseCommit?: string;
   } = {},
 ): Promise<PreparedBranch> {
   repositoryBranch(branch);
@@ -171,6 +173,15 @@ export async function prepareBranch(
     );
   const base = `origin/${baseBranch}`;
   if (!(await refExists(repoPath, base))) throw new Error(`${repo}: base branch ${base} not found`);
+  if (opts.baseCommit) {
+    // The revision the run analysed and planned against. It must exist; nothing is invented when it does not.
+    if (!/^[0-9a-f]{40}$/.test(opts.baseCommit) || !(await refExists(repoPath, `${opts.baseCommit}^{commit}`)))
+      throw new Error(
+        `${repo}: the run's pinned base ${opts.baseCommit.slice(0, 12)} is not available in the checkout (nothing was created)`,
+      );
+    await git(repoPath, "worktree", "add", "--no-track", "-b", branch, wt, opts.baseCommit);
+    return { repo, branch, path: wt, createdFrom: `${base}@${opts.baseCommit.slice(0, 12)}` };
+  }
   await git(repoPath, "worktree", "add", "--no-track", "-b", branch, wt, base);
   return { repo, branch, path: wt, createdFrom: base };
 }

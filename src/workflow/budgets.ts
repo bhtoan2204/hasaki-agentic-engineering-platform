@@ -44,16 +44,22 @@ export async function budgetPreflight(c: Db, run: RunRow, s: StepRow): Promise<b
       basis = `historical median of step "${s.key}" (${h.n} attempts)`;
     }
   }
-  const events = await q<{ k: string | null; scope: string; level: string }>(
+  const events = await q<{ k: string | null; scope: string; level: string; action: string | null }>(
     c,
-    "SELECT data->>'key' AS k, data->>'scope' AS scope, data->>'level' AS level FROM workflow_events WHERE run_id = $1 AND kind = 'budget'",
+    "SELECT data->>'key' AS k, data->>'scope' AS scope, data->>'level' AS level, data->>'action' AS action FROM workflow_events WHERE run_id = $1 AND kind = 'budget'",
     [run.id],
   );
   const fired = new Set(events.map((e) => e.k).filter(Boolean));
   // A scope whose budget already paused this run was acknowledged by the resume: warn from now on, never pause again.
   const acknowledged = new Set(
     events
-      .filter((e) => e.level === "exceeded" || e.level === "preflight_projected")
+      // Only an overrun that actually paused the run was acknowledged (by resuming). A warning recorded under the
+      // "warn" policy acknowledges nothing; events from before `action` was recorded keep their old meaning.
+      .filter(
+        (e) =>
+          (e.level === "exceeded" || e.level === "preflight_projected") &&
+          (e.action == null || e.action === "pause"),
+      )
       .map((e) => e.scope),
   );
   const nextAttempt = Number(s.attempt_count ?? 0) + 1;
@@ -96,6 +102,8 @@ export async function budgetPreflight(c: Db, run: RunRow, s: StepRow): Promise<b
         limit_usd: line.limit_usd,
         enforcement: "platform_soft_pause",
         provider_hard_limit: false,
+        action: willPause ? "pause" : "warn",
+        policy_action: config.costBudget.action,
       },
     );
     if (willPause) pause = true;
@@ -138,7 +146,7 @@ export async function enforceBudget(c: Db, run: RunRow, stepId: number, attemptI
       c,
       run.id,
       "budget",
-      `cost budget ${over ? "exceeded" : "warning"} (${scope === "run" ? "run" : "work item"}): $${line.used_usd} of $${line.limit_usd} (${line.pct}%)${willPause ? " — run paused; resume to continue past the budget" : ""}`,
+      `cost budget ${over ? "exceeded" : "warning"} (${scope === "run" ? "run" : "work item"}): $${line.used_usd} of $${line.limit_usd} (${line.pct}%)${willPause ? " — run paused; resume to continue past the budget" : over ? ` — warning only (cost policy: ${config.costBudget.action})` : ""}`,
       stepId,
       attemptId,
       {
@@ -148,6 +156,10 @@ export async function enforceBudget(c: Db, run: RunRow, stepId: number, attemptI
         used_usd: line.used_usd,
         pct: line.pct,
         source: line.source,
+        action: willPause ? "pause" : "warn",
+        policy_action: config.costBudget.action,
+        enforcement: "platform_soft_pause",
+        provider_hard_limit: false,
       },
     );
     if (willPause) pause = true;

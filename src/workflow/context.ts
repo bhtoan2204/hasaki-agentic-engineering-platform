@@ -95,12 +95,40 @@ export interface ResolvedContext {
 const CODE_REF =
   /(?:^|[\s`'"([])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|py|java|kt|sql|proto|ya?ml|json|php|rb|cs))(?::(\d+))?/g;
 
+/** Shell commands that only read source; their file arguments are handed on like Read/Grep tool calls. */
+const SHELL_READ =
+  /^(?:cat|sed|head|tail|grep|egrep|rg|nl|less|wc|awk|git\s+(?:show|diff|log|blame|grep))\b/;
+const SHELL_PATH =
+  /(?:^|[\s`'"([:=])((?:[\w.-]+\/)*[\w.-]+\.(?:go|ts|tsx|js|jsx|mjs|py|java|kt|sql|proto|ya?ml|json|php|rb|cs|css|md))(?::(\d+))?(?=$|[\s`'"),;:|])/g;
+
+/** Repository-relative files a read-only shell command names (absolute paths under `roots` are made relative). */
+export function shellReadPaths(command: string, roots: string[] = []): string[] {
+  let text = command;
+  for (const r of roots) if (r) text = text.split(`${r.replace(/\/$/, "")}/`).join("");
+  const out = new Set<string>();
+  for (const raw of text.split(/&&|\|\||;|\||\n/)) {
+    const seg = raw.trim();
+    if (!SHELL_READ.test(seg)) continue;
+    for (const m of seg.matchAll(SHELL_PATH)) if (!m[1].startsWith("/")) out.add(m[1]);
+  }
+  return [...out];
+}
+
 /**
  * Deterministic handoff of source locations: files read/edited/grepped by the CURRENT attempt of each ancestor step
- * (invalidated attempts are excluded, so stale exploration is never handed on) plus path[:line] references in their
- * outputs. Saves the next agent from rediscovering where the relevant code is.
+ * (invalidated attempts are excluded, so stale exploration is never handed on) — through file tools or read-only
+ * shell commands — plus path[:line] references in their outputs. Saves the next agent from rediscovering where the
+ * relevant code is.
+ *
+ * Revision-aware: an ancestor attempt that read a different revision than the run's pinned one (sourceRevision.ts)
+ * contributes nothing; its attempt id is reported in `excluded` instead. Attempts recorded before pinning existed
+ * have no revision and are kept. Withheld ancestors are not in `upstream`, so they never contribute.
  */
-export async function collectFileRefs(c: Db, upstream: StepInput["upstream"]) {
+export async function collectFileRefs(
+  c: Db,
+  upstream: StepInput["upstream"],
+  opts: { runId?: number; excluded?: number[] } = {},
+) {
   const byPath = new Map<string, { refs: number; from: Set<string> }>();
   const add = (path: string, from: string) => {
     const p = path.replace(/^\.\//, "");
@@ -109,21 +137,64 @@ export async function collectFileRefs(c: Db, upstream: StepInput["upstream"]) {
     e.refs++;
     e.from.add(from);
   };
-  const attemptIds = Object.values(upstream)
+  let attemptIds = Object.values(upstream)
     .map((u) => u.attempt_id)
     .filter((x): x is number => !!x);
-  if (attemptIds.length) {
-    const rows = await q<{ key: string; name: string; path: string }>(
+  const stale = new Set<number>();
+  if (attemptIds.length && opts.runId) {
+    const pins =
+      (
+        await one<{ s: Record<string, { commit: string }> | null }>(
+          c,
+          "SELECT source_revisions AS s FROM workflow_runs WHERE id = $1",
+          [opts.runId],
+        )
+      )?.s ?? {};
+    const revs = await q<{ id: number; rev: Record<string, { read: string | null }> | null }>(
       c,
-      `SELECT s.key, e.data->>'name' AS name, COALESCE(e.data->'input'->>'file_path', e.data->'input'->>'path') AS path
-         FROM workflow_events e JOIN workflow_steps s ON s.id = e.step_id
-        WHERE e.attempt_id = ANY($1) AND e.kind = 'tool' AND e.data->>'name' IN ('Read', 'Edit', 'Write', 'MultiEdit', 'Grep')`,
+      "SELECT id, metrics->'source_revision' AS rev FROM workflow_step_attempts WHERE id = ANY($1)",
       [attemptIds],
     );
-    for (const r of rows) if (r.path && /\.[a-z]{1,5}$/i.test(r.path)) add(r.path, r.key);
+    for (const r of revs)
+      if (
+        Object.entries(r.rev ?? {}).some(
+          ([repo, v]) => pins[repo] && v?.read && v.read !== pins[repo].commit,
+        )
+      )
+        stale.add(Number(r.id));
+    attemptIds = attemptIds.filter((id) => !stale.has(id));
+    opts.excluded?.push(...stale);
+  }
+  if (attemptIds.length) {
+    const roots = opts.runId
+      ? (
+          await q<{ path: string }>(c, "SELECT path FROM execution_workspaces WHERE run_id = $1", [
+            opts.runId,
+          ])
+        ).map((w) => w.path)
+      : [];
+    const rows = await q<{
+      key: string;
+      name: string;
+      path: string | null;
+      command: string | null;
+    }>(
+      c,
+      `SELECT s.key, e.data->>'name' AS name, COALESCE(e.data->'input'->>'file_path', e.data->'input'->>'path') AS path,
+              e.data->'input'->>'command' AS command
+         FROM workflow_events e JOIN workflow_steps s ON s.id = e.step_id
+        WHERE e.attempt_id = ANY($1) AND e.kind = 'tool'
+          AND e.data->>'name' IN ('Read', 'Edit', 'Write', 'MultiEdit', 'Grep', 'Bash', 'shell')`,
+      [attemptIds],
+    );
+    for (const r of rows) {
+      if (r.path && /\.[a-z]{1,5}$/i.test(r.path)) add(r.path, r.key);
+      if (r.command) for (const p of shellReadPaths(r.command, roots)) add(p, r.key);
+    }
   }
   for (const [key, u] of Object.entries(upstream)) {
-    if (u.status !== "COMPLETED" || !u.output) continue;
+    if (u.status !== "COMPLETED" || !u.output || (u.attempt_id && stale.has(u.attempt_id)))
+      continue;
     for (const m of JSON.stringify(u.output).replace(/\\n/g, " ").matchAll(CODE_REF))
       add(m[2] ? `${m[1]}:${m[2]}` : m[1], key);
   }
@@ -447,9 +518,10 @@ export async function resolveContext(
       ? Math.min(2000, Number(cfg.upstream_tokens ?? config.agent.upstreamTokens))
       : Number(cfg.upstream_tokens ?? config.agent.upstreamTokens),
   );
+  const staleRefAttempts: number[] = [];
   const fileRefs =
     step.type === "agent" || step.type === "coding_agent"
-      ? await collectFileRefs(c, input.upstream)
+      ? await collectFileRefs(c, input.upstream, { runId: run.id, excluded: staleRefAttempts })
       : [];
   const nativeSources =
     step.type === "agent" || step.type === "coding_agent"
@@ -469,6 +541,8 @@ export async function resolveContext(
       knowledge: disclosure,
       upstream: upstream.plan,
       file_refs: fileRefs,
+      // Ancestor attempts whose exploration was at another revision than the run's pinned one (not handed on).
+      ...(staleRefAttempts.length ? { file_refs_stale_attempts: staleRefAttempts } : {}),
       budgets: {
         inline_knowledge_tokens: config.agent.inlineKnowledgeTokens,
         index_size: config.agent.knowledgeIndexSize,

@@ -49,6 +49,8 @@ interface CostData {
   by_step: Array<CostBucket & { step_key: string; step_name: string; wasted_usd: number }>;
   by_model: Array<CostBucket & { provider: string; model: string }>;
   budget?: CostBudget | null;
+  /** The effective cost policy (run cost only): what happens when a budget is reached. */
+  policy?: { action: "pause" | "warn"; warn_pct: number; acknowledged: string[] } | null;
   run_count?: number;
   avg_per_run_usd?: number | null;
   runs?: Array<{
@@ -252,6 +254,16 @@ export function CostPanel({
             <BudgetBar line={data.budget.work_item} />
           </div>
         )}
+        {kind === "run" &&
+          data.policy &&
+          (budget?.limit_usd != null || data.budget?.work_item?.limit_usd != null) && (
+            <p className="muted small cost-policy" data-action={data.policy.action}>
+              {t(data.policy.action === "pause" ? "cost.policyPause" : "cost.policyWarn", {
+                pct: Math.round(data.policy.warn_pct * 100),
+              })}
+              {data.policy.acknowledged.length > 0 && ` ${t("cost.policyAcknowledged")}`}
+            </p>
+          )}
         <BudgetEditor path={`${base}/budget`} current={ownBudget} onSaved={setData} />
       </div>
 

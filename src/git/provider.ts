@@ -581,9 +581,21 @@ async function prepareLockedWorkspace(
       );
     }
   }
+  // A new run branch starts at the commit the run's analysis was pinned to (sourceRevision.ts), not a newer tip.
+  const pinned =
+    !target.existing && !target.parent
+      ? ((
+          await one<{ commit: string | null }>(
+            pool,
+            "SELECT source_revisions->$2->>'commit' AS commit FROM workflow_runs WHERE id = $1",
+            [run.id, repo],
+          )
+        )?.commit ?? undefined)
+      : undefined;
   const b = await prepareBranch(key, repo, target.branch, reg.path || repo, {
     mustExist: target.existing,
     from: target.parent,
+    baseCommit: pinned,
     checkoutPath: checkout,
     workspacePath: path,
     defaultBranch: reg.default_branch ?? undefined,

@@ -23,7 +23,19 @@ export function harnessEvidence(s: LifecycleState, result: ExecResult | undefine
       reported_usd: s.metrics?.cost_usd ?? null,
       remaining_budget_usd: s.budget?.remainingUsd ?? null,
       enforcement: s.budget?.enforcement ?? null,
+      // What happens at the limit: "pause" = platform soft pause (resume acknowledges); "warn" = events only.
+      // Never a provider-enforced dollar cap.
+      policy: s.budget ? { action: s.budget.action, acknowledged: s.budget.acknowledged } : null,
+      provider_hard_limit: false,
     },
+    source_revisions: (s.revisions ?? []).map((v) => ({
+      repo: v.repo,
+      pinned: v.pinned.commit,
+      head: v.head,
+      pinned_now: v.pinnedNow,
+      drift: v.drift,
+      freshness: v.pinned.freshness,
+    })),
     repairs: (s.rounds ?? []).map((r) => ({
       kind: "verify",
       round: r.round,

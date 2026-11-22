@@ -264,9 +264,38 @@ export async function budgetsForRun(
   return { run: runLine, work_item: wiLine, work_item_id: run.work_item_id };
 }
 
+/**
+ * The effective cost policy, as configured (COST_BUDGET_ACTION / _WARN_PCT / _UNKNOWN_ESTIMATE). "pause" is a platform
+ * soft pause (the run stops before the next attempt or turn; resuming acknowledges the overrun); "warn" only records
+ * events. No provider enforces a hard dollar cap, so none is ever claimed.
+ */
+export const costPolicy = () => ({
+  action: config.costBudget.action,
+  warn_pct: config.costBudget.warnPct,
+  unknown_estimate: config.costBudget.unknownEstimate,
+  enforcement: "platform_soft_pause" as const,
+  provider_hard_limit: false as const,
+});
+
+/** Scopes whose overrun paused this run and were acknowledged by resuming (they are not paused again). */
+async function acknowledged(runId: number) {
+  return (
+    await q<{ scope: string }>(
+      pool,
+      "SELECT DISTINCT data->>'scope' AS scope FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND data->>'level' IN ('exceeded', 'preflight_projected') AND COALESCE(data->>'action', 'pause') = 'pause'",
+      [runId],
+    )
+  ).map((r) => r.scope);
+}
+
 export async function runCost(runId: number) {
   const rows = await attemptRows([runId]);
-  return { run_id: runId, ...summarize(rows), budget: await budgetsForRun(runId, pool, rows) };
+  return {
+    run_id: runId,
+    ...summarize(rows),
+    budget: await budgetsForRun(runId, pool, rows),
+    policy: { ...costPolicy(), acknowledged: await acknowledged(runId) },
+  };
 }
 
 export async function workItemCost(workItemId: number) {

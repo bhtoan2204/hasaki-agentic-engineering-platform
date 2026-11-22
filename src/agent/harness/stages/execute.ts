@@ -29,6 +29,7 @@ import {
   developerDecisions,
   untrusted,
 } from "../../stepPrompt.ts";
+import { revisionNote } from "../../../workflow/sourceRevision.ts";
 import { latestDelivery, planContextDelivery, recordDelivery } from "../../../context/delivery.ts";
 import {
   attemptArtifacts,
@@ -85,6 +86,8 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
           },
         ]
       : [];
+  const revision = revisionNote(s.revisions ?? []);
+  if (revision) extras.unshift({ title: "Source revision for this run", body: revision });
   if (codeIntelligenceEnabled() && !independent && !ctx.context.contextPack) {
     try {
       const names = ctx.run.selected_repositories.length

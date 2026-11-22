@@ -17,6 +17,7 @@ import {
 import { remoteGit } from "./git.ts";
 import { repositoryRemote } from "./remote.ts";
 import { alignCheckoutToBase } from "./checkoutBase.ts";
+import { ensureFreshBase, ensureFreshLocalBase, lastFreshness } from "./freshness.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 
 const exec = promisify(execFile);
@@ -66,7 +67,15 @@ export async function prepareRepository(
   refresh = false,
   persistedPath?: string,
 ): Promise<string> {
-  if (!repo.repository_url) return validateCheckout(repo); // Explicit local/benchmark and transitional legacy checkouts.
+  if (!repo.repository_url) {
+    // Explicit local/benchmark and transitional legacy checkouts: never moved, but a stale origin is fetched so the
+    // run's base revision is the remote's current one.
+    const path = await validateCheckout(repo);
+    const branch = repo.default_branch || config.baseBranch;
+    const fresh = await ensureFreshLocalBase(path, branch).catch(() => null);
+    if (fresh) lastFreshness.set(path, fresh);
+    return path;
+  }
   const remote = repositoryRemote(repo.repository_url);
   return repositoryLock(repo, async () => {
     const path = persistedPath ?? resolveRepoPath(repo);
@@ -74,20 +83,30 @@ export async function prepareRepository(
       throw new Error(
         `Refusing to prepare ${repo.name}: the checkout overlaps the running application source tree`,
       );
-    const sync = () =>
+    const branch = repo.default_branch || config.baseBranch;
+    const fetch = () =>
       remoteGit(
         remote.url,
-        refresh
-          ? [
-              "fetch",
-              "--no-recurse-submodules",
-              "--",
-              remote.url,
-              "+refs/heads/*:refs/remotes/origin/*",
-            ]
-          : ["ls-remote", "--", remote.url, "HEAD"],
+        [
+          "fetch",
+          "--no-recurse-submodules",
+          "--",
+          remote.url,
+          "+refs/heads/*:refs/remotes/origin/*",
+        ],
         path,
       );
+    // Every reuse is authorized against the remote (ls-remote). The answer also says whether the local base is
+    // stale: only then is the remote fetched (remote-tracking refs only), so a run never analyses an old base.
+    const sync = async () => {
+      if (refresh) return void (await fetch());
+      const fresh = await ensureFreshBase(path, branch, {
+        lsRemote: () =>
+          remoteGit(remote.url, ["ls-remote", "--", remote.url, `refs/heads/${branch}`], path),
+        fetch,
+      });
+      lastFreshness.set(path, fresh);
+    };
     if (persistedPath) {
       await validateCheckout(repo, persistedPath);
       await sync();
@@ -122,7 +141,6 @@ export async function prepareRepository(
       }
       // The primary checkout (never a run worktree) tracks the base branch the code index uses, not the clone-time
       // remote HEAD: chat reads its working tree and the index diffs it against that base.
-      const branch = repo.default_branch || config.baseBranch;
       const aligned = await alignCheckoutToBase(path, branch);
       if (aligned.status === "skipped")
         console.warn(`[repos] ${repo.name}: checkout not moved to ${branch}: ${aligned.reason}`);

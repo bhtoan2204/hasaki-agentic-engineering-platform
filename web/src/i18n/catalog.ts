@@ -202,6 +202,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cost.workItemBudget": "Ngân sách work item",
     "cost.noBudget": "Chưa đặt ngân sách",
     "cost.defaultBudget": "mặc định",
+    "cost.policyPause":
+      "Khi chạm ngân sách: run tạm dừng trước attempt hoặc lượt kế tiếp, chờ bạn tiếp tục (tạm dừng mềm của nền tảng; provider không áp hạn mức cứng). Cảnh báo từ {pct}%.",
+    "cost.policyWarn":
+      "Khi chạm ngân sách: chỉ cảnh báo, run vẫn chạy tiếp (COST_BUDGET_ACTION=warn). Cảnh báo từ {pct}%.",
+    "cost.policyAcknowledged": "Bạn đã cho phép vượt ngân sách này nên run không tạm dừng lại vì nó.",
     "cost.budgetPlaceholder": "USD, vd 5",
     "cost.setBudget": "Đặt ngân sách",
     "cost.clearBudget": "Bỏ",
@@ -3423,6 +3428,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cost.workItemBudget": "Work item budget",
     "cost.noBudget": "No budget set",
     "cost.defaultBudget": "default",
+    "cost.policyPause":
+      "At the budget: the run pauses before its next attempt or turn until you resume (platform soft pause; no provider-enforced cap). Warning from {pct}%.",
+    "cost.policyWarn":
+      "At the budget: warning only, the run continues (COST_BUDGET_ACTION=warn). Warning from {pct}%.",
+    "cost.policyAcknowledged": "You resumed past this budget, so the run is not paused again for it.",
     "cost.budgetPlaceholder": "USD, e.g. 5",
     "cost.setBudget": "Set budget",
     "cost.clearBudget": "Clear",

@@ -23,7 +23,7 @@ export async function budgetStage(s: LifecycleState): Promise<ExecResult | void>
     (
       await q<{ scope: string }>(
         pool,
-        "SELECT data->>'scope' AS scope FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND data->>'level' IN ('exceeded', 'preflight_projected')",
+        "SELECT data->>'scope' AS scope FROM workflow_events WHERE run_id = $1 AND kind = 'budget' AND data->>'level' IN ('exceeded', 'preflight_projected') AND COALESCE(data->>'action', 'pause') = 'pause'",
         [ctx.run.id],
       ).catch(() => [])
     ).map((e) => e.scope),
@@ -37,6 +37,8 @@ export async function budgetStage(s: LifecycleState): Promise<ExecResult | void>
   const remaining = open.map(([, line]) => line!.limit_usd! - line!.used_usd);
   const least = remaining.length ? Math.min(...remaining) : null;
   s.budget = {
+    action: config.costBudget.action,
+    acknowledged: [...acknowledged] as Array<"run" | "work_item">,
     // An overrun at attempt start is the engine's (pre-queue and post-attempt) to report; only "pause" stops a turn.
     remainingUsd: config.costBudget.action === "pause" && least != null && least > 0 ? least : null,
     scopes: open.map(([scope]) => scope),

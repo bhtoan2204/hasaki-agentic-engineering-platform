@@ -14,6 +14,7 @@ import {
 import { assertSelfCodingIsolation, isSelfRepository } from "../../../platform/selfDevelopment.ts";
 import { repositories } from "../../../repos/service.ts";
 import { checkoutForRun, prepareRepository } from "../../../repos/workspaces.ts";
+import { resolveSourceRevisions } from "../../../workflow/sourceRevision.ts";
 import { validateMicroWorkspace } from "../../../workflow/microEvidence.ts";
 import { antigravityCapabilities } from "../../antigravity/capabilities.ts";
 import { codexCapabilities } from "../../codex/run.ts";
@@ -60,8 +61,10 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
   }
   {
     const checkouts: Record<string, string> = {};
+    const branches: Record<string, string> = {};
     for (const name of live ? [] : ctx.run.selected_repositories) {
       const repo = await repositories.get(name);
+      if (repo) branches[name] = repo.default_branch || config.baseBranch;
       try {
         if (!repo?.enabled || !repo.allowed_actions.includes(mode === "coding" ? "write" : "read"))
           throw new Error(`Repository ${name} is unavailable or unauthorized`);
@@ -88,6 +91,32 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
           checkpoint: { local_setup: { repository: name } },
         };
       }
+    }
+    // One source revision per run: the first source step pins the (fresh) base; later steps compare with it.
+    if (Object.keys(checkouts).length) {
+      s.revisions = await resolveSourceRevisions({
+        runId: ctx.run.id,
+        stepId: ctx.step.id,
+        stepKey: ctx.step.key,
+        attemptId: ctx.attempt.id,
+        generation: ctx.attempt.generation,
+        mode,
+        checkouts: Object.fromEntries(
+          Object.entries(checkouts).map(([n, path]) => [n, { path, branch: branches[n] }]),
+        ),
+      });
+      await ctx.recordMetrics({
+        source_revision: Object.fromEntries(
+          s.revisions.map((v) => [
+            v.repo,
+            {
+              pinned: v.pinned.commit,
+              read: mode === "coding" ? v.pinned.commit : v.head,
+              drift: v.drift,
+            },
+          ]),
+        ),
+      });
     }
     // A worktree another run left on this run's branch: decide before the agent starts, so no attempt is spent on it.
     if (mode === "coding" && ctx.step.config?.isolated_workspace !== true) {

@@ -1,3 +1,4 @@
+import type { RevisionView } from "../../workflow/sourceRevision.ts";
 import type { ExecutionContext } from "../../workflow/executors/registry.ts";
 import type { ExecResult } from "../../workflow/types.ts";
 import type { EffectiveAgent } from "../stepAgent.ts";
@@ -34,6 +35,8 @@ export interface LifecycleState {
   ws: Workspace[];
   restoreWorkspaces: () => Promise<ExecResult | null>;
   guarantees: GuaranteeCheck;
+  /** Source revision per selected repository (pinned for the run; drift when the checkout is elsewhere). */
+  revisions?: RevisionView[];
   // context
   policy: PolicyContext;
   delegation: boolean;
@@ -46,6 +49,10 @@ export interface LifecycleState {
   independent: boolean;
   // budget
   budget: {
+    /** The configured cost policy: "pause" (platform soft pause) or "warn" (events only). */
+    action: "pause" | "warn";
+    /** Scopes whose overrun was acknowledged by resuming a budget pause. */
+    acknowledged: Array<"run" | "work_item">;
     remainingUsd: number | null;
     scopes: Array<"run" | "work_item">;
     enforcement: "between_turns" | "preflight_only";
