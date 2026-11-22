@@ -1,0 +1,2371 @@
+{
+  "meta": {
+    "level": "live-provider",
+    "sandbox": "os-sandbox",
+    "provider": "claude",
+    "model": "claude-sonnet-5-5",
+    "generated_at": "2026-11-22T00:30:59.028Z",
+    "variable": "codeAct.enabled (code.execute disclosed and callable) — everything else identical",
+    "dataset": "src/eval/codeactTasks.ts (10 tasks, deterministic fake incident window)",
+    "eligibility": "two or more deterministic read-only lookups whose results must be combined, or one large result whose useful content is an aggregate",
+    "notes": [
+      "LIVE PROVIDER: tokens/cost as reported by the provider; null where it did not report."
+    ]
+  },
+  "samples": 24,
+  "pairs": 12,
+  "incomplete_pairs": [],
+  "spend": {
+    "known_usd": 3.380837,
+    "unknown_cost_samples": 0
+  },
+  "model_check": {
+    "status": "matched",
+    "models": [
+      "claude-sonnet-5-5"
+    ],
+    "requested": [
+      "claude-sonnet-5-5"
+    ],
+    "efforts": [
+      "medium"
+    ],
+    "unresolved_samples": 0,
+    "mismatched_pairs": []
+  },
+  "capability_check": {
+    "direct_offered": 0,
+    "codeact_not_offered": 0,
+    "valid": true
+  },
+  "intention_to_treat": {
+    "pairs": 12,
+    "correct": {
+      "n": 12,
+      "mean": 0,
+      "ci95": [
+        -0.25,
+        0.25
+      ]
+    },
+    "sdk_calls": {
+      "n": 12,
+      "mean": 0,
+      "ci95": [
+        0,
+        0
+      ]
+    },
+    "model_turns": {
+      "n": 12,
+      "mean": -2.4166666666666665,
+      "ci95": [
+        -5,
+        -0.25
+      ]
+    },
+    "provider_tool_uses": {
+      "n": 12,
+      "mean": -2.4166666666666665,
+      "ci95": [
+        -5,
+        -0.25
+      ]
+    },
+    "tool_calls": {
+      "n": 12,
+      "mean": -2.3333333333333335,
+      "ci95": [
+        -4.833333333333333,
+        -0.25
+      ]
+    },
+    "prompt_chars_total": {
+      "n": 12,
+      "mean": 0.08333333333333333,
+      "ci95": [
+        0,
+        0.25
+      ]
+    },
+    "prompt_chars_max": {
+      "n": 12,
+      "mean": 0.08333333333333333,
+      "ci95": [
+        0,
+        0.25
+      ]
+    },
+    "tool_result_chars": {
+      "n": 12,
+      "mean": -12070.25,
+      "ci95": [
+        -26255.083333333332,
+        -1403.25
+      ]
+    },
+    "latency_ms": {
+      "n": 12,
+      "mean": -3581.8333333333335,
+      "ci95": [
+        -9646.916666666666,
+        1113.8333333333333
+      ]
+    },
+    "input_tokens": {
+      "n": 12,
+      "mean": -0.5,
+      "ci95": [
+        -2.1666666666666665,
+        0.8333333333333334
+      ]
+    },
+    "output_tokens": {
+      "n": 12,
+      "mean": -361.0833333333333,
+      "ci95": [
+        -1095.25,
+        192.75
+      ]
+    },
+    "cache_read_tokens": {
+      "n": 12,
+      "mean": -11839.25,
+      "ci95": [
+        -48384.916666666664,
+        15325.75
+      ]
+    },
+    "cache_creation_tokens": {
+      "n": 12,
+      "mean": -9035.333333333334,
+      "ci95": [
+        -19860.5,
+        -914.9166666666666
+      ]
+    },
+    "input_tokens_total": {
+      "n": 12,
+      "mean": -20875.083333333332,
+      "ci95": [
+        -66851,
+        13515.5
+      ]
+    },
+    "cost_usd": {
+      "n": 12,
+      "mean": -0.04093725,
+      "ci95": [
+        -0.09537616666666666,
+        -0.0010515833333333325
+      ]
+    }
+  },
+  "usage_outcomes": {
+    "label": "observational: adoption is chosen by the agent, not randomized",
+    "used": {
+      "n": 8,
+      "correct": 6,
+      "mean_cost_usd": 0.13321424999999998,
+      "mean_latency_ms": 17243.375,
+      "mean_model_turns": 7.625
+    },
+    "not_used": {
+      "n": 0,
+      "correct": 0,
+      "mean_cost_usd": null,
+      "mean_latency_ms": null,
+      "mean_model_turns": null
+    }
+  },
+  "variants": {
+    "direct": {
+      "n": 12,
+      "completed": 12,
+      "correct": 10,
+      "success_ci95": {
+        "low": 0.5519636426153274,
+        "high": 0.9530358523851776,
+        "method": "Wilson 95%",
+        "n": 12
+      },
+      "unsupported_conclusions": 0,
+      "metrics": {
+        "correct": {
+          "known": 12,
+          "of": 12,
+          "mean": 0.8333333333333334,
+          "median": 1
+        },
+        "sdk_calls": {
+          "known": 12,
+          "of": 12,
+          "mean": 1,
+          "median": 1
+        },
+        "model_turns": {
+          "known": 12,
+          "of": 12,
+          "mean": 8.5,
+          "median": 8
+        },
+        "provider_tool_uses": {
+          "known": 12,
+          "of": 12,
+          "mean": 7.5,
+          "median": 7
+        },
+        "tool_calls": {
+          "known": 12,
+          "of": 12,
+          "mean": 7.416666666666667,
+          "median": 7
+        },
+        "prompt_chars_total": {
+          "known": 12,
+          "of": 12,
+          "mean": 3279.4166666666665,
+          "median": 3255.5
+        },
+        "prompt_chars_max": {
+          "known": 12,
+          "of": 12,
+          "mean": 3279.4166666666665,
+          "median": 3255.5
+        },
+        "tool_result_chars": {
+          "known": 12,
+          "of": 12,
+          "mean": 18312.916666666668,
+          "median": 10810
+        },
+        "latency_ms": {
+          "known": 12,
+          "of": 12,
+          "mean": 17728.833333333332,
+          "median": 15218
+        },
+        "input_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 9.833333333333334,
+          "median": 10
+        },
+        "output_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 1539.1666666666667,
+          "median": 1179.5
+        },
+        "cache_read_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 98738.91666666667,
+          "median": 93221.5
+        },
+        "cache_creation_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 33954.916666666664,
+          "median": 27394.5
+        },
+        "input_tokens_total": {
+          "known": 12,
+          "of": 12,
+          "mean": 132703.66666666666,
+          "median": 119959.5
+        },
+        "cost_usd": {
+          "known": 12,
+          "of": 12,
+          "mean": 0.16133683333333335,
+          "median": 0.1294245
+        }
+      }
+    },
+    "codeact": {
+      "n": 12,
+      "completed": 12,
+      "correct": 10,
+      "success_ci95": {
+        "low": 0.5519636426153274,
+        "high": 0.9530358523851776,
+        "method": "Wilson 95%",
+        "n": 12
+      },
+      "unsupported_conclusions": 0,
+      "metrics": {
+        "correct": {
+          "known": 12,
+          "of": 12,
+          "mean": 0.8333333333333334,
+          "median": 1
+        },
+        "sdk_calls": {
+          "known": 12,
+          "of": 12,
+          "mean": 1,
+          "median": 1
+        },
+        "model_turns": {
+          "known": 12,
+          "of": 12,
+          "mean": 6.083333333333333,
+          "median": 6
+        },
+        "provider_tool_uses": {
+          "known": 12,
+          "of": 12,
+          "mean": 5.083333333333333,
+          "median": 5
+        },
+        "tool_calls": {
+          "known": 12,
+          "of": 12,
+          "mean": 5.083333333333333,
+          "median": 5
+        },
+        "prompt_chars_total": {
+          "known": 12,
+          "of": 12,
+          "mean": 3279.5,
+          "median": 3255.5
+        },
+        "prompt_chars_max": {
+          "known": 12,
+          "of": 12,
+          "mean": 3279.5,
+          "median": 3255.5
+        },
+        "tool_result_chars": {
+          "known": 12,
+          "of": 12,
+          "mean": 6242.666666666667,
+          "median": 5072
+        },
+        "latency_ms": {
+          "known": 12,
+          "of": 12,
+          "mean": 14147,
+          "median": 14561.5
+        },
+        "input_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 9.333333333333334,
+          "median": 10
+        },
+        "output_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 1178.0833333333333,
+          "median": 1131
+        },
+        "cache_read_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 86899.66666666667,
+          "median": 92184.5
+        },
+        "cache_creation_tokens": {
+          "known": 12,
+          "of": 12,
+          "mean": 24919.583333333332,
+          "median": 24684.5
+        },
+        "input_tokens_total": {
+          "known": 12,
+          "of": 12,
+          "mean": 111828.58333333333,
+          "median": 115728.5
+        },
+        "cost_usd": {
+          "known": 12,
+          "of": 12,
+          "mean": 0.12039958333333332,
+          "median": 0.1185895
+        }
+      }
+    }
+  },
+  "paired_codeact_minus_direct": {
+    "correct": {
+      "n": 12,
+      "mean": 0,
+      "ci95": [
+        -0.25,
+        0.25
+      ]
+    },
+    "sdk_calls": {
+      "n": 12,
+      "mean": 0,
+      "ci95": [
+        0,
+        0
+      ]
+    },
+    "model_turns": {
+      "n": 12,
+      "mean": -2.4166666666666665,
+      "ci95": [
+        -5,
+        -0.25
+      ]
+    },
+    "provider_tool_uses": {
+      "n": 12,
+      "mean": -2.4166666666666665,
+      "ci95": [
+        -5,
+        -0.25
+      ]
+    },
+    "tool_calls": {
+      "n": 12,
+      "mean": -2.3333333333333335,
+      "ci95": [
+        -4.833333333333333,
+        -0.25
+      ]
+    },
+    "prompt_chars_total": {
+      "n": 12,
+      "mean": 0.08333333333333333,
+      "ci95": [
+        0,
+        0.25
+      ]
+    },
+    "prompt_chars_max": {
+      "n": 12,
+      "mean": 0.08333333333333333,
+      "ci95": [
+        0,
+        0.25
+      ]
+    },
+    "tool_result_chars": {
+      "n": 12,
+      "mean": -12070.25,
+      "ci95": [
+        -26255.083333333332,
+        -1403.25
+      ]
+    },
+    "latency_ms": {
+      "n": 12,
+      "mean": -3581.8333333333335,
+      "ci95": [
+        -9646.916666666666,
+        1113.8333333333333
+      ]
+    },
+    "input_tokens": {
+      "n": 12,
+      "mean": -0.5,
+      "ci95": [
+        -2.1666666666666665,
+        0.8333333333333334
+      ]
+    },
+    "output_tokens": {
+      "n": 12,
+      "mean": -361.0833333333333,
+      "ci95": [
+        -1095.25,
+        192.75
+      ]
+    },
+    "cache_read_tokens": {
+      "n": 12,
+      "mean": -11839.25,
+      "ci95": [
+        -48384.916666666664,
+        15325.75
+      ]
+    },
+    "cache_creation_tokens": {
+      "n": 12,
+      "mean": -9035.333333333334,
+      "ci95": [
+        -19860.5,
+        -914.9166666666666
+      ]
+    },
+    "input_tokens_total": {
+      "n": 12,
+      "mean": -20875.083333333332,
+      "ci95": [
+        -66851,
+        13515.5
+      ]
+    },
+    "cost_usd": {
+      "n": 12,
+      "mean": -0.04093725,
+      "ci95": [
+        -0.09537616666666666,
+        -0.0010515833333333325
+      ]
+    }
+  },
+  "per_task": {
+    "T01-single-lookup": {
+      "eligible": false,
+      "correct": {
+        "direct": 2,
+        "codeact": 2,
+        "of": 2
+      },
+      "sdk_calls": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "model_turns": {
+        "direct": 3,
+        "codeact": 3
+      },
+      "cost_usd": {
+        "direct": 0.099631,
+        "codeact": 0.100516
+      },
+      "codeact_used": 0,
+      "prompt_chars_total": {
+        "direct": 3159.5,
+        "codeact": 3159.5
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "T03-trace-log-correlation": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 0,
+        "of": 2
+      },
+      "sdk_calls": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "model_turns": {
+        "direct": 8,
+        "codeact": 6
+      },
+      "cost_usd": {
+        "direct": 0.1392195,
+        "codeact": 0.1258095
+      },
+      "codeact_used": 2,
+      "prompt_chars_total": {
+        "direct": 3281.5,
+        "codeact": 3281.5
+      },
+      "truncated_results": {
+        "direct": 1,
+        "codeact": 0.5
+      }
+    },
+    "T06-refund-timeout": {
+      "eligible": true,
+      "correct": {
+        "direct": 2,
+        "codeact": 2,
+        "of": 2
+      },
+      "sdk_calls": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "model_turns": {
+        "direct": 11,
+        "codeact": 10.5
+      },
+      "cost_usd": {
+        "direct": 0.16980499999999998,
+        "codeact": 0.167997
+      },
+      "codeact_used": 2,
+      "prompt_chars_total": {
+        "direct": 3463.5,
+        "codeact": 3463.5
+      },
+      "truncated_results": {
+        "direct": 1.5,
+        "codeact": 1
+      }
+    },
+    "T08-large-aggregation": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 2,
+        "of": 2
+      },
+      "sdk_calls": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "model_turns": {
+        "direct": 17.5,
+        "codeact": 6
+      },
+      "cost_usd": {
+        "direct": 0.341702,
+        "codeact": 0.11613200000000001
+      },
+      "codeact_used": 2,
+      "prompt_chars_total": {
+        "direct": 3229.5,
+        "codeact": 3229.5
+      },
+      "truncated_results": {
+        "direct": 7,
+        "codeact": 0.5
+      }
+    },
+    "T09-partial-failure": {
+      "eligible": true,
+      "correct": {
+        "direct": 2,
+        "codeact": 2,
+        "of": 2
+      },
+      "sdk_calls": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "model_turns": {
+        "direct": 8,
+        "codeact": 8
+      },
+      "cost_usd": {
+        "direct": 0.1280055,
+        "codeact": 0.1229185
+      },
+      "codeact_used": 2,
+      "prompt_chars_total": {
+        "direct": 3374.5,
+        "codeact": 3375
+      },
+      "truncated_results": {
+        "direct": 1,
+        "codeact": 0.5
+      }
+    },
+    "T10-codeact-unnecessary": {
+      "eligible": false,
+      "correct": {
+        "direct": 2,
+        "codeact": 2,
+        "of": 2
+      },
+      "sdk_calls": {
+        "direct": 1,
+        "codeact": 1
+      },
+      "model_turns": {
+        "direct": 3.5,
+        "codeact": 3
+      },
+      "cost_usd": {
+        "direct": 0.089658,
+        "codeact": 0.0890245
+      },
+      "codeact_used": 0,
+      "prompt_chars_total": {
+        "direct": 3168,
+        "codeact": 3168
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    }
+  },
+  "adoption": {
+    "eligible_turns": 8,
+    "eligible_turns_using_codeact": 8,
+    "adoption_rate_ci95": {
+      "low": 0.6755843804891231,
+      "high": 1,
+      "method": "Wilson 95%",
+      "n": 8
+    },
+    "eligible_turns_direct_only": 0,
+    "ineligible_turns_using_codeact": 0,
+    "executions": 15,
+    "failed_executions": 2,
+    "failure_categories": {
+      "program_runtime_error<-tool_invocation_failed": 2
+    },
+    "nested_failures": 8,
+    "recovery": {
+      "recovery_attempts": 2,
+      "recovered": 2,
+      "recovery_failed": 0,
+      "fallback_direct": 0,
+      "abandoned": 0,
+      "unknown": 0,
+      "nested_failures_in_ok_executions": 6
+    },
+    "failed_but_correct_turns": 2,
+    "composed_tools": {
+      "eval.logs": 7,
+      "eval.traces": 6,
+      "eval.services": 1
+    },
+    "evidence_complete_turns": 8,
+    "evidence_incomplete_turns": 0
+  },
+  "stopped": null,
+  "known_spend_usd": 3.380837,
+  "budget": {
+    "limit_usd": 5,
+    "known_spend_usd": 3.380837,
+    "overshoot_usd": 0,
+    "unknown_cost_samples": 0,
+    "enforcement": "best-effort (estimate from observed cost before each pair; no provider hard cap)"
+  },
+  "pair_schedule": [
+    {
+      "task_id": "T01-single-lookup",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T08-large-aggregation",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T09-partial-failure",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T10-codeact-unnecessary",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T01-single-lookup",
+      "repetition": 1,
+      "variants": [
+        "codeact",
+        "direct"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "repetition": 1,
+      "variants": [
+        "codeact",
+        "direct"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "repetition": 1,
+      "variants": [
+        "codeact",
+        "direct"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T08-large-aggregation",
+      "repetition": 1,
+      "variants": [
+        "codeact",
+        "direct"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T09-partial-failure",
+      "repetition": 1,
+      "variants": [
+        "codeact",
+        "direct"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "T10-codeact-unnecessary",
+      "repetition": 1,
+      "variants": [
+        "codeact",
+        "direct"
+      ],
+      "complete": true
+    }
+  ],
+  "raw_samples": [
+    {
+      "task_id": "T01-single-lookup",
+      "category": "single read-only lookup",
+      "eligible": false,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "status": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 3,
+      "provider_tool_uses": 2,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3159,
+      "prompt_chars_max": 3159,
+      "estimated_prompt_tokens": 790,
+      "tool_result_chars": 397,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 327,
+      "cache_read_tokens": 30604,
+      "cache_creation_tokens": 26213,
+      "input_tokens_total": 56823,
+      "cost_usd": 0.111425,
+      "provider_ms": 7169,
+      "sandbox_ms": 0,
+      "latency_ms": 10021,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T01-single-lookup",
+      "category": "single read-only lookup",
+      "eligible": false,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "status": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 3,
+      "provider_tool_uses": 2,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3159,
+      "prompt_chars_max": 3159,
+      "estimated_prompt_tokens": 790,
+      "tool_result_chars": 397,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 324,
+      "cache_read_tokens": 31632,
+      "cache_creation_tokens": 26727,
+      "input_tokens_total": 58365,
+      "cost_usd": 0.113551,
+      "provider_ms": 7965,
+      "sandbox_ms": 0,
+      "latency_ms": 7998,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "category": "SigNoz trace and Splunk log correlation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": false,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "order_ids": false,
+        "count": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 9,
+      "provider_tool_uses": 8,
+      "tool_calls": 8,
+      "integration_calls": 4,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3281,
+      "prompt_chars_max": 3281,
+      "estimated_prompt_tokens": 821,
+      "tool_result_chars": 15321,
+      "truncated_results": 1,
+      "input_tokens": 10,
+      "output_tokens": 1626,
+      "cache_read_tokens": 95272,
+      "cache_creation_tokens": 30490,
+      "input_tokens_total": 125772,
+      "cost_usd": 0.148001,
+      "provider_ms": 18278,
+      "sandbox_ms": 0,
+      "latency_ms": 18338,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "category": "SigNoz trace and Splunk log correlation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": false,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "order_ids": false,
+        "count": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 6,
+      "provider_tool_uses": 5,
+      "tool_calls": 5,
+      "integration_calls": 0,
+      "codeact_executions": 2,
+      "codeact_failed": 0,
+      "nested_calls": 4,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
+      "prompt_chars_total": 3281,
+      "prompt_chars_max": 3281,
+      "estimated_prompt_tokens": 821,
+      "tool_result_chars": 5650,
+      "truncated_results": 0,
+      "input_tokens": 10,
+      "output_tokens": 1562,
+      "cache_read_tokens": 91974,
+      "cache_creation_tokens": 23746,
+      "input_tokens_total": 115730,
+      "cost_usd": 0.120055,
+      "provider_ms": 16207,
+      "sandbox_ms": 253,
+      "latency_ms": 16262,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "category": "payment/refund timeout investigation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_operation": true,
+        "slow_refund_orders": true,
+        "db_pool_warning_overlap": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 10,
+      "provider_tool_uses": 9,
+      "tool_calls": 9,
+      "integration_calls": 6,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3463,
+      "prompt_chars_max": 3463,
+      "estimated_prompt_tokens": 866,
+      "tool_result_chars": 16431,
+      "truncated_results": 1,
+      "input_tokens": 12,
+      "output_tokens": 1918,
+      "cache_read_tokens": 128232,
+      "cache_creation_tokens": 31944,
+      "input_tokens_total": 160188,
+      "cost_usd": 0.160042,
+      "provider_ms": 18411,
+      "sandbox_ms": 0,
+      "latency_ms": 18489,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "category": "payment/refund timeout investigation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_operation": true,
+        "slow_refund_orders": true,
+        "db_pool_warning_overlap": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 12,
+      "provider_tool_uses": 11,
+      "tool_calls": 11,
+      "integration_calls": 5,
+      "codeact_executions": 2,
+      "codeact_failed": 1,
+      "nested_calls": 8,
+      "nested_failures": 3,
+      "codeact_failures": [
+        {
+          "execution_id": 3,
+          "category": "program_runtime_error",
+          "phase": "program_run",
+          "nested_tool": "eval.traces",
+          "nested_category": "tool_invocation_failed"
+        }
+      ],
+      "recovery": {
+        "execution_failures": 1,
+        "recovery_attempts": 1,
+        "recovered": 1,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 2,
+        "episodes": [
+          {
+            "execution_ids": [
+              3,
+              4
+            ],
+            "categories": [
+              "program_runtime_error"
+            ],
+            "attempts": 1,
+            "outcome": "recovered"
+          }
+        ]
+      },
+      "composed_tools": [
+        "eval.traces"
+      ],
+      "prompt_chars_total": 3463,
+      "prompt_chars_max": 3463,
+      "estimated_prompt_tokens": 866,
+      "tool_result_chars": 17361,
+      "truncated_results": 1,
+      "input_tokens": 14,
+      "output_tokens": 2464,
+      "cache_read_tokens": 170118,
+      "cache_creation_tokens": 32452,
+      "input_tokens_total": 202584,
+      "cost_usd": 0.171727,
+      "provider_ms": 22306,
+      "sandbox_ms": 232,
+      "latency_ms": 22383,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T08-large-aggregation",
+      "category": "large tool response requiring aggregation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": false,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "distinct_orders": false,
+        "events": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 18,
+      "provider_tool_uses": 17,
+      "tool_calls": 16,
+      "integration_calls": 12,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3229,
+      "prompt_chars_max": 3229,
+      "estimated_prompt_tokens": 808,
+      "tool_result_chars": 64186,
+      "truncated_results": 10,
+      "input_tokens": 18,
+      "output_tokens": 4399,
+      "cache_read_tokens": 273366,
+      "cache_creation_tokens": 70345,
+      "input_tokens_total": 343729,
+      "cost_usd": 0.352972,
+      "provider_ms": 45275,
+      "sandbox_ms": 0,
+      "latency_ms": 45338,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T08-large-aggregation",
+      "category": "large tool response requiring aggregation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "distinct_orders": true,
+        "events": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 6,
+      "provider_tool_uses": 5,
+      "tool_calls": 5,
+      "integration_calls": 1,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 1,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "eval.logs"
+      ],
+      "prompt_chars_total": 3229,
+      "prompt_chars_max": 3229,
+      "estimated_prompt_tokens": 808,
+      "tool_result_chars": 7799,
+      "truncated_results": 1,
+      "input_tokens": 10,
+      "output_tokens": 962,
+      "cache_read_tokens": 93984,
+      "cache_creation_tokens": 25623,
+      "input_tokens_total": 119617,
+      "cost_usd": 0.121759,
+      "provider_ms": 14842,
+      "sandbox_ms": 135,
+      "latency_ms": 14905,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T09-partial-failure",
+      "category": "tool timeout or partial integration failure",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "db_pool_warning_orders": true,
+        "slowest_operation": true,
+        "unavailable": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 8,
+      "provider_tool_uses": 7,
+      "tool_calls": 7,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3374,
+      "prompt_chars_max": 3374,
+      "estimated_prompt_tokens": 844,
+      "tool_result_chars": 9296,
+      "truncated_results": 1,
+      "input_tokens": 10,
+      "output_tokens": 1113,
+      "cache_read_tokens": 93218,
+      "cache_creation_tokens": 26723,
+      "input_tokens_total": 119951,
+      "cost_usd": 0.1276,
+      "provider_ms": 14584,
+      "sandbox_ms": 0,
+      "latency_ms": 14649,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T09-partial-failure",
+      "category": "tool timeout or partial integration failure",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "db_pool_warning_orders": true,
+        "slowest_operation": true,
+        "unavailable": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 8,
+      "provider_tool_uses": 7,
+      "tool_calls": 7,
+      "integration_calls": 2,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 1,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 1,
+        "episodes": []
+      },
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
+      "prompt_chars_total": 3375,
+      "prompt_chars_max": 3375,
+      "estimated_prompt_tokens": 844,
+      "tool_result_chars": 9190,
+      "truncated_results": 1,
+      "input_tokens": 10,
+      "output_tokens": 1227,
+      "cache_read_tokens": 95788,
+      "cache_creation_tokens": 26652,
+      "input_tokens_total": 122450,
+      "cost_usd": 0.128713,
+      "provider_ms": 14134,
+      "sandbox_ms": 102,
+      "latency_ms": 14218,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T10-codeact-unnecessary",
+      "category": "CodeAct unnecessary",
+      "eligible": false,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "services": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 3,
+      "provider_tool_uses": 2,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3168,
+      "prompt_chars_max": 3168,
+      "estimated_prompt_tokens": 792,
+      "tool_result_chars": 752,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 457,
+      "cache_read_tokens": 36739,
+      "cache_creation_tokens": 20191,
+      "input_tokens_total": 56936,
+      "cost_usd": 0.089244,
+      "provider_ms": 7904,
+      "sandbox_ms": 0,
+      "latency_ms": 7975,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T10-codeact-unnecessary",
+      "category": "CodeAct unnecessary",
+      "eligible": false,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "services": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 3,
+      "provider_tool_uses": 2,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3168,
+      "prompt_chars_max": 3168,
+      "estimated_prompt_tokens": 792,
+      "tool_result_chars": 752,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 426,
+      "cache_read_tokens": 38281,
+      "cache_creation_tokens": 20191,
+      "input_tokens_total": 58478,
+      "cost_usd": 0.089089,
+      "provider_ms": 8034,
+      "sandbox_ms": 0,
+      "latency_ms": 8057,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T01-single-lookup",
+      "category": "single read-only lookup",
+      "eligible": false,
+      "variant": "codeact",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "status": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 3,
+      "provider_tool_uses": 2,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3160,
+      "prompt_chars_max": 3160,
+      "estimated_prompt_tokens": 790,
+      "tool_result_chars": 397,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 302,
+      "cache_read_tokens": 38260,
+      "cache_creation_tokens": 20099,
+      "input_tokens_total": 58365,
+      "cost_usd": 0.087481,
+      "provider_ms": 7514,
+      "sandbox_ms": 0,
+      "latency_ms": 7587,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T01-single-lookup",
+      "category": "single read-only lookup",
+      "eligible": false,
+      "variant": "direct",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "status": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 3,
+      "provider_tool_uses": 2,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3160,
+      "prompt_chars_max": 3160,
+      "estimated_prompt_tokens": 790,
+      "tool_result_chars": 397,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 353,
+      "cache_read_tokens": 36718,
+      "cache_creation_tokens": 20099,
+      "input_tokens_total": 56823,
+      "cost_usd": 0.087837,
+      "provider_ms": 8281,
+      "sandbox_ms": 0,
+      "latency_ms": 8311,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "category": "SigNoz trace and Splunk log correlation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": false,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "order_ids": false,
+        "count": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 6,
+      "provider_tool_uses": 5,
+      "tool_calls": 5,
+      "integration_calls": 0,
+      "codeact_executions": 2,
+      "codeact_failed": 0,
+      "nested_calls": 4,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
+      "prompt_chars_total": 3282,
+      "prompt_chars_max": 3282,
+      "estimated_prompt_tokens": 821,
+      "tool_result_chars": 8848,
+      "truncated_results": 1,
+      "input_tokens": 10,
+      "output_tokens": 1624,
+      "cache_read_tokens": 94665,
+      "cache_creation_tokens": 26401,
+      "input_tokens_total": 121076,
+      "cost_usd": 0.131564,
+      "provider_ms": 18261,
+      "sandbox_ms": 240,
+      "latency_ms": 18349,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T03-trace-log-correlation",
+      "category": "SigNoz trace and Splunk log correlation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "order_ids": true,
+        "count": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 7,
+      "provider_tool_uses": 6,
+      "tool_calls": 6,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3282,
+      "prompt_chars_max": 3282,
+      "estimated_prompt_tokens": 821,
+      "tool_result_chars": 12324,
+      "truncated_results": 1,
+      "input_tokens": 8,
+      "output_tokens": 1169,
+      "cache_read_tokens": 62728,
+      "cache_creation_tokens": 28056,
+      "input_tokens_total": 90792,
+      "cost_usd": 0.130438,
+      "provider_ms": 13818,
+      "sandbox_ms": 0,
+      "latency_ms": 13905,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "category": "payment/refund timeout investigation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_operation": true,
+        "slow_refund_orders": true,
+        "db_pool_warning_overlap": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 9,
+      "provider_tool_uses": 8,
+      "tool_calls": 8,
+      "integration_calls": 2,
+      "codeact_executions": 3,
+      "codeact_failed": 1,
+      "nested_calls": 8,
+      "nested_failures": 3,
+      "codeact_failures": [
+        {
+          "execution_id": 10,
+          "category": "program_runtime_error",
+          "phase": "program_run",
+          "nested_tool": "eval.traces",
+          "nested_category": "tool_invocation_failed"
+        }
+      ],
+      "recovery": {
+        "execution_failures": 1,
+        "recovery_attempts": 1,
+        "recovered": 1,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 2,
+        "episodes": [
+          {
+            "execution_ids": [
+              10,
+              11
+            ],
+            "categories": [
+              "program_runtime_error"
+            ],
+            "attempts": 1,
+            "outcome": "recovered"
+          }
+        ]
+      },
+      "composed_tools": [
+        "eval.logs",
+        "eval.services",
+        "eval.traces"
+      ],
+      "prompt_chars_total": 3464,
+      "prompt_chars_max": 3464,
+      "estimated_prompt_tokens": 866,
+      "tool_result_chars": 15320,
+      "truncated_results": 1,
+      "input_tokens": 14,
+      "output_tokens": 2364,
+      "cache_read_tokens": 166359,
+      "cache_creation_tokens": 30931,
+      "input_tokens_total": 197304,
+      "cost_usd": 0.164267,
+      "provider_ms": 23032,
+      "sandbox_ms": 334,
+      "latency_ms": 23121,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T06-refund-timeout",
+      "category": "payment/refund timeout investigation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_operation": true,
+        "slow_refund_orders": true,
+        "db_pool_warning_overlap": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 12,
+      "provider_tool_uses": 11,
+      "tool_calls": 11,
+      "integration_calls": 7,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3464,
+      "prompt_chars_max": 3464,
+      "estimated_prompt_tokens": 866,
+      "tool_result_chars": 22433,
+      "truncated_results": 2,
+      "input_tokens": 12,
+      "output_tokens": 2116,
+      "cache_read_tokens": 133016,
+      "cache_creation_tokens": 36211,
+      "input_tokens_total": 169239,
+      "cost_usd": 0.179568,
+      "provider_ms": 20282,
+      "sandbox_ms": 0,
+      "latency_ms": 20349,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T08-large-aggregation",
+      "category": "large tool response requiring aggregation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "distinct_orders": true,
+        "events": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 6,
+      "provider_tool_uses": 5,
+      "tool_calls": 5,
+      "integration_calls": 0,
+      "codeact_executions": 2,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "eval.logs"
+      ],
+      "prompt_chars_total": 3230,
+      "prompt_chars_max": 3230,
+      "estimated_prompt_tokens": 808,
+      "tool_result_chars": 3952,
+      "truncated_results": 0,
+      "input_tokens": 10,
+      "output_tokens": 1035,
+      "cache_read_tokens": 91059,
+      "cache_creation_tokens": 22700,
+      "input_tokens_total": 113769,
+      "cost_usd": 0.110505,
+      "provider_ms": 13412,
+      "sandbox_ms": 216,
+      "latency_ms": 13470,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T08-large-aggregation",
+      "category": "large tool response requiring aggregation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "distinct_orders": true,
+        "events": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 17,
+      "provider_tool_uses": 16,
+      "tool_calls": 16,
+      "integration_calls": 13,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3230,
+      "prompt_chars_max": 3230,
+      "estimated_prompt_tokens": 808,
+      "tool_result_chars": 68168,
+      "truncated_results": 4,
+      "input_tokens": 14,
+      "output_tokens": 3309,
+      "cache_read_tokens": 164896,
+      "cache_creation_tokens": 70149,
+      "input_tokens_total": 235059,
+      "cost_usd": 0.330432,
+      "provider_ms": 28607,
+      "sandbox_ms": 0,
+      "latency_ms": 31318,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T09-partial-failure",
+      "category": "tool timeout or partial integration failure",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "db_pool_warning_orders": true,
+        "slowest_operation": true,
+        "unavailable": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 8,
+      "provider_tool_uses": 7,
+      "tool_calls": 7,
+      "integration_calls": 1,
+      "codeact_executions": 2,
+      "codeact_failed": 0,
+      "nested_calls": 3,
+      "nested_failures": 1,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 1,
+        "episodes": []
+      },
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
+      "prompt_chars_total": 3375,
+      "prompt_chars_max": 3375,
+      "estimated_prompt_tokens": 844,
+      "tool_result_chars": 4494,
+      "truncated_results": 0,
+      "input_tokens": 10,
+      "output_tokens": 1434,
+      "cache_read_tokens": 92395,
+      "cache_creation_tokens": 23322,
+      "input_tokens_total": 115727,
+      "cost_usd": 0.117124,
+      "provider_ms": 15162,
+      "sandbox_ms": 194,
+      "latency_ms": 15239,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "T09-partial-failure",
+      "category": "tool timeout or partial integration failure",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "db_pool_warning_orders": true,
+        "slowest_operation": true,
+        "unavailable": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 8,
+      "provider_tool_uses": 7,
+      "tool_calls": 7,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3375,
+      "prompt_chars_max": 3375,
+      "estimated_prompt_tokens": 844,
+      "tool_result_chars": 9296,
+      "truncated_results": 1,
+      "input_tokens": 10,
+      "output_tokens": 1190,
+      "cache_read_tokens": 93225,
+      "cache_creation_tokens": 26733,
+      "input_tokens_total": 119968,
+      "cost_usd": 0.128411,
+      "provider_ms": 15712,
+      "sandbox_ms": 0,
+      "latency_ms": 15787,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T10-codeact-unnecessary",
+      "category": "CodeAct unnecessary",
+      "eligible": false,
+      "variant": "codeact",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "services": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 3,
+      "provider_tool_uses": 2,
+      "tool_calls": 2,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3168,
+      "prompt_chars_max": 3168,
+      "estimated_prompt_tokens": 792,
+      "tool_result_chars": 752,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 413,
+      "cache_read_tokens": 38281,
+      "cache_creation_tokens": 20191,
+      "input_tokens_total": 58478,
+      "cost_usd": 0.08896,
+      "provider_ms": 8105,
+      "sandbox_ms": 0,
+      "latency_ms": 8175,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "T10-codeact-unnecessary",
+      "category": "CodeAct unnecessary",
+      "eligible": false,
+      "variant": "direct",
+      "repetition": 1,
+      "provider": "claude",
+      "model": "claude-sonnet-5-5",
+      "requested_model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "provider_models": [
+        "claude-sonnet-5-5"
+      ],
+      "model_resolution": "provider_reported",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "services": true
+      },
+      "sdk_calls": 1,
+      "model_turns": 4,
+      "provider_tool_uses": 3,
+      "tool_calls": 3,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 3168,
+      "prompt_chars_max": 3168,
+      "estimated_prompt_tokens": 792,
+      "tool_result_chars": 754,
+      "truncated_results": 0,
+      "input_tokens": 6,
+      "output_tokens": 493,
+      "cache_read_tokens": 36853,
+      "cache_creation_tokens": 20305,
+      "input_tokens_total": 57164,
+      "cost_usd": 0.090072,
+      "provider_ms": 8222,
+      "sandbox_ms": 0,
+      "latency_ms": 8266,
+      "evidence_complete": null
+    }
+  ]
+}
