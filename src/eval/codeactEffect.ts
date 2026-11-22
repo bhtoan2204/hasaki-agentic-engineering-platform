@@ -69,6 +69,8 @@ export interface Sample {
   fields: Record<string, boolean>;
   /** Per-field grading diagnosis (expected/actual, missing/unexpected/duplicate ids, ordering, count consistency). */
   grading: Record<string, FieldDiagnostic>;
+  /** RCA tasks: the per-dimension diagnosis (service, operation, cause, false confirmation, …). */
+  rca?: Record<string, boolean>;
   /** The parsed answer block (fixture data only), capped, so a field mismatch can be inspected later. */
   answer: Record<string, unknown> | null;
   /**
@@ -274,7 +276,7 @@ export async function runSample(
   o: RunOptions,
 ): Promise<Sample> {
   registerEvaluationTools();
-  const expected = await referenceAnswer(task);
+  const expected = task.reference ? task.reference() : await referenceAnswer(task);
   const { wrapped, prompts, offered } = measured(o.runnerFor(task, variant));
   const providers = Object.fromEntries(PROVIDERS.map((p) => [p, wrapped])) as Record<
     AgentProvider,
@@ -387,7 +389,9 @@ export async function runSample(
   );
   const answer = parseAnswer(reply?.content ?? "");
   // Same rules for both variants: the task's declared field semantics.
-  const grade = gradeAnswer(expected, answer, task.grading);
+  const grade = task.grade
+    ? task.grade(expected, answer)
+    : gradeAnswer(expected, answer, task.grading);
   const n = (v: unknown) => (typeof v === "number" ? v : v == null ? null : Number(v));
   return {
     task_id: task.id,
@@ -411,6 +415,7 @@ export async function runSample(
     unsupported: grade.unsupported,
     fields: grade.fields,
     grading: grade.diagnostics,
+    ...("rca" in grade && grade.rca ? { rca: grade.rca as Record<string, boolean> } : {}),
     answer: sanitizedAnswer(answer),
     sdk_calls: Number(usage.completions ?? prompts.length),
     model_turns: n(usage.model_turns),
@@ -483,6 +488,8 @@ export interface EvaluationPlan {
   budgetUsd?: number;
   /** A pair starts only when both of its samples fit. */
   maxSamples?: number;
+  /** The task suite (default: the CodeAct effectiveness tasks); e.g. rcaTasks(seeds) for RCA accuracy. */
+  suite?: EffectTask[];
 }
 export interface PairRecord {
   task_id: string;
@@ -501,7 +508,9 @@ const usd = (v: number) => Math.round(v * 1e6) / 1e6;
  * incomplete with its cost, and the evaluation stops.
  */
 export async function runEvaluation(plan: EvaluationPlan, o: RunOptions) {
-  const tasks = TASKS.filter((t) => !plan.tasks?.length || plan.tasks.includes(t.id));
+  const tasks = (plan.suite ?? TASKS).filter(
+    (t) => !plan.tasks?.length || plan.tasks.includes(t.id),
+  );
   const samples: Sample[] = [];
   const pairs: PairRecord[] = [];
   let spent = 0;
@@ -688,6 +697,17 @@ export function summarize(
       correct: xs.filter((s) => s.correct).length,
       success_ci95: wilson(xs.filter((s) => s.correct).length, xs.length),
       unsupported_conclusions: xs.reduce((a, s) => a + s.unsupported, 0),
+      /** RCA suites: how many samples hold each dimension (service, cause, false_confirmation, …), of `rca_graded`. */
+      ...(xs.some((s) => s.rca)
+        ? {
+            rca_graded: xs.filter((s) => s.rca).length,
+            rca_dimensions: xs.reduce<Record<string, number>>((acc, s) => {
+              for (const [k, v] of Object.entries(s.rca ?? {}))
+                acc[k] = (acc[k] ?? 0) + (v ? 1 : 0);
+              return acc;
+            }, {}),
+          }
+        : {}),
       metrics: Object.fromEntries(
         METRICS.map((k) => {
           const vals = known(k);

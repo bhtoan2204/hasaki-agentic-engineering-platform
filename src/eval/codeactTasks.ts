@@ -233,6 +233,20 @@ export interface EffectTask {
    * semantics, and both variants are graded by them.
    */
   grading?: Record<string, FieldRule>;
+  /** A documented ground truth (instead of running `plan`); the plan must still derive it from the tools. */
+  reference?: () => Record<string, unknown>;
+  /** A task-specific grader (e.g. RCA dimensions); otherwise `gradeAnswer` with `grading`. */
+  grade?: (
+    expected: Record<string, unknown>,
+    answer: Record<string, unknown> | null,
+  ) => {
+    correct: boolean;
+    fields: Record<string, boolean>;
+    unsupported: number;
+    answered: boolean;
+    diagnostics: Record<string, FieldDiagnostic>;
+    rca?: Record<string, boolean>;
+  };
 }
 export type FieldRule =
   { kind: "exact" } | { kind: "set" } | { kind: "ordered" } | { kind: "count"; of: string };

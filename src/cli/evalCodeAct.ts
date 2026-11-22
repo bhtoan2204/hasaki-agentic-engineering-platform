@@ -9,6 +9,8 @@
  * real provider with this machine's credentials and needs `--model` (both variants pinned to the same model),
  * `--budget-usd` and `--max-samples` (unknown cost is bounded by the sample count); it never runs without them. Pairs
  * are admitted only when both samples fit the allowance and the estimated remaining budget.
+ *
+ *   --suite rca [--seeds 1,2]   the synthetic RCA incidents (src/eval/rcaIncidents.ts) instead of the CodeAct tasks
  */
 import { writeFileSync } from "node:fs";
 import { migrate } from "../db/migrate.ts";
@@ -26,6 +28,7 @@ import {
   summarize,
   renderMarkdown,
 } from "../eval/codeactEffect.ts";
+import { rcaTasks } from "../eval/rcaIncidents.ts";
 
 const argv = process.argv.slice(2);
 const opt = (k: string) => {
@@ -70,6 +73,9 @@ const { samples, stopped, known_spend_usd, pairs, budget } = await runEvaluation
   {
     repetitions: Number(opt("--repetitions") ?? 1),
     tasks: opt("--tasks")?.split(","),
+    ...(opt("--suite") === "rca"
+      ? { suite: rcaTasks((opt("--seeds") ?? "1").split(",").map(Number)) }
+      : {}),
     budgetUsd,
     maxSamples,
   },

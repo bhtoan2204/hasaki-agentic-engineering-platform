@@ -1,0 +1,4966 @@
+{
+  "meta": {
+    "level": "fixture-simulated-provider",
+    "sandbox": "os-sandbox",
+    "provider": "simulated",
+    "model": null,
+    "generated_at": "2026-11-22T09:02:56.027Z",
+    "variable": "codeAct.enabled (code.execute disclosed and callable) — everything else identical",
+    "dataset": "src/eval/codeactTasks.ts (10 tasks, deterministic fake incident window)",
+    "eligibility": "two or more deterministic read-only lookups whose results must be combined, or one large result whose useful content is an aggregate",
+    "notes": [
+      "SIMULATED PROVIDER: tokens and cost are unknown (null); estimated_prompt_tokens is chars/4, not a provider count.",
+      "Adoption is by construction (the policy uses CodeAct for every eligible task when offered).",
+      "The policy replays the same reference plan in both variants and never reformulates a query to avoid truncation; truncation effects are an upper bound for a naive direct strategy.",
+      "This is NOT a live-model or production result (verification level ≤ 3)."
+    ]
+  },
+  "samples": 40,
+  "pairs": 20,
+  "incomplete_pairs": [],
+  "spend": {
+    "known_usd": 0,
+    "unknown_cost_samples": 40
+  },
+  "model_check": {
+    "status": "unverified",
+    "models": [],
+    "requested": [
+      "(account default)"
+    ],
+    "efforts": [
+      "(default)"
+    ],
+    "unresolved_samples": 40,
+    "mismatched_pairs": []
+  },
+  "capability_check": {
+    "direct_offered": 0,
+    "codeact_not_offered": 0,
+    "valid": true
+  },
+  "intention_to_treat": {
+    "pairs": 20,
+    "correct": {
+      "n": 20,
+      "mean": 0.05,
+      "ci95": [
+        0,
+        0.15
+      ]
+    },
+    "sdk_calls": {
+      "n": 20,
+      "mean": -0.9,
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
+    },
+    "model_turns": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "provider_tool_uses": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "tool_calls": {
+      "n": 20,
+      "mean": -0.9,
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
+    },
+    "prompt_chars_total": {
+      "n": 20,
+      "mean": -7421.65,
+      "ci95": [
+        -9092.1,
+        -5618.35
+      ]
+    },
+    "prompt_chars_max": {
+      "n": 20,
+      "mean": -2228.3,
+      "ci95": [
+        -2896.7,
+        -1660.9
+      ]
+    },
+    "tool_result_chars": {
+      "n": 20,
+      "mean": -3095.1,
+      "ci95": [
+        -3847,
+        -2324.8
+      ]
+    },
+    "latency_ms": {
+      "n": 20,
+      "mean": 60.45,
+      "ci95": [
+        51.4,
+        70.3
+      ]
+    },
+    "input_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "output_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "cache_read_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "cache_creation_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "input_tokens_total": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "cost_usd": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    }
+  },
+  "usage_outcomes": {
+    "label": "observational: adoption is chosen by the agent, not randomized",
+    "used": {
+      "n": 20,
+      "correct": 20,
+      "mean_cost_usd": null,
+      "mean_latency_ms": 149.3,
+      "mean_model_turns": null
+    },
+    "not_used": {
+      "n": 0,
+      "correct": 0,
+      "mean_cost_usd": null,
+      "mean_latency_ms": null,
+      "mean_model_turns": null
+    }
+  },
+  "variants": {
+    "direct": {
+      "n": 20,
+      "completed": 20,
+      "correct": 19,
+      "success_ci95": {
+        "low": 0.7638641064874331,
+        "high": 0.9911187805671268,
+        "method": "Wilson 95%",
+        "n": 20
+      },
+      "unsupported_conclusions": 0,
+      "rca_graded": 20,
+      "rca_dimensions": {
+        "detection": 19,
+        "service": 19,
+        "operation": 19,
+        "cause": 19,
+        "fault_localized": 19,
+        "correlation": 19,
+        "symptom_as_cause": 0,
+        "misleading_signal_taken": 0,
+        "false_confirmation": 0,
+        "uncertainty_reported": 20,
+        "missing_sources_reported": 20,
+        "unsafe_next_action": 0
+      },
+      "metrics": {
+        "correct": {
+          "known": 20,
+          "of": 20,
+          "mean": 0.95,
+          "median": 1
+        },
+        "sdk_calls": {
+          "known": 20,
+          "of": 20,
+          "mean": 2.9,
+          "median": 3
+        },
+        "model_turns": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "provider_tool_uses": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "tool_calls": {
+          "known": 20,
+          "of": 20,
+          "mean": 1.9,
+          "median": 2
+        },
+        "prompt_chars_total": {
+          "known": 20,
+          "of": 20,
+          "mean": 16309.45,
+          "median": 16409
+        },
+        "prompt_chars_max": {
+          "known": 20,
+          "of": 20,
+          "mean": 7115.4,
+          "median": 6684
+        },
+        "tool_result_chars": {
+          "known": 20,
+          "of": 20,
+          "mean": 3988.6,
+          "median": 3608.5
+        },
+        "latency_ms": {
+          "known": 20,
+          "of": 20,
+          "mean": 88.85,
+          "median": 89.5
+        },
+        "input_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "output_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "cache_read_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "cache_creation_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "input_tokens_total": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "cost_usd": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        }
+      }
+    },
+    "codeact": {
+      "n": 20,
+      "completed": 20,
+      "correct": 20,
+      "success_ci95": {
+        "low": 0.8388698745050667,
+        "high": 1,
+        "method": "Wilson 95%",
+        "n": 20
+      },
+      "unsupported_conclusions": 0,
+      "rca_graded": 20,
+      "rca_dimensions": {
+        "detection": 20,
+        "service": 20,
+        "operation": 20,
+        "cause": 20,
+        "fault_localized": 20,
+        "correlation": 20,
+        "symptom_as_cause": 0,
+        "misleading_signal_taken": 0,
+        "false_confirmation": 0,
+        "uncertainty_reported": 20,
+        "missing_sources_reported": 20,
+        "unsafe_next_action": 0
+      },
+      "metrics": {
+        "correct": {
+          "known": 20,
+          "of": 20,
+          "mean": 1,
+          "median": 1
+        },
+        "sdk_calls": {
+          "known": 20,
+          "of": 20,
+          "mean": 2,
+          "median": 2
+        },
+        "model_turns": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "provider_tool_uses": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "tool_calls": {
+          "known": 20,
+          "of": 20,
+          "mean": 1,
+          "median": 1
+        },
+        "prompt_chars_total": {
+          "known": 20,
+          "of": 20,
+          "mean": 8887.8,
+          "median": 8908
+        },
+        "prompt_chars_max": {
+          "known": 20,
+          "of": 20,
+          "mean": 4887.1,
+          "median": 4906
+        },
+        "tool_result_chars": {
+          "known": 20,
+          "of": 20,
+          "mean": 893.5,
+          "median": 912.5
+        },
+        "latency_ms": {
+          "known": 20,
+          "of": 20,
+          "mean": 149.3,
+          "median": 154
+        },
+        "input_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "output_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "cache_read_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "cache_creation_tokens": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "input_tokens_total": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        },
+        "cost_usd": {
+          "known": 0,
+          "of": 20,
+          "mean": null,
+          "median": null
+        }
+      }
+    }
+  },
+  "paired_codeact_minus_direct": {
+    "correct": {
+      "n": 20,
+      "mean": 0.05,
+      "ci95": [
+        0,
+        0.15
+      ]
+    },
+    "sdk_calls": {
+      "n": 20,
+      "mean": -0.9,
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
+    },
+    "model_turns": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "provider_tool_uses": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "tool_calls": {
+      "n": 20,
+      "mean": -0.9,
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
+    },
+    "prompt_chars_total": {
+      "n": 20,
+      "mean": -7421.65,
+      "ci95": [
+        -9092.1,
+        -5618.35
+      ]
+    },
+    "prompt_chars_max": {
+      "n": 20,
+      "mean": -2228.3,
+      "ci95": [
+        -2896.7,
+        -1660.9
+      ]
+    },
+    "tool_result_chars": {
+      "n": 20,
+      "mean": -3095.1,
+      "ci95": [
+        -3847,
+        -2324.8
+      ]
+    },
+    "latency_ms": {
+      "n": 20,
+      "mean": 60.45,
+      "ci95": [
+        51.4,
+        70.3
+      ]
+    },
+    "input_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "output_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "cache_read_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "cache_creation_tokens": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "input_tokens_total": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    },
+    "cost_usd": {
+      "n": 0,
+      "mean": null,
+      "ci95": null
+    }
+  },
+  "per_task": {
+    "INC-provider-timeout-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 15983,
+        "codeact": 8917
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-retry-amplification-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 18824,
+        "codeact": 8912
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-kafka-consumer-lag-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 2,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 9062,
+        "codeact": 8721
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-db-pool-saturation-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 15941,
+        "codeact": 8919
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-downstream-http-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 17528,
+        "codeact": 8899
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-idempotency-conflict-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 19337,
+        "codeact": 8885
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-misleading-warnings-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 16304,
+        "codeact": 8937
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-missing-spans-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 15597,
+        "codeact": 8898
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-partial-outage-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 4,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 22386,
+        "codeact": 9038
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-event-ordering-1": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 2,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 9385,
+        "codeact": 8725
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-provider-timeout-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 16277,
+        "codeact": 8923
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-retry-amplification-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 0,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 20667,
+        "codeact": 8920
+      },
+      "truncated_results": {
+        "direct": 1,
+        "codeact": 0
+      }
+    },
+    "INC-kafka-consumer-lag-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 2,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 9826,
+        "codeact": 8727
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-db-pool-saturation-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 16514,
+        "codeact": 8926
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-downstream-http-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 15857,
+        "codeact": 8904
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-idempotency-conflict-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 18161,
+        "codeact": 8889
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-misleading-warnings-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 17759,
+        "codeact": 8942
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-missing-spans-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 3,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 17578,
+        "codeact": 8904
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-partial-outage-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 4,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 22936,
+        "codeact": 9043
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    },
+    "INC-event-ordering-2": {
+      "eligible": true,
+      "correct": {
+        "direct": 1,
+        "codeact": 1,
+        "of": 1
+      },
+      "sdk_calls": {
+        "direct": 2,
+        "codeact": 2
+      },
+      "model_turns": {
+        "direct": null,
+        "codeact": null
+      },
+      "cost_usd": {
+        "direct": null,
+        "codeact": null
+      },
+      "codeact_used": 1,
+      "prompt_chars_total": {
+        "direct": 10267,
+        "codeact": 8727
+      },
+      "truncated_results": {
+        "direct": 0,
+        "codeact": 0
+      }
+    }
+  },
+  "adoption": {
+    "eligible_turns": 20,
+    "eligible_turns_using_codeact": 20,
+    "adoption_rate_ci95": {
+      "low": 0.8388698745050667,
+      "high": 1,
+      "method": "Wilson 95%",
+      "n": 20
+    },
+    "eligible_turns_direct_only": 0,
+    "ineligible_turns_using_codeact": 0,
+    "executions": 20,
+    "failed_executions": 0,
+    "failure_categories": {},
+    "nested_failures": 2,
+    "recovery": {
+      "recovery_attempts": 0,
+      "recovered": 0,
+      "recovery_failed": 0,
+      "fallback_direct": 0,
+      "abandoned": 0,
+      "unknown": 0,
+      "nested_failures_in_ok_executions": 2
+    },
+    "failed_but_correct_turns": 0,
+    "composed_tools": {
+      "rca.traces": 16,
+      "rca.logs": 12
+    },
+    "evidence_complete_turns": 20,
+    "evidence_incomplete_turns": 0
+  },
+  "stopped": null,
+  "known_spend_usd": 0,
+  "budget": {
+    "limit_usd": null,
+    "known_spend_usd": 0,
+    "overshoot_usd": null,
+    "unknown_cost_samples": 40,
+    "enforcement": "best-effort (estimate from observed cost before each pair; no provider hard cap)"
+  },
+  "pair_schedule": [
+    {
+      "task_id": "INC-provider-timeout-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-retry-amplification-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-kafka-consumer-lag-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-db-pool-saturation-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-downstream-http-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-idempotency-conflict-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-misleading-warnings-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-missing-spans-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-partial-outage-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-event-ordering-1",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-provider-timeout-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-retry-amplification-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-kafka-consumer-lag-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-db-pool-saturation-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-downstream-http-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-idempotency-conflict-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-misleading-warnings-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-missing-spans-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-partial-outage-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    },
+    {
+      "task_id": "INC-event-ordering-2",
+      "repetition": 0,
+      "variants": [
+        "direct",
+        "codeact"
+      ],
+      "complete": true
+    }
+  ],
+  "raw_samples": [
+    {
+      "task_id": "INC-provider-timeout-1",
+      "category": "RCA: provider-timeout",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 10,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 15983,
+      "prompt_chars_max": 6488,
+      "estimated_prompt_tokens": 3997,
+      "tool_result_chars": 3172,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 41,
+      "sandbox_ms": 0,
+      "latency_ms": 114,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-provider-timeout-1",
+      "category": "RCA: provider-timeout",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 10,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8917,
+      "prompt_chars_max": 4915,
+      "estimated_prompt_tokens": 2230,
+      "tool_result_chars": 922,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 1,
+      "sandbox_ms": 108,
+      "latency_ms": 166,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-retry-amplification-1",
+      "category": "RCA: retry-amplification",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "refund.retry",
+        "cause": "retry_amplification",
+        "status": "CONFIRMED",
+        "affected_orders": 8,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker refund.retry"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 18824,
+      "prompt_chars_max": 9595,
+      "estimated_prompt_tokens": 4707,
+      "tool_result_chars": 6172,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 43,
+      "sandbox_ms": 0,
+      "latency_ms": 95,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-retry-amplification-1",
+      "category": "RCA: retry-amplification",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "refund.retry",
+        "cause": "retry_amplification",
+        "status": "CONFIRMED",
+        "affected_orders": 8,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker refund.retry"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8912,
+      "prompt_chars_max": 4901,
+      "estimated_prompt_tokens": 2229,
+      "tool_result_chars": 899,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 96,
+      "latency_ms": 151,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-kafka-consumer-lag-1",
+      "category": "RCA: kafka-consumer-lag",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "consume.refund-events",
+        "cause": "consumer_lag",
+        "status": "CONFIRMED",
+        "affected_orders": 8,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 9062,
+      "prompt_chars_max": 5075,
+      "estimated_prompt_tokens": 2266,
+      "tool_result_chars": 1108,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 20,
+      "sandbox_ms": 0,
+      "latency_ms": 64,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-kafka-consumer-lag-1",
+      "category": "RCA: kafka-consumer-lag",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "consume.refund-events",
+        "cause": "consumer_lag",
+        "status": "CONFIRMED",
+        "affected_orders": 8,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 1,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs"
+      ],
+      "prompt_chars_total": 8721,
+      "prompt_chars_max": 4734,
+      "estimated_prompt_tokens": 2181,
+      "tool_result_chars": 740,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 107,
+      "latency_ms": 155,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-db-pool-saturation-1",
+      "category": "RCA: db-pool-saturation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "refund.db.acquire",
+        "cause": "db_pool_saturation",
+        "status": "CONFIRMED",
+        "affected_orders": 10,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 15941,
+      "prompt_chars_max": 6434,
+      "estimated_prompt_tokens": 3986,
+      "tool_result_chars": 3112,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 40,
+      "sandbox_ms": 0,
+      "latency_ms": 98,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-db-pool-saturation-1",
+      "category": "RCA: db-pool-saturation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "refund.db.acquire",
+        "cause": "db_pool_saturation",
+        "status": "CONFIRMED",
+        "affected_orders": 10,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8919,
+      "prompt_chars_max": 4911,
+      "estimated_prompt_tokens": 2230,
+      "tool_result_chars": 912,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 112,
+      "latency_ms": 157,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-downstream-http-1",
+      "category": "RCA: downstream-http",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "fraud-service",
+        "root_cause_operation": "fraud.check",
+        "cause": "downstream_http_degradation",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 17528,
+      "prompt_chars_max": 7187,
+      "estimated_prompt_tokens": 4383,
+      "tool_result_chars": 4870,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 42,
+      "sandbox_ms": 0,
+      "latency_ms": 89,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-downstream-http-1",
+      "category": "RCA: downstream-http",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "fraud-service",
+        "root_cause_operation": "fraud.check",
+        "cause": "downstream_http_degradation",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8899,
+      "prompt_chars_max": 4899,
+      "estimated_prompt_tokens": 2225,
+      "tool_result_chars": 908,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 97,
+      "latency_ms": 127,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-idempotency-conflict-1",
+      "category": "RCA: idempotency-conflict",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "order-api",
+        "root_cause_operation": "refund.submit",
+        "cause": "idempotency_conflict",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 19337,
+      "prompt_chars_max": 9155,
+      "estimated_prompt_tokens": 4835,
+      "tool_result_chars": 6839,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 41,
+      "sandbox_ms": 0,
+      "latency_ms": 89,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-idempotency-conflict-1",
+      "category": "RCA: idempotency-conflict",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "order-api",
+        "root_cause_operation": "refund.submit",
+        "cause": "idempotency_conflict",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8885,
+      "prompt_chars_max": 4886,
+      "estimated_prompt_tokens": 2222,
+      "tool_result_chars": 896,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 114,
+      "latency_ms": 156,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-misleading-warnings-1",
+      "category": "RCA: misleading-warnings",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 11,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 16304,
+      "prompt_chars_max": 6647,
+      "estimated_prompt_tokens": 4077,
+      "tool_result_chars": 3487,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 40,
+      "sandbox_ms": 0,
+      "latency_ms": 91,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-misleading-warnings-1",
+      "category": "RCA: misleading-warnings",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 11,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8937,
+      "prompt_chars_max": 4925,
+      "estimated_prompt_tokens": 2235,
+      "tool_result_chars": 922,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 111,
+      "latency_ms": 154,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-missing-spans-1",
+      "category": "RCA: missing-spans",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 9,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 15597,
+      "prompt_chars_max": 6260,
+      "estimated_prompt_tokens": 3900,
+      "tool_result_chars": 2768,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 42,
+      "sandbox_ms": 0,
+      "latency_ms": 93,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-missing-spans-1",
+      "category": "RCA: missing-spans",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 9,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8898,
+      "prompt_chars_max": 4904,
+      "estimated_prompt_tokens": 2225,
+      "tool_result_chars": 919,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 1,
+      "sandbox_ms": 113,
+      "latency_ms": 158,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-partial-outage-1",
+      "category": "RCA: partial-outage",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "PROBABLE",
+        "affected_orders": 14,
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 4,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 3,
+      "integration_calls": 3,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 22386,
+      "prompt_chars_max": 6968,
+      "estimated_prompt_tokens": 5598,
+      "tool_result_chars": 4216,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 62,
+      "sandbox_ms": 0,
+      "latency_ms": 117,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-partial-outage-1",
+      "category": "RCA: partial-outage",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "PROBABLE",
+        "affected_orders": 14,
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 3,
+      "nested_failures": 1,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 1,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 9038,
+      "prompt_chars_max": 5041,
+      "estimated_prompt_tokens": 2261,
+      "tool_result_chars": 1066,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 100,
+      "latency_ms": 149,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-event-ordering-1",
+      "category": "RCA: event-ordering",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "ledger-service",
+        "root_cause_operation": "ledger.apply",
+        "cause": "event_ordering",
+        "status": "CONFIRMED",
+        "affected_orders": 9,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 9385,
+      "prompt_chars_max": 5390,
+      "estimated_prompt_tokens": 2347,
+      "tool_result_chars": 1425,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 20,
+      "sandbox_ms": 0,
+      "latency_ms": 64,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-event-ordering-1",
+      "category": "RCA: event-ordering",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "ledger-service",
+        "root_cause_operation": "ledger.apply",
+        "cause": "event_ordering",
+        "status": "CONFIRMED",
+        "affected_orders": 9,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 1,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs"
+      ],
+      "prompt_chars_total": 8725,
+      "prompt_chars_max": 4730,
+      "estimated_prompt_tokens": 2182,
+      "tool_result_chars": 728,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 98,
+      "latency_ms": 173,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-provider-timeout-2",
+      "category": "RCA: provider-timeout",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 11,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 16277,
+      "prompt_chars_max": 6638,
+      "estimated_prompt_tokens": 4070,
+      "tool_result_chars": 3487,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 40,
+      "sandbox_ms": 0,
+      "latency_ms": 90,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-provider-timeout-2",
+      "category": "RCA: provider-timeout",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 11,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8923,
+      "prompt_chars_max": 4920,
+      "estimated_prompt_tokens": 2231,
+      "tool_result_chars": 926,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 95,
+      "latency_ms": 122,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-retry-amplification-2",
+      "category": "RCA: retry-amplification",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": false,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": false,
+        "root_cause_operation": false,
+        "cause": false,
+        "affected_orders": false,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {
+        "root_cause_service": {
+          "expected": "refund-worker",
+          "actual": null
+        },
+        "root_cause_operation": {
+          "expected": "refund.retry",
+          "actual": null
+        },
+        "cause": {
+          "expected": "retry_amplification",
+          "actual": null
+        },
+        "affected_orders": {
+          "expected": 11,
+          "actual": null
+        }
+      },
+      "rca": {
+        "detection": false,
+        "service": false,
+        "operation": false,
+        "cause": false,
+        "fault_localized": false,
+        "correlation": false,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {},
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 20667,
+      "prompt_chars_max": 11010,
+      "estimated_prompt_tokens": 5168,
+      "tool_result_chars": 7705,
+      "truncated_results": 1,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 39,
+      "sandbox_ms": 0,
+      "latency_ms": 87,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-retry-amplification-2",
+      "category": "RCA: retry-amplification",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "refund.retry",
+        "cause": "retry_amplification",
+        "status": "CONFIRMED",
+        "affected_orders": 11,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker refund.retry"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8920,
+      "prompt_chars_max": 4908,
+      "estimated_prompt_tokens": 2230,
+      "tool_result_chars": 905,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 98,
+      "latency_ms": 147,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-kafka-consumer-lag-2",
+      "category": "RCA: kafka-consumer-lag",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "consume.refund-events",
+        "cause": "consumer_lag",
+        "status": "CONFIRMED",
+        "affected_orders": 14,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 9826,
+      "prompt_chars_max": 5838,
+      "estimated_prompt_tokens": 2457,
+      "tool_result_chars": 1930,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 20,
+      "sandbox_ms": 0,
+      "latency_ms": 61,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-kafka-consumer-lag-2",
+      "category": "RCA: kafka-consumer-lag",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "consume.refund-events",
+        "cause": "consumer_lag",
+        "status": "CONFIRMED",
+        "affected_orders": 14,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 1,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs"
+      ],
+      "prompt_chars_total": 8727,
+      "prompt_chars_max": 4739,
+      "estimated_prompt_tokens": 2182,
+      "tool_result_chars": 744,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 106,
+      "latency_ms": 154,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-db-pool-saturation-2",
+      "category": "RCA: db-pool-saturation",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "refund.db.acquire",
+        "cause": "db_pool_saturation",
+        "status": "CONFIRMED",
+        "affected_orders": 12,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 16514,
+      "prompt_chars_max": 6721,
+      "estimated_prompt_tokens": 4130,
+      "tool_result_chars": 3730,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 40,
+      "sandbox_ms": 0,
+      "latency_ms": 89,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-db-pool-saturation-2",
+      "category": "RCA: db-pool-saturation",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "refund-worker",
+        "root_cause_operation": "refund.db.acquire",
+        "cause": "db_pool_saturation",
+        "status": "CONFIRMED",
+        "affected_orders": 12,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8926,
+      "prompt_chars_max": 4917,
+      "estimated_prompt_tokens": 2233,
+      "tool_result_chars": 917,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 105,
+      "latency_ms": 154,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-downstream-http-2",
+      "category": "RCA: downstream-http",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "fraud-service",
+        "root_cause_operation": "fraud.check",
+        "cause": "downstream_http_degradation",
+        "status": "CONFIRMED",
+        "affected_orders": 10,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 15857,
+      "prompt_chars_max": 6366,
+      "estimated_prompt_tokens": 3965,
+      "tool_result_chars": 3052,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 40,
+      "sandbox_ms": 0,
+      "latency_ms": 87,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-downstream-http-2",
+      "category": "RCA: downstream-http",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "fraud-service",
+        "root_cause_operation": "fraud.check",
+        "cause": "downstream_http_degradation",
+        "status": "CONFIRMED",
+        "affected_orders": 10,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8904,
+      "prompt_chars_max": 4904,
+      "estimated_prompt_tokens": 2226,
+      "tool_result_chars": 913,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 95,
+      "latency_ms": 129,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-idempotency-conflict-2",
+      "category": "RCA: idempotency-conflict",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "order-api",
+        "root_cause_operation": "refund.submit",
+        "cause": "idempotency_conflict",
+        "status": "CONFIRMED",
+        "affected_orders": 13,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 18161,
+      "prompt_chars_max": 8375,
+      "estimated_prompt_tokens": 4541,
+      "tool_result_chars": 5561,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 41,
+      "sandbox_ms": 0,
+      "latency_ms": 91,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-idempotency-conflict-2",
+      "category": "RCA: idempotency-conflict",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "order-api",
+        "root_cause_operation": "refund.submit",
+        "cause": "idempotency_conflict",
+        "status": "CONFIRMED",
+        "affected_orders": 13,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8889,
+      "prompt_chars_max": 4890,
+      "estimated_prompt_tokens": 2223,
+      "tool_result_chars": 900,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 93,
+      "latency_ms": 122,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-misleading-warnings-2",
+      "category": "RCA: misleading-warnings",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 17759,
+      "prompt_chars_max": 7392,
+      "estimated_prompt_tokens": 4440,
+      "tool_result_chars": 5062,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 41,
+      "sandbox_ms": 0,
+      "latency_ms": 86,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-misleading-warnings-2",
+      "category": "RCA: misleading-warnings",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8942,
+      "prompt_chars_max": 4930,
+      "estimated_prompt_tokens": 2236,
+      "tool_result_chars": 927,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 108,
+      "latency_ms": 160,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-missing-spans-2",
+      "category": "RCA: missing-spans",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 3,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 2,
+      "integration_calls": 2,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 17578,
+      "prompt_chars_max": 7247,
+      "estimated_prompt_tokens": 4396,
+      "tool_result_chars": 4903,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 40,
+      "sandbox_ms": 0,
+      "latency_ms": 96,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-missing-spans-2",
+      "category": "RCA: missing-spans",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "CONFIRMED",
+        "affected_orders": 16,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 2,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 8904,
+      "prompt_chars_max": 4910,
+      "estimated_prompt_tokens": 2227,
+      "tool_result_chars": 925,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 120,
+      "latency_ms": 148,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-partial-outage-2",
+      "category": "RCA: partial-outage",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "PROBABLE",
+        "affected_orders": 16,
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 4,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 3,
+      "integration_calls": 3,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 22936,
+      "prompt_chars_max": 7250,
+      "estimated_prompt_tokens": 5736,
+      "tool_result_chars": 4806,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 60,
+      "sandbox_ms": 0,
+      "latency_ms": 115,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-partial-outage-2",
+      "category": "RCA: partial-outage",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "payment-provider",
+        "root_cause_operation": "provider.refund.http",
+        "cause": "provider_timeout",
+        "status": "PROBABLE",
+        "affected_orders": 16,
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 3,
+      "nested_failures": 1,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 1,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
+      "prompt_chars_total": 9043,
+      "prompt_chars_max": 5046,
+      "estimated_prompt_tokens": 2262,
+      "tool_result_chars": 1071,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 130,
+      "latency_ms": 154,
+      "evidence_complete": true
+    },
+    {
+      "task_id": "INC-event-ordering-2",
+      "category": "RCA: event-ordering",
+      "eligible": true,
+      "variant": "direct",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": false,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "ledger-service",
+        "root_cause_operation": "ledger.apply",
+        "cause": "event_ordering",
+        "status": "CONFIRMED",
+        "affected_orders": 15,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 1,
+      "codeact_executions": 0,
+      "codeact_failed": 0,
+      "nested_calls": 0,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [],
+      "prompt_chars_total": 10267,
+      "prompt_chars_max": 6272,
+      "estimated_prompt_tokens": 2567,
+      "tool_result_chars": 2367,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 21,
+      "sandbox_ms": 0,
+      "latency_ms": 61,
+      "evidence_complete": null
+    },
+    {
+      "task_id": "INC-event-ordering-2",
+      "category": "RCA: event-ordering",
+      "eligible": true,
+      "variant": "codeact",
+      "repetition": 0,
+      "provider": "claude",
+      "model": null,
+      "requested_model": null,
+      "effort": null,
+      "provider_models": [],
+      "model_resolution": "unresolved",
+      "codeact_offered": true,
+      "turn_status": "completed",
+      "correct": true,
+      "answered": true,
+      "unsupported": 0,
+      "fields": {
+        "root_cause_service": true,
+        "root_cause_operation": true,
+        "cause": true,
+        "affected_orders": true,
+        "status": true,
+        "missing_sources": true,
+        "next_actions": true
+      },
+      "grading": {},
+      "rca": {
+        "detection": true,
+        "service": true,
+        "operation": true,
+        "cause": true,
+        "fault_localized": true,
+        "correlation": true,
+        "symptom_as_cause": false,
+        "misleading_signal_taken": false,
+        "false_confirmation": false,
+        "uncertainty_reported": true,
+        "missing_sources_reported": true,
+        "unsafe_next_action": false
+      },
+      "answer": {
+        "root_cause_service": "ledger-service",
+        "root_cause_operation": "ledger.apply",
+        "cause": "event_ordering",
+        "status": "CONFIRMED",
+        "affected_orders": 15,
+        "missing_sources": [],
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
+      },
+      "sdk_calls": 2,
+      "model_turns": null,
+      "provider_tool_uses": null,
+      "tool_calls": 1,
+      "integration_calls": 0,
+      "codeact_executions": 1,
+      "codeact_failed": 0,
+      "nested_calls": 1,
+      "nested_failures": 0,
+      "codeact_failures": [],
+      "recovery": {
+        "execution_failures": 0,
+        "recovery_attempts": 0,
+        "recovered": 0,
+        "recovery_failed": 0,
+        "fallback_direct": 0,
+        "abandoned": 0,
+        "unknown": 0,
+        "nested_failures_in_ok_executions": 0,
+        "episodes": []
+      },
+      "composed_tools": [
+        "rca.logs"
+      ],
+      "prompt_chars_total": 8727,
+      "prompt_chars_max": 4732,
+      "estimated_prompt_tokens": 2182,
+      "tool_result_chars": 730,
+      "truncated_results": 0,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cache_read_tokens": null,
+      "cache_creation_tokens": null,
+      "input_tokens_total": null,
+      "cost_usd": null,
+      "provider_ms": 0,
+      "sandbox_ms": 116,
+      "latency_ms": 150,
+      "evidence_complete": true
+    }
+  ]
+}
