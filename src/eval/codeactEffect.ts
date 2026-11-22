@@ -22,6 +22,7 @@ import type { Actor } from "../authz/access.ts";
 import type { AgentProvider } from "../agent/provider.ts";
 import type { CompletionRunner } from "../agent/complete.ts";
 import { wilson } from "./scoring.ts";
+import { classifyRecovery, type RecoverySummary, type ToolEvent } from "./codeactRecovery.ts";
 import {
   gradeAnswer,
   parseAnswer,
@@ -55,8 +56,18 @@ export interface Sample {
   codeact_executions: number;
   codeact_failed: number;
   nested_calls: number;
-  /** CodeAct executions that failed and were followed by another tool call in the same turn. */
-  repairs: number;
+  /** Nested calls that did not succeed (inside failed and successful executions alike). */
+  nested_failures: number;
+  /** Sanitized diagnosis of each failed execution (category, phase, the nested tool involved). */
+  codeact_failures: Array<{
+    execution_id: number;
+    category: string;
+    phase: string;
+    nested_tool?: string | null;
+    nested_category?: string;
+  }>;
+  /** What followed each failure, from the observed sequence (see codeactRecovery.ts). */
+  recovery: RecoverySummary;
   composed_tools: string[];
   /** Prompt text the provider received (all completions) and the largest single prompt (context occupancy). */
   prompt_chars_total: number;
@@ -92,9 +103,16 @@ const final = (value: unknown, note: string) =>
  * The deterministic stand-in for a model. It keeps what it has seen across completions (like a session), never reads
  * fixture data except through its prompt, and cannot use a result the platform truncated.
  */
-export function simulatedPolicy(task: EffectTask): CompletionRunner {
+export function simulatedPolicy(
+  task: EffectTask,
+  /**
+   * Regression fixtures only: the first program sent (e.g. a buggy one), and what the policy does when a program fails:
+   * send the reference program once more (`retry`) or continue with direct calls (`direct`, the default).
+   */
+  fault: { firstProgram?: string; onFailure?: "retry" | "direct" } = {},
+): CompletionRunner {
   const seen = new Map<number, Seen>();
-  let codeactTried = false;
+  let programs = 0;
   return async (prompt, options) => {
     for (const m of prompt.matchAll(RESULT)) {
       const seq = Number(m[1]);
@@ -119,10 +137,15 @@ export function simulatedPolicy(task: EffectTask): CompletionRunner {
     const offered =
       /\bcode\.execute\b/.test(prompt) ||
       !!options.nativeTools?.tools.some((t) => t.name === "code.execute");
-    if (task.eligible && offered && !codeactTried) {
-      codeactTried = true;
-      const code = `return await (${task.plan.toString()})((name, args) => platform.callTool(name, args));`;
+    const plan = `return await (${task.plan.toString()})((name, args) => platform.callTool(name, args));`;
+    if (task.eligible && offered && programs === 0) {
+      programs++;
+      const code = fault.firstProgram ?? plan;
       return { text: block([{ tool: "code.execute", arguments: { code } }]), tokens: null };
+    }
+    if (task.eligible && offered && programs === 1 && codeact && fault.onFailure === "retry") {
+      programs++;
+      return { text: block([{ tool: "code.execute", arguments: { code: plan } }]), tokens: null };
     }
     // Direct: replay the plan; the k-th tool call maps to the k-th tools.call result seen.
     const direct = ordered.filter((s) => s.tool === "tools.call");
@@ -247,29 +270,72 @@ export async function runSample(
         [conv.id],
       )
     )?.usage ?? {};
-  const calls = await q<{ tool: string; status: string; chars: number; created_at: Date }>(
+  const calls = await q<{
+    tool: string;
+    status: string;
+    chars: number;
+    created_at: Date;
+    duration_ms: number | null;
+    execution_id: string | null;
+  }>(
     pool,
-    "SELECT tool, status, length(coalesce(result::text, '')) AS chars, created_at FROM chat_tool_calls WHERE conversation_id = $1 ORDER BY id",
+    `SELECT tool, status, length(coalesce(result::text, '')) AS chars, created_at, duration_ms,
+            result->>'execution_id' AS execution_id
+     FROM chat_tool_calls WHERE conversation_id = $1 ORDER BY id`,
     [conv.id],
   );
-  const execs = await q<{ id: number; status: string; duration_ms: number | null }>(
+  const execs = await q<{
+    id: number;
+    status: string;
+    duration_ms: number | null;
+    diagnostics: {
+      failure?: {
+        category: string;
+        phase: string;
+        last_nested_failure?: { tool: string | null; category: string };
+      };
+      nested_failures?: unknown[];
+    } | null;
+  }>(
     pool,
-    "SELECT id, status, duration_ms FROM code_executions WHERE conversation_id = $1 ORDER BY id",
+    "SELECT id, status, duration_ms, diagnostics FROM code_executions WHERE conversation_id = $1 ORDER BY id",
     [conv.id],
   );
   const nested = execs.length
-    ? await q<{ tool: string }>(
+    ? await q<{ tool: string; status: string }>(
         pool,
-        "SELECT tool FROM code_execution_calls WHERE execution_id = ANY($1::bigint[])",
+        "SELECT tool, status FROM code_execution_calls WHERE execution_id = ANY($1::bigint[])",
         [execs.map((e) => e.id)],
       )
     : [];
+  const execById = new Map(execs.map((e) => [Number(e.id), e]));
+  const events: ToolEvent[] = calls.map((c) => {
+    const started = new Date(c.created_at).getTime();
+    const e = c.execution_id ? execById.get(Number(c.execution_id)) : undefined;
+    return {
+      tool: c.tool,
+      status: c.status,
+      started_at: started,
+      finished_at: started + Number(c.duration_ms ?? 0),
+      ...(e
+        ? {
+            execution: {
+              id: Number(e.id),
+              ok: e.status === "ok",
+              failure:
+                e.diagnostics?.failure ??
+                (e.status === "ok" ? null : { category: "unknown", phase: "unknown" }),
+              nested_failures: e.diagnostics?.nested_failures?.length ?? 0,
+            },
+          }
+        : {}),
+    };
+  });
   const codeCalls = await q<{ result: { evidence_status?: string } | null }>(
     pool,
     "SELECT result FROM chat_tool_calls WHERE conversation_id = $1 AND tool = 'code.execute' AND status = 'ok'",
     [conv.id],
   );
-  const failedExec = calls.findIndex((c) => c.tool === "code.execute" && c.status !== "ok");
   const answer = parseAnswer(reply?.content ?? "");
   const grade = gradeAnswer(expected, answer);
   const n = (v: unknown) => (typeof v === "number" ? v : v == null ? null : Number(v));
@@ -292,7 +358,25 @@ export async function runSample(
     codeact_executions: execs.length,
     codeact_failed: execs.filter((e) => e.status !== "ok").length,
     nested_calls: nested.length,
-    repairs: failedExec >= 0 && calls.length > failedExec + 1 ? 1 : 0,
+    nested_failures: nested.filter((c) => c.status !== "ok").length,
+    codeact_failures: execs
+      .filter((e) => e.status !== "ok")
+      .map((e) => {
+        const f = e.diagnostics?.failure;
+        return {
+          execution_id: Number(e.id),
+          // Rows without a diagnosis (e.g. recorded before diagnostics existed) stay explicitly unknown.
+          category: f?.category ?? "unknown",
+          phase: f?.phase ?? "unknown",
+          ...(f?.last_nested_failure
+            ? {
+                nested_tool: f.last_nested_failure.tool,
+                nested_category: f.last_nested_failure.category,
+              }
+            : {}),
+        };
+      }),
+    recovery: classifyRecovery(events),
     composed_tools: [...new Set(nested.map((c) => c.tool))].sort(),
     prompt_chars_total: prompts.reduce((a, b) => a + b, 0),
     prompt_chars_max: Math.max(0, ...prompts),
@@ -517,7 +601,30 @@ export function summarize(
         .length,
       executions: cb.reduce((a, s) => a + s.codeact_executions, 0),
       failed_executions: cb.reduce((a, s) => a + s.codeact_failed, 0),
-      repairs: cb.reduce((a, s) => a + s.repairs, 0),
+      failure_categories: cb
+        .flatMap((s) => s.codeact_failures)
+        .reduce<Record<string, number>>((acc, f) => {
+          const k = f.nested_category ? `${f.category}<-${f.nested_category}` : f.category;
+          acc[k] = (acc[k] ?? 0) + 1;
+          return acc;
+        }, {}),
+      nested_failures: cb.reduce((a, s) => a + s.nested_failures, 0),
+      recovery: (
+        [
+          "recovery_attempts",
+          "recovered",
+          "recovery_failed",
+          "fallback_direct",
+          "abandoned",
+          "unknown",
+          "nested_failures_in_ok_executions",
+        ] as const
+      ).reduce<Record<string, number>>((acc, k) => {
+        acc[k] = cb.reduce((a, s) => a + s.recovery[k], 0);
+        return acc;
+      }, {}),
+      /** Turns with a failed execution that still ended with a verified-correct answer. */
+      failed_but_correct_turns: cb.filter((s) => s.codeact_failed > 0 && s.correct).length,
       composed_tools: composed,
       evidence_complete_turns: cb.filter((s) => s.evidence_complete === true).length,
       evidence_incomplete_turns: cb.filter((s) => s.evidence_complete === false).length,
@@ -564,7 +671,11 @@ export function renderMarkdown(r: EffectReport) {
         `| ${id} | ${t.eligible ? "yes" : "no"} | ${t.correct.direct}/${t.correct.of} | ${t.correct.codeact}/${t.correct.of} | ${fmt(t.completions.direct, 1)}→${fmt(t.completions.codeact, 1)} | ${fmt(t.prompt_chars_total.direct)}→${fmt(t.prompt_chars_total.codeact)} | ${fmt(t.truncated_results.direct, 1)}→${fmt(t.truncated_results.codeact, 1)} |`,
     ),
     "",
-    `Adoption (CodeAct variant): ${r.adoption.eligible_turns_using_codeact}/${r.adoption.eligible_turns} eligible turns used CodeAct, ${r.adoption.eligible_turns_direct_only} used direct calls only, ${r.adoption.ineligible_turns_using_codeact} ineligible turns used it; ${r.adoption.executions} executions, ${r.adoption.failed_executions} failed, ${r.adoption.repairs} repairs; evidence complete in ${r.adoption.evidence_complete_turns} turns, incomplete in ${r.adoption.evidence_incomplete_turns}.`,
+    `Adoption (CodeAct variant): ${r.adoption.eligible_turns_using_codeact}/${r.adoption.eligible_turns} eligible turns used CodeAct, ${r.adoption.eligible_turns_direct_only} used direct calls only, ${r.adoption.ineligible_turns_using_codeact} ineligible turns used it; ${r.adoption.executions} executions, ${r.adoption.failed_executions} failed (${
+      Object.entries(r.adoption.failure_categories)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ") || "none"
+    }); after failures: ${r.adoption.recovery.recovery_attempts} recovery attempts, ${r.adoption.recovery.recovered} recovered, ${r.adoption.recovery.fallback_direct} fell back to direct tools, ${r.adoption.recovery.abandoned + r.adoption.recovery.recovery_failed} abandoned, ${r.adoption.recovery.unknown} unknown; ${r.adoption.failed_but_correct_turns} turns with a failed execution still answered correctly; evidence complete in ${r.adoption.evidence_complete_turns} turns, incomplete in ${r.adoption.evidence_incomplete_turns}.`,
     "",
     ...r.meta.notes.map((n) => `- ${n}`),
   ].join("\n");

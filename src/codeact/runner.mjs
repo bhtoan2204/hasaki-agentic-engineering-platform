@@ -6,7 +6,10 @@
  *
  * Protocol (JSON lines).
  *   stdin  ← {t:"start",code,maxOutputBytes} | {t:"result",id,ok,result|error} | {t:"tools",id,tools|error}
- *   stdout → {t:"call",id,name,args} | {t:"list",id} | {t:"done",value[,truncated,original_bytes]} | {t:"fail",error,category?}
+ *   stdout → {t:"started"} | {t:"call",id,name,args} | {t:"list",id} | {t:"done",value[,truncated,original_bytes]}
+ *            | {t:"fail",error,phase:"compile"|"run"|"result"}
+ * `started` is sent once the program compiled, so the parent can tell a sandbox that never came up from a program
+ * that crashed, and a syntax error (phase compile) from a runtime error (phase run).
  */
 import vm from "node:vm";
 import { createInterface } from "node:readline";
@@ -84,21 +87,28 @@ async function start(code, maxOutputBytes) {
   if (started) return;
   started = true;
   let value;
+  let program;
   try {
     const context = vm.createContext({ console: programConsole });
-    const program = vm.runInContext(`(async (platform) => {\n${code}\n})`, context, {
+    program = vm.runInContext(`(async (platform) => {\n${code}\n})`, context, {
       filename: "program.js",
     });
+  } catch (e) {
+    send({ t: "fail", error: String(e?.message ?? e).slice(0, 2000), phase: "compile" });
+    process.exit(0);
+  }
+  send({ t: "started" });
+  try {
     value = await program(platform);
   } catch (e) {
-    send({ t: "fail", error: String(e?.message ?? e).slice(0, 2000) });
+    send({ t: "fail", error: String(e?.message ?? e).slice(0, 2000), phase: "run" });
     process.exit(0);
   }
   let text;
   try {
     text = JSON.stringify(value === undefined ? null : value);
   } catch (e) {
-    send({ t: "fail", error: `the result is not JSON: ${e.message}`, category: "internal" });
+    send({ t: "fail", error: `the result is not JSON: ${e.message}`, phase: "result" });
     process.exit(0);
   }
   const bytes = Buffer.byteLength(text);

@@ -19,10 +19,12 @@ import {
   canonicalJson,
   codeActAvailability,
   executeCode,
+  recoveryAdvice,
   type CallRecord,
   type Category,
   type CodeActCall,
   type CodeActResult,
+  type Failure,
 } from "./execute.ts";
 import { createHash } from "node:crypto";
 
@@ -38,6 +40,11 @@ export interface CodeActAnswer {
   note?: string;
   error?: string;
   category?: CodeActResult["category"];
+  /** The execution's row (absent only when CodeAct was unavailable and nothing ran). */
+  execution_id?: number;
+  /** Sanitized diagnosis of the failure, and what to do about it (retry only what a corrected program can fix). */
+  failure?: Failure;
+  recovery?: ReturnType<typeof recoveryAdvice>;
   /** References to durably recorded nested results, each resolvable with resolveCodeActEvidence. */
   evidence: string[];
   /**
@@ -174,7 +181,8 @@ const familiesOf = (p: CodeActPlatform) =>
 async function reconcileStale() {
   await q(
     pool,
-    `UPDATE code_executions SET status = 'error', error_category = 'internal', finished_at = now()
+    `UPDATE code_executions SET status = 'error', error_category = 'internal', finished_at = now(),
+       diagnostics = '{"failure":{"category":"interrupted","phase":"unknown"}}'::jsonb
      WHERE status = 'running' AND created_at < now() - make_interval(secs => $1)`,
     [Math.ceil(config.codeAct.timeoutMs / 1000) + 120],
   );
@@ -248,11 +256,12 @@ async function terminate(
   status: "ok" | "error",
   category: string | null,
   stats?: CodeActResult["stats"],
+  diagnostics?: Record<string, unknown>,
 ) {
   const row = await one<{ id: number }>(
     pool,
     `UPDATE code_executions SET status=$2, error_category=$3, calls=COALESCE($4, calls),
-       result_bytes=COALESCE($5, result_bytes), duration_ms=$6, finished_at=now()
+       result_bytes=COALESCE($5, result_bytes), duration_ms=$6, finished_at=now(), diagnostics=$7
      WHERE id=$1 AND status='running' RETURNING id`,
     [
       executionId,
@@ -261,6 +270,7 @@ async function terminate(
       stats?.calls ?? null,
       stats?.result_bytes ?? null,
       stats?.duration_ms ?? null,
+      diagnostics ? JSON.stringify(diagnostics) : null,
     ],
   );
   return !!row;
@@ -280,12 +290,26 @@ async function finishExecution(
   // A reference is a claim that a durable row exists: only for recorded calls of an execution finalized here.
   const warnings: string[] = [];
   let finalized = false;
+  // Sanitized: categories, phases, sequence numbers and catalog tool names only (an unknown tool's name is dropped).
+  const diagnostics = {
+    ...(r.failure ? { failure: r.failure } : {}),
+    nested_failures: r.calls
+      .filter((c) => c.failure)
+      .slice(0, 20)
+      .map((c) => ({
+        seq: c.seq,
+        tool: c.failure === "unknown_tool" ? null : c.tool,
+        category: c.failure,
+      })),
+    persistence_failures: r.calls.filter((c) => c.persisted === false).length,
+  };
   try {
     finalized = await terminate(
       executionId,
       r.ok ? "ok" : "error",
       r.ok ? null : (r.category ?? "internal"),
       r.stats,
+      diagnostics,
     );
     if (!finalized)
       warnings.push(
@@ -309,7 +333,14 @@ async function finishExecution(
   return {
     ok: r.ok,
     untrusted: true,
-    ...(r.ok ? { value: r.value } : { error: r.error, category: r.category }),
+    execution_id: executionId,
+    ...(r.ok
+      ? { value: r.value }
+      : {
+          error: r.error,
+          category: r.category,
+          ...(r.failure ? { failure: r.failure, recovery: recoveryAdvice(r.failure) } : {}),
+        }),
     ...(r.truncated
       ? {
           truncated: true,

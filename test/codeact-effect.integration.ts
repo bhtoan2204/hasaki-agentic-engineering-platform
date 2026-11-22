@@ -15,6 +15,7 @@ import type { AgentProvider } from "../src/agent/provider.ts";
 import { TASKS, referenceAnswer, gradeAnswer, parseAnswer } from "../src/eval/codeactTasks.ts";
 import {
   runEvaluation,
+  runSample,
   simulatedPolicy,
   summarize,
   renderMarkdown,
@@ -157,4 +158,77 @@ test("the budget stops the evaluation before the next sample", async () => {
   );
   assert.equal(samples.length, 1);
   assert.match(stopped ?? "", /sample limit/);
+});
+
+// A realistic CodeAct failure: the program also asks SigNoz for refund-worker spans (HTTP 503 in the fixture) without
+// handling the error, so the whole program fails although its other calls succeeded.
+const BUGGY_T06 = `
+  const slow = (await platform.callTool("eval.traces", { service: "payment-gateway", operation: "gateway.refund", min_duration_ms: 5000 })).spans;
+  const worker = (await platform.callTool("eval.traces", { service: "refund-worker" })).spans;
+  return { slow: slow.length, worker: worker.length };`;
+
+test("regression: a failed program is diagnosed, then recovered by a corrected program (Chat harness)", async () => {
+  const actor = { ...user, active: true };
+  const task = TASKS.find((t) => t.id === "T06-refund-timeout")!;
+  const s = await runSample(task, "codeact", 0, {
+    actor,
+    provider: "claude",
+    runnerFor: (t) => simulatedPolicy(t, { firstProgram: BUGGY_T06, onFailure: "retry" }),
+    turnTimeoutMs: 60_000,
+  });
+  console.log(
+    `FAULT-RECOVERED ${JSON.stringify({ codeact_failures: s.codeact_failures, recovery: s.recovery, correct: s.correct })}`,
+  );
+  assert.equal(s.codeact_executions, 2);
+  assert.equal(s.codeact_failed, 1);
+  assert.deepEqual(
+    s.codeact_failures.map(({ execution_id: _id, ...f }) => f),
+    [
+      {
+        category: "program_runtime_error",
+        phase: "program_run",
+        nested_tool: "eval.traces",
+        nested_category: "tool_invocation_failed",
+      },
+    ],
+  );
+  assert.deepEqual(
+    [s.recovery.execution_failures, s.recovery.recovery_attempts, s.recovery.recovered],
+    [1, 1, 1],
+  );
+  assert.equal(s.nested_failures, 1, "the 503 inside the failed program is counted");
+  assert.equal(s.correct, true, "final outcome reported separately from the failure");
+  const report = summarize([s], {
+    level: "fixture-simulated-provider",
+    sandbox: "plain-process",
+    provider: "simulated",
+    model: null,
+  });
+  assert.equal(report.adoption.failed_executions, 1);
+  assert.deepEqual(report.adoption.failure_categories, {
+    "program_runtime_error<-tool_invocation_failed": 1,
+  });
+  assert.equal(report.adoption.recovery.recovered, 1);
+  assert.equal(report.adoption.failed_but_correct_turns, 1);
+  assert.match(
+    renderMarkdown(report),
+    /1 failed \(program_runtime_error<-tool_invocation_failed: 1\)/,
+  );
+});
+
+test("regression: a failed program followed by direct calls is a fallback, not a repair", async () => {
+  const actor = { ...user, active: true };
+  const task = TASKS.find((t) => t.id === "T06-refund-timeout")!;
+  const s = await runSample(task, "codeact", 0, {
+    actor,
+    provider: "claude",
+    runnerFor: (t) => simulatedPolicy(t, { firstProgram: BUGGY_T06, onFailure: "direct" }),
+    turnTimeoutMs: 60_000,
+  });
+  assert.equal(s.codeact_failed, 1);
+  assert.deepEqual(
+    [s.recovery.recovered, s.recovery.fallback_direct, s.recovery.recovery_attempts],
+    [0, 1, 0],
+  );
+  assert.ok(s.integration_calls > 0);
 });

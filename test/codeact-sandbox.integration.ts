@@ -177,3 +177,41 @@ test(
     assert.equal(t.leftover(), "");
   },
 );
+
+test(
+  "failure diagnosis in the real sandbox: syntax, runtime-after-nested-failure, memory exhaustion",
+  { skip },
+  async () => {
+    const run = (code: string, c = call) =>
+      executeCode(
+        { code, timeoutMs: 15000 },
+        { tools: () => TOOLS, call: c, launch: sandboxLauncher },
+      );
+    const syntax = await run(`return {;`);
+    assert.deepEqual(syntax.failure, {
+      category: "program_syntax_error",
+      phase: "program_compile",
+    });
+    const nested = await run(`await platform.callTool("echo", {}); return 1;`, async () => ({
+      ok: false,
+      error: "HTTP 503",
+    }));
+    assert.deepEqual(nested.failure, {
+      category: "program_runtime_error",
+      phase: "program_run",
+      last_nested_failure: { seq: 1, tool: "echo", category: "tool_invocation_failed" },
+    });
+    const ok = await run(`return (await platform.callTool("echo", { n: 2 })).n;`);
+    assert.deepEqual([ok.ok, ok.value, ok.failure], [true, 2, undefined]);
+    // The heap limit kills the program: the runner had already reported `started`, so the process died while running.
+    const memory = await run(`const a = []; for (;;) a.push("x".repeat(1 << 20)); return 1;`);
+    assert.equal(memory.ok, false);
+    assert.ok(
+      ["process_terminated", "program_runtime_error"].includes(memory.failure!.category),
+      JSON.stringify(memory.failure),
+    );
+    console.log(
+      `SANDBOX-DIAG ${JSON.stringify({ syntax: syntax.failure, nested: nested.failure, memory: memory.failure })}`,
+    );
+  },
+);

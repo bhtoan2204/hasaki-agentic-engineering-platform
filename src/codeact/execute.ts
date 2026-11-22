@@ -29,6 +29,118 @@ export type Category =
   | "dependency_unavailable"
   | "internal";
 
+/**
+ * Sanitized diagnosis of a failed execution or nested call: what failed and in which phase, never program text or tool
+ * payloads. `Category` above stays the coarse, backward-compatible classification.
+ */
+export type FailureCategory =
+  | "invalid_program"
+  | "sandbox_unavailable"
+  | "sandbox_startup_failed"
+  | "program_syntax_error"
+  | "program_runtime_error"
+  | "process_terminated"
+  | "execution_timeout"
+  | "canceled"
+  | "resource_budget_exceeded"
+  | "ipc_protocol_error"
+  | "output_too_large"
+  // nested calls
+  | "unknown_tool"
+  | "unauthorized_tool"
+  | "invalid_tool_arguments"
+  | "nested_tool_timeout"
+  | "tool_output_too_large"
+  | "tool_invocation_failed";
+export type FailurePhase =
+  "validate" | "sandbox_launch" | "sandbox_start" | "program_compile" | "program_run" | "result";
+export interface Failure {
+  category: FailureCategory;
+  phase: FailurePhase;
+  /**
+   * The most recent nested call that failed before a runtime failure (the program may or may not have failed because of
+   * it). `tool` is null when the program asked for a tool that does not exist (its name is program-supplied text).
+   */
+  last_nested_failure?: { seq: number; tool: string | null; category: FailureCategory };
+}
+
+/** What an agent should do about a failure: retry only what a corrected program can fix. */
+export function recoveryAdvice(f: Failure): {
+  retry: "no" | "fix_program" | "fix_arguments" | "narrow" | "handle_partial_failure";
+  hint: string;
+} {
+  const nested =
+    f.category === "program_runtime_error" ? f.last_nested_failure?.category : undefined;
+  const narrow = {
+    retry: "narrow" as const,
+    hint: "Narrow the queries (filters, fewer ids, smaller pages) or return an aggregate instead of raw rows.",
+  };
+  const no = (hint: string) => ({ retry: "no" as const, hint });
+  switch (nested) {
+    case "invalid_tool_arguments":
+      return {
+        retry: "fix_arguments",
+        hint: "A nested call had invalid arguments: correct them from the tool's documented arguments, then retry once.",
+      };
+    case "unknown_tool":
+      return {
+        retry: "fix_program",
+        hint: "A nested call named a tool that does not exist: use an exact name from platform.listTools().",
+      };
+    case "unauthorized_tool":
+      return no(
+        "A nested call is not allowed here; retrying cannot change that. Continue without it.",
+      );
+    case "tool_invocation_failed":
+      return {
+        retry: "handle_partial_failure",
+        hint: "A source failed: do not repeat the same call; wrap it in try/catch and report that source as missing, or answer with the evidence you have.",
+      };
+    case "nested_tool_timeout":
+    case "tool_output_too_large":
+    case "resource_budget_exceeded":
+      return narrow;
+    case "canceled":
+      return no("The turn was canceled.");
+  }
+  switch (f.category) {
+    case "invalid_program":
+    case "program_syntax_error":
+    case "program_runtime_error":
+      return { retry: "fix_program", hint: "Fix the program (see `error`) and retry once." };
+    case "execution_timeout":
+    case "resource_budget_exceeded":
+    case "output_too_large":
+    case "process_terminated":
+      return narrow;
+    case "canceled":
+      return no("The turn was canceled.");
+    default:
+      return no(
+        "CodeAct cannot run here right now; do not retry it. Use direct tool calls for what is still needed.",
+      );
+  }
+}
+
+/** The nested-call category for a broker outcome reported by a surface's call (coarse `Category` or a denial). */
+function nestedFailure(category: Category | undefined, error: string | undefined): FailureCategory {
+  switch (category) {
+    case "invalid_input":
+      return "invalid_tool_arguments";
+    case "unauthorized":
+      return "unauthorized_tool";
+    case "timeout":
+      return "nested_tool_timeout";
+    case "budget_exceeded":
+      return "resource_budget_exceeded";
+    case "canceled":
+      return "canceled";
+  }
+  if (/^denied\b/i.test(error ?? "")) return "unauthorized_tool";
+  if (/invalid arguments/i.test(error ?? "")) return "invalid_tool_arguments";
+  return "tool_invocation_failed";
+}
+
 export interface CodeActTool {
   name: string;
   summary: string;
@@ -55,6 +167,8 @@ export interface CallRecord {
   tool: string;
   status: "ok" | "error" | "denied" | "timeout";
   category?: Category;
+  /** Sanitized diagnosis of a call that did not succeed. */
+  failure?: FailureCategory;
   ms: number;
   input_sha256: string;
   output_sha256?: string;
@@ -76,6 +190,8 @@ export interface CodeActResult {
   original_bytes?: number;
   error?: string;
   category?: Category;
+  /** Sanitized diagnosis of a failed execution (absent when ok). */
+  failure?: Failure;
   calls: CallRecord[];
   stats: { duration_ms: number; calls: number; result_bytes: number };
 }
@@ -201,13 +317,19 @@ export async function executeCode(
       result_bytes: resultBytes,
     },
   });
-  const fail = (category: Category, error: string) => outcome({ ok: false, category, error });
-  const canceled = () => fail("canceled", reasonOf(deps.signal, "execution canceled"));
+  let phase: FailurePhase = "validate";
+  const fail = (
+    category: Category,
+    error: string,
+    failure: FailureCategory,
+    at: FailurePhase = phase,
+  ) => outcome({ ok: false, category, error, failure: { category: failure, phase: at } });
+  const canceled = () => fail("canceled", reasonOf(deps.signal, "execution canceled"), "canceled");
 
   if (typeof req.code !== "string" || !req.code.trim())
-    return fail("invalid_input", "code is empty");
+    return fail("invalid_input", "code is empty", "invalid_program");
   if (Buffer.byteLength(req.code) > lim.maxCodeBytes)
-    return fail("invalid_input", `code exceeds ${lim.maxCodeBytes} bytes`);
+    return fail("invalid_input", `code exceeds ${lim.maxCodeBytes} bytes`, "invalid_program");
   if (deps.signal?.aborted) return canceled();
   const timeoutMs = Math.max(100, Math.min(req.timeoutMs ?? lim.timeoutMs, lim.timeoutMs));
 
@@ -219,12 +341,15 @@ export async function executeCode(
     RUNNER,
   ];
   let inv: Awaited<ReturnType<Launcher>>;
+  phase = "sandbox_launch";
   try {
     inv = await (deps.launch ?? testLauncher ?? sandboxLauncher)(process.execPath, nodeArgs);
   } catch (e) {
+    const unavailable = e instanceof CodeActError && e.category === "dependency_unavailable";
     return fail(
       e instanceof CodeActError ? e.category : "dependency_unavailable",
       (e as Error).message,
+      unavailable ? "sandbox_unavailable" : "sandbox_startup_failed",
     );
   }
   // Canceled while the sandbox was being prepared: release it and never spawn the program.
@@ -237,6 +362,7 @@ export async function executeCode(
     return canceled();
   }
 
+  phase = "sandbox_start";
   const child = spawn(inv.command, inv.args, {
     env: inv.env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -283,13 +409,15 @@ export async function executeCode(
       if (!settled && child.stdin.writable) child.stdin.write(`${line}\n`);
     };
     const timer = setTimeout(
-      () => finish(fail("timeout", `the program exceeded ${timeoutMs} ms`)),
+      () => finish(fail("timeout", `the program exceeded ${timeoutMs} ms`, "execution_timeout")),
       timeoutMs,
     );
     const onAbort = () => finish(canceled());
     deps.signal?.addEventListener("abort", onAbort, { once: true });
 
-    child.on("error", (e) => finish(fail("dependency_unavailable", e.message)));
+    child.on("error", (e) =>
+      finish(fail("dependency_unavailable", e.message, "sandbox_startup_failed")),
+    );
     child.stdin.on("error", () => {});
     child.stderr.on("data", (b: Buffer) => {
       stderrTail = (stderrTail + b.toString()).slice(-2000);
@@ -299,6 +427,8 @@ export async function executeCode(
         fail(
           "internal",
           `the program ended without a result (exit ${code ?? "signal"})${stderrTail.trim() ? `: ${stderrTail.trim().split("\n").slice(-2).join(" | ")}` : ""}`,
+          // Nothing from the runner at all: the sandbox never came up. Otherwise the process died while running.
+          phase === "sandbox_start" ? "sandbox_startup_failed" : "process_terminated",
         ),
       ),
     );
@@ -313,17 +443,35 @@ export async function executeCode(
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
         if (line.length > lineLimit)
-          return finish(fail("budget_exceeded", "a protocol message exceeded the size limit"));
+          return finish(
+            fail(
+              "budget_exceeded",
+              "a protocol message exceeded the size limit",
+              "resource_budget_exceeded",
+            ),
+          );
         if (++messages > lim.maxProtocolMessages)
-          return finish(fail("budget_exceeded", "the program sent too many protocol messages"));
+          return finish(
+            fail(
+              "budget_exceeded",
+              "the program sent too many protocol messages",
+              "resource_budget_exceeded",
+            ),
+          );
         handle(line);
       }
       if (buffer.length > lineLimit)
-        finish(fail("budget_exceeded", "a protocol message exceeded the size limit"));
+        finish(
+          fail(
+            "budget_exceeded",
+            "a protocol message exceeded the size limit",
+            "resource_budget_exceeded",
+          ),
+        );
     });
 
     const violation = (what: string) =>
-      finish(fail("invalid_input", `protocol violation: ${what}`));
+      finish(fail("invalid_input", `protocol violation: ${what}`, "ipc_protocol_error"));
     const freshId = (id: unknown): id is number => {
       if (!Number.isSafeInteger(id) || (id as number) <= 0) {
         violation("request ids must be positive integers");
@@ -354,6 +502,9 @@ export async function executeCode(
         return; // not protocol: ignored (but counted)
       }
       if (!m || typeof m !== "object") return;
+      // The runner spoke: the sandbox is up and the program is running.
+      if (phase === "sandbox_start") phase = "program_run";
+      if (m.t === "started") return;
       if (m.t === "list") {
         if (!freshId(m.id)) return;
         if (++lists > lim.maxListTools)
@@ -382,7 +533,12 @@ export async function executeCode(
           const original = Number(m.original_bytes);
           if (!(original > lim.maxOutputBytes) || Buffer.byteLength(text) > lim.maxOutputBytes)
             return finish(
-              fail("budget_exceeded", "the program's result exceeded the output limit"),
+              fail(
+                "budget_exceeded",
+                "the program's result exceeded the output limit",
+                "output_too_large",
+                "result",
+              ),
             );
           finish(
             outcome({
@@ -393,10 +549,36 @@ export async function executeCode(
             }),
           );
         } else if (Buffer.byteLength(text) > lim.maxOutputBytes)
-          finish(fail("budget_exceeded", "the program's result exceeded the output limit"));
+          finish(
+            fail(
+              "budget_exceeded",
+              "the program's result exceeded the output limit",
+              "output_too_large",
+              "result",
+            ),
+          );
         else finish(outcome({ ok: true, value: m.value ?? null }));
-      } else if (m.t === "fail")
-        finish(fail("internal", String(m.error ?? "the program failed").slice(0, 2000)));
+      } else if (m.t === "fail") {
+        // The runner is untrusted: only its known phase values are read.
+        const compile = (m as { phase?: unknown }).phase === "compile";
+        const atResult = (m as { phase?: unknown }).phase === "result";
+        const r = fail(
+          "internal",
+          String(m.error ?? "the program failed").slice(0, 2000),
+          compile ? "program_syntax_error" : "program_runtime_error",
+          compile ? "program_compile" : atResult ? "result" : "program_run",
+        );
+        const last = compile
+          ? undefined
+          : calls.filter((c) => c && c.failure).sort((a, b) => b.seq - a.seq)[0];
+        if (last && r.failure)
+          r.failure.last_nested_failure = {
+            seq: last.seq,
+            tool: last.failure === "unknown_tool" ? null : last.tool,
+            category: last.failure!,
+          };
+        finish(r);
+      }
     };
 
     /** A concurrency slot, FIFO; false when the deadline passes in the queue or the execution ends. */
@@ -472,13 +654,19 @@ export async function executeCode(
           });
         records.add(p);
       };
-      const deny = (error: string, category: Category, readOnly = false) => {
+      const deny = (
+        error: string,
+        category: Category,
+        failure: FailureCategory,
+        readOnly = false,
+      ) => {
         keep(
           {
             seq,
             tool: toolName.slice(0, 200),
             status: "denied",
             category,
+            failure,
             ms: 0,
             input_sha256,
             bytes: 0,
@@ -490,19 +678,33 @@ export async function executeCode(
         reply(error);
       };
       if (seq > lim.maxCalls)
-        return deny(`call budget of ${lim.maxCalls} nested calls reached`, "budget_exceeded");
+        return deny(
+          `call budget of ${lim.maxCalls} nested calls reached`,
+          "budget_exceeded",
+          "resource_budget_exceeded",
+        );
       if (resultBytes >= lim.maxResultBytes)
-        return deny(`result budget of ${lim.maxResultBytes} bytes reached`, "budget_exceeded");
+        return deny(
+          `result budget of ${lim.maxResultBytes} bytes reached`,
+          "budget_exceeded",
+          "resource_budget_exceeded",
+        );
       const tool = deps.tools().find((t) => t.name === name);
-      if (!tool) return deny(`unknown tool "${toolName.slice(0, 100)}"`, "invalid_input");
+      if (!tool)
+        return deny(`unknown tool "${toolName.slice(0, 100)}"`, "invalid_input", "unknown_tool");
       if (!tool.readOnly)
-        return deny(`${tool.name} changes external state; CodeAct is read-only`, "unauthorized");
+        return deny(
+          `${tool.name} changes external state; CodeAct is read-only`,
+          "unauthorized",
+          "unauthorized_tool",
+        );
 
       const slot = acquire(deadline);
       if (slot === "overflow")
         return deny(
           `too many nested calls at once: ${lim.maxConcurrency} running and ${lim.maxQueuedCalls} queued`,
           "budget_exceeded",
+          "resource_budget_exceeded",
           true,
         );
       const granted = await slot;
@@ -516,6 +718,7 @@ export async function executeCode(
             tool: tool.name,
             status: "timeout",
             category: "timeout",
+            failure: "nested_tool_timeout",
             ms: Date.now() - issuedAt,
             input_sha256,
             bytes: 0,
@@ -556,6 +759,7 @@ export async function executeCode(
       const timedOut = !r.ok && signal.aborted && !nested.signal.aborted;
       const text = r.ok ? (JSON.stringify(r.result ?? null) ?? "null") : undefined;
       const bytes = text ? Buffer.byteLength(text) : 0;
+      const tooLarge = !!text && bytes > lim.maxCallResultBytes;
       const refusal = !text
         ? undefined
         : bytes > lim.maxCallResultBytes
@@ -570,11 +774,21 @@ export async function executeCode(
           tool: tool.name,
           status: r.ok ? (refusal ? "error" : "ok") : timedOut ? "timeout" : "error",
           ...(refusal
-            ? { category: "budget_exceeded" as const }
+            ? {
+                category: "budget_exceeded" as const,
+                failure: tooLarge
+                  ? ("tool_output_too_large" as const)
+                  : ("resource_budget_exceeded" as const),
+              }
             : timedOut
-              ? { category: "timeout" as const }
-              : !r.ok && r.category
-                ? { category: r.category }
+              ? { category: "timeout" as const, failure: "nested_tool_timeout" as const }
+              : !r.ok
+                ? {
+                    ...(r.category ? { category: r.category } : {}),
+                    failure: nested.signal.aborted
+                      ? ("canceled" as const)
+                      : nestedFailure(r.category, r.error),
+                  }
                 : {}),
           ms: Date.now() - t0,
           input_sha256,
