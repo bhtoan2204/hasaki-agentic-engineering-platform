@@ -108,7 +108,13 @@ import {
   type ScanPreset,
 } from "../prodErrors/scan.ts";
 import { cancelScan } from "../prodErrors/jobs.ts";
-import { bugHuntDetail, createFixTask, listBugHunts, startBugHunt } from "../bugHunt/service.ts";
+import {
+  bugHuntDetail,
+  bugHuntSummaries,
+  createFixTask,
+  listBugHunts,
+  startBugHunt,
+} from "../bugHunt/service.ts";
 import {
   bitbucketStatus,
   clearBitbucket,
@@ -2467,6 +2473,15 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/bug-hunts$/,
     (c) => startBugHunt(c.p[0], c.actor, c.body),
+  ],
+  [
+    "GET",
+    /^\/api\/bug-hunts\/summary$/,
+    (c) =>
+      bugHuntSummaries(
+        (c.url.searchParams.get("fingerprints") ?? "").split(",").filter(Boolean),
+        c.actor,
+      ),
   ],
   ["GET", /^\/api\/bug-hunts\/(\d+)$/, (c) => bugHuntDetail(num(c.p[0]), c.actor, support(c))],
   [

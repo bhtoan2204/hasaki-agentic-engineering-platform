@@ -131,9 +131,14 @@ async function shape(h: HuntRow, full: boolean) {
     started_at: string | null;
     finished_at: string | null;
     error: unknown;
+    attempt_count: number | null;
+    max_attempts: number | null;
+    current_attempt_id: number | null;
+    output: Record<string, unknown> | null;
   }>(
     pool,
-    `SELECT s.id, s.key, s.name, s.status, s.started_at, s.finished_at,
+    `SELECT s.id, s.key, s.name, s.status, s.started_at, s.finished_at, s.attempt_count, s.max_attempts,
+            s.current_attempt_id, CASE WHEN s.status = 'SKIPPED' THEN s.output END AS output,
             (SELECT a.error FROM workflow_step_attempts a WHERE a.id = s.current_attempt_id) AS error
        FROM workflow_steps s WHERE s.run_id=$1 ORDER BY s.position`,
     [h.run_id],
@@ -166,9 +171,37 @@ async function shape(h: HuntRow, full: boolean) {
       status: s.status,
       started_at: s.started_at,
       finished_at: s.finished_at,
+      attempt: s.attempt_count == null ? null : Number(s.attempt_count),
+      max_attempts: s.max_attempts == null ? null : Number(s.max_attempts),
+      // Why a stage stopped: its last attempt's error, or why it was skipped. Never synthesized.
+      error:
+        s.status === "FAILED" && s.error
+          ? String((s.error as { message?: string })?.message ?? s.error).slice(0, 500)
+          : null,
+      skipped_reason: s.status === "SKIPPED" ? String(s.output?.reason ?? "") || null : null,
     })),
   };
   if (!full) return base;
+  // What the running stage last recorded (a platform log line or the name of a tool call), with its time.
+  const running = steps.find((s) => s.status === "RUNNING" && s.current_attempt_id);
+  const activity = running
+    ? await one<{ kind: string; content: string; tool: string | null; created_at: string }>(
+        pool,
+        `SELECT kind, left(content, 240) AS content, data->>'name' AS tool, created_at FROM workflow_events
+          WHERE attempt_id=$1 AND kind IN ('system','tool') ORDER BY id DESC LIMIT 1`,
+        [running.current_attempt_id],
+      )
+    : null;
+  const triage = !h.report
+    ? steps.find((s) => s.key === "triage" && s.status === "COMPLETED")
+    : undefined;
+  const triageOut = triage
+    ? await one<{ output: Record<string, unknown> | null }>(
+        pool,
+        "SELECT output FROM workflow_steps WHERE id=$1",
+        [triage.id],
+      )
+    : null;
   // Before the report exists (running, or the run failed before it), the hunter's raw candidates are shown as what they
   // are: unverified hypotheses.
   const hunt = await one<{ output: Record<string, unknown> | null }>(
@@ -178,6 +211,32 @@ async function shape(h: HuntRow, full: boolean) {
   );
   return {
     ...base,
+    server_time: new Date().toISOString(),
+    activity: activity
+      ? {
+          stage: running!.key,
+          kind: activity.kind,
+          text: activity.kind === "tool" && activity.tool ? activity.tool : activity.content,
+          at: activity.created_at,
+        }
+      : null,
+    // Between triage and the report: which claims are being verified (platform-built, no hunter reasoning).
+    verifying: triageOut?.output
+      ? {
+          claims: ((triageOut.output.to_verify ?? []) as Array<Record<string, unknown>>).map(
+            (c) => ({
+              id: c.id,
+              file_path: c.file_path,
+              function: c.function,
+              line_start: c.line_start,
+              category: c.category,
+              claim: c.claim,
+            }),
+          ),
+          deferred: ((triageOut.output.deferred ?? []) as unknown[]).length,
+          rejected: ((triageOut.output.rejected ?? []) as unknown[]).length,
+        }
+      : null,
     report: h.report,
     findings: findings.map((f) => ({ finding_id: Number(f.id), ...f.finding })),
     unverified_candidates:
@@ -194,6 +253,47 @@ async function shape(h: HuntRow, full: boolean) {
          FROM workflow_runs r LEFT JOIN work_items w ON w.id = r.work_item_id
         WHERE r.inputs->>'bug_hunt_id' = $1 ORDER BY r.id DESC`,
       [String(h.id)],
+    ),
+  };
+}
+
+/**
+ * The requester's latest hunt for each of several incidents, in one query (the incident list shows it in row headers
+ * without one request per row).
+ */
+export async function bugHuntSummaries(fingerprints: string[], actor: Actor) {
+  const fps = [...new Set(fingerprints)].filter((f) => /^[0-9a-f]{20}$/.test(f)).slice(0, 500);
+  if (!fps.length) return { hunts: {} };
+  const rows = await q<{
+    fingerprint: string;
+    id: number;
+    run_id: number;
+    run_status: string;
+    report: { partial?: boolean } | null;
+    steps: Array<{ key: string; status: string }>;
+    confirmed: number;
+  }>(
+    pool,
+    `SELECT DISTINCT ON (h.fingerprint) h.fingerprint, h.id, h.run_id, r.status AS run_status, h.report,
+            COALESCE((SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position)
+                        FROM workflow_steps s WHERE s.run_id = h.run_id), '[]') AS steps,
+            (SELECT count(*)::int FROM bug_hunt_findings f WHERE f.hunt_id = h.id AND f.bug_verification_status = 'CONFIRMED') AS confirmed
+       FROM bug_hunts h JOIN workflow_runs r ON r.id = h.run_id
+      WHERE h.fingerprint = ANY($1) AND h.requested_by = $2
+      ORDER BY h.fingerprint, h.id DESC`,
+    [fps, actor.id],
+  );
+  return {
+    hunts: Object.fromEntries(
+      rows.map((r) => [
+        r.fingerprint,
+        {
+          id: Number(r.id),
+          run_id: Number(r.run_id),
+          status: huntStatus(r.run_status, r.steps, r.report),
+          confirmed: r.confirmed,
+        },
+      ]),
     ),
   };
 }

@@ -18,6 +18,7 @@ import { getRun, cancelRun, reexecuteStep } from "../src/workflow/engine.ts";
 import { runOnce } from "../src/workflow/scheduler.ts";
 import { bwrapAvailable } from "../src/platform/selfDevelopment.ts";
 import {
+  bugHuntSummaries,
   bugHuntDetail,
   createFixTask,
   listBugHunts,
@@ -351,6 +352,109 @@ test("a candidate citing a stale commit or a location that does not exist is rej
 });
 
 // ---------------------------------------------------------------- benchmark: A (investigation) vs B (bug hunt)
+
+interface ProgressView {
+  status: string;
+  report: unknown;
+  unverified_candidates: unknown[];
+  verifying: { claims: Array<Record<string, unknown>> } | null;
+  activity: { stage: string; text: string } | null;
+  server_time: string;
+  stages: Array<{ key: string; status: string; started_at: string | null; error: string | null }>;
+  counts: Record<string, number>;
+}
+const progress = async (id: number) =>
+  (await bugHuntDetail(id, owner, false)) as unknown as ProgressView;
+type Summaries = Record<string, { id: number; status: string }>;
+
+test("progress for the UI: the running stage with what it last recorded, claims under verification, a batched summary", async () => {
+  const fp = caseFingerprint("idempotency");
+  // The scripted hunter pauses after reading its scope, so the stage can be observed while it runs.
+  fx.useScript(
+    "bughunt-slow",
+    `import def from ${JSON.stringify(join(root, "bughunt-agent.mjs"))};
+export default async (x) => {
+  if (x.prompt.includes("Hunt for REAL")) { await x.call("read_step_output", { step_key: "scope" }); await new Promise((r) => setTimeout(r, 2500)); }
+  return def(x);
+};`,
+  );
+  try {
+    const h = await startBugHunt(fp, owner, { repositories: [repo], provider: "codex" });
+    const at = async (key: string) =>
+      (await one<{ status: string }>(
+        pool,
+        "SELECT status FROM workflow_steps WHERE run_id=$1 AND key=$2",
+        [h.run_id, key],
+      ))!.status;
+    // Before anything ran: queued, pending stages, nothing presented as a result.
+    let d = await progress(h.hunt_id);
+    assert.equal(d.status, "queued");
+    assert.equal(d.report, null);
+    assert.deepEqual(d.unverified_candidates, []);
+    while ((await at("hunt")) !== "READY")
+      if (!(await runOnce())) await new Promise((r) => setTimeout(r, 50));
+    // Run the hunter in the background and watch it from the API, as the panel's polling does.
+    const running = runOnce();
+    let seen: ProgressView | null = null;
+    for (let i = 0; i < 100 && !seen; i++) {
+      d = await progress(h.hunt_id);
+      if (d.activity?.stage === "hunt") seen = d;
+      else await new Promise((r) => setTimeout(r, 50));
+    }
+    await running;
+    assert.ok(seen, "the running stage's last recorded activity is exposed");
+    assert.equal(seen!.status, "running");
+    assert.equal(seen!.stages.find((st) => st.key === "hunt")!.status, "RUNNING");
+    assert.ok(seen!.server_time && seen!.stages.find((st) => st.key === "hunt")!.started_at);
+    assert.ok((seen!.activity?.text ?? "").length > 0);
+    // Hunter done, triage not yet: candidates are shown as unverified hypotheses.
+    d = await progress(h.hunt_id);
+    assert.equal(d.unverified_candidates.length, 1);
+    assert.equal(d.verifying, null);
+    while ((await at("triage")) !== "COMPLETED")
+      if (!(await runOnce())) await new Promise((r) => setTimeout(r, 50));
+    d = await progress(h.hunt_id);
+    assert.equal(d.status, "verifying");
+    assert.equal(d.verifying!.claims.length, 1);
+    assert.equal(d.verifying!.claims[0].function, "(Processor).Charge");
+    assert.ok(
+      !("hypothesis" in d.verifying!.claims[0]) &&
+        !("supporting_evidence" in d.verifying!.claims[0]),
+    );
+    // The list's batched summary: one query for many incidents, only the requester's hunts.
+    const s = await bugHuntSummaries([fp, caseFingerprint("real-bug"), "nope"], owner);
+    assert.equal((s.hunts as Summaries)[fp].id, h.hunt_id);
+    assert.equal((s.hunts as Summaries)[fp].status, "verifying");
+    assert.ok((s.hunts as Summaries)[caseFingerprint("real-bug")]);
+    assert.deepEqual((await bugHuntSummaries([fp], other)).hunts, {});
+    await cancelRun(h.run_id);
+    assert.equal(await drive(h.run_id), "CANCELED");
+  } finally {
+    fx.defaultScript();
+  }
+});
+
+test("a failed stage exposes its recorded reason", async () => {
+  const fp = caseFingerprint("missing-cancellation");
+  // A hunter that never submits: the step fails after its attempts with the harness's own error.
+  fx.useScript(
+    "bughunt-nosubmit",
+    `import def from ${JSON.stringify(join(root, "bughunt-agent.mjs"))};
+export default async (x) => (x.prompt.includes("Hunt for REAL") ? null : def(x));`,
+  );
+  try {
+    const h = await startBugHunt(fp, owner, { repositories: [repo], provider: "codex" });
+    assert.equal(await drive(h.run_id), "FAILED");
+    const d = await progress(h.hunt_id);
+    assert.equal(d.status, "failed");
+    const stage = d.stages.find((st) => st.key === "hunt")!;
+    assert.equal(stage.status, "FAILED");
+    assert.match(stage.error ?? "", /submit_result/);
+    assert.equal(d.counts.CONFIRMED, 0);
+  } finally {
+    fx.defaultScript();
+  }
+});
 
 test("offline benchmark: 10 seeded scenarios, incident-investigation (A) vs bug hunt + independent verifier (B)", async () => {
   // A fresh requester: only the recurring incident may reuse a verified finding (reuse is per requester).

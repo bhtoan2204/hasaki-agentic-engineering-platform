@@ -1,0 +1,332 @@
+/* Bug Hunter (incident accordion and Incident Detail). Mobile first: one column, no horizontal overflow. */
+.bh-intro,
+.bh-detail-head,
+.bh-form-actions,
+.bh-inline-head,
+.bh-inline-actions,
+.bh-verdicts {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+}
+.bh-intro p {
+  flex: 1 1 280px;
+  margin: 0;
+}
+.bh-inline {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  min-width: 0;
+}
+.bh-inline-head {
+  justify-content: space-between;
+}
+.bh-inline-head h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-md, 15px);
+}
+.bh-inline p {
+  margin: 0;
+}
+.bh-detail {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.bh-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bh-status.bh-failed,
+.pe-hunt.bh-failed {
+  color: var(--st-err);
+}
+.bh-status.bh-completed {
+  color: var(--st-ok, inherit);
+}
+.pe-hunt {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* Form */
+.bh-form {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.bh-form fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.bh-form legend {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.bh-form fieldset small {
+  flex-basis: 100%;
+}
+
+/* History (Incident Detail) */
+.bh-hunts {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: grid;
+  gap: 4px;
+}
+.bh-hunts button {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+}
+.bh-hunts button.active {
+  border-color: var(--brand);
+}
+
+/* Timeline: one stage per line, state in words and icon (not colour only) */
+.bh-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.bh-tl-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  position: relative;
+  padding-bottom: 10px;
+}
+.bh-tl-item:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 24px;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+.bh-tl-item.is-done:not(:last-child)::before {
+  background: var(--st-ok, var(--brand));
+}
+.bh-tl-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  box-sizing: border-box;
+}
+.is-done .bh-tl-dot {
+  border-color: var(--st-ok, var(--brand));
+  color: var(--st-ok, var(--brand));
+}
+.is-active .bh-tl-dot {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.is-failed .bh-tl-dot,
+.is-blocked .bh-tl-dot {
+  border-color: var(--st-err);
+  color: var(--st-err);
+}
+.bh-tl-body {
+  min-width: 0;
+  padding-top: 2px;
+}
+.bh-tl-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.bh-tl-head > a,
+.bh-tl-head > span:first-child {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+}
+.bh-tl-head > span:first-child {
+  cursor: default;
+}
+.bh-tl-name {
+  font-weight: 600;
+}
+.is-pending .bh-tl-name,
+.is-skipped .bh-tl-name {
+  font-weight: 500;
+  color: var(--ink-2, inherit);
+}
+.bh-tl-state {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.is-active .bh-tl-state {
+  color: var(--brand);
+}
+.is-failed .bh-tl-state,
+.is-blocked .bh-tl-state {
+  color: var(--st-err);
+}
+.bh-tl-desc,
+.bh-tl-activity,
+.bh-tl-error {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.bh-tl-error {
+  color: var(--st-err);
+}
+.bh-progress > summary {
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+/* Results */
+.bh-results {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.bh-callout {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--r-md);
+  overflow-wrap: anywhere;
+}
+.bh-callout p {
+  margin: 4px 0 0;
+}
+.bh-callout ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.bh-callout.is-confirmed,
+.bh-callout.is-failed {
+  border-left-color: var(--st-err);
+}
+.bh-callout.is-verifying {
+  border-left-color: var(--brand);
+}
+.bh-callout.is-candidates {
+  border-left-color: var(--st-warn, var(--brand));
+}
+.bh-callout.is-none {
+  border-left-color: var(--st-ok, var(--brand));
+}
+.bh-section > h4,
+.bh-section > summary {
+  margin: 6px 0 8px;
+  font-weight: 600;
+}
+details.bh-section > summary,
+.bh-coverage > summary,
+.bh-more > summary {
+  cursor: pointer;
+}
+.bh-finding {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--r-md);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.bh-finding > p {
+  margin: 0;
+}
+.bh-finding[data-status="CONFIRMED"] {
+  border-left-color: var(--st-err);
+}
+.bh-finding[data-status="SUSPECTED"] {
+  border-left-color: var(--st-warn, var(--brand));
+}
+.bh-finding header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+.bh-finding .bh-loc {
+  font-size: var(--fs-xs);
+}
+.bh-finding > button,
+.bh-finding > a {
+  justify-self: start;
+}
+.bh-finding dl,
+.bh-coverage dl {
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 6px 0;
+  font-size: var(--fs-sm, 13px);
+}
+.bh-finding dt,
+.bh-coverage dt {
+  color: var(--muted);
+}
+.bh-finding dd,
+.bh-coverage dd {
+  margin: 0;
+  min-width: 0;
+}
+.bh-cmd {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.bh-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+@media (max-width: 640px) {
+  .bh-finding dl,
+  .bh-coverage dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bh-finding dd,
+  .bh-coverage dd {
+    margin-bottom: 4px;
+  }
+  .bh-inline {
+    padding: 10px;
+  }
+}

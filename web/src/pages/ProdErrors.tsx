@@ -32,6 +32,8 @@ import {
 } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 import { ScanProgressCard, type Progress } from "./ScanProgress.tsx";
+import { BugHunterInline } from "./prodErrors/BugHunter.tsx";
+import { ACTIVE_HUNT, usePolling } from "./prodErrors/bugHuntParts.tsx";
 import "./ProdErrors.css";
 
 type Sev = "critical" | "high" | "medium" | "low";
@@ -431,18 +433,48 @@ const inSource = (g: Group, source: Source) =>
     ? !!g.detail.sources?.includes("signoz")
     : !g.detail.sources?.length || g.detail.sources.includes("splunk");
 
+interface HuntSummary {
+  id: number;
+  run_id: number;
+  status: string;
+  confirmed: number;
+}
+
+/** Compact Bug Hunter state for a collapsed row header (from the batched summary or the expanded row's polling). */
+function HuntBadge({ status, confirmed }: { status?: string; confirmed?: number }) {
+  const { t } = useI18n();
+  if (!status) return null;
+  const active = ACTIVE_HUNT.has(status);
+  return (
+    <span className={`pill pe-hunt bh-${status}`} title={t("an.bh.title")}>
+      <Bug size={11} aria-hidden="true" />
+      {active || !confirmed
+        ? t(`an.bh.status.${status}`)
+        : t("an.bh.confirmedBadge", { n: confirmed })}
+    </span>
+  );
+}
+
 function GroupRow({
   g,
   index,
   open,
   onToggle,
   reload,
+  hunt,
+  huntId,
+  huntStatus,
+  onHunt,
 }: {
   g: Group;
   index: string;
   open: boolean;
   onToggle: () => void;
   reload: () => void;
+  hunt?: HuntSummary;
+  huntId: number | null;
+  huntStatus?: string;
+  onHunt: (huntId: number, status?: string) => void;
 }) {
   const { t, status } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -515,6 +547,10 @@ function GroupRow({
           ) : g.status === "ignored" ? (
             <span className="muted">{t("pe.ignored")}</span>
           ) : null}
+          <HuntBadge
+            status={huntStatus}
+            confirmed={huntId == null || huntId === hunt?.id ? hunt?.confirmed : undefined}
+          />
         </span>
       </button>
       {open && (
@@ -595,6 +631,12 @@ function GroupRow({
               <pre className="pe-pre">{g.detail.stack}</pre>
             </details>
           )}
+          <BugHunterInline
+            fingerprint={g.fingerprint}
+            huntId={huntId}
+            onHunt={onHunt}
+            detailHref={`#/prod-errors/incident/${g.fingerprint}?return_to=${encodeURIComponent(location.hash.slice(1))}`}
+          />
           <div className="row tight pe-actions">
             {g.status === "ignored" ? (
               <button className="sm ghost" onClick={() => ignore(false)}>
@@ -777,6 +819,34 @@ export function ProdErrorsPage({
     for (const g of tabGroups) if (ns === "all" || g.namespace === ns) c[g.severity]++;
     return c;
   }, [tabGroups, ns]);
+
+  // Bug Hunter: one batched summary for the whole list (row headers), never one request per row. Detailed hunt data is
+  // fetched by the expanded row only.
+  const fingerprints = useMemo(
+    () => (data?.groups ?? []).map((g) => g.fingerprint).sort().join(","),
+    [data?.groups],
+  );
+  const huntSummary = useApi<{ hunts: Record<string, HuntSummary> }>(
+    fingerprints ? `/api/bug-hunts/summary?fingerprints=${fingerprints}` : null,
+  );
+  // The hunt each row shows, remembered across collapse/reopen and list refreshes (a hunt started here wins).
+  const [huntSel, setHuntSel] = useState<Record<string, number>>({});
+  const [huntLive, setHuntLive] = useState<Record<string, string>>({});
+  const summaries = huntSummary.data?.hunts ?? {};
+  // The expanded row's hunt polls itself; the batched summary only polls for active hunts in collapsed rows.
+  usePolling(
+    Object.entries(summaries).some(
+      ([fp, h]) => ACTIVE_HUNT.has(h.status) && fp !== open,
+    ),
+    huntSummary.reload,
+  );
+  const onHunt = (fp: string, id: number, status?: string) => {
+    setHuntSel((m) => (m[fp] === id ? m : { ...m, [fp]: id }));
+    if (!status || huntLive[fp] === status) return;
+    setHuntLive((m) => ({ ...m, [fp]: status }));
+    // A started or finished hunt: refresh the batched summary once (row header counts), not on every poll.
+    if (huntLive[fp] !== undefined || !ACTIVE_HUNT.has(status)) void huntSummary.reload();
+  };
 
   const [panel, setPanel] = useState(false);
   const last = data?.lastScan;
@@ -1033,6 +1103,14 @@ export function ProdErrorsPage({
                       open={open === g.fingerprint}
                       onToggle={() => setOpen(open === g.fingerprint ? null : g.fingerprint)}
                       reload={reload}
+                      hunt={summaries[g.fingerprint]}
+                      huntId={huntSel[g.fingerprint] ?? summaries[g.fingerprint]?.id ?? null}
+                      huntStatus={
+                        open === g.fingerprint || huntSel[g.fingerprint] !== summaries[g.fingerprint]?.id
+                          ? (huntLive[g.fingerprint] ?? summaries[g.fingerprint]?.status)
+                          : summaries[g.fingerprint]?.status
+                      }
+                      onHunt={(id, status) => onHunt(g.fingerprint, id, status)}
                     />
                   ))}
                 </div>
