@@ -294,6 +294,13 @@ export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
     // Repetition is not corroboration: the same claim stated twice is merged, never counted twice.
     const key = norm(text);
     const prev = byText.get(key);
+    // A contradicted citation (fabricated, another run's, wrong observation) is never merged away: it must stay
+    // visible so the verdict can fail, even when a same-text claim cites a valid record.
+    if (prev && (c.verification_status === "contradicted" || prev.verification_status === "contradicted")) {
+      (c.notes ??= []).push(`not merged with ${prev.id}: a contradicted citation stays separate`);
+      out.push(c);
+      return;
+    }
     if (prev) {
       if (strength(c) > strength(prev)) Object.assign(prev, { ...c, id: prev.id });
       notes.push(`duplicate claim ${id} merged into ${prev.id}`);

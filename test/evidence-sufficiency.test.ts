@@ -285,3 +285,29 @@ test("a stale code location (file changed since the cited commit) does not count
   assert.equal(r.verification.status, "incomplete");
   assert.deepEqual(r.verification.sufficiency.missing_sources, ["code"]);
 });
+
+test("a fabricated citation fails even when a verified claim with the same text would absorb it on merge", async () => {
+  const r = await report({
+    claims: [
+      { ...traceFact, source_ref: "codeact:999999:1" },
+      traceFact,
+      logFact,
+      cause(["F1", "F2"]),
+    ],
+    root_cause_assessment: confirmed(["F1", "F2", "R1"]),
+  });
+  assert.equal(r.verification.status, "failed", JSON.stringify(r.verification));
+  assert.ok(r.verification.failures.some((f) => /999999/.test(f.reason)));
+});
+
+test("normalization never merges a contradicted citation into a same-text verified claim", async () => {
+  const { normalizeInvestigationOutput } = await import("../src/agent/evidence.ts");
+  const { withProvenance } = await import("../src/agent/provenance.ts");
+  const claims = await withProvenance(
+    [{ ...traceFact, source_ref: "codeact:999999:1" }, traceFact],
+    env,
+  );
+  const n = normalizeInvestigationOutput("root_cause", { claims });
+  assert.equal(n.claims.length, 2);
+  assert.ok(n.claims.some((c) => c.verification_status === "contradicted"));
+});

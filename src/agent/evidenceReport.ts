@@ -118,6 +118,15 @@ export async function buildEvidenceReport(
         claim_id: c.id,
         reason: c.provenance?.reason ?? c.notes?.join("; ") ?? "contradicted",
       });
+  // A contradicted citation (fabricated, another run's, or a wrong observation) is a failure even when normalization
+  // merged its claim into a same-text claim with a valid citation: checked on every claim before any merge.
+  for (const raw of Array.isArray(claims) ? claims : []) {
+    const c = raw as { id?: unknown; provenance?: { status?: string; reason?: string | null } };
+    if (c?.provenance?.status !== "CONTRADICTED") continue;
+    const reason = c.provenance.reason ?? "contradicted citation";
+    if (!failures.some((f) => f.reason === reason))
+      failures.push({ ...(c.id != null ? { claim_id: String(c.id) } : {}), reason });
+  }
   // Conclusions the platform had to lower (here or when the agent step's output was normalized) were unsupported.
   const lowered = [
     ...list(record(source.evidence_validation).notes, 40),
