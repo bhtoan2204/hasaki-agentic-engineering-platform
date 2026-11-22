@@ -242,7 +242,38 @@ function maskArgs(paths: string[]) {
 
 /** Bubblewrap arguments that hide credentials; used by the verification sandbox on top of its read-only root. */
 export function credentialMaskArgs() {
-  return maskArgs(credentialMasks());
+  const masks = credentialMasks();
+  return [...maskArgs(masks), ...resolverRebinds(masks)];
+}
+
+/** Name-resolution configuration a sandboxed process needs (no secrets in any of them). */
+export const RESOLVER_FILES = ["/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf"];
+
+/**
+ * A masked directory can hold the real file behind a resolver symlink: on WSL /etc/resolv.conf → /mnt/wsl/resolv.conf,
+ * and /mnt/wsl is masked for its sockets. Without the file, every DNS lookup in the sandbox fails (EAI_AGAIN) and npm
+ * crashes with "Exit handler never called!". Each such file alone is bound back read-only after the masks; the rest
+ * of the masked directory stays hidden.
+ */
+export function resolverRebinds(
+  masks: string[],
+  files: string[] = RESOLVER_FILES,
+  real: (p: string) => string | null = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  },
+): string[] {
+  const hidden = masks.map((m) => real(m)).filter((m): m is string => !!m);
+  const out: string[] = [];
+  for (const f of files) {
+    const target = real(f);
+    if (target && target !== f && hidden.some((h) => inside(target, h)))
+      out.push("--ro-bind", target, target);
+  }
+  return out;
 }
 
 const inside = (p: string, root: string) => p === root || p.startsWith(root + sep);
