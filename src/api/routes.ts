@@ -2745,6 +2745,11 @@ export const routes: Route[] = [
     },
   ],
   [
+    "GET",
+    /^\/api\/chat\/conversations\/(\d+)\/delegations$/,
+    (c) => chat.delegations(c.actor, num(c.p[0])),
+  ],
+  [
     "POST",
     /^\/api\/chat\/conversations\/(\d+)\/delegation\/preview$/,
     (c) => chat.delegationPreview(c.actor, num(c.p[0]), c.body),

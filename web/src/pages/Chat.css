@@ -829,3 +829,65 @@
   color: var(--st-err);
   font-size: var(--fs-sm);
 }
+
+/* Workflow runs started from the conversation (investigations, tasks). */
+.chat-runs {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  min-width: 0;
+}
+.chat-runs > header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.chat-runs ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.chat-runs li {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-runs li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.chat-run-head,
+.chat-run-verdicts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.chat-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-run-status.is-failed,
+.chat-run-failed {
+  color: var(--st-err);
+}
+.chat-run-result p {
+  margin: 6px 0 0;
+}
+.chat-run-report {
+  margin-top: 6px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}

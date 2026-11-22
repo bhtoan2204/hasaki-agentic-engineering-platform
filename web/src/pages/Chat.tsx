@@ -16,6 +16,7 @@ import {
   Square,
   Trash2,
   Workflow,
+  FileSearch,
   AlertTriangle,
   FileText,
   Paperclip,
@@ -29,6 +30,7 @@ import { useI18n } from "../i18n/index.tsx";
 import { applyChatEvent, seedFromTurn, type LiveStatus, type LiveTurn, type TraceItem } from "./chatStream.ts";
 import { markPending, reconcilePending, type PendingMessage } from "./chatOptimistic.ts";
 import { ChatImportReview, type ImportedProposal } from "./ChatImportReview.tsx";
+import { ChatDelegations } from "./ChatDelegations.tsx";
 import "./Chat.css";
 
 type Mode = "AUTO" | "ASK" | "INVESTIGATE" | "PLAN" | "DELEGATE";
@@ -364,7 +366,7 @@ function phaseLabel(phase: string | null | undefined, t: T) {
 type ChatActions = {
   copy: (text: string) => void;
   regenerate: (turnId: number) => void;
-  delegate: (kind: "task" | "delegate") => void;
+  delegate: (kind: "task" | "delegate" | "investigation") => void;
   decide: (id: number, decision: "confirm" | "reject") => void;
   retry: (turn: Turn) => void;
   retryOther: (turn: Turn) => void;
@@ -479,6 +481,13 @@ const ChatMessages = memo(function ChatMessages({
                   </button>
                   <button className="ghost xs" onClick={() => actions.delegate("delegate")}>
                     {t("chat.delegate")}
+                  </button>
+                  <button
+                    className="ghost xs"
+                    title={t("chat.investigateTip")}
+                    onClick={() => actions.delegate("investigation")}
+                  >
+                    <FileSearch size={14} /> {t("chat.investigate")}
                   </button>
                 </div>
               )}
@@ -1090,6 +1099,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     return request && !detail?.active_turn ? request : null;
   }, [detail?.turns, detail?.tool_calls, detail?.active_turn]);
 
+  const [runsVersion, setRunsVersion] = useState(0);
   const confirmDelegation = async () => {
     if (!activeId || !preview) return;
     const r = await act(() =>
@@ -1107,6 +1117,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     );
     if (r) {
       setPreview(null);
+      setRunsVersion((v) => v + 1);
       toast(
         t("chat.delegated", { code: r.work_item_code ?? r.work_item_id, run: r.run_id ?? "—" }),
         "ok",
@@ -1529,6 +1540,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     </>
                   )}
                 </div>
+              )}
+              {activeId != null && (
+                <ChatDelegations conversationId={activeId} version={runsVersion} />
               )}
               {proposal && (
                 <div className="chat-proposal" role="status">

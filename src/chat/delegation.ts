@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { HttpError } from "../http/error.ts";
+import { pool, q } from "../db/pool.ts";
 import { hashOf, definitions } from "../workflow/definitions.ts";
 import { previewRun, startRun } from "../workflow/engine.ts";
 import { routeWorkflow } from "../investigation/service.ts";
@@ -38,7 +39,9 @@ export type DelegationRequest = z.infer<typeof DelegationRequest>;
 const STALE_MS = 24 * 3600_000;
 
 const KIND_WORKFLOW: Record<string, string[]> = {
-  investigation: ["bug-investigation", "production-investigation", "investigation"],
+  // Read-only, evidence-verified incident investigation (the workflow, started and followed from the chat). A fix is a
+  // separate "task" delegation; an investigation never starts a coding workflow.
+  investigation: ["production-incident-investigation", "incident-investigation"],
   plan: ["feature-planning", "planning", "plan"],
 };
 
@@ -297,4 +300,76 @@ export async function executeDelegation(
     data: { work_item_id: item.id, run_id: runId, delegation_id: row?.id ?? null },
   });
   return { ...row, work_item_code: item.code, run_error: runError, duplicate: false };
+}
+
+interface DelegatedRow {
+  id: number;
+  work_item_id: number | null;
+  run_id: number | null;
+  created_at: string;
+  work_item_code: string | null;
+  run_status: string | null;
+  definition_key: string | null;
+}
+
+const record = (v: unknown): Record<string, unknown> =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+
+/**
+ * Runs started from this conversation, with what the chat shows about them: workflow, status, the step running now and
+ * steps done, and — once an investigation reports — its conclusion (the platform's report and evidence verdict, not
+ * the chat's). One query per kind of data, for all runs together.
+ */
+export async function delegatedRuns(conversationId: number) {
+  const rows = (await chatRepository.delegationsOf(conversationId)) as DelegatedRow[];
+  const ids = rows.map((r) => r.run_id).filter((x): x is number => x != null);
+  const steps = ids.length
+    ? await q<{
+        run_id: number;
+        key: string;
+        name: string;
+        status: string;
+        action: string | null;
+        output: Record<string, unknown> | null;
+      }>(
+        pool,
+        `SELECT s.run_id, s.key, s.name, s.status, s.config->>'action' AS action,
+                CASE WHEN s.status = 'COMPLETED' AND s.config->>'action' IN ('investigation_report', 'evidence_report')
+                     THEN s.output END AS output
+           FROM workflow_steps s WHERE s.run_id = ANY($1) ORDER BY s.run_id, s.position`,
+        [ids],
+      )
+    : [];
+  return rows.map((r) => {
+    const own = steps.filter((s) => s.run_id === r.run_id);
+    const report = own.find((s) => s.action === "investigation_report" && s.output)?.output;
+    const evidence = own.find((s) => s.action === "evidence_report" && s.output)?.output;
+    const verification = record(evidence?.verification);
+    const rootCause = record(evidence?.root_cause);
+    return {
+      ...r,
+      progress: {
+        done: own.filter((s) => s.status === "COMPLETED" || s.status === "SKIPPED").length,
+        total: own.length,
+        current: own.filter((s) => ["RUNNING", "READY", "WAITING_INPUT", "WAITING_APPROVAL"].includes(s.status))
+          .map((s) => ({ key: s.key, name: s.name, status: s.status })),
+        failed: own.filter((s) => s.status === "FAILED").map((s) => ({ key: s.key, name: s.name })),
+      },
+      result:
+        report || evidence
+          ? {
+              summary: String(report?.summary ?? evidence?.summary ?? "").slice(0, 2000) || null,
+              status: (report?.status as string | undefined) ?? null,
+              markdown: report?.report_markdown ? String(report.report_markdown).slice(0, 20_000) : null,
+              verification: (verification.status as string | undefined) ?? null,
+              root_cause: rootCause.status
+                ? {
+                    status: rootCause.status,
+                    explanation: String(rootCause.explanation ?? rootCause.summary ?? "").slice(0, 1000),
+                  }
+                : null,
+            }
+          : null,
+    };
+  });
 }

@@ -393,7 +393,7 @@ const TOOLS: ToolDef[] = [
     name: "work.delegate",
     group: "platform",
     description:
-      "For an implementation, bug fix, refactor, tests or a pull request: hand the request to the platform's coding workflow (Agent Harness: isolated worktree, sandbox, review gates, validation, PR when authorized). Returns a proposal the user reviews and starts in the chat; it never starts work by itself. Investigate first so the request names the repository and the problem.",
+      "Hand work to a platform workflow. kind \"task\" (default): an implementation, bug fix, refactor, tests or a pull request, through the coding workflow (Agent Harness: isolated worktree, sandbox, review gates, validation, PR when authorized). kind \"investigation\": a production incident that needs a durable, evidence-verified, read-only investigation (logs/traces/code correlated, the platform verifies the evidence and records a report the chat then shows); answer quick questions directly instead. Returns a proposal the user reviews and starts in the chat; it never starts work by itself. Investigate first so the request names the repository and the problem.",
     usage: '{"title": "Fix refund timeout in payment-paypal", "kind?": "task", "repositories?": ["payment-paypal"]}',
     args: z
       .object({

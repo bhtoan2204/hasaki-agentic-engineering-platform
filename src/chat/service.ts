@@ -17,7 +17,7 @@ import { LIMITS } from "./policy.ts";
 import { emitChatEvent } from "./events.ts";
 import { abortLocal, recoverStaleTurns, scheduleTurn, withholdRevoked } from "./runtime.ts";
 import { readableRepositories, setDelegationPreview } from "./tools.ts";
-import { buildDelegationPreview, DelegationRequest, executeDelegation } from "./delegation.ts";
+import { buildDelegationPreview, DelegationRequest, executeDelegation, delegatedRuns } from "./delegation.ts";
 
 setDelegationPreview(buildDelegationPreview);
 import { chatFailure } from "./failures.ts";
@@ -564,6 +564,12 @@ export const chat = {
       throw new HttpError(409, "conversation title was renamed manually");
     scheduleTitleGeneration(conversationId, actor.id, { force: true });
     return { ok: true, scheduled: true };
+  },
+
+  /** Runs started from the conversation with their progress and (investigations) their verified conclusion. */
+  async delegations(actor: Actor, conversationId: number) {
+    await requireConversation(conversationId, actor);
+    return { delegations: await delegatedRuns(conversationId) };
   },
 
   async delegationPreview(actor: Actor, conversationId: number, body: unknown) {

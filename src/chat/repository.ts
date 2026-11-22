@@ -736,7 +736,8 @@ export const chatRepository = {
   delegationsOf(conversationId: number, db: Db = pool) {
     return q(
       db,
-      `SELECT d.id, d.work_item_id, d.run_id, d.created_at, w.code AS work_item_code, r.status AS run_status
+      `SELECT d.id, d.work_item_id, d.run_id, d.created_at, w.code AS work_item_code, r.status AS run_status,
+              r.definition_key
          FROM chat_delegations d LEFT JOIN work_items w ON w.id = d.work_item_id LEFT JOIN workflow_runs r ON r.id = d.run_id
         WHERE d.conversation_id = $1 ORDER BY d.id`,
       [conversationId],
