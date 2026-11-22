@@ -278,8 +278,25 @@ export function platformEnvironmentError(code: number | null, output: string): s
     : null;
 }
 
+/**
+ * A failure of the verification ENVIRONMENT that says nothing about the change: the package manager crashed or could
+ * not reach its registry, or the disk is full. The command is run once more; a second identical failure is reported
+ * as an environment error (never handed to the agent as a code failure to repair).
+ */
+export function transientEnvironmentFailure(code: number | null, output: string): string | null {
+  if (code === 0) return null;
+  const tail = output.slice(-20_000);
+  const m =
+    /npm (?:ERR!|error) Exit handler never called!/.exec(tail) ??
+    /npm (?:ERR!|error) code (?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ENOSPC|EAI_FAIL)\b/.exec(tail) ??
+    /\bENOSPC\b|no space left on device/i.exec(tail);
+  return m ? m[0].slice(0, 200) : null;
+}
+
 export interface RepoVerification {
   tested_state?: { head: string; fingerprint: string };
+  /** Failed tests parsed from the runner output (0: the command failed without a recognisable test failure). */
+  failing_tests?: number;
   contract_revision?: string;
   required_tests?: Record<string, "passed" | "failed" | "skipped" | "not_executed">;
   repo: string;
@@ -903,6 +920,17 @@ export async function verifyWorkspaces(
         );
       let r = await runWith(known?.skipRegex ?? null);
       if (signal.aborted) throw new Error("verification canceled");
+      // The environment, not the change, failed (e.g. `npm ci` crashed): run once more before judging the code.
+      let envFailure = r.timedOut ? null : transientEnvironmentFailure(r.code, r.output);
+      if (envFailure) {
+        await deps.log?.(
+          `◆ verify ${w.repo}: verification environment failed (${envFailure}); running the verification once more`,
+          { repo: w.repo, verification: round, environment_retry: envFailure },
+        );
+        r = await runWith(known?.skipRegex ?? null);
+        if (signal.aborted) throw new Error("verification canceled");
+        envFailure = r.timedOut ? null : transientEnvironmentFailure(r.code, r.output);
+      }
       const headCommit = await exec("git", ["-C", p, "rev-parse", "HEAD"])
         .then(({ stdout }) => stdout.trim())
         .catch(() => "");
@@ -930,7 +958,11 @@ export async function verifyWorkspaces(
           note: `environment unavailable: ${unavailable}`,
           excerpt: failureExcerpt(r.output),
         });
-      const broken = r.timedOut ? null : platformEnvironmentError(r.code, r.output);
+      const broken =
+        (r.timedOut ? null : platformEnvironmentError(r.code, r.output)) ??
+        (envFailure
+          ? `the verification environment failed twice (${envFailure}) — not a code failure; retry the step once the worker is healthy`
+          : null);
       if (broken)
         Object.assign(entry, { status: "error", error: broken, excerpt: failureExcerpt(r.output) });
       if (entry.status === "failed") {
@@ -951,6 +983,7 @@ export async function verifyWorkspaces(
             );
           if (base) c = classify(report, base);
         }
+        entry.failing_tests = failing.length;
         if (!failing.length)
           entry.note = `exit ${r.timedOut ? "timeout" : r.code} without a parseable test failure (build/script error) — counted as a failure`;
         if (c) {
@@ -1226,6 +1259,9 @@ export async function sourceUnchangedSince(
 ): Promise<boolean> {
   if (!failed.repos.length) return false;
   for (const r of failed.repos) {
+    // Only a deterministic code failure (tests that parsed as failing) repeats on identical source. A build/script
+    // failure without a recognisable test result may be the environment (Run #153: `npm ci` crashed), so it re-runs.
+    if (!r.passed && !(r.status === "failed" && (r.failing_tests ?? 0) > 0)) return false;
     const w = ws.find((x) => x.repo === r.repo);
     if (!w || !r.tested_state) return false;
     const now = await worktreeFingerprint(w.path).catch(() => null);

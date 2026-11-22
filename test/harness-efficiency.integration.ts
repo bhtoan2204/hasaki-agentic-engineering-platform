@@ -212,3 +212,82 @@ test("a submission rejected by the output contract is reported as CONTRACT_INVAL
   for (const k of ["CODEX_BIN", "FAKE_CODEX_MODE", "FAKE_CODEX_SCRIPT", "FAKE_CODEX_LOG"])
     delete process.env[k];
 });
+
+// ---------------------------------------------------------------- Run #153: environment failures are not code failures
+
+const NPM_CRASH =
+  "npm error Exit handler never called!\nnpm error This is an error with npm itself. Please report this error at:\n";
+function scripted(outputs: Array<{ code: number; output: string }>) {
+  let n = 0;
+  return {
+    run: (async () => {
+      const o = outputs[Math.min(n, outputs.length - 1)];
+      n++;
+      return { code: o.code, output: o.output, timedOut: false };
+    }) as VerifyDeps["run"],
+    calls: () => n,
+  };
+}
+
+test("an unchanged repair still re-runs verification when the failure was not a parseable test failure", async () => {
+  const wt = worktree();
+  const ws = [{ repo: "svc", path: wt }];
+  // A build/script failure without a recognisable test result, then a pass: e.g. a flaky install, now healthy.
+  const c = scripted([
+    { code: 1, output: "Error: Command failed: make build\n" },
+    { code: 0, output: "ok  \texample.com/v\t0.01s\n" },
+  ]);
+  const res = await verificationLoop({
+    cfg: CFG,
+    signal: never,
+    verify: (n) => verifyWorkspaces(ws, [wt], CFG, n, never, { run: c.run }),
+    repair: async () => undefined, // the agent changed nothing and resubmitted
+    unchanged: (failed) => sourceUnchangedSince(ws, failed),
+  });
+  assert.equal(c.calls(), 2, "the gate ran again instead of stopping as 'no progress'");
+  assert.equal(res.outcome, "passed");
+});
+
+test("Run #153: a crashed `npm ci` is retried once inside the round; never handed to the agent as a code failure", async () => {
+  const wt = worktree();
+  const ws = [{ repo: "svc", path: wt }];
+  const logs: string[] = [];
+  const once = scripted([
+    { code: 1, output: NPM_CRASH },
+    { code: 0, output: "ok  \texample.com/v\t0.01s\n" },
+  ]);
+  let repairs = 0;
+  const healed = await verificationLoop({
+    cfg: CFG,
+    signal: never,
+    verify: (n) =>
+      verifyWorkspaces(ws, [wt], CFG, n, never, {
+        run: once.run,
+        log: async (m) => void logs.push(m),
+      }),
+    repair: async () => void repairs++,
+    unchanged: (failed) => sourceUnchangedSince(ws, failed),
+  });
+  assert.equal(healed.outcome, "passed");
+  assert.equal(once.calls(), 2);
+  assert.equal(repairs, 0, "no repair round was spent on the environment");
+  assert.ok(
+    logs.some((l) => /verification environment failed .*Exit handler never called/.test(l)),
+  );
+
+  const twice = scripted([{ code: 1, output: NPM_CRASH }]);
+  const broken = await verificationLoop({
+    cfg: CFG,
+    signal: never,
+    verify: (n) => verifyWorkspaces(ws, [wt], CFG, n, never, { run: twice.run }),
+    repair: async () => void repairs++,
+    unchanged: (failed) => sourceUnchangedSince(ws, failed),
+  });
+  assert.equal(broken.outcome, "error", "an environment error, not a failure of the change");
+  assert.equal(repairs, 0);
+  assert.equal(twice.calls(), 2);
+  assert.match(
+    String(broken.rounds[0].repos[0].error),
+    /verification environment failed twice .*not a code failure/,
+  );
+});
