@@ -192,7 +192,7 @@ export function buildSystemAppend(
     "## Integration tools",
     "Native logical tools: platform.search_code, get_symbol, find_dependencies, search_knowledge, get_business_rules, search_task_memory, get_work_item, get_step_output, get_run_context, get_production_errors, get_repository_metadata, request_clarification" +
       (codeActEnabled()
-        ? ", execute_code (one sandboxed read-only program for several correlated integration lookups)"
+        ? ", execute_code (one sandboxed read-only program to correlate or aggregate large or several read-only results; a single small lookup is a direct call)"
         : "") +
       (config.lsp.enabled
         ? ", navigate_code (language-server definition/references/diagnostics in a known file)"
