@@ -16,6 +16,7 @@ import {
 } from "./paths.ts";
 import { remoteGit } from "./git.ts";
 import { repositoryRemote } from "./remote.ts";
+import { alignCheckoutToBase } from "./checkoutBase.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 
 const exec = promisify(execFile);
@@ -119,6 +120,12 @@ export async function prepareRepository(
         // Always authorize reuse, too: a different run owner must not inherit another member's access.
         await sync();
       }
+      // The primary checkout (never a run worktree) tracks the base branch the code index uses, not the clone-time
+      // remote HEAD: chat reads its working tree and the index diffs it against that base.
+      const branch = repo.default_branch || config.baseBranch;
+      const aligned = await alignCheckoutToBase(path, branch);
+      if (aligned.status === "skipped")
+        console.warn(`[repos] ${repo.name}: checkout not moved to ${branch}: ${aligned.reason}`);
       failures.delete(failureKey(repo));
       return await validateCheckout(repo);
     } catch (e) {
