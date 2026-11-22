@@ -232,3 +232,66 @@ test("regression: a failed program followed by direct calls is a fallback, not a
   );
   assert.ok(s.integration_calls > 0);
 });
+
+test("provider telemetry flows through the Chat harness into the sample, including a failed program", async () => {
+  const actor = { ...user, active: true };
+  const task = TASKS.find((t) => t.id === "T06-refund-timeout")!;
+  let call = 0;
+  const s = await runSample(task, "codeact", 0, {
+    actor,
+    provider: "claude",
+    model: "opus",
+    runnerFor: (t) => {
+      const policy = simulatedPolicy(t, { firstProgram: BUGGY_T06, onFailure: "retry" });
+      return async (prompt, options) => {
+        const r = await policy(prompt, options);
+        call++;
+        return {
+          ...r,
+          model: "claude-opus-5-5",
+          cost_usd: 0.01,
+          tokens: { input: 5, output: 50, cache_read: 1000, cache_creation: call === 1 ? 300 : 0 },
+          telemetry: {
+            model_turns: 2,
+            assistant_messages: 2,
+            provider_tool_uses: 1,
+            provider_tool_errors: 0,
+            session_model: "claude-opus-5-5",
+            api_models: ["claude-opus-5-5-20261101"],
+            provider_duration_ms: 100,
+            reasoning_tokens: null,
+          },
+        };
+      };
+    },
+    turnTimeoutMs: 60_000,
+  });
+  assert.equal(s.codeact_failed, 1, "the failed program is still visible");
+  assert.equal(s.sdk_calls, call);
+  assert.equal(s.model_turns, 2 * call, "model turns are summed per SDK call, not equal to it");
+  assert.equal(s.provider_tool_uses, call);
+  assert.deepEqual(s.provider_models, ["claude-opus-5-5-20261101"]);
+  assert.equal(s.model_resolution, "provider_reported");
+  assert.equal(s.requested_model, "opus");
+  assert.equal(s.cost_usd, Math.round(0.01 * call * 1e6) / 1e6);
+  assert.equal(s.input_tokens_total, 5 * call + 1000 * call + 300);
+  assert.equal(s.codeact_offered, true);
+});
+
+test("a provider that reports no telemetry leaves turns and model identity unknown", async () => {
+  const actor = { ...user, active: true };
+  const task = TASKS.find((t) => t.id === "T01-single-lookup")!;
+  const s = await runSample(task, "direct", 0, {
+    actor,
+    provider: "claude",
+    runnerFor: (t) => simulatedPolicy(t),
+    turnTimeoutMs: 60_000,
+  });
+  assert.equal(s.model_turns, null);
+  assert.equal(s.provider_tool_uses, null);
+  assert.deepEqual(s.provider_models, []);
+  assert.equal(s.model_resolution, "unresolved");
+  assert.equal(s.input_tokens_total, null);
+  assert.equal(s.cost_usd, null);
+  assert.equal(s.codeact_offered, false);
+});

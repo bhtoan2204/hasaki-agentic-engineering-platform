@@ -14,6 +14,7 @@ import {
   codeActAvailability,
   executeCode,
   sandboxLauncher,
+  type CodeActCall,
   type CodeActTool,
   type Launcher,
 } from "../src/codeact/execute.ts";
@@ -182,7 +183,7 @@ test(
   "failure diagnosis in the real sandbox: syntax, runtime-after-nested-failure, memory exhaustion",
   { skip },
   async () => {
-    const run = (code: string, c = call) =>
+    const run = (code: string, c: CodeActCall = call) =>
       executeCode(
         { code, timeoutMs: 15000 },
         { tools: () => TOOLS, call: c, launch: sandboxLauncher },

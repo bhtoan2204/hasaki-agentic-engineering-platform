@@ -124,6 +124,8 @@ function emptyUsage(): ChatUsage {
     cache_read_tokens: 0,
     cache_creation_tokens: 0,
     cost_usd: 0,
+    model_turns: 0,
+    provider_tool_uses: 0,
   };
 }
 
@@ -133,9 +135,15 @@ export function addUsage(
     provider_execution_ms: number;
     cost_usd: number | null;
     tokens: Record<string, number | null | undefined> | null;
+    telemetry?: { model_turns: number | null; provider_tool_uses: number | null } | null;
   },
 ) {
   u.completions++;
+  const turns = m.telemetry?.model_turns ?? null;
+  const toolUses = m.telemetry?.provider_tool_uses ?? null;
+  u.model_turns = u.model_turns == null || turns == null ? null : u.model_turns + turns;
+  u.provider_tool_uses =
+    u.provider_tool_uses == null || toolUses == null ? null : u.provider_tool_uses + toolUses;
   u.provider_ms += m.provider_execution_ms;
   const input = m.tokens?.input ?? m.tokens?.input_tokens;
   const output = m.tokens?.output ?? m.tokens?.output_tokens;
@@ -154,6 +162,9 @@ export function mergeUsage(total: Record<string, unknown>, turn: ChatUsage) {
   const t = { ...emptyUsage(), ...(total as Partial<ChatUsage>) };
   const sum = (a: number | null | undefined, b: number | null) =>
     a == null || b == null ? null : a + b;
+  // Totals recorded before turns were measured: their earlier turns are unknown, not zero.
+  const earlier = (k: "model_turns" | "provider_tool_uses") =>
+    (total as Partial<ChatUsage>)[k] === undefined && (t.completions ?? 0) > 0 ? null : t[k];
   return {
     completions: (t.completions ?? 0) + turn.completions,
     tool_calls: (t.tool_calls ?? 0) + turn.tool_calls,
@@ -163,6 +174,8 @@ export function mergeUsage(total: Record<string, unknown>, turn: ChatUsage) {
     cache_read_tokens: sum(t.cache_read_tokens, turn.cache_read_tokens ?? null),
     cache_creation_tokens: sum(t.cache_creation_tokens, turn.cache_creation_tokens ?? null),
     cost_usd: sum(t.cost_usd, turn.cost_usd),
+    model_turns: sum(earlier("model_turns"), turn.model_turns ?? null),
+    provider_tool_uses: sum(earlier("provider_tool_uses"), turn.provider_tool_uses ?? null),
   };
 }
 
@@ -570,6 +583,12 @@ async function executeTurn(
   };
   const usage = emptyUsage();
   const steps: Array<Record<string, unknown>> = [];
+  /**
+   * The models the provider itself reported for this turn: API message models (an alias resolves there), else the
+   * session model it announced. A completion that reported neither leaves the turn's model unresolved.
+   */
+  const providerModels = new Set<string>();
+  let modelUnresolved = false;
   const citations: Citation[] = [];
   const toolResults: Array<{ seq: number; tool: string; status: string; body: string }> = [];
   const seen = new Set<string>();
@@ -857,7 +876,18 @@ async function executeTurn(
         signal.throwIfAborted();
         await stream.flush();
         addUsage(usage, completion.metrics);
+        const tel = completion.metrics.telemetry;
+        const reported = tel?.api_models.length
+          ? tel.api_models
+          : tel?.session_model
+            ? [tel.session_model]
+            : [];
+        if (!reported.length) modelUnresolved = true;
+        for (const m of reported) providerModels.add(m);
         steps.push({
+          provider_models: reported,
+          model_turns: tel?.model_turns ?? null,
+          provider_tool_uses: tel?.provider_tool_uses ?? null,
           attempt,
           step,
           sent,
@@ -975,6 +1005,9 @@ async function executeTurn(
     attempts: attempts.length,
     provider: admission.provider,
     model: attempts.find((a) => a.ok)?.model ?? admission.model,
+    // `model` above is what was requested (null = account default); these are what the provider reported using.
+    provider_models: [...providerModels].sort(),
+    model_resolution: modelUnresolved || !providerModels.size ? "unresolved" : "provider_reported",
   };
   // Recorded before the turn becomes terminal, so an immediate follow-up already sees it.
   await recordContinuation(turn.id, { status: "completed", stopReason, escalated });

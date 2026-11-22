@@ -182,6 +182,12 @@ export interface ChatUsage {
   cache_read_tokens?: number | null;
   cache_creation_tokens?: number | null;
   cost_usd: number | null;
+  /**
+   * Model turns inside the provider completions (one SDK call can hold several: native tool loops) and the provider's
+   * tool-use events; null once any completion did not report them. `completions` counts SDK calls only.
+   */
+  model_turns?: number | null;
+  provider_tool_uses?: number | null;
 }
 
 /** Unfinished request of a conversation (see continuation.ts). */

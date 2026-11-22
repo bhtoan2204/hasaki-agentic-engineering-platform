@@ -6,7 +6,12 @@ import { createSdkMcpServer, query, tool, type SDKUserMessage } from "@anthropic
 import type { z } from "zod";
 import { config } from "../config.ts";
 import { agentEnvironment, paidClaudeAuth, paidClaudeAuthMessage } from "./environment.ts";
-import { accumulateMetrics, newMetrics } from "./metrics.ts";
+import {
+  accumulateMetrics,
+  newMetrics,
+  providerTelemetry,
+  type ProviderTelemetry,
+} from "./metrics.ts";
 import { codexComplete } from "./codex/run.ts";
 import { cursorComplete } from "./cursor/run.ts";
 import { antigravityComplete } from "./antigravity/run.ts";
@@ -50,6 +55,8 @@ export interface Completion {
     model_source: string;
     cost_usd: number | null;
     tokens: Record<string, number | null | undefined> | null;
+    /** What the provider reported about the work inside this completion; null when it reports nothing. */
+    telemetry: ProviderTelemetry | null;
   };
 }
 
@@ -105,6 +112,7 @@ export type CompletionRunner = (
   cost_usd?: number | null;
   tokens: Completion["metrics"]["tokens"];
   session_id?: string | null;
+  telemetry?: ProviderTelemetry | null;
 }>;
 const claudeComplete: CompletionRunner = async (prompt, options) => {
   const metrics = newMetrics(options.model || "default");
@@ -114,6 +122,7 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
   if (options.signal?.aborted) ac.abort();
   let text = "";
   let partial = "";
+  let completed = false;
   let sessionId: string | null = null;
   const stream = options.onStream;
   const session = options.session?.keep ? options.session : null;
@@ -200,7 +209,10 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
           else if (d.type === "thinking_delta") stream({ type: "reasoning", delta: d.thinking });
         }
       }
-      if (msg.type === "result" && msg.subtype === "success") text = msg.result;
+      if (msg.type === "result" && msg.subtype === "success") {
+        text = msg.result;
+        completed = true;
+      }
     }
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
@@ -211,6 +223,7 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
     tokens: metrics.tokens,
     cost_usd: metrics.cost_usd,
     session_id: session ? sessionId : null,
+    telemetry: providerTelemetry(metrics, { completed }),
   };
 };
 
@@ -287,6 +300,7 @@ export async function completeForRun(
       model_source: resolved.field_sources?.model ?? "account/CLI default (external)",
       cost_usd: result.cost_usd ?? null,
       tokens: result.tokens,
+      telemetry: result.telemetry ?? null,
     },
   };
 }

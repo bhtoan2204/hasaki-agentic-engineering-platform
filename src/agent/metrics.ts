@@ -86,6 +86,54 @@ export function newMetrics(model: string): AgentMetrics {
 }
 
 const streamedUsage = new WeakMap<AgentMetrics, Map<string, number>>();
+/** What the provider itself reported about the model work inside one completion (see providerTelemetry). */
+const providerState = new WeakMap<
+  AgentMetrics,
+  {
+    assistantIds: Set<string>;
+    apiModels: Set<string>;
+    sessionModel: string | null;
+    toolUses: number;
+    resultSeen: boolean;
+  }
+>();
+const stateOf = (m: AgentMetrics) => {
+  let st = providerState.get(m);
+  if (!st)
+    providerState.set(
+      m,
+      (st = {
+        assistantIds: new Set(),
+        apiModels: new Set(),
+        sessionModel: null,
+        toolUses: 0,
+        resultSeen: false,
+      }),
+    );
+  return st;
+};
+
+/**
+ * Provider telemetry of one completion, from the provider's own events: internal model turns (the result's
+ * `num_turns`), distinct assistant API messages of the main session, tool-use events, the session model the provider
+ * announced and the models its API messages carried (an alias resolves there). Null when not reported — the requested
+ * model is never substituted, and a completion that ended without a result has unknown turns and duration.
+ */
+export function providerTelemetry(m: AgentMetrics, o: { completed?: boolean } = {}) {
+  const st = stateOf(m);
+  const finished = st.resultSeen && o.completed !== false;
+  return {
+    model_turns: finished ? m.turns : null,
+    assistant_messages: st.assistantIds.size,
+    provider_tool_uses: st.toolUses,
+    provider_tool_errors: m.tool_errors,
+    session_model: st.sessionModel,
+    api_models: [...st.apiModels].sort(),
+    provider_duration_ms: finished ? m.duration_ms : null,
+    reasoning_tokens: m.tokens?.reasoning_output ?? null,
+  };
+}
+export type ProviderTelemetry = ReturnType<typeof providerTelemetry>;
 const seenMessages = new WeakMap<AgentMetrics, Set<string>>();
 /** Side state for repetition / first-touch measurement (not persisted itself). */
 const toolState = new WeakMap<
@@ -162,6 +210,7 @@ interface MetricsMessage {
     | string
     | {
         id?: unknown;
+        model?: unknown;
         usage?: {
           input_tokens?: unknown;
           cache_read_input_tokens?: unknown;
@@ -200,9 +249,18 @@ export function accumulateMetrics(m: AgentMetrics, msg: MetricsMessage) {
     ];
   } else if (msg.type === "system" && msg.subtype === "init") {
     m.sessions++;
-    if (typeof msg.model === "string" && msg.model) m.model = msg.model;
+    if (typeof msg.model === "string" && msg.model) {
+      m.model = msg.model;
+      stateOf(m).sessionModel = msg.model;
+    }
   } else if (msg.type === "assistant") {
     const usage = body?.usage;
+    if (!msg.parent_tool_use_id) {
+      const st = stateOf(m);
+      // Streamed content blocks of one API message share its id: one model turn, however many events.
+      st.assistantIds.add(String(body?.id ?? msg.uuid ?? st.assistantIds.size));
+      if (typeof body?.model === "string" && body.model) st.apiModels.add(body.model);
+    }
     // Subagents have their own context; only the main session's calls measure its occupancy.
     if (usage && !msg.parent_tool_use_id) {
       const occupied = [
@@ -232,6 +290,7 @@ export function accumulateMetrics(m: AgentMetrics, msg: MetricsMessage) {
     const content = body?.content;
     for (const b of typeof content === "string" ? [] : (content ?? []))
       if (b.type === "tool_use") {
+        if (!msg.parent_tool_use_id) stateOf(m).toolUses++;
         const name = String(b.name);
         m.tool_calls[name] = (m.tool_calls[name] ?? 0) + 1;
         noteToolUse(m, name, b.input);
@@ -239,6 +298,7 @@ export function accumulateMetrics(m: AgentMetrics, msg: MetricsMessage) {
   } else if (msg.type === "user" && Array.isArray(body?.content)) {
     for (const b of body.content) if (b.type === "tool_result" && b.is_error) m.tool_errors++;
   } else if (msg.type === "result") {
+    stateOf(m).resultSeen = true;
     m.turns += msg.num_turns ?? 0;
     m.duration_ms += msg.duration_ms ?? 0;
     addUsage(m, msg.usage, msg.total_cost_usd);

@@ -43,14 +43,29 @@ export interface Sample {
   variant: Variant;
   repetition: number;
   provider: string;
+  /** Deprecated alias of `requested_model` (kept for older readers). */
   model: string | null;
+  /** What the evaluation asked for (null = the provider account's default) and the reasoning effort used. */
+  requested_model: string | null;
+  effort: string | null;
+  /** What the provider reported using (API message models, else its session model); empty when it reported none. */
+  provider_models: string[];
+  model_resolution: "provider_reported" | "unresolved";
+  /** Whether code.execute was offered to the model in this sample (catalog text or native tool definition). */
+  codeact_offered: boolean;
   turn_status: string;
   correct: boolean;
   answered: boolean;
   unsupported: number;
   fields: Record<string, boolean>;
-  /** Provider completions (LLM turns) and the top-level chat tool calls the model made. */
-  completions: number;
+  /**
+   * SDK calls (provider completions the chat harness made) and the model turns inside them — one SDK call can hold a
+   * whole native tool loop. `model_turns` is null when the provider did not report it. Then the top-level chat tool
+   * calls and the provider's own tool-use events.
+   */
+  sdk_calls: number;
+  model_turns: number | null;
+  provider_tool_uses: number | null;
   tool_calls: number;
   integration_calls: number;
   codeact_executions: number;
@@ -82,6 +97,8 @@ export interface Sample {
   output_tokens: number | null;
   cache_read_tokens: number | null;
   cache_creation_tokens: number | null;
+  /** Uncached input + cache reads + cache writes (what the provider processed as input); null if any part unknown. */
+  input_tokens_total: number | null;
   cost_usd: number | null;
   provider_ms: number;
   sandbox_ms: number;
@@ -198,13 +215,20 @@ export function simulatedPolicy(
 // ------------------------------------------------------------------------------------------------- harness
 
 /** Wraps a runner to record the prompts the provider received. */
+/** Wraps a runner to record the prompts the provider received and whether code.execute was offered in them. */
 function measured(runner: CompletionRunner) {
   const prompts: number[] = [];
+  let codeactOffered = false;
   const wrapped: CompletionRunner = (prompt, options) => {
     prompts.push(prompt.length);
+    if (
+      /\bcode\.execute\b/.test(prompt) ||
+      options.nativeTools?.tools.some((t) => t.name === "code.execute")
+    )
+      codeactOffered = true;
     return runner(prompt, options);
   };
-  return { wrapped, prompts };
+  return { wrapped, prompts, offered: () => codeactOffered };
 }
 
 async function waitForTurn(actor: Actor, conversationId: number, timeoutMs: number) {
@@ -237,7 +261,7 @@ export async function runSample(
   registerEvaluationTools();
   const expected = await referenceAnswer(task);
   config.codeAct.enabled = variant === "codeact";
-  const { wrapped, prompts } = measured(o.runnerFor(task, variant));
+  const { wrapped, prompts, offered } = measured(o.runnerFor(task, variant));
   setChatProviders(
     Object.fromEntries(PROVIDERS.map((p) => [p, wrapped])) as Record<
       AgentProvider,
@@ -262,14 +286,20 @@ export async function runSample(
     "SELECT content FROM chat_messages WHERE conversation_id = $1 AND role = 'assistant' ORDER BY id DESC LIMIT 1",
     [conv.id],
   );
-  const usage =
-    (
-      await one<{ usage: Record<string, number | null> }>(
-        pool,
-        "SELECT usage FROM chat_conversations WHERE id = $1",
-        [conv.id],
-      )
-    )?.usage ?? {};
+  // The turn's own record: usage, what the provider reported using, and what was requested (the attempt).
+  const turnRow = await one<{
+    metrics: Record<string, unknown> | null;
+    attempts: Array<{ model?: string | null; effort?: string | null; ok?: boolean }> | null;
+  }>(
+    pool,
+    "SELECT metrics, attempts FROM chat_turns WHERE conversation_id = $1 ORDER BY id DESC LIMIT 1",
+    [conv.id],
+  );
+  const usage = (turnRow?.metrics ?? {}) as Record<string, unknown>;
+  const attempt = turnRow?.attempts?.find((a) => a.ok) ?? turnRow?.attempts?.at(-1);
+  const providerModels = Array.isArray(usage.provider_models)
+    ? (usage.provider_models as unknown[]).filter((m): m is string => typeof m === "string")
+    : [];
   const calls = await q<{
     tool: string;
     status: string;
@@ -347,12 +377,22 @@ export async function runSample(
     repetition,
     provider: o.provider,
     model: o.model ?? null,
+    requested_model: attempt?.model ?? o.model ?? null,
+    effort: attempt?.effort ?? null,
+    provider_models: providerModels,
+    model_resolution:
+      usage.model_resolution === "provider_reported" && providerModels.length
+        ? "provider_reported"
+        : "unresolved",
+    codeact_offered: offered(),
     turn_status: status,
     correct: grade.correct,
     answered: grade.answered,
     unsupported: grade.unsupported,
     fields: grade.fields,
-    completions: Number(usage.completions ?? prompts.length),
+    sdk_calls: Number(usage.completions ?? prompts.length),
+    model_turns: n(usage.model_turns),
+    provider_tool_uses: n(usage.provider_tool_uses),
     tool_calls: calls.length,
     integration_calls: calls.filter((c) => c.tool === "tools.call").length,
     codeact_executions: execs.length,
@@ -390,6 +430,16 @@ export async function runSample(
     output_tokens: n(usage.output_tokens),
     cache_read_tokens: n(usage.cache_read_tokens),
     cache_creation_tokens: n(usage.cache_creation_tokens),
+    input_tokens_total: [
+      usage.input_tokens,
+      usage.cache_read_tokens,
+      usage.cache_creation_tokens,
+    ].some((v) => v == null)
+      ? null
+      : [usage.input_tokens, usage.cache_read_tokens, usage.cache_creation_tokens].reduce<number>(
+          (a, v) => a + Number(v),
+          0,
+        ),
     cost_usd: n(usage.cost_usd),
     provider_ms: Number(usage.provider_ms ?? 0),
     sandbox_ms: execs.reduce((a, e) => a + Number(e.duration_ms ?? 0), 0),
@@ -465,20 +515,30 @@ function pairedDiff(diffs: number[]) {
     ci95: diffs.length >= 5 ? [means[49], means[1949]] : null,
   };
 }
-type Metric = keyof Pick<
-  Sample,
-  | "completions"
-  | "tool_calls"
-  | "prompt_chars_total"
-  | "prompt_chars_max"
-  | "tool_result_chars"
-  | "latency_ms"
-  | "input_tokens"
-  | "output_tokens"
-  | "cost_usd"
->;
+type Metric =
+  | "correct"
+  | keyof Pick<
+      Sample,
+      | "sdk_calls"
+      | "model_turns"
+      | "provider_tool_uses"
+      | "tool_calls"
+      | "prompt_chars_total"
+      | "prompt_chars_max"
+      | "tool_result_chars"
+      | "latency_ms"
+      | "input_tokens"
+      | "output_tokens"
+      | "cache_read_tokens"
+      | "cache_creation_tokens"
+      | "input_tokens_total"
+      | "cost_usd"
+    >;
 const METRICS: Metric[] = [
-  "completions",
+  "correct",
+  "sdk_calls",
+  "model_turns",
+  "provider_tool_uses",
   "tool_calls",
   "prompt_chars_total",
   "prompt_chars_max",
@@ -486,8 +546,35 @@ const METRICS: Metric[] = [
   "latency_ms",
   "input_tokens",
   "output_tokens",
+  "cache_read_tokens",
+  "cache_creation_tokens",
+  "input_tokens_total",
   "cost_usd",
 ];
+/** A metric's value; null = unknown. Verified correctness counts as 1/0 so it can be compared per pair. */
+const valueOf = (s: Sample, k: Metric): number | null =>
+  k === "correct" ? (s.correct ? 1 : 0) : typeof s[k] === "number" ? (s[k] as number) : null;
+
+/**
+ * Whether the A/B comparison is model-matched: every complete pair ran on the same provider-reported model(s) and
+ * effort. Unresolved identity is `unverified` (never assumed matched); any difference is `mismatched`.
+ */
+function modelCheck(samples: Sample[], complete: Array<Record<Variant, Sample>>) {
+  const key = (s: Sample) =>
+    `${s.provider_models.join("+")}|${s.effort ?? ""}|${s.requested_model ?? ""}`;
+  const mismatched = complete
+    .filter((p) => key(p.direct) !== key(p.codeact))
+    .map((p) => `${p.direct.task_id}#${p.direct.repetition}`);
+  const unresolved = samples.filter((s) => s.model_resolution !== "provider_reported").length;
+  return {
+    status: mismatched.length ? "mismatched" : unresolved ? "unverified" : "matched",
+    models: [...new Set(samples.flatMap((s) => s.provider_models))].sort(),
+    requested: [...new Set(samples.map((s) => s.requested_model ?? "(account default)"))].sort(),
+    efforts: [...new Set(samples.map((s) => s.effort ?? "(default)"))].sort(),
+    unresolved_samples: unresolved,
+    mismatched_pairs: mismatched,
+  } as const;
+}
 
 export function summarize(
   samples: Sample[],
@@ -502,7 +589,7 @@ export function summarize(
   const variant = (v: Variant) => {
     const xs = by(v);
     const known = (k: Metric) =>
-      xs.map((s) => s[k]).filter((x): x is number => typeof x === "number");
+      xs.map((s) => valueOf(s, k)).filter((x): x is number => typeof x === "number");
     return {
       n: xs.length,
       completed: xs.filter((s) => s.turn_status === "completed").length,
@@ -528,8 +615,8 @@ export function summarize(
   const paired = Object.fromEntries(
     METRICS.map((k) => {
       const diffs = complete
-        .filter((p) => typeof p.codeact[k] === "number" && typeof p.direct[k] === "number")
-        .map((p) => (p.codeact[k] as number) - (p.direct[k] as number));
+        .filter((p) => valueOf(p.codeact, k) != null && valueOf(p.direct, k) != null)
+        .map((p) => valueOf(p.codeact, k)! - valueOf(p.direct, k)!);
       return [k, pairedDiff(diffs)];
     }),
   );
@@ -546,10 +633,23 @@ export function summarize(
             codeact: v("codeact").filter((s) => s.correct).length,
             of: v("direct").length,
           },
-          completions: {
-            direct: mean(v("direct").map((s) => s.completions)),
-            codeact: mean(v("codeact").map((s) => s.completions)),
+          sdk_calls: {
+            direct: mean(v("direct").map((s) => s.sdk_calls)),
+            codeact: mean(v("codeact").map((s) => s.sdk_calls)),
           },
+          model_turns: {
+            direct: mean(
+              v("direct").flatMap((s) => (s.model_turns == null ? [] : [s.model_turns])),
+            ),
+            codeact: mean(
+              v("codeact").flatMap((s) => (s.model_turns == null ? [] : [s.model_turns])),
+            ),
+          },
+          cost_usd: {
+            direct: mean(v("direct").flatMap((s) => (s.cost_usd == null ? [] : [s.cost_usd]))),
+            codeact: mean(v("codeact").flatMap((s) => (s.cost_usd == null ? [] : [s.cost_usd]))),
+          },
+          codeact_used: v("codeact").filter((s) => s.codeact_executions > 0).length,
           prompt_chars_total: {
             direct: mean(v("direct").map((s) => s.prompt_chars_total)),
             codeact: mean(v("codeact").map((s) => s.prompt_chars_total)),
@@ -588,6 +688,7 @@ export function summarize(
     },
     samples: samples.length,
     pairs: complete.length,
+    model_check: modelCheck(samples, complete),
     variants: { direct: variant("direct"), codeact: variant("codeact") },
     paired_codeact_minus_direct: paired,
     per_task: perTask,
@@ -654,7 +755,10 @@ export function renderMarkdown(r: EffectReport) {
     "",
     "| metric (mean, known/of) | Direct | CodeAct | paired Δ (B−A) | 95% CI |",
     "|---|---|---|---|---|",
-    row("completions", 2),
+    row("correct", 2),
+    row("sdk_calls", 2),
+    row("model_turns", 2),
+    row("provider_tool_uses", 2),
     row("tool_calls", 2),
     row("prompt_chars_total"),
     row("prompt_chars_max"),
@@ -662,13 +766,18 @@ export function renderMarkdown(r: EffectReport) {
     row("latency_ms"),
     row("input_tokens"),
     row("output_tokens"),
+    row("cache_read_tokens"),
+    row("cache_creation_tokens"),
+    row("input_tokens_total"),
     row("cost_usd", 4),
     "",
-    "| task | eligible | correct A | correct B | LLM turns A→B | prompt chars A→B | truncated results A→B |",
-    "|---|---|---|---|---|---|---|",
+    `Model check: **${r.model_check.status === "matched" ? "model-matched" : r.model_check.status === "mismatched" ? "NOT model-matched" : "model identity unverified"}** — provider-reported ${r.model_check.models.join(", ") || "none"}; requested ${r.model_check.requested.join(", ")}; effort ${r.model_check.efforts.join(", ")}; ${r.model_check.unresolved_samples} samples unresolved${r.model_check.mismatched_pairs.length ? `; mismatched pairs ${r.model_check.mismatched_pairs.join(", ")}` : ""}.`,
+    "",
+    "| task | eligible | correct A | correct B | SDK calls A→B | model turns A→B | cost A→B | CodeAct used (B) | truncated results A→B |",
+    "|---|---|---|---|---|---|---|---|---|",
     ...Object.entries(r.per_task).map(
       ([id, t]) =>
-        `| ${id} | ${t.eligible ? "yes" : "no"} | ${t.correct.direct}/${t.correct.of} | ${t.correct.codeact}/${t.correct.of} | ${fmt(t.completions.direct, 1)}→${fmt(t.completions.codeact, 1)} | ${fmt(t.prompt_chars_total.direct)}→${fmt(t.prompt_chars_total.codeact)} | ${fmt(t.truncated_results.direct, 1)}→${fmt(t.truncated_results.codeact, 1)} |`,
+        `| ${id} | ${t.eligible ? "yes" : "no"} | ${t.correct.direct}/${t.correct.of} | ${t.correct.codeact}/${t.correct.of} | ${fmt(t.sdk_calls.direct, 1)}→${fmt(t.sdk_calls.codeact, 1)} | ${fmt(t.model_turns.direct, 1)}→${fmt(t.model_turns.codeact, 1)} | ${fmt(t.cost_usd.direct, 4)}→${fmt(t.cost_usd.codeact, 4)} | ${t.codeact_used} | ${fmt(t.truncated_results.direct, 1)}→${fmt(t.truncated_results.codeact, 1)} |`,
     ),
     "",
     `Adoption (CodeAct variant): ${r.adoption.eligible_turns_using_codeact}/${r.adoption.eligible_turns} eligible turns used CodeAct, ${r.adoption.eligible_turns_direct_only} used direct calls only, ${r.adoption.ineligible_turns_using_codeact} ineligible turns used it; ${r.adoption.executions} executions, ${r.adoption.failed_executions} failed (${
