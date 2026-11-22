@@ -232,7 +232,10 @@ if (mode === "script") {
     return text;
   };
   const output = await script({ call, prompt });
-  if (output) await tool(mcp, "submit_result", { output });
+  if (output) {
+    const submitted = await tool(mcp, "submit_result", { output });
+    log({ submitResult: (submitted?.content?.[0]?.text ?? "").slice(0, 2000) });
+  }
   out({ type: "item.completed", item: { id: "m", type: "agent_message", text: "done" } });
   out({ type: "turn.completed", usage });
   mcp.close();

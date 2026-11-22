@@ -11,6 +11,9 @@
  * are admitted only when both samples fit the allowance and the estimated remaining budget.
  *
  *   --suite rca [--seeds 1,2]   the synthetic RCA incidents (src/eval/rcaIncidents.ts) instead of the CodeAct tasks
+ *   --workflow-arm              (with --suite rca) also run arm C: the incident-investigation workflow through the real
+ *                               engine for every incident (live: the same provider/model/effort; simulated: not
+ *                               available — the deterministic workflow arm runs in test/rca-three-arm.integration.ts)
  */
 import { writeFileSync } from "node:fs";
 import { migrate } from "../db/migrate.ts";
@@ -29,6 +32,12 @@ import {
   renderMarkdown,
 } from "../eval/codeactEffect.ts";
 import { rcaTasks } from "../eval/rcaIncidents.ts";
+import {
+  ensureRcaWorkflow,
+  runWorkflowSample,
+  summarizeWorkflowArm,
+} from "../eval/rcaWorkflowArm.ts";
+import { registerDefaultExecutors } from "../workflow/executors/index.ts";
 
 const argv = process.argv.slice(2);
 const opt = (k: string) => {
@@ -69,13 +78,18 @@ const user = await createUser({
   password: "codeact-eval",
   role: "member",
 });
+const suite =
+  opt("--suite") === "rca" ? rcaTasks((opt("--seeds") ?? "1").split(",").map(Number)) : undefined;
+const workflowArm = argv.includes("--workflow-arm");
+if (workflowArm && (!suite || !live))
+  throw new Error(
+    "--workflow-arm needs --suite rca and --live (the simulated workflow arm runs in the test suite)",
+  );
 const { samples, stopped, known_spend_usd, pairs, budget } = await runEvaluation(
   {
     repetitions: Number(opt("--repetitions") ?? 1),
     tasks: opt("--tasks")?.split(","),
-    ...(opt("--suite") === "rca"
-      ? { suite: rcaTasks((opt("--seeds") ?? "1").split(",").map(Number)) }
-      : {}),
+    ...(suite ? { suite } : {}),
     budgetUsd,
     maxSamples,
   },
@@ -87,6 +101,24 @@ const { samples, stopped, known_spend_usd, pairs, budget } = await runEvaluation
     runnerFor: (task) => (live ? completionRunners[provider] : simulatedPolicy(task)),
   },
 );
+// Arm C: the same incidents through the workflow, within what is left of the budget and sample allowance.
+const workflow = [];
+if (workflowArm && suite) {
+  registerDefaultExecutors();
+  const definitionKey = await ensureRcaWorkflow({ model: opt("--model"), effort: opt("--effort") });
+  let spent = known_spend_usd;
+  let used = samples.length;
+  for (const task of suite.filter(
+    (t) => !opt("--tasks") || opt("--tasks")!.split(",").includes(t.id),
+  )) {
+    if (maxSamples != null && used >= maxSamples) break;
+    if (budgetUsd != null && spent >= budgetUsd) break;
+    const s = await runWorkflowSample(task, 0, { ownerId: user.id, provider, definitionKey });
+    workflow.push(s);
+    used++;
+    spent += s.cost_usd ?? 0;
+  }
+}
 const report = {
   ...summarize(samples, {
     level: live ? "live-provider" : "fixture-simulated-provider",
@@ -98,6 +130,9 @@ const report = {
   known_spend_usd,
   budget,
   pair_schedule: pairs,
+  ...(workflowArm
+    ? { workflow_arm: { summary: summarizeWorkflowArm(workflow), samples: workflow } }
+    : {}),
   raw_samples: samples,
 };
 console.log(renderMarkdown(report));

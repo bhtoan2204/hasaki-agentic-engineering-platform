@@ -13,6 +13,8 @@ const scope = new AsyncLocalStorage<{ enabled: boolean }>();
 export function withCodeActScope<T>(enabled: boolean, fn: () => T): T {
   return scope.run({ enabled }, fn);
 }
+/** The scope's own setting, or undefined outside any scope (then the installation default applies). */
+export const codeActScopeValue = (): boolean | undefined => scope.getStore()?.enabled;
 export function codeActEnabled(): boolean {
   return scope.getStore()?.enabled ?? config.codeAct.enabled;
 }

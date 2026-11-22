@@ -724,3 +724,22 @@ export function rcaTasks(
   );
 }
 export const incidentForTests = (id: string) => INCIDENTS.get(id);
+
+/**
+ * The reference plan of an incident as one CodeAct program for the workflow arm: the same plan the other arms run,
+ * plus the size of every successful nested result (in call order) so an agent can state checkable `observed` counts.
+ */
+export function incidentProgram(taskId: string): string {
+  const inc = INCIDENTS.get(taskId);
+  if (!inc) throw new Error(`unknown incident ${taskId}`);
+  return `const sizes = [];
+const call = async (n, a) => {
+  const r = await platform.callTool(n, a);
+  const key = Array.isArray(r?.spans) ? "spans" : Array.isArray(r?.events) ? "events" : null;
+  sizes.push({ tool: n, key, count: key ? r[key].length : null });
+  return r;
+};
+const answer = await (async (call) => {${planSource(inc)}
+})(call);
+return { answer, sizes };`;
+}

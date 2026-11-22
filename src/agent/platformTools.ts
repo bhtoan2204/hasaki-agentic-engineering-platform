@@ -56,10 +56,17 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
  * After ask_user has open questions, further mutations are refused until the engine resumes.
  */
 import { traceLog } from "../workflow/trace.ts";
+import { codeActScopeValue, withCodeActScope } from "../codeact/scope.ts";
 
 export interface PlatformToolEnv {
   /** Set once submit_result recorded a valid output; each provider turn gets a fresh env, so a repair turn may submit again. */
   submittedThisTurn?: boolean;
+  /**
+   * CodeAct for this attempt when the worker built its env inside an evaluation scope (withCodeActScope). Tool calls
+   * arrive through the broker outside that async context, so they use this snapshot. Undefined — no scope, or an env
+   * rebuilt in a bridge process — means the installation setting applies, read at call time as before.
+   */
+  codeact?: boolean;
   contextPreparation?: boolean;
   attemptAllowedTools?: string[] | null;
   /** The attempt's execution signal: run cancellation, lease loss, attempt timeout (absent in a bridge process). */
@@ -179,6 +186,8 @@ export async function dispatchPlatformTool(
   args: unknown,
   env: PlatformToolEnv,
 ): Promise<string> {
+  if (env.codeact !== undefined && codeActScopeValue() !== env.codeact)
+    return withCodeActScope(env.codeact, () => dispatchPlatformTool(name, args, env));
   const started = performance.now();
   const call = args as { name?: unknown; arguments?: unknown } | null | undefined;
   try {
@@ -874,6 +883,8 @@ export function envFromExecution(
   onSubmit: (output: Record<string, unknown>) => void,
 ): PlatformToolEnv {
   return {
+    // Only an evaluation scope is captured; otherwise the installation setting keeps applying live, as before.
+    codeact: codeActScopeValue(),
     runId: ctx.run.id,
     snapshotId: ctx.context?.snapshot_id,
     recordMetrics: (m) => ctx.recordMetrics(m),
