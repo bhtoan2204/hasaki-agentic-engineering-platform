@@ -49,7 +49,7 @@ const lockKey = (s: string) => createHash("sha256").update(s).digest().readBigIn
 export async function startBugHunt(
   fingerprint: string,
   actor: Actor,
-  body: { repositories?: unknown; provider?: unknown },
+  body: { repositories?: unknown; provider?: unknown; context?: string; prior_evidence?: string[] },
 ) {
   if (!/^[0-9a-f]{20}$/.test(fingerprint)) throw new HttpError(400, "invalid fingerprint");
   const repos = Array.isArray(body.repositories) ? [...new Set(body.repositories.map(String))] : [];
@@ -81,7 +81,12 @@ export async function startBugHunt(
       run = await startRun({
         definitionKey: BUG_HUNT_WORKFLOW,
         title: `[Bug Hunt] ${g.service}: ${g.signature}`.slice(0, 160),
-        inputs: { fingerprint, request: describeGroup(g) },
+        // `context`: bounded, already-validated prior evidence of the same incident (unified workbench), as hints.
+        inputs: {
+          fingerprint,
+          request: describeGroup(g) + (body.context ?? ""),
+          ...(body.prior_evidence?.length ? { prior_evidence: body.prior_evidence } : {}),
+        },
         repositories: repos,
         agentProvider: body.provider ? String(body.provider) : undefined,
         ownerId: actor.id,

@@ -59,6 +59,7 @@
     "smoke:run-view": "node --disable-warning=ExperimentalWarning test/run-view.smoke.ts",
     "smoke:observability": "node --disable-warning=ExperimentalWarning test/execution-observability.smoke.ts",
     "smoke:prod-errors-tabs": "node --disable-warning=ExperimentalWarning test/prod-errors-tabs.smoke.ts",
+    "smoke:incident-workbench": "node --disable-warning=ExperimentalWarning test/incident-workbench.smoke.ts",
     "smoke:overview-timesheet": "node --disable-warning=ExperimentalWarning test/overview-timesheet.smoke.ts",
     "smoke:chat": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 test/chat.browser.ts",
     "smoke:run-detail": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=1 test/run-detail.browser.ts",

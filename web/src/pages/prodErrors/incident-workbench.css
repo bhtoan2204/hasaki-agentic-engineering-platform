@@ -1,0 +1,113 @@
+/* Unified Incident Workbench (incident accordion). Mobile first: one column, no horizontal overflow. */
+.wb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  min-width: 0;
+}
+.wb-summary-head,
+.wb-actions,
+.wb-source-head {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+}
+.wb-summary-head h4,
+.wb-block h5 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.wb-summary ul,
+.wb-block ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.wb-summary {
+  min-width: 0;
+}
+.wb-causes {
+  width: 100%;
+  border-collapse: collapse;
+}
+.wb-causes .mono {
+  overflow-wrap: anywhere;
+}
+.wb-causes th,
+.wb-causes td {
+  text-align: left;
+  vertical-align: top;
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.wb-status.wb-confirmed {
+  color: var(--st-ok);
+}
+.wb-status.wb-conflicted,
+.wb-status.wb-blocked,
+.wb-contra,
+.wb-conflicts h5 {
+  color: var(--st-err);
+}
+.wb-sources {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+.wb-source {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+.wb-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.wb-progress span {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+}
+.wb-block {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Phone: each cause becomes a stacked card instead of a wide table row. */
+@media (max-width: 640px) {
+  .wb-causes thead {
+    display: none;
+  }
+  .wb-causes,
+  .wb-causes tbody,
+  .wb-causes tr,
+  .wb-causes td {
+    display: block;
+    width: auto;
+  }
+  .wb-causes tr {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .wb-causes td {
+    border: 0;
+    padding: 2px 0;
+  }
+  .wb-causes td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--muted);
+  }
+}

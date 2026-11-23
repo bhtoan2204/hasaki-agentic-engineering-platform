@@ -134,6 +134,14 @@ import {
   startBugHunt,
 } from "../bugHunt/service.ts";
 import {
+  getWorkbench,
+  rcaVersion,
+  startRuntime,
+  startHunt,
+  startBoth,
+  createFix as createIncidentFix,
+} from "../incidents/unified.ts";
+import {
   bitbucketStatus,
   clearBitbucket,
   clearGithub,
@@ -2683,6 +2691,27 @@ export const routes: Route[] = [
     /^\/api\/bug-hunts\/(\d+)\/findings\/(\d+)\/fix-task$/,
     (c) => createFixTask(num(c.p[0]), num(c.p[1]), c.actor),
   ],
+  // Unified Incident Workbench: the actor's (incident, owner) workspace; admins in support mode may read another owner's.
+  [
+    "GET",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench$/,
+    (c) => {
+      const owner = c.url.searchParams.get("owner");
+      return getWorkbench(c.p[0], c.actor, { support: support(c), ownerId: owner ? num(owner) : undefined });
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/rca\/(\d+)$/,
+    (c) => {
+      const owner = c.url.searchParams.get("owner");
+      return rcaVersion(c.p[0], c.actor, num(c.p[1]), { support: support(c), ownerId: owner ? num(owner) : undefined });
+    },
+  ],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/runtime$/, (c) => startRuntime(c.p[0], c.actor, c.body)],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/bug-hunt$/, (c) => startHunt(c.p[0], c.actor, c.body)],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/both$/, (c) => startBoth(c.p[0], c.actor, c.body)],
+  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/fix$/, (c) => createIncidentFix(c.p[0], c.actor, c.body)],
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/link$/,
