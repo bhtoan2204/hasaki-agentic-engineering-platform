@@ -25,10 +25,23 @@ func bucketSQL(field string) string { return "date_trunc($4::text, " + field + "
 // only the columns the dashboards read instead of r.* and t.*, so the materialized CTEs carry no unused JSONB
 // (run inputs, graph, learning) and the telemetry view's unused derived columns (provenance, cost availability,
 // terminal status) are never computed. runSummary adds workflow_runs.summary for the health incident links.
-func executionCTE(runSummary bool) string {
+func executionCTE(runSummary bool) string { return executionCTEWith(runSummary, true) }
+
+// leanExecutionCTE omits the attempt metrics JSONB and the context_snapshots join (metrics, context_preparation_ms):
+// dashboards that never read them skip detoasting those large documents for every attempt.
+func leanExecutionCTE() string { return executionCTEWith(false, false) }
+
+func executionCTEWith(runSummary, attemptDetail bool) string {
 	summary := ""
 	if runSummary {
 		summary = "r.summary,"
+	}
+	metricsCol, contextCol, contextJoin := "", "", ""
+	if attemptDetail {
+		metricsCol = "a.metrics, "
+		contextCol = `,
+   COALESCE((a.metrics->>'context_preparation_ms')::double precision,(cs.content->>'preparation_duration_ms')::double precision) AS context_preparation_ms`
+		contextJoin = "LEFT JOIN context_snapshots cs ON cs.id=a.context_snapshot_id"
 	}
 	return `WITH ` + boundsSQL + `,
 run_candidates AS MATERIALIZED (
@@ -58,18 +71,17 @@ attempt_candidates AS MATERIALIZED (
    t.queue_duration_ms, t.provider_execution_ms, t.tool_execution_ms, t.human_wait_ms, t.wall_duration_ms,
    t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.reasoning_tokens,
    t.reported_cost_usd, t.tool_failures, t.status, t.normalized_failure_category, t.provider_sessions,
-   a.metrics, COALESCE(a.input->'pending' ? 'resume',false) AS is_resume, a.invalidated_at, a.context_snapshot_id,
+   ` + metricsCol + `COALESCE(a.input->'pending' ? 'resume',false) AS is_resume, a.invalidated_at, a.context_snapshot_id,
    s.key AS step_key, s.type AS step_type,
    NULLIF(a.effective_agent->>'model','') AS configured_model,
    NULLIF(a.agent_model,'') AS requested_model,
    (SELECT string_agg(DISTINCT NULLIF(v->>'model',''), ', ' ORDER BY NULLIF(v->>'model',''))
      FROM jsonb_each(COALESCE(t.provider_sessions,'{}'::jsonb)) e(k,v)) AS session_models,
    r.definition_key, r.username, r.project, r.selected_repositories, r.work_item_id, r.verified, r.status AS run_status,
-   (SELECT sum(value::numeric) FROM jsonb_each_text(COALESCE(t.tool_calls,'{}'::jsonb))) AS tool_call_count,
-   COALESCE((a.metrics->>'context_preparation_ms')::double precision,(cs.content->>'preparation_duration_ms')::double precision) AS context_preparation_ms
+   (SELECT sum(value::numeric) FROM jsonb_each_text(COALESCE(t.tool_calls,'{}'::jsonb))) AS tool_call_count` + contextCol + `
  FROM run_candidates r JOIN execution_attempt_telemetry t ON t.run_id=r.id
  JOIN workflow_step_attempts a ON a.id=t.attempt_id JOIN workflow_steps s ON s.id=t.step_id
- LEFT JOIN context_snapshots cs ON cs.id=a.context_snapshot_id
+ ` + contextJoin + `
 ),
 usage_candidates AS MATERIALIZED (
  SELECT a.attempt_id,a.run_id,a.step_id,a.step_key,a.step_type,a.start_time,a.definition_key,a.owner_id,a.username,a.project,a.selected_repositories,
@@ -218,7 +230,7 @@ func jsonFields(alias string, fields []string, missing bool) string {
 
 // Performance is already one statement in TypeScript; the cohort projection above is the change.
 func (s *Service) performance(ctx context.Context, r *Request) (any, error) {
-	sql := executionCTE(false) + `,
+	sql := leanExecutionCTE() + `,
 invocations AS (
   SELECT * FROM usage WHERE step_type IN ('agent','coding_agent') OR invocation_id IS NOT NULL
 ),

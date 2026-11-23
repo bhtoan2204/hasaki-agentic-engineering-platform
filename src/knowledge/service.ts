@@ -57,7 +57,14 @@ function check(x: Partial<KnowledgeInput>) {
 export const knowledge = {
   /** `summary`: without the version content and applicability (list views; the item route has them). */
   list(
-    filter: { category?: string; ownerId?: number; all?: boolean; summary?: boolean } = {},
+    filter: {
+      category?: string;
+      scope?: string;
+      search?: string;
+      ownerId?: number;
+      all?: boolean;
+      summary?: boolean;
+    } = {},
     db: Db = pool,
   ) {
     const scoped = filter.ownerId != null || filter.all === true;
@@ -71,6 +78,9 @@ export const knowledge = {
             OR ($3::bool AND (i.owner_id IS NULL OR i.owner_id = $4))
             OR ($5::bool)
           )
+          AND ($6::text IS NULL OR i.scope_type = $6)
+          AND ($7::text IS NULL OR i.title ILIKE $7 OR i.key ILIKE $7 OR i.scope_ref ILIKE $7
+               OR v.metadata->>'description' ILIKE $7)
         ORDER BY i.category, i.scope_type, i.owner_id NULLS FIRST, i.key`,
       [
         filter.category ?? null,
@@ -78,6 +88,8 @@ export const knowledge = {
         filter.ownerId != null && !filter.all,
         filter.ownerId ?? null,
         !!filter.all,
+        filter.scope ?? null,
+        filter.search ? `%${filter.search.replace(/[\\%_]/g, "\\$&")}%` : null,
       ],
     );
   },

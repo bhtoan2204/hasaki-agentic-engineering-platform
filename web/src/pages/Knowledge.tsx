@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   BookMarked,
@@ -165,6 +165,12 @@ type KnowledgeUsage = {
     created_at: string;
   }>;
 };
+type KnowledgePage = {
+  items: KnowledgeSummary[];
+  total: number;
+  counts: Record<string, number>;
+};
+const PAGE_SIZE = 50;
 type ProposalRef = { id: number; change_type: string; status: string };
 type ImportPreview = {
   created: number;
@@ -228,38 +234,36 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
   const me = useApi<{ user: { role: string } }>("/api/auth/me");
   const pendingProposals = useApi<ProposalRef[]>("/api/knowledge-proposals?status=pending");
   const [cat, setCat] = useState("");
-  const { data, error, loading, reload } = useApi<KnowledgeSummary[]>(
-    `/api/knowledge${cat ? `?category=${cat}` : ""}`,
-    [cat],
-  );
-  // Category counts need the unfiltered list; only fetched separately while a category filter is active.
-  const all = useApi<KnowledgeSummary[]>(cat ? "/api/knowledge" : null, [cat]);
   const [q, setQ] = useState("");
   const [scope, setScope] = useState("");
-  const counts = useMemo(() => {
-    const src = cat ? all.data : data;
-    const m: Record<string, number> = {};
-    for (const k of src ?? []) m[k.category] = (m[k.category] ?? 0) + 1;
-    return src ? ({ ...m, "": src.length } as Record<string, number>) : null;
-  }, [cat, all.data, data]);
+  const [page, setPage] = useState(1);
+  const [needle, setNeedle] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setNeedle(q.trim()), 250);
+    return () => clearTimeout(id);
+  }, [q]);
+  useEffect(() => setPage(1), [cat, scope, needle]);
+  const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
+  if (cat) params.set("category", cat);
+  if (scope) params.set("scope", scope);
+  if (needle) params.set("q", needle);
+  const { data, error, loading, reload } = useApi<KnowledgePage>(`/api/knowledge?${params}`, [
+    page,
+    cat,
+    scope,
+    needle,
+  ]);
+  const counts = data?.counts ?? null;
+  const items = data?.items ?? [];
+  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
+  useEffect(() => {
+    if (data && page > pages) setPage(pages);
+  }, [data, page, pages]);
   const reloadAll = () => {
     reload();
-    if (cat) all.reload();
     pendingProposals.reload();
   };
-  const items = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return (data ?? []).filter(
-      (k) =>
-        (!scope || k.scope_type === scope) &&
-        (!needle ||
-          [k.title, k.key, k.scope_ref, k.metadata?.description].some((x) =>
-            String(x ?? "")
-              .toLowerCase()
-              .includes(needle),
-          )),
-    );
-  }, [data, q, scope]);
+  const filtered = !!(cat || scope || needle);
 
   return (
     <div className="kn">
@@ -333,7 +337,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
             <SkeletonRows rows={6} />
           ) : error ? (
             <ErrorBox error={error} onRetry={reload} />
-          ) : !data?.length ? (
+          ) : !data?.total && !filtered ? (
             <EmptyState
               icon={BookOpen}
               title={t("kn.emptyTitle")}
@@ -349,41 +353,44 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
           ) : !items.length ? (
             <div className="kn-none">{t("kn.noMatch")}</div>
           ) : (
-            <ul className="kn-items">
-              {items.map((k) => {
-                const I = CAT_ICON[k.category] ?? FileText;
-                return (
-                  <li key={k.key}>
-                    <button
-                      type="button"
-                      className={`kn-item${k.key === itemKey ? " on" : ""}${k.enabled ? "" : " is-off"}`}
-                      onClick={() => navigate(`/knowledge/${k.key}`)}
-                    >
-                      <span className="kn-item-icon">
-                        <I size={16} strokeWidth={2} />
-                      </span>
-                      <span className="kn-item-body">
-                        <span className="kn-item-title">
-                          <b>{k.title}</b>
-                          <Badge s={k.owner_id ? "RUNNING" : "COMPLETED"}>
-                            {k.owner_id ? t("auth.my") : t("auth.shared")}
-                          </Badge>
-                          {k.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
-                          {!k.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
+            <>
+              <ul className="kn-items">
+                {items.map((k) => {
+                  const I = CAT_ICON[k.category] ?? FileText;
+                  return (
+                    <li key={k.key}>
+                      <button
+                        type="button"
+                        className={`kn-item${k.key === itemKey ? " on" : ""}${k.enabled ? "" : " is-off"}`}
+                        onClick={() => navigate(`/knowledge/${k.key}`)}
+                      >
+                        <span className="kn-item-icon">
+                          <I size={16} strokeWidth={2} />
                         </span>
-                        <span className="kn-item-key mono">{k.key}</span>
-                        <span className="kn-item-meta">
-                          <ScopeBadge type={k.scope_type} scopeRef={k.scope_ref} />
-                          <span className="kn-tag">{t(catKey(k.category))}</span>
-                          <span className="kn-tag mono">v{k.current_version}</span>
-                          <LoadChip metadata={k.metadata} />
+                        <span className="kn-item-body">
+                          <span className="kn-item-title">
+                            <b>{k.title}</b>
+                            <Badge s={k.owner_id ? "RUNNING" : "COMPLETED"}>
+                              {k.owner_id ? t("auth.my") : t("auth.shared")}
+                            </Badge>
+                            {k.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
+                            {!k.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
+                          </span>
+                          <span className="kn-item-key mono">{k.key}</span>
+                          <span className="kn-item-meta">
+                            <ScopeBadge type={k.scope_type} scopeRef={k.scope_ref} />
+                            <span className="kn-tag">{t(catKey(k.category))}</span>
+                            <span className="kn-tag mono">v{k.current_version}</span>
+                            <LoadChip metadata={k.metadata} />
+                          </span>
                         </span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <Pager page={page} pages={pages} total={data?.total ?? 0} onPage={setPage} />
+            </>
           )}
         </aside>
         <section className="kn-detail">
@@ -417,6 +424,54 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
         </section>
       </div>
     </div>
+  );
+}
+
+function pageWindow(page: number, pages: number): Array<number | "…"> {
+  const keep = new Set([1, pages, page - 1, page, page + 1]);
+  const out: Array<number | "…"> = [];
+  let prev = 0;
+  for (const n of [...keep].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b)) {
+    if (n - prev > 1) out.push("…");
+    out.push(n);
+    prev = n;
+  }
+  return out;
+}
+
+function Pager({
+  page,
+  pages,
+  total,
+  onPage,
+}: {
+  page: number;
+  pages: number;
+  total: number;
+  onPage: (n: number) => void;
+}) {
+  if (pages <= 1) return null;
+  return (
+    <nav className="kn-pager" aria-label="Pagination">
+      <span className="kn-pager-total">{total}</span>
+      {pageWindow(page, pages).map((n, i) =>
+        n === "…" ? (
+          <span key={`gap${i}`} className="kn-pager-gap">
+            …
+          </span>
+        ) : (
+          <button
+            key={n}
+            type="button"
+            className={`sm${n === page ? "" : " ghost"}`}
+            aria-current={n === page ? "page" : undefined}
+            onClick={() => onPage(n)}
+          >
+            {n}
+          </button>
+        ),
+      )}
+    </nav>
   );
 }
 
@@ -1338,9 +1393,7 @@ function KnowledgeAuditPanel() {
       {loading && !data && <SkeletonRows rows={3} />}
       {data && (
         <>
-          <p>
-            {t("kn.audit.summary", { count: data.itemCount, days: data.windowDays })}
-          </p>
+          <p>{t("kn.audit.summary", { count: data.itemCount, days: data.windowDays })}</p>
           <JsonBlock value={data.counts} />
           {data.findings.length === 0 ? (
             <Empty>{t("kn.audit.noFindings")}</Empty>

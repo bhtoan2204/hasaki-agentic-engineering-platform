@@ -1574,14 +1574,30 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/knowledge$/,
     async (c) => {
-      return visibleKnowledge(
+      const sp = c.url.searchParams;
+      const category = sp.get("category") || undefined;
+      const paged = sp.has("page");
+      const rows = await visibleKnowledge(
         c.actor.id,
         await knowledge.list({
-          category: c.url.searchParams.get("category") ?? undefined,
+          category: paged ? undefined : category,
+          scope: paged ? sp.get("scope") || undefined : undefined,
+          search: paged ? sp.get("q")?.trim() || undefined : undefined,
           summary: true,
           ...mine(c),
         }),
       );
+      if (!paged) return rows;
+      const counts: Record<string, number> = { "": rows.length };
+      for (const k of rows) counts[k.category] = (counts[k.category] ?? 0) + 1;
+      const matched = category ? rows.filter((k) => k.category === category) : rows;
+      const size = Math.min(200, Math.max(1, Number(sp.get("page_size")) || 50));
+      const page = Math.max(1, Number(sp.get("page")) || 1);
+      return {
+        items: matched.slice((page - 1) * size, page * size),
+        total: matched.length,
+        counts,
+      };
     },
   ],
   [
