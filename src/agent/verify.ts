@@ -972,6 +972,7 @@ export async function verifyWorkspaces(
           .filter(([, x]) => x.status === "fail")
           .map(([k]) => k);
         let c: Classification | null = null;
+        let baseReport: GoTestReport | null = null;
         if (failing.length && cfg.baseline === "go" && deps.baseline) {
           const base = await deps
             .baseline({ repo: w.repo, path: p }, failing)
@@ -981,7 +982,10 @@ export async function verifyWorkspaces(
                 null
               ),
             );
-          if (base) c = classify(report, base);
+          if (base) {
+            c = classify(report, base);
+            baseReport = base;
+          }
         }
         entry.failing_tests = failing.length;
         if (!failing.length)
@@ -1007,16 +1011,35 @@ export async function verifyWorkspaces(
               });
             } else {
               // Confirm: re-run with the pre-existing tests excluded; anything still failing is not explained by the base.
-              const skip = [
-                known?.skipRegex,
-                `^(${entry.pre_existing_tests.map(escapeRe).join("|")})$`,
-              ]
-                .filter(Boolean)
-                .join("|");
+              const excluded = [...entry.pre_existing_tests];
+              const skipFor = () =>
+                [known?.skipRegex, `^(${excluded.map(escapeRe).join("|")})$`]
+                  .filter(Boolean)
+                  .join("|");
               await deps.log?.(
-                `◆ verify ${w.repo}: confirming that only pre-existing failures remain (re-run excluding ${entry.pre_existing_tests.length} test(s))`,
+                `◆ verify ${w.repo}: confirming that only pre-existing failures remain (re-run excluding ${excluded.length} test(s))`,
               );
-              const again = await runWith(skip);
+              let again = await runWith(skipFor());
+              // A panic aborts the package and hides the tests after it: exclude newly revealed base failures and re-run.
+              for (let round = 0; round < 4 && !signal.aborted; round++) {
+                if (again.code === 0 || again.timedOut || !baseReport) break;
+                const fresh = new Set<string>();
+                let explained = true;
+                for (const [pkg, x] of Object.entries(parseGoTest(again.output))) {
+                  if (x.status !== "fail") continue;
+                  const baseTests = new Set(baseReport[pkg]?.tests ?? []);
+                  if (x.buildErrors.length || !x.tests.length) explained = false;
+                  for (const t of x.tests) {
+                    if (excluded.includes(t.split("/")[0])) continue;
+                    if (baseTests.has(t) || baseTests.has(t.split("/")[0])) fresh.add(t.split("/")[0]);
+                    else explained = false;
+                  }
+                }
+                if (!explained || !fresh.size) break;
+                excluded.push(...fresh);
+                entry.pre_existing_tests = [...excluded];
+                again = await runWith(skipFor());
+              }
               if (signal.aborted) throw new Error("verification canceled");
               if (again.code === 0 && !again.timedOut)
                 Object.assign(entry, {
