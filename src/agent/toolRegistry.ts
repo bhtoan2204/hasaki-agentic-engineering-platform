@@ -123,10 +123,13 @@ type PreparedIntegrationCall = {
   preflight?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
 };
 
-type RegisteredIntegrationTool = Omit<IntegrationTool, "handler" | "preflight" | "preauthorized"> & {
-  prepare: (raw: unknown) =>
-    | { ok: true; call: PreparedIntegrationCall }
-    | { ok: false; error: z.ZodError };
+type RegisteredIntegrationTool = Omit<
+  IntegrationTool,
+  "handler" | "preflight" | "preauthorized"
+> & {
+  prepare: (
+    raw: unknown,
+  ) => { ok: true; call: PreparedIntegrationCall } | { ok: false; error: z.ZodError };
 };
 
 const registry = new Map<string, RegisteredIntegrationTool>();
@@ -370,8 +373,11 @@ const CRITICAL_LINE =
  * is stored separately (`rawRef` says where). No model call. Pure.
  */
 export function compressToolOutput(v: unknown, max = MAX_RESULT, rawRef?: string) {
+  // Compact first: indentation is whitespace the model pays for and carries nothing. Only an oversized result is
+  // re-rendered with line breaks, because the compression below keeps whole lines (errors, file:line locations).
+  const compact = toolJson(v);
+  if (compact.length <= max) return compact;
   const s = JSON.stringify(v, null, 2) ?? "null";
-  if (s.length <= max) return s;
   const lines = s.split("\n");
   const head: string[] = [];
   const tail: string[] = [];
@@ -408,8 +414,11 @@ export function compressToolOutput(v: unknown, max = MAX_RESULT, rawRef?: string
   ].join("\n");
 }
 
+/** Tool results are sent as compact JSON (same data as the indented form, ~35% fewer characters on nested results). */
+export const toolJson = (v: unknown) => JSON.stringify(v) ?? "null";
+
 export function capResult(v: unknown) {
-  const s = JSON.stringify(v, null, 2) ?? "null";
+  const s = toolJson(v);
   return s.length > MAX_RESULT
     ? s.slice(0, MAX_RESULT) + `\n… (truncated, ${s.length - MAX_RESULT} more chars)`
     : s;

@@ -42,6 +42,7 @@ import {
   callTool,
   capResult,
   compressToolOutput,
+  toolJson,
   describeTool,
   listTools,
 } from "./toolRegistry.ts";
@@ -389,28 +390,24 @@ async function dispatchOwned(name: string, args: ToolArgs, env: PlatformToolEnv)
     case "read_artifact":
       return readArtifact(args as Parameters<typeof readArtifact>[0], env);
     case "list_tools":
-      return JSON.stringify(
-        [
-          ...listOwnedTools(args?.query),
-          ...listTools(typeof args.query === "string" ? args.query : undefined, {
-            mode: env.mode,
-          }),
-          ...CONTEXT_TOOLS.map((t) => ({
-            name: t.logicalName,
-            summary: t.description,
-            read_only: t.readOnly,
-            available: contextToolSupported(t.name),
-          })),
-        ],
-        null,
-        2,
-      );
+      return toolJson([
+        ...listOwnedTools(args?.query),
+        ...listTools(typeof args.query === "string" ? args.query : undefined, {
+          mode: env.mode,
+        }),
+        ...CONTEXT_TOOLS.map((t) => ({
+          name: t.logicalName,
+          summary: t.description,
+          read_only: t.readOnly,
+          available: contextToolSupported(t.name),
+        })),
+      ]);
     case "describe_tool":
       try {
         const owned = describeOwnedTool(String(args?.name ?? ""));
-        if (owned) return JSON.stringify(owned, null, 2);
+        if (owned) return toolJson(owned);
         const native = contextTool(String(args?.name ?? ""));
-        return JSON.stringify(
+        return toolJson(
           native
             ? {
                 name: native.logicalName,
@@ -420,8 +417,6 @@ async function dispatchOwned(name: string, args: ToolArgs, env: PlatformToolEnv)
                 input_schema: z.toJSONSchema(native.input),
               }
             : describeTool(String(args?.name ?? "")),
-          null,
-          2,
         );
       } catch (e) {
         return (e as Error).message;
@@ -743,9 +738,7 @@ async function searchKnowledge(args: ToolArgs, env: PlatformToolEnv): Promise<st
       hits: hits.map((h) => h.key),
     },
   );
-  return hits.length
-    ? JSON.stringify(hits, null, 2)
-    : "No applicable knowledge matches. Try other words.";
+  return hits.length ? toolJson(hits) : "No applicable knowledge matches. Try other words.";
 }
 
 async function readArtifact(
@@ -857,8 +850,10 @@ async function callIntegration(
     { integration: toolName, ok: r.ok, ms: r.ms },
   );
   if (!r.ok) return `ERROR: ${r.error}`;
+  const compact = toolJson(r.result);
+  if (compact.length <= MAX_TOOL_RESULT) return compact;
+  // The stored artifact keeps the indented form: it is read by people and paged by lines.
   const full = JSON.stringify(r.result, null, 2) ?? "null";
-  if (full.length <= MAX_TOOL_RESULT) return full;
   // Oversized: keep the complete (redacted) output as a log artifact so nothing the model did not see is lost.
   const artifact = await one<{ id: number }>(
     pool,

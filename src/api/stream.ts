@@ -79,15 +79,23 @@ function send(client: Client, p: LivePayload) {
   client.res.write(`id: ${p.id}\nevent: change\ndata: ${JSON.stringify(p)}\n\n`);
 }
 
+/** Deliveries run strictly in NOTIFY order: a cold owner lookup for one event must not let a later event overtake it. */
+let deliveries: Promise<void> = Promise.resolve();
 /** One owner lookup per notification at most (cached), never one per subscriber. */
-async function fanOut(p: LivePayload) {
+function fanOut(p: LivePayload) {
   if (!clients.size) return;
-  const ownerId = await ownerOf(p.run_id);
-  for (const cl of clients) {
-    if (!visible(cl, p.run_id, ownerId)) continue;
-    if (cl.queued) cl.queued.push(p);
-    else send(cl, p);
-  }
+  const owner = ownerOf(p.run_id); // starts now, so lookups overlap; only the delivery below is ordered
+  owner.catch(() => {}); // reported by the chain below
+  deliveries = deliveries
+    .then(async () => {
+      const ownerId = await owner;
+      for (const cl of clients) {
+        if (!visible(cl, p.run_id, ownerId)) continue;
+        if (cl.queued) cl.queued.push(p);
+        else send(cl, p);
+      }
+    })
+    .catch((e) => console.error("event stream fan-out:", (e as Error).message));
 }
 
 /**
@@ -181,7 +189,7 @@ export async function startEventStream() {
       } catch {
         return;
       }
-      fanOut(p).catch((e) => console.error("event stream fan-out:", e.message));
+      fanOut(p);
     });
     let dead = false;
     c.on("error", (e) => {
@@ -241,10 +249,22 @@ export async function handleStream(
   actor: Actor,
   support: boolean,
 ) {
+  // Registered before any await: a disconnect during the access check must be seen, or the client would be added to a
+  // dead connection afterwards and keep its ping timer forever.
+  let closed = false;
+  let ping: ReturnType<typeof setInterval> | null = null;
+  let client: Client | null = null;
+  const release = () => {
+    closed = true;
+    if (ping) clearInterval(ping);
+    if (client) clients.delete(client);
+  };
+  req.on("close", release);
   const filter = url.searchParams.get("run_id");
   const runId = filter ? positiveId(filter, "run_id") : null;
   if (runId != null && !(await runAllowed(runId, actor, support)))
     throw new HttpError(404, "not found");
+  if (closed) return;
   // The browser's own reconnect sends Last-Event-ID (newest); a reopened stream passes ?after=.
   const after =
     cursorParam(req.headers["last-event-id"]) ?? cursorParam(url.searchParams.get("after"));
@@ -254,7 +274,7 @@ export async function handleStream(
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
   });
-  const client: Client = {
+  const self: Client = {
     res,
     runId,
     userId: actor.id,
@@ -264,13 +284,13 @@ export async function handleStream(
     sent: new Set(),
     cursor: after,
   };
-  clients.add(client);
-  const ping = setInterval(() => {
+  client = self;
+  clients.add(self);
+  ping = setInterval(() => {
     sessionFromRequest(req)
       .then((session) => {
         if (!session || session.id !== actor.id) {
-          clearInterval(ping);
-          clients.delete(client);
+          release();
           res.end();
           return;
         }
@@ -283,15 +303,11 @@ export async function handleStream(
         res.write(": ping\n\n");
       });
   }, 20_000);
-  req.on("close", () => {
-    clearInterval(ping);
-    clients.delete(client);
-  });
   try {
-    await catchUp(client, after);
+    await catchUp(self, after);
   } catch (e) {
     console.error("event stream replay:", (e as Error).message);
-    hello(client, { reset: true });
+    hello(self, { reset: true });
   }
 }
 
