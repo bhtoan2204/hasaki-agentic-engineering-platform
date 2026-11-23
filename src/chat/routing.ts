@@ -1,5 +1,4 @@
 import type { ChatMode, Mention } from "./types.ts";
-import { MODE_GROUPS, type ToolGroup } from "./toolGroups.ts";
 
 /**
  * Intent routes (execution strategies). Requested conversation mode stays independent; AUTO resolves
@@ -45,10 +44,6 @@ export function resolveEffectiveMode(requested: ChatMode, route: ChatRoute): Exc
     default:
       return "ASK";
   }
-}
-
-export function toolGroupsFor(mode: Exclude<ChatMode, "AUTO">): ToolGroup[] {
-  return MODE_GROUPS[mode];
 }
 
 // --- layered signals (deterministic; no paid model call) ---

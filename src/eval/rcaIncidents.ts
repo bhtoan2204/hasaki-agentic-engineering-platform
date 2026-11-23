@@ -723,7 +723,6 @@ export function rcaTasks(
     }),
   );
 }
-export const incidentForTests = (id: string) => INCIDENTS.get(id);
 
 /**
  * The reference plan of an incident as one CodeAct program for the workflow arm: the same plan the other arms run,

@@ -508,15 +508,6 @@ async function notifyTransition(
   await notify(text, row.url).catch(() => {});
 }
 
-/** Owner pause/resume of the automation for one PR (status keeps being read). */
-export async function setLifecyclePaused(id: number, paused: boolean) {
-  await q(
-    pool,
-    "UPDATE pull_requests SET lifecycle_paused = $2, next_sync_at = NULL WHERE id = $1",
-    [id, paused],
-  );
-}
-
 /** Delivery view of a run: one row per PR and the aggregate. */
 export async function runDelivery(runId: number) {
   const prs = await q<{

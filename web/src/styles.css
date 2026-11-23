@@ -1189,29 +1189,6 @@ tr.click:hover td {
   gap: 10px;
 }
 
-.updating-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--brand), transparent);
-  background-size: 200% 100%;
-  animation: updating-shimmer 1.5s infinite linear;
-  z-index: 10;
-  pointer-events: none;
-}
-
-@keyframes updating-shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-
-  100% {
-    background-position: 200% 0;
-  }
-}
-
 /* ---------------------------------------------------------------- overlays: drawer / dialog / tooltip */
 .scrim {
   position: fixed;

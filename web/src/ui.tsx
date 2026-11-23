@@ -220,11 +220,6 @@ export function Loading({ label }: { label?: string }) {
     </div>
   );
 }
-export function UpdatingBar({ active }: { active?: boolean }) {
-  const { t } = useI18n();
-  if (!active) return null;
-  return <div className="updating-bar" role="progressbar" aria-label={t("common.updating")} />;
-}
 export function Skeleton({
   h = 14,
   w = "100%",

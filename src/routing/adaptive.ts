@@ -94,9 +94,6 @@ export async function cachedOutcomes(ttlMs = 5 * 60_000) {
   cached = { at: Date.now(), key: "all", samples };
   return samples;
 }
-export function clearOutcomeCache() {
-  cached = null;
-}
 
 export async function loadOutcomes(
   opts: { stepType?: string; before?: Date; sinceDays?: number },

@@ -202,5 +202,3 @@ export async function chatEventsSince(conversationId: number, ownerId: number, a
     return { events: [], reset: true, cursor: (await chatRepository.latestEventId(conversationId))?.id ?? after };
   return { events: rows, reset: false, cursor: rows.at(-1)?.id ?? after };
 }
-
-export const chatStreamClientCount = () => clients.size;
