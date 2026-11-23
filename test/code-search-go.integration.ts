@@ -1,32 +1,31 @@
 /**
- * Code search in platform-go (ADR 0006; the only engine). The whole code intelligence suite
- * (code-intelligence.integration.ts) runs with searches answered by a real platform-go: stale overlays,
- * modified/deleted/renamed files, symlinks, unauthorized repositories and traversal, ranking ties, proto
- * dependencies; plus the internal API's own defenses, secret redaction, unavailability, timeout and cancellation. Fails without a Go toolchain.
+ * Go code-search boundary coverage: authorization, redaction, and service failures. The indexing and worktree
+ * behavior in code-intelligence.integration.ts has its own fixture and runs once in that suite.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { config } from "../src/config.ts";
 import { goToolchain, requireGoToolchain, startPlatformGo } from "./fixtures/platformGo.ts";
+import { shareAllRepositoriesForTests } from "./fixtures/repositoryAccess.ts";
+import { pool } from "../src/db/pool.ts";
 
 if (!goToolchain()) {
   requireGoToolchain("code search with the Go engine");
 } else {
-  const go = await startPlatformGo();
-  after(go.stop);
-  // The shared code-intelligence fixtures (repositories, workflow, worktrees) and its suite, on platform-go.
-  await import("./code-intelligence.integration.ts");
+  let go: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
+  after(async () => {
+    go?.stop();
+    await pool.end();
+  });
   const search = await import("../src/codeIntelligence/search.ts");
   const { goSearchStats } = await import("../src/codeIntelligence/goSearch.ts");
   const { repositories } = await import("../src/repos/service.ts");
   const { indexRepository } = await import("../src/codeIntelligence/indexer.ts");
   const { retrievalService } = await import("../src/retrieval/semantic.ts");
   const { parserVersion } = await import("../src/codeIntelligence/parser.ts");
-  const { startRun } = await import("../src/workflow/engine.ts");
-  const { recordWorkspace } = await import("../src/git/provider.ts");
 
   const env = {
     ...process.env,
@@ -37,16 +36,15 @@ if (!goToolchain()) {
   };
   const git = (root: string, ...args: string[]) =>
     execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env }).trim();
-  const fixtures = resolve(import.meta.dirname, "../src/codeIntelligence");
   const repos = ["cs-alpha", "cs-beta", "cs-gamma"];
   const roots: Record<string, string> = {};
-  let run: { id: number };
-  // Registered after the imported suite's before(): migrations, the ci-fixture definition, sharing.
   before(async () => {
+    config.codeIntelligence.enabled = true;
+    go = await startPlatformGo();
+    await shareAllRepositoriesForTests();
     for (const [i, name] of repos.entries()) {
       const root = join(config.reposRoot, name);
-      mkdirSync(root, { recursive: true });
-      cpSync(fixtures, join(root, "src"), { recursive: true });
+      mkdirSync(join(root, "src"), { recursive: true });
       writeFileSync(
         join(root, "src", `extra${i}.ts`),
         `export function sharedHelper${i}() { return "password=hunter2-secret-value"; }\nexport const searchSymbols = 1;\n`,
@@ -58,30 +56,6 @@ if (!goToolchain()) {
       await indexRepository(name);
       roots[name] = root;
     }
-    // A run with a worktree of cs-beta: modified, deleted, renamed and added files, indexed as an overlay.
-    run = await startRun({
-      definitionKey: "ci-fixture",
-      title: "CS",
-      repositories: ["cs-beta"],
-      inputs: { project: "CS" },
-      start: false,
-    });
-    const wt = join(config.dataDir, "cs-beta-wt");
-    git(roots["cs-beta"], "worktree", "add", "-qb", "cs-wt", wt);
-    await recordWorkspace(run.id, {
-      repo: "cs-beta",
-      path: wt,
-      branch: "cs-wt",
-      created_from: "base",
-    });
-    writeFileSync(
-      join(wt, "src", "search.ts"),
-      readFileSync(join(wt, "src", "search.ts"), "utf8") + "\nexport function overlayOnly() {}\n",
-    );
-    execFileSync("rm", [join(wt, "src", "store.ts")]);
-    git(wt, "mv", "src/git.ts", "src/gitRenamed.ts");
-    writeFileSync(join(wt, "src", "added.ts"), "export function addedInWorktree() { return 1 }\n");
-    await indexRepository("cs-beta", run.id);
   });
 
   const scope = (extra: Record<string, unknown> = {}) => ({
@@ -121,20 +95,14 @@ if (!goToolchain()) {
   test("exact search authorizes lazily with the sequential semantics: an unauthorized repository raises only when reached", async () => {
     await repositories.upsert("cs-beta", { projects: ["CS"], allowed_actions: [] } as never);
     try {
-      for (const e of ["go"] as const) {
-        // sharedHelper occurs once per repository: limit 2 reaches cs-beta, limit 1 is filled by cs-alpha.
-        await assert.rejects(
-          search.searchCodeExact("sharedHelper", scope(), 2),
-          /unavailable or unauthorized/,
-          e,
-        );
-        const hits = await search.searchCodeExact("sharedHelper", scope(), 1);
-        assert.equal(hits.length, 1, e);
-        assert.ok(
-          hits.every((h) => h.repository === "cs-alpha"),
-          e,
-        );
-      }
+      // sharedHelper occurs once per repository. A limit of two reaches cs-beta, one is filled by cs-alpha.
+      await assert.rejects(
+        search.searchCodeExact("sharedHelper", scope(), 2),
+        /unavailable or unauthorized/,
+      );
+      const hits = await search.searchCodeExact("sharedHelper", scope(), 1);
+      assert.equal(hits.length, 1);
+      assert.equal(hits[0].repository, "cs-alpha");
     } finally {
       await repositories.upsert("cs-beta", {
         projects: ["CS"],

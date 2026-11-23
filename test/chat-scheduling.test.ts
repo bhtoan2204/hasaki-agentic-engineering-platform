@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { deferred } from "./fixtures/deferred.ts";
 import {
   runningTurns,
   turnScheduled,
@@ -18,11 +19,12 @@ import {
   type AgentHealth,
 } from "../src/agent/health.ts";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-test("turn activity: waits end when the turn settles or the instance is idle, bounded by a deadline", async () => {
-  // The deadline timers are unref'd (they never hold a process open); this test is the only thing running.
-  const alive = setInterval(() => {}, 1000);
+test("turn activity: waits end when the turn settles or the instance is idle, bounded by a deadline", async (t) => {
+  const { mock } = t;
+  mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => {
+    for (const id of [1, 2, 3]) turnSettled(id);
+  });
   assert.equal(runningTurns(), 0);
   await whenTurnSettles(1, 10_000); // not running here: resolves at once
   await whenNoTurnRuns(10_000);
@@ -33,18 +35,24 @@ test("turn activity: waits end when the turn settles or the instance is idle, bo
   const idle = whenNoTurnRuns(10_000).then(() => order.push("idle"));
   turnSettled(1);
   await one;
-  await sleep(5);
+  await Promise.resolve();
   assert.deepEqual(order, ["turn 1"], "idle waits for the other turn");
   turnSettled(2);
   await idle;
   assert.deepEqual(order, ["turn 1", "idle"]);
   turnScheduled(3);
-  const t0 = Date.now();
-  await whenNoTurnRuns(30);
-  assert.ok(Date.now() - t0 >= 25, "a busy instance still lets the waiter go after the deadline");
+  let deadlineReached = false;
+  const bounded = whenNoTurnRuns(30).then(() => {
+    deadlineReached = true;
+  });
+  mock.timers.tick(29);
+  await Promise.resolve();
+  assert.equal(deadlineReached, false, "the waiter stays pending until its deadline");
+  mock.timers.tick(1);
+  await bounded;
+  assert.equal(runningTurns(), 1, "the deadline only releases the waiter");
   turnSettled(3);
   assert.equal(runningTurns(), 0);
-  clearInterval(alive);
 });
 
 test("shared agent health: concurrent readers share one probe, reuse it briefly, see remembered quota at once", async () => {
@@ -54,13 +62,16 @@ test("shared agent health: concurrent readers share one probe, reuse it briefly,
     { provider: "claude", connected: true, quota: "unknown" },
     { provider: "codex", connected: true, quota: "unknown" },
   ];
+  const probe = deferred<void>();
   setSharedHealthProber(async () => {
     probes++;
-    await sleep(20);
+    await probe.promise;
     return rows;
   });
   try {
-    const all = await Promise.all(Array.from({ length: 8 }, () => sharedAgentHealth()));
+    const pending = Promise.all(Array.from({ length: 8 }, () => sharedAgentHealth()));
+    probe.resolve();
+    const all = await pending;
     assert.equal(probes, 1, "eight concurrent admissions, one probe");
     assert.ok(all.every((r) => r.length === 2));
     await sharedAgentHealth();

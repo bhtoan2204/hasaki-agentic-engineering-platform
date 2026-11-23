@@ -1,7 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { pool, one, q } from "../src/db/pool.ts";
-import { migrate } from "../src/db/migrate.ts";
 import { config, codeIntelligenceEnabled } from "../src/config.ts";
 import { execution } from "../src/auth/execution.ts";
 import { createUser } from "../src/auth/users.ts";
@@ -34,6 +33,7 @@ import {
 import { runOnce, claimJob } from "../src/workflow/scheduler.ts";
 import { registerDefaultExecutors } from "../src/workflow/executors/index.ts";
 import { allowedRepositoriesForRun } from "../src/repos/access.ts";
+import { startPlatformGo } from "./fixtures/platformGo.ts";
 let suite: Awaited<ReturnType<typeof publishBuiltinSuite>>,
   owner: Awaited<ReturnType<typeof createUser>>,
   other: Awaited<ReturnType<typeof createUser>>;
@@ -64,8 +64,9 @@ const evidence = (): Evidence => ({
   failure_class: null,
   details: {},
 });
+let go: Awaited<ReturnType<typeof startPlatformGo>> | undefined;
 before(async () => {
-  await migrate();
+  go = await startPlatformGo();
   config.evaluation.enabled = true;
   config.learning.detectChanges = false;
   config.learning.evolveSkills = false;
@@ -85,6 +86,7 @@ before(async () => {
 after(async () => {
   const { settleBackground } = await import("../src/workflow/background.ts");
   await settleBackground();
+  go?.stop();
   await pool.end();
 });
 async function driveAll(ids: number[]) {
@@ -506,11 +508,12 @@ test("Two evaluations can execute concurrently without A/B scope or workspace co
   });
   await startPendingRun(a.workflow_run_id);
   await startPendingRun(b.workflow_run_id);
-  const jobs = await Promise.all([claimJob("eval-a", 30), claimJob("eval-b", 30)]);
+  const workers = ["eval-a", "eval-b"];
+  const jobs = await Promise.all(workers.map((worker) => claimJob(worker, 30)));
   assert.ok(jobs[0] && jobs[1]);
   assert.notEqual(jobs[0]!.id, jobs[1]!.id);
   await Promise.all(
-    jobs.map((j, i) => processJob(j!, `eval-${i}`, { leaseSeconds: 30, heartbeatSeconds: 5 })),
+    jobs.map((j, i) => processJob(j!, workers[i], { leaseSeconds: 30, heartbeatSeconds: 5 })),
   );
   const ra = await evaluationDetail(a.id, owner.id),
     rb = await evaluationDetail(b.id, owner.id);

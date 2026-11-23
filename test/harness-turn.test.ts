@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { setTimeout as sleep } from "node:timers/promises";
 import { stopFailure, superviseTurn, turnLimits } from "../src/agent/harness/cliTurn.ts";
 import { FAILURE_POLICY } from "../src/agent/harness/failure.ts";
 
@@ -16,7 +15,8 @@ test("turn limits: step settings win, then provider config, then platform defaul
   assert.equal(turnLimits({ timeout_ms: 5_000 }).idleMs, 5_000);
 });
 
-test("watchdog stops a silent turn as idle and keeps an active one alive", async () => {
+test("watchdog stops a silent turn as idle and keeps an active one alive", ({ mock }) => {
+  mock.timers.enable({ apis: ["setTimeout"] });
   const stops: string[] = [];
   const ac = new AbortController();
   const watch = superviseTurn({
@@ -26,17 +26,20 @@ test("watchdog stops a silent turn as idle and keeps an active one alive", async
     stop: (r) => stops.push(r),
   });
   for (let i = 0; i < 4; i++) {
-    await sleep(30);
+    mock.timers.tick(30);
     watch.touch();
   }
   assert.equal(watch.reason, null);
-  await sleep(120);
+  mock.timers.tick(59);
+  assert.equal(watch.reason, null, "the last touch resets the full idle window");
+  mock.timers.tick(1);
   assert.equal(watch.reason, "idle");
   assert.deepEqual(stops, ["idle"]);
   watch.dispose();
 });
 
-test("watchdog reports the wall-clock limit and cancellation once", async () => {
+test("watchdog reports the wall-clock limit and cancellation once", ({ mock }) => {
+  mock.timers.enable({ apis: ["setTimeout"] });
   const ac = new AbortController();
   const stops: string[] = [];
   const timed = superviseTurn({
@@ -45,7 +48,9 @@ test("watchdog reports the wall-clock limit and cancellation once", async () => 
     idleMs: 1_000,
     stop: (r) => stops.push(r),
   });
-  await sleep(80);
+  mock.timers.tick(39);
+  assert.equal(timed.reason, null);
+  mock.timers.tick(1);
   ac.abort();
   assert.equal(timed.reason, "timeout");
   timed.dispose();

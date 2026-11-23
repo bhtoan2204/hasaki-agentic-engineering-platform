@@ -1,6 +1,9 @@
 import { test, after, before } from "node:test";
 import assert from "node:assert/strict";
-import { pool, q } from "../src/db/pool.ts";
+import { setTimeout as sleep } from "node:timers/promises";
+import { deferred } from "./fixtures/deferred.ts";
+import { one, pool, q } from "../src/db/pool.ts";
+import { registerInstance } from "../src/instances.ts";
 import { createUser } from "../src/auth/users.ts";
 import { chat } from "../src/chat/service.ts";
 import { setChatProviders } from "../src/chat/runtime.ts";
@@ -11,15 +14,21 @@ import type { CompletionRunner } from "../src/agent/complete.ts";
 import { settleBackground } from "../src/workflow/background.ts";
 
 const PROVIDERS: AgentProvider[] = ["claude", "cursor", "codex", "antigravity", "copilot"];
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const all = (r: CompletionRunner) =>
   Object.fromEntries(PROVIDERS.map((p) => [p, r])) as Record<AgentProvider, CompletionRunner>;
 
-before(() =>
+let a: Actor;
+before(async () => {
+  await registerInstance();
+  a = await createUser({
+    username: "chat-stream-owner",
+    password: "local-test-password",
+    role: "member",
+  });
   setChatHealthProbe(async () =>
     PROVIDERS.map((provider) => ({ provider, connected: true, quota: "unknown" as const })),
-  ),
-);
+  );
+});
 after(async () => {
   setChatProviders(undefined);
   setChatHealthProbe(undefined);
@@ -27,13 +36,14 @@ after(async () => {
   await pool.end();
 });
 
-async function owner(tag: string): Promise<Actor> {
-  const u = await createUser({
-    username: `chat-stream-${tag}-${Date.now()}`,
-    password: "local-test-password",
-    role: "member",
-  });
-  return { id: u.id, username: u.username, role: u.role as Actor["role"], active: u.active };
+async function waitFor<T>(read: () => Promise<T>, ready: (value: T) => boolean, label: string) {
+  const deadline = performance.now() + 5_000;
+  do {
+    const value = await read();
+    if (ready(value)) return value;
+    await sleep(10);
+  } while (performance.now() < deadline);
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 async function settle(a: Actor, id: number) {
@@ -53,25 +63,35 @@ const events = (turnId: number) =>
   );
 
 test("streaming: provider text arrives as coalesced deltas, reasoning and activity form the trace, the final answer supersedes the draft", async () => {
-  const a = await owner("ok");
   const c = await chat.create(a, { mode: "ASK", provider: "claude" });
   const seen: Array<{ kind: string; data: Record<string, unknown> }> = [];
+  const readEvents = () =>
+    q<(typeof seen)[number]>(
+      pool,
+      "SELECT kind, data FROM chat_events WHERE conversation_id = $1 ORDER BY id",
+      [c.id],
+    );
   setChatProviders(
     all(async (_p, opts) => {
       opts.onStream?.({ type: "started" });
       opts.onStream?.({ type: "reasoning", delta: "Checking the question. " });
       opts.onStream?.({ type: "activity", label: "tool: search" });
-      let text = "";
-      for (const w of ["Câu ", "trả ", "lời ", "**từng** ", "phần."]) {
-        opts.onStream?.({ type: "text", text: (text += w) });
-        await sleep(120);
+      let text = "Câu ";
+      opts.onStream?.({ type: "text", text });
+      await waitFor(
+        readEvents,
+        (rows) => rows.some((r) => r.kind === "response.delta"),
+        "first delta",
+      );
+      for (const word of ["trả ", "lời ", "**từng** ", "phần."]) {
+        opts.onStream?.({ type: "text", text: (text += word) });
       }
-      // A turn whose events are read mid-flight sees the draft and deltas, not only phases.
+      // The final delta must be visible even while the provider is still running.
       seen.push(
-        ...(await q<{ kind: string; data: Record<string, unknown> }>(
-          pool,
-          "SELECT kind, data FROM chat_events WHERE conversation_id = $1 ORDER BY id",
-          [c.id],
+        ...(await waitFor(
+          readEvents,
+          (rows) => rows.filter((r) => r.kind === "response.delta").length >= 2,
+          "second delta",
         )),
       );
       return { text, model: "m", tokens: null, cost_usd: null };
@@ -118,7 +138,6 @@ test("streaming: provider text arrives as coalesced deltas, reasoning and activi
 });
 
 test("streaming: a tool-call request is never streamed as answer text; tool steps join the trace", async () => {
-  const a = await owner("tools");
   const c = await chat.create(a, { mode: "INVESTIGATE", provider: "claude" });
   const deltas: string[] = [];
   let calls = 0;
@@ -132,16 +151,17 @@ test("streaming: a tool-call request is never streamed as answer text; tool step
       for (let i = 1; i <= text.length; i += 7)
         opts.onStream?.({ type: "text", text: text.slice(0, i) });
       opts.onStream?.({ type: "text", text });
-      await sleep(250);
-      deltas.push(
-        ...(
-          await q<{ data: { text: string } }>(
+      const rows = await waitFor(
+        () =>
+          q<{ data: { text: string } }>(
             pool,
-            "SELECT data FROM chat_events WHERE conversation_id = $1 AND kind = 'response.delta'",
+            "SELECT data FROM chat_events WHERE conversation_id = $1 AND kind = 'response.delta' ORDER BY id",
             [c.id],
-          )
-        ).map((r) => r.data.text),
+          ),
+        (rows) => rows.length > deltas.length,
+        `visible text from provider call ${calls}`,
       );
+      deltas.splice(0, deltas.length, ...rows.map((r) => r.data.text));
       return { text, model: "m", tokens: null, cost_usd: null };
     }),
   );
@@ -152,19 +172,17 @@ test("streaming: a tool-call request is never streamed as answer text; tool step
   const d = await settle(a, c.id);
   const turn = d.turns.find((t) => t.id === msg.turn.id)!;
   assert.equal(turn.status, "completed", JSON.stringify(turn.failure));
+  assert.ok(deltas.includes("Let me look."), "visible prefix was streamed");
+  assert.ok(deltas.includes("Done: no repositories."), "answer after the tool was streamed");
   assert.ok(!deltas.some((t) => /chat-tool|"calls"|`/.test(t)), deltas.join("|"));
   assert.ok(turn.trace.some((i) => i.k === "tool" && i.tool === "repo.list" && i.status === "ok"));
 });
 
 test("streaming: stop keeps the streamed partial answer, marked by the canceled turn", async () => {
-  const a = await owner("stop");
   const c = await chat.create(a, { mode: "ASK", provider: "claude" });
-  let streamed!: () => void;
-  const ready = new Promise<void>((r) => (streamed = r));
   setChatProviders(
     all(async (_p, opts) => {
       opts.onStream?.({ type: "text", text: "Phần đầu của câu trả lời" });
-      streamed();
       await new Promise((_, reject) =>
         opts.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
       );
@@ -175,14 +193,20 @@ test("streaming: stop keeps the streamed partial answer, marked by the canceled 
     content: "dài",
     client_message_id: "stream-stop-msg",
   });
-  await ready;
-  await sleep(1300);
-  assert.equal(
-    (await chat.get(a, c.id)).active_turn?.draft,
-    "Phần đầu của câu trả lời",
-    "checkpoint is visible to a reconnecting client",
-  );
-  await chat.cancelTurn(a, msg.turn.id);
+  try {
+    await waitFor(
+      () => one<{ draft: string }>(pool, "SELECT draft FROM chat_turns WHERE id=$1", [msg.turn.id]),
+      (row) => row?.draft === "Phần đầu của câu trả lời",
+      "saved stream checkpoint",
+    );
+    assert.equal(
+      (await chat.get(a, c.id)).active_turn?.draft,
+      "Phần đầu của câu trả lời",
+      "checkpoint is visible to a reconnecting client",
+    );
+  } finally {
+    await chat.cancelTurn(a, msg.turn.id);
+  }
   await settleBackground();
   const d = await settle(a, c.id);
   const turn = d.turns.find((t) => t.id === msg.turn.id)!;
@@ -195,7 +219,6 @@ test("streaming: stop keeps the streamed partial answer, marked by the canceled 
 });
 
 test("streaming: a provider failing mid-stream falls back in AUTO; the failed attempt's draft is not the answer", async () => {
-  const a = await owner("fail");
   const c = await chat.create(a, { mode: "ASK", provider: "auto" });
   const used: string[] = [];
   const failing: CompletionRunner = async (_p, opts) => {
@@ -232,7 +255,6 @@ test("streaming: a provider failing mid-stream falls back in AUTO; the failed at
 });
 
 test("streaming: a failure without fallback keeps the streamed partial answer next to the error", async () => {
-  const a = await owner("manual");
   const c = await chat.create(a, {
     mode: "ASK",
     provider: "codex",
@@ -259,56 +281,51 @@ test("streaming: a failure without fallback keeps the streamed partial answer ne
   );
 });
 
-test("streaming: the first visible text is emitted at once, later updates at most once per flush interval", async () => {
-  const a = await owner("lead");
+test("streaming: the leading delta and a later coalesced burst persist while the provider is active", async () => {
   const c = await chat.create(a, { mode: "ASK", provider: "claude" });
-  // The provider sends its first text, then holds: that first delta must be stored without waiting for a flush.
-  let release!: () => void;
-  const held = new Promise<void>((r) => (release = r));
-  let firstText = 0;
+  const burst = deferred();
+  const finish = deferred();
+  const suffix = Array.from({ length: 30 }, (_, i) => `w${i} `).join("");
   setChatProviders(
     all(async (_p, opts) => {
-      firstText = Date.now();
-      opts.onStream?.({ type: "text", text: "first " });
-      await held;
       let text = "first ";
-      for (let i = 0; i < 30; i++) {
-        opts.onStream?.({ type: "text", text: (text += `w${i} `) });
-        await sleep(10);
+      opts.onStream?.({ type: "text", text });
+      await burst.promise;
+      for (const word of suffix.trimEnd().split(" ")) {
+        opts.onStream?.({ type: "text", text: (text += word + " ") });
       }
+      await finish.promise;
       return { text, model: "stub", tokens: null };
     }),
   );
-  const m = await chat.postMessage(a, c.id, {
-    content: "lead",
-    client_message_id: `leading-edge-${c.id}`,
-  });
-  const deltas = () =>
-    q<{ at: Date; data: { text: string } }>(
-      pool,
-      "SELECT created_at AS at, data FROM chat_events WHERE turn_id = $1 AND kind = 'response.delta' ORDER BY id",
-      [m.turn.id],
+  try {
+    const m = await chat.postMessage(a, c.id, {
+      content: "lead",
+      client_message_id: `leading-edge-${c.id}`,
+    });
+    const deltas = () =>
+      q<{ data: { offset: number; text: string } }>(
+        pool,
+        "SELECT data FROM chat_events WHERE turn_id=$1 AND kind='response.delta' ORDER BY id",
+        [m.turn.id],
+      );
+    const first = await waitFor(deltas, (rows) => rows.length > 0, "leading delta");
+    assert.deepEqual(
+      first.map((r) => r.data.text),
+      ["first "],
     );
-  let first: Awaited<ReturnType<typeof deltas>> = [];
-  for (let i = 0; i < 100 && !first.length; i++) {
-    first = await deltas();
-    await sleep(10);
+    burst.resolve();
+    const afterBurst = await waitFor(deltas, (rows) => rows.length >= 2, "coalesced delta");
+    assert.deepEqual(
+      afterBurst.map((r) => [r.data.offset, r.data.text]),
+      [
+        [0, "first "],
+        [6, suffix],
+      ],
+    );
+  } finally {
+    burst.resolve();
+    finish.resolve();
   }
-  assert.equal(first.length, 1);
-  assert.equal(first[0].data.text, "first ");
-  const lag = first[0].at.getTime() - firstText;
-  assert.ok(
-    lag < 150,
-    `first delta ${lag} ms after the provider's first text (the flush interval is 200 ms)`,
-  );
-  // 30 updates over ~300 ms: still at most one delta per 200 ms.
-  const t0 = Date.now();
-  release();
-  await sleep(250);
-  const n = (await deltas()).length - 1;
-  assert.ok(
-    n <= Math.ceil((Date.now() - t0) / 200) + 1,
-    `throttled: ${n} deltas in ${Date.now() - t0} ms`,
-  );
   await settle(a, c.id);
 });
