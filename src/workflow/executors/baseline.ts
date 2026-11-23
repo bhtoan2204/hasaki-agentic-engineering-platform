@@ -200,10 +200,40 @@ export async function goBaseline(
           .map((l) => l.split("|")[0]),
       );
       const testable = todo.filter((p) => present.has(p));
-      const r = testable.length
-        ? await run(`go test -short -timeout 5m ${testable.join(" ")}`, dir)
-        : { code: 0, output: "", timedOut: false };
-      const parsed = parseGoTest(r.output);
+      // A panic aborts the whole package, hiding the tests after it: re-run skipping what already failed until stable.
+      let r: { code: number | null; output: string; timedOut: boolean } = {
+        code: 0,
+        output: "",
+        timedOut: false,
+      };
+      const parsed: GoTestReport = {};
+      const failed = new Set<string>();
+      for (let round = 0; testable.length && round < 5; round++) {
+        const skip = failed.size
+          ? ` -skip '^(${[...failed].map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$'`
+          : "";
+        r = await run(`go test -short -timeout 5m${skip} ${testable.join(" ")}`, dir);
+        const round1 = parseGoTest(r.output);
+        let added = false;
+        for (const [pkg, res] of Object.entries(round1)) {
+          const prev = parsed[pkg];
+          parsed[pkg] = prev
+            ? {
+                status: prev.status === "fail" || res.status === "fail" ? "fail" : "ok",
+                tests: [...new Set([...prev.tests, ...res.tests])],
+                buildErrors: prev.buildErrors.length ? prev.buildErrors : res.buildErrors,
+              }
+            : res;
+          for (const t of res.tests) {
+            const top = t.split("/")[0];
+            if (!failed.has(top)) {
+              failed.add(top);
+              added = true;
+            }
+          }
+        }
+        if (!added || r.timedOut) break;
+      }
       for (const p of todo) {
         const res =
           parsed[p] ??
