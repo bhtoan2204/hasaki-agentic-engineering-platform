@@ -25,6 +25,8 @@ export interface LiveTurn {
   status: LiveStatus;
   /** Deltas that arrived past the end of `text` (missed events): applied once a checkpoint catches up. */
   pending: Delta[];
+  /** A tool is running: `text` is kept (it mirrors what the server diffs against) but not shown until new text arrives. */
+  held: boolean;
 }
 
 const READING = /read|search|list|get|grep|open|file|knowledge|repo/i;
@@ -36,6 +38,7 @@ export const emptyLive = (turnId: number): LiveTurn => ({
   trace: [],
   status: null,
   pending: [],
+  held: false,
 });
 
 function applyDelta(l: LiveTurn, d: Delta): LiveTurn {
@@ -47,7 +50,7 @@ function applyDelta(l: LiveTurn, d: Delta): LiveTurn {
     if (p.key !== d.key) continue;
     else if (p.offset <= text.length) text = text.slice(0, p.offset) + p.text;
     else rest.push(p);
-  return { ...l, key: d.key, text, pending: rest, status: "generating" };
+  return { ...l, key: d.key, text, pending: rest, status: "generating", held: false };
 }
 
 /** Pure reducer: returns the same object when the event does not concern the live turn. */
@@ -56,7 +59,7 @@ export function applyChatEvent(
   ev: { kind: string; turn_id: number | null; data?: Record<string, unknown> },
 ): LiveTurn | null {
   if (ev.turn_id == null) return live;
-  let l = live && live.turnId === ev.turn_id ? live : emptyLive(ev.turn_id);
+  const l = live && live.turnId === ev.turn_id ? live : emptyLive(ev.turn_id);
   const d = ev.data ?? {};
   switch (ev.kind) {
     case "response.delta":
@@ -84,9 +87,9 @@ export function applyChatEvent(
     }
     case "tool.started": {
       const tool = String(d.tool ?? "");
-      l = { ...l, text: "", key: null, pending: [] };
       return {
         ...l,
+        held: true,
         trace: [
           ...l.trace,
           {
@@ -130,7 +133,7 @@ export function applyChatEvent(
     case "phase.updated":
       return d.phase === "calling_provider" ? { ...l, status: "thinking" } : live;
     case "provider.attempt_started":
-      return { ...l, text: "", key: null, pending: [], status: "thinking" };
+      return { ...l, text: "", key: null, pending: [], status: "thinking", held: false };
     default:
       return live;
   }

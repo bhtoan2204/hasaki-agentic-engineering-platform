@@ -1,4 +1,5 @@
 import { rankRepositoriesWithClaude } from "../../agent/claude.ts";
+import { registerPlatformOps } from "../../chat/platformOps.ts";
 import { agentExecutor } from "../../agent/harness/executor.ts";
 import {
   commandExecutor,
@@ -39,6 +40,7 @@ export function registerDefaultExecutors() {
   registerExecutor("git_pull_request", pullRequestExecutor);
   setAiRepositoryRanker(rankRepositoriesWithClaude);
   registerBuiltinTools();
+  registerPlatformOps();
   registerExecutor("task_result_report", taskResultReportExecutor);
   setReportReasoner(claudeReportReasoner);
   setTestFailureAdvisor(claudeTestFailureAdvisor);

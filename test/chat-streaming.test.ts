@@ -86,7 +86,7 @@ test("client stream state: ordered deltas, revisions, new calls, tool steps and 
   l = applyChatEvent(l, delta(6, "there"));
   assert.equal(l!.text, "Hello there", "a provider revision replaces from its offset");
   l = applyChatEvent(l, ev("tool.started", { tool_call_id: 3, seq: 2, tool: "code.read_file" }));
-  assert.deepEqual([l!.text, l!.status], ["", "reading"]);
+  assert.deepEqual([l!.text, l!.held, l!.status], ["Hello there", true, "reading"]);
   l = applyChatEvent(l, ev("tool.completed", { tool_call_id: 3, status: "ok", duration_ms: 12 }));
   assert.deepEqual(l!.trace.at(-1), {
     k: "tool",
@@ -111,4 +111,18 @@ test("client stream state: ordered deltas, revisions, new calls, tool steps and 
     "0123456789 end!",
     "an older checkpoint never rewinds",
   );
+});
+
+test("client stream state: an assistant message after a tool call that shares a prefix with the earlier one still streams", () => {
+  const ev = (kind: string, data: Record<string, unknown>) => ({ kind, turn_id: 8, data });
+  const delta = (offset: number, text: string) =>
+    ev("response.delta", { attempt: 0, step: 0, offset, text });
+  let l: LiveTurn | null = null;
+  l = applyChatEvent(l, delta(0, "Mình sẽ kiểm tra"));
+  l = applyChatEvent(l, ev("tool.started", { tool_call_id: 1, seq: 1, tool: "code.search" }));
+  assert.equal(l!.held, true);
+  // The server diffs against what it already sent: the second message shares "Mình " with the first.
+  l = applyChatEvent(l, delta(5, "đã thấy kết quả"));
+  assert.equal(l!.text, "Mình đã thấy kết quả");
+  assert.deepEqual([l!.held, l!.pending.length, l!.status], [false, 0, "generating"]);
 });

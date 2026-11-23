@@ -20,12 +20,24 @@ const sources = (user: string[], observed: Array<[string, string]>): Sources => 
 
 test("sinks are declared for every mutating registry tool", async () => {
   const { registerBuiltinTools, integrationTools } = await import("../src/agent/toolRegistry.ts");
+  const { registerPlatformOps } = await import("../src/chat/platformOps.ts");
   registerBuiltinTools();
+  registerPlatformOps();
   const mutating = integrationTools()
     .filter((t) => !t.readOnly)
     .map((t) => t.name)
     .sort();
-  assert.deepEqual(mutating, ["kafka.publish", "qc_http.request"]);
+  assert.deepEqual(mutating, [
+    "kafka.publish",
+    "qc_http.request",
+    "runs.approve_step",
+    "runs.cancel",
+    "runs.pause",
+    "runs.reject_step",
+    "runs.resume",
+    "runs.retry_step",
+    "runs.start",
+  ]);
   assert.deepEqual(
     Object.keys(SINKS).sort(),
     mutating,

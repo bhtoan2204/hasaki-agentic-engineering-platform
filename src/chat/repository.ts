@@ -802,6 +802,92 @@ export const chatRepository = {
     );
   },
 
+  /** The owner's work items, filtered by text, status and an updated-at day range (inclusive, in `tz`). */
+  listWorkItems(
+    ownerId: number,
+    f: { text?: string; status?: string; from?: string; to?: string; tz: string; limit: number },
+    db: Db = pool,
+  ) {
+    const text = f.text ?? "";
+    return q<{
+      id: number;
+      code: string;
+      title: string;
+      status: string;
+      created_at: string;
+      updated_at: string;
+    }>(
+      db,
+      `SELECT id, code, title, status, created_at, updated_at FROM work_items
+        WHERE owner_id = $1
+          AND ($2 = '' OR title ILIKE $3 OR code ILIKE $3 OR description ILIKE $3)
+          AND ($4::text IS NULL OR status = $4)
+          AND ($5::date IS NULL OR updated_at >= $5::date::timestamp AT TIME ZONE $7)
+          AND ($6::date IS NULL OR updated_at < ($6::date + 1)::timestamp AT TIME ZONE $7)
+        ORDER BY updated_at DESC LIMIT $8`,
+      [
+        ownerId,
+        text,
+        `%${text.replace(/[\\%_]/g, "\\$&")}%`,
+        f.status ?? null,
+        f.from ?? null,
+        f.to ?? null,
+        f.tz,
+        f.limit,
+      ],
+    );
+  },
+
+  /** The owner's workflow runs, filtered by status, work item and a created-at day range (inclusive, in `tz`). */
+  listRuns(
+    ownerId: number,
+    f: { status?: string; workItemId?: number; from?: string; to?: string; tz: string; limit: number },
+    db: Db = pool,
+  ) {
+    return q<{
+      id: number;
+      definition_key: string;
+      title: string;
+      status: string;
+      work_item_id: number | null;
+      created_at: string;
+      finished_at: string | null;
+    }>(
+      db,
+      `SELECT id, definition_key, title, status, work_item_id, created_at, finished_at FROM workflow_runs
+        WHERE owner_id = $1
+          AND ($2::text IS NULL OR status = $2)
+          AND ($3::bigint IS NULL OR work_item_id = $3)
+          AND ($4::date IS NULL OR created_at >= $4::date::timestamp AT TIME ZONE $6)
+          AND ($5::date IS NULL OR created_at < ($5::date + 1)::timestamp AT TIME ZONE $6)
+        ORDER BY id DESC LIMIT $7`,
+      [ownerId, f.status ?? null, f.workItemId ?? null, f.from ?? null, f.to ?? null, f.tz, f.limit],
+    );
+  },
+
+  /** What the owner touched in a day range: work items updated and runs created or finished, oldest first. */
+  activityTimeline(
+    ownerId: number,
+    f: { from: string; to: string; tz: string; limit: number },
+    db: Db = pool,
+  ) {
+    return q<{ at: string; kind: string; ref: string; title: string; status: string }>(
+      db,
+      `WITH b AS (SELECT $2::date::timestamp AT TIME ZONE $4 AS lo, ($3::date + 1)::timestamp AT TIME ZONE $4 AS hi)
+       SELECT * FROM (
+         SELECT w.updated_at AS at, 'work_item_updated' AS kind, w.code AS ref, w.title, w.status
+           FROM work_items w, b WHERE w.owner_id = $1 AND w.updated_at >= b.lo AND w.updated_at < b.hi
+         UNION ALL
+         SELECT r.created_at, 'run_created', '#' || r.id, r.title, r.status
+           FROM workflow_runs r, b WHERE r.owner_id = $1 AND r.created_at >= b.lo AND r.created_at < b.hi
+         UNION ALL
+         SELECT r.finished_at, 'run_finished', '#' || r.id, r.title, r.status
+           FROM workflow_runs r, b WHERE r.owner_id = $1 AND r.finished_at >= b.lo AND r.finished_at < b.hi
+       ) t ORDER BY at LIMIT $5`,
+      [ownerId, f.from, f.to, f.tz, f.limit],
+    );
+  },
+
   searchIncidents(text: string, limit: number, db: Db = pool) {
     return q<{
       fingerprint: string;

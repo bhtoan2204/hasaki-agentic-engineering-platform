@@ -32,6 +32,14 @@ export const SINKS: Record<string, SinkSpec> = {
   // pre-authorized rules (DELETE never runs unconfirmed) and an auth profile is bound to its hosts by configuration
   // (checked by the tool). Matching them against free text would only produce noise.
   "qc_http.request": { targets: ["url"], payload: ["body", "query", "headers"] },
+  // Run orchestration (chat/platformOps.ts): the owner's own runs, always confirmed; ids found by reading are payload.
+  "runs.start": { targets: [], payload: ["run_id", "repositories", "step_mode"] },
+  "runs.cancel": { targets: [], payload: ["run_id", "reason"] },
+  "runs.pause": { targets: [], payload: ["run_id"] },
+  "runs.resume": { targets: [], payload: ["run_id"] },
+  "runs.retry_step": { targets: [], payload: ["run_id", "step_key"] },
+  "runs.approve_step": { targets: [], payload: ["run_id", "step_key", "comment"] },
+  "runs.reject_step": { targets: [], payload: ["run_id", "step_key", "comment"] },
 };
 export interface Sources {
   trusted: Array<{ ref: string; text: string }>;

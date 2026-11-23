@@ -27,7 +27,13 @@ import { AGENT_PROVIDERS, agentKey, asProvider } from "../agentProvider.tsx";
 import { dialog } from "../dialog/index.ts";
 import { EmptyState, ErrorBox, Loading, Markdown, SearchInput, act, ago, toast } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
-import { applyChatEvent, seedFromTurn, type LiveStatus, type LiveTurn, type TraceItem } from "./chatStream.ts";
+import {
+  applyChatEvent,
+  seedFromTurn,
+  type LiveStatus,
+  type LiveTurn,
+  type TraceItem,
+} from "./chatStream.ts";
 import { markPending, reconcilePending, type PendingMessage } from "./chatOptimistic.ts";
 import { ChatImportReview, type ImportedProposal } from "./ChatImportReview.tsx";
 import { ChatDelegations } from "./ChatDelegations.tsx";
@@ -77,9 +83,7 @@ function groupConversations(rows: Conversation[]) {
   const map = new Map<DateGroupKey, Conversation[]>();
   for (const key of order) map.set(key, []);
   for (const row of rows) map.get(dateGroupKey(row.updated_at))!.push(row);
-  return order
-    .map((key) => ({ key, items: map.get(key)! }))
-    .filter((g) => g.items.length > 0);
+  return order.map((key) => ({ key, items: map.get(key)! })).filter((g) => g.items.length > 0);
 }
 
 type Message = {
@@ -89,7 +93,13 @@ type Message = {
   content: string;
   citations?: Array<{ label: string; tool?: string; ref: string; repository?: string }>;
   withheld?: boolean;
-  attachments?: Array<{ id: number; media_type: string; bytes: number; kind?: "image" | "document"; filename?: string }>;
+  attachments?: Array<{
+    id: number;
+    media_type: string;
+    bytes: number;
+    kind?: "image" | "document";
+    filename?: string;
+  }>;
   created_at: string;
 };
 
@@ -103,7 +113,8 @@ const DOCUMENTS_PER_MESSAGE = 10;
 const TOTAL_BYTES = 40 * 1024 * 1024;
 const isImage = (f: File) => IMAGE_TYPES.includes(f.type);
 const isDocument = (f: File) => !isImage(f) && DOCUMENT_EXT.test(f.name);
-const sizeLabel = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const sizeLabel = (n: number) =>
+  n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 const typeLabel = (name: string) => (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? "file").toUpperCase();
 
 /** Document chips (name, type, size); in history each downloads through the authenticated route. */
@@ -112,7 +123,13 @@ function DocChips({
   onRemove,
   removeLabel,
 }: {
-  items: Array<{ key: string | number; name: string; bytes: number; href?: string; state?: string }>;
+  items: Array<{
+    key: string | number;
+    name: string;
+    bytes: number;
+    href?: string;
+    state?: string;
+  }>;
   onRemove?: (key: string | number) => void;
   removeLabel?: string;
 }) {
@@ -134,7 +151,13 @@ function DocChips({
             {d.state ? ` · ${d.state}` : ""}
           </small>
           {onRemove && (
-            <button type="button" className="ghost xs" aria-label={removeLabel} title={removeLabel} onClick={() => onRemove(d.key)}>
+            <button
+              type="button"
+              className="ghost xs"
+              aria-label={removeLabel}
+              title={removeLabel}
+              onClick={() => onRemove(d.key)}
+            >
               <X size={12} />
             </button>
           )}
@@ -153,12 +176,25 @@ const base64Of = (file: File) =>
   });
 
 /** Thumbnails of a message's images; each opens the original through the authenticated route. */
-function Thumbs({ items, label }: { items: Array<{ key: string | number; src: string }>; label: string }) {
+function Thumbs({
+  items,
+  label,
+}: {
+  items: Array<{ key: string | number; src: string }>;
+  label: string;
+}) {
   if (!items.length) return null;
   return (
     <div className="chat-thumbs">
       {items.map((i) => (
-        <a key={i.key} href={i.src} target="_blank" rel="noopener noreferrer" title={label} aria-label={label}>
+        <a
+          key={i.key}
+          href={i.src}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={label}
+          aria-label={label}
+        >
           <img src={i.src} alt="" loading="lazy" />
         </a>
       ))}
@@ -215,7 +251,13 @@ type Operation = {
   expires_at: string;
 };
 
-type Memory = { key: string; title: string; enabled: boolean; content: string; metadata?: { memory?: { kind?: string; count?: number } } };
+type Memory = {
+  key: string;
+  title: string;
+  enabled: boolean;
+  content: string;
+  metadata?: { memory?: { kind?: string; count?: number } };
+};
 
 type Detail = {
   conversation: Conversation;
@@ -223,7 +265,12 @@ type Detail = {
   tool_calls: ToolCall[];
   turns: Turn[];
   active_turn: Turn | null;
-  delegations: Array<{ id: number; work_item_id: number | null; run_id: number | null; work_item_code?: string }>;
+  delegations: Array<{
+    id: number;
+    work_item_id: number | null;
+    run_id: number | null;
+    work_item_code?: string;
+  }>;
   operations?: Operation[];
 };
 
@@ -289,7 +336,10 @@ function Reasoning({
               {item.label}
             </div>
           ) : (
-            <div key={i} className={`chat-tool${["ok", "running"].includes(item.status) ? "" : " is-err"}`}>
+            <div
+              key={i}
+              className={`chat-tool${["ok", "running"].includes(item.status) ? "" : " is-err"}`}
+            >
               {(() => {
                 const seq = item.seq ?? tools?.find((tc) => tc.id === item.id)?.seq;
                 return seq != null ? `#${seq} ` : "";
@@ -304,11 +354,22 @@ function Reasoning({
   );
 }
 
-function OperationCard({ op, onDecide }: { op: Operation; onDecide: (id: number, d: "confirm" | "reject") => void }) {
+function OperationCard({
+  op,
+  onDecide,
+}: {
+  op: Operation;
+  onDecide: (id: number, d: "confirm" | "reject") => void;
+}) {
   const { t } = useI18n();
-  const target = Object.values(op.target ?? {}).filter(Boolean).join(" / ");
+  const target = Object.values(op.target ?? {})
+    .filter(Boolean)
+    .join(" / ");
   return (
-    <div className={`chat-operation is-${op.status}`} role={op.status === "pending" ? "alert" : undefined}>
+    <div
+      className={`chat-operation is-${op.status}`}
+      role={op.status === "pending" ? "alert" : undefined}
+    >
       <div className="chat-operation-head">
         <strong>{t("chat.op.title", { id: op.id, tool: op.tool })}</strong>
         <span className="chat-meta-pill">{t(`chat.op.status.${op.status}`)}</span>
@@ -338,7 +399,9 @@ function OperationCard({ op, onDecide }: { op: Operation; onDecide: (id: number,
           <button className="ghost sm" onClick={() => onDecide(op.id, "reject")}>
             {t("chat.op.reject")}
           </button>
-          <span className="muted">{t("chat.op.expires", { at: new Date(op.expires_at).toLocaleTimeString() })}</span>
+          <span className="muted">
+            {t("chat.op.expires", { at: new Date(op.expires_at).toLocaleTimeString() })}
+          </span>
         </div>
       )}
     </div>
@@ -352,8 +415,13 @@ function liveLabel(status: LiveStatus, t: T) {
 function traceSummary(turn: Turn | undefined, t: T) {
   const steps = (turn?.trace ?? []).filter((i) => i.k !== "reasoning").length;
   const ms =
-    turn?.started_at && turn.finished_at ? Date.parse(turn.finished_at) - Date.parse(turn.started_at) : null;
-  return t("chat.reasoning.done", { s: ms != null ? Math.max(1, Math.round(ms / 1000)) : "?", n: steps });
+    turn?.started_at && turn.finished_at
+      ? Date.parse(turn.finished_at) - Date.parse(turn.started_at)
+      : null;
+  return t("chat.reasoning.done", {
+    s: ms != null ? Math.max(1, Math.round(ms / 1000)) : "?",
+    n: steps,
+  });
 }
 
 function phaseLabel(phase: string | null | undefined, t: T) {
@@ -441,16 +509,18 @@ const ChatMessages = memo(function ChatMessages({
               <DocChips
                 items={(m.attachments ?? [])
                   .filter((a) => a.kind === "document")
-                  .map((a) => ({ key: a.id, name: a.filename || `#${a.id}`, bytes: a.bytes, href: `/api/chat/attachments/${a.id}` }))}
+                  .map((a) => ({
+                    key: a.id,
+                    name: a.filename || `#${a.id}`,
+                    bytes: a.bytes,
+                    href: `/api/chat/attachments/${a.id}`,
+                  }))}
               />
               {!!tools?.length && !turn?.trace?.length && (
                 <details className="chat-tools">
                   <summary>{t("chat.tools", { n: tools.length })}</summary>
                   {tools.map((tc) => (
-                    <div
-                      key={tc.id}
-                      className={`chat-tool${tc.status === "ok" ? "" : " is-err"}`}
-                    >
+                    <div key={tc.id} className={`chat-tool${tc.status === "ok" ? "" : " is-err"}`}>
                       #{tc.seq} {tc.tool} — {tc.status}
                       {tc.duration_ms != null ? ` (${Math.round(tc.duration_ms)} ms)` : ""}
                     </div>
@@ -513,19 +583,13 @@ const ChatMessages = memo(function ChatMessages({
                     <button className="sm" onClick={() => actions.retry(turn)}>
                       {t("chat.retry")}
                     </button>
-                    <button
-                      className="ghost sm"
-                      onClick={() => actions.retryOther(turn)}
-                    >
+                    <button className="ghost sm" onClick={() => actions.retryOther(turn)}>
                       {t("chat.retryOther")}
                     </button>
                     <a className="btn ghost sm" href="#/settings">
                       {t("chat.openSettings")}
                     </a>
-                    <button
-                      className="ghost sm"
-                      onClick={actions.refreshHealth}
-                    >
+                    <button className="ghost sm" onClick={actions.refreshHealth}>
                       {t("chat.refreshHealth")}
                     </button>
                   </div>
@@ -575,7 +639,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     if (docs.length)
       setDocuments((cur) => {
         const room = DOCUMENTS_PER_MESSAGE - cur.length;
-        if (docs.length > room) toast(t("chat.attach.docLimit", { n: DOCUMENTS_PER_MESSAGE }), "err");
+        if (docs.length > room)
+          toast(t("chat.attach.docLimit", { n: DOCUMENTS_PER_MESSAGE }), "err");
         const next = [...cur, ...docs.slice(0, Math.max(0, room))];
         if (next.reduce((n, f) => n + f.size, 0) > TOTAL_BYTES) {
           toast(t("chat.attach.total"), "err");
@@ -697,7 +762,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     };
     const startPolling = () => {
       poll ??= setInterval(() => {
-        if (document.visibilityState === "visible" && detailIdRef.current === id) void loadDetail(id);
+        if (document.visibilityState === "visible" && detailIdRef.current === id)
+          void loadDetail(id);
       }, 8000);
     };
     const stopPolling = () => {
@@ -727,13 +793,15 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
         if (kind === "phase.updated") setLiveNote(phaseLabel(p.data?.phase, t));
         else if (kind === "provider.selected")
           setLiveNote(t("chat.live.provider", { provider: p.data?.provider ?? "" }));
-        else if (kind === "provider.fallback")
-          setLiveNote(t("chat.live.fallback"));
-        else if (kind === "tool.started") setLiveNote(t("chat.live.tool", { tool: p.data?.tool ?? "" }));
+        else if (kind === "provider.fallback") setLiveNote(t("chat.live.fallback"));
+        else if (kind === "tool.started")
+          setLiveNote(t("chat.live.tool", { tool: p.data?.tool ?? "" }));
         else if (kind === "repositories.resolved")
           setLiveNote(
             t("chat.live.sources", {
-              repos: ((p.data?.repositories ?? []) as Array<{ name: string }>).map((r) => r.name).join(", "),
+              repos: ((p.data?.repositories ?? []) as Array<{ name: string }>)
+                .map((r) => r.name)
+                .join(", "),
             }),
           );
         else if (kind === "routing.completed")
@@ -809,7 +877,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const opsByTurn = useMemo(() => {
     const m = new Map<number | null, Operation[]>();
     const answered = new Set(
-      (detail?.messages ?? []).filter((x) => x.role === "assistant" && x.turn_id).map((x) => x.turn_id),
+      (detail?.messages ?? [])
+        .filter((x) => x.role === "assistant" && x.turn_id)
+        .map((x) => x.turn_id),
     );
     for (const op of detail?.operations ?? []) {
       const k = op.turn_id != null && answered.has(op.turn_id) ? op.turn_id : null;
@@ -821,7 +891,13 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   const providerOptions = useMemo(() => {
     const rows = providers.data ?? [];
     return [
-      { id: "auto", label: t("chat.provider.auto"), ok: true, enabled: true, quota: undefined as string | undefined },
+      {
+        id: "auto",
+        label: t("chat.provider.auto"),
+        ok: true,
+        enabled: true,
+        quota: undefined as string | undefined,
+      },
       ...AGENT_PROVIDERS.map((id) => {
         const row = rows.find((p) => p.id === id);
         return {
@@ -869,21 +945,32 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     repositories: repoScope,
   });
 
-  const deliver = async (conversationId: number, cid: string, content: string, pendingImages?: PendingMessage) => {
+  const deliver = async (
+    conversationId: number,
+    cid: string,
+    content: string,
+    pendingImages?: PendingMessage,
+  ) => {
     setBusy(true);
     setLiveNote(t("chat.live.thinking"));
     try {
       // Images are uploaded once; a retry of the same message reuses their ids.
       let attachments = pendingImages?.attachmentIds;
-      const files = [...(pendingImages?.images ?? []).map((i) => i.file), ...(pendingImages?.documents ?? [])];
+      const files = [
+        ...(pendingImages?.images ?? []).map((i) => i.file),
+        ...(pendingImages?.documents ?? []),
+      ];
       if (!attachments && files.length) {
         attachments = [];
         for (const file of files) {
           try {
-            const up = await api<{ id: number }>(`/api/chat/conversations/${conversationId}/attachments`, {
-              data: await base64Of(file),
-              filename: file.name,
-            });
+            const up = await api<{ id: number }>(
+              `/api/chat/conversations/${conversationId}/attachments`,
+              {
+                data: await base64Of(file),
+                filename: file.name,
+              },
+            );
             attachments.push(up.id);
           } catch (e) {
             throw new Error(`${file.name}: ${(e as Error).message}`);
@@ -909,7 +996,13 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   };
 
   const send = () => {
-    if (!activeId || (!draft.trim() && !images.length && !documents.length) || busy || detail?.active_turn) return;
+    if (
+      !activeId ||
+      (!draft.trim() && !images.length && !documents.length) ||
+      busy ||
+      detail?.active_turn
+    )
+      return;
     const content = draft.trim();
     const cid = clientMessageId();
     const message: PendingMessage = {
@@ -945,7 +1038,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     if (await act(() => api(`/api/knowledge/${key}`, body))) void memories.reloadFresh();
   };
   const deleteMemory = async (key: string) => {
-    if (await act(() => api(`/api/knowledge/${key}/delete`, { reason: "removed from chat memory" })))
+    if (
+      await act(() => api(`/api/knowledge/${key}/delete`, { reason: "removed from chat memory" }))
+    )
       void memories.reloadFresh();
   };
 
@@ -1071,7 +1166,10 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     if (!activeId) return;
     const body = typeof request === "string" ? { kind: request } : request;
     const p = await act(() =>
-      api<NonNullable<typeof preview>>(`/api/chat/conversations/${activeId}/delegation/preview`, body),
+      api<NonNullable<typeof preview>>(
+        `/api/chat/conversations/${activeId}/delegation/preview`,
+        body,
+      ),
     );
     if (p) setPreview(p);
   };
@@ -1082,20 +1180,34 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
         .filter((c) => c.tool === "knowledge.propose_import" && c.status === "ok")
         .slice(-3)
         .map((c) => {
-          const r = c.result as { scope?: string; proposals?: ImportedProposal[]; errors?: Array<{ filename: string; error: string }> };
-          return { id: c.id, scope: r?.scope ?? "", proposals: r?.proposals ?? [], errors: r?.errors ?? [] };
+          const r = c.result as {
+            scope?: string;
+            proposals?: ImportedProposal[];
+            errors?: Array<{ filename: string; error: string }>;
+          };
+          return {
+            id: c.id,
+            scope: r?.scope ?? "",
+            proposals: r?.proposals ?? [],
+            errors: r?.errors ?? [],
+          };
         }),
     [detail?.tool_calls],
   );
   // A task the agent proposed in the latest turn (work.delegate): reviewed and started through the same preview.
   const proposal = useMemo(() => {
     // Turns arrive newest first; take the highest id rather than trust the order.
-    const last = (detail?.turns ?? []).reduce<Turn | undefined>((a, b) => (!a || b.id > a.id ? b : a), undefined);
+    const last = (detail?.turns ?? []).reduce<Turn | undefined>(
+      (a, b) => (!a || b.id > a.id ? b : a),
+      undefined,
+    );
     const call = [...(detail?.tool_calls ?? [])]
       .reverse()
       .find((c) => c.tool === "work.delegate" && c.status === "ok" && c.turn_id === last?.id);
-    const request = (call?.result as { request?: { kind: DelegationKind; title: string; repositories: string[] } } | undefined)
-      ?.request;
+    const request = (
+      call?.result as
+        { request?: { kind: DelegationKind; title: string; repositories: string[] } } | undefined
+    )?.request;
     return request && !detail?.active_turn ? request : null;
   }, [detail?.turns, detail?.tool_calls, detail?.active_turn]);
 
@@ -1104,16 +1216,18 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     if (!activeId || !preview) return;
     const r = await act(() =>
       api<{ work_item_code?: string; work_item_id: number; run_id?: number | null }>(
-        `/api/chat/conversations/${activeId}/delegation/execute`, {
-        request: {
-          workflow: preview.workflow?.key,
-          title: preview.title,
-          repositories: preview.repositories,
-          message_id: preview.source_message_id,
+        `/api/chat/conversations/${activeId}/delegation/execute`,
+        {
+          request: {
+            workflow: preview.workflow?.key,
+            title: preview.title,
+            repositories: preview.repositories,
+            message_id: preview.source_message_id,
+          },
+          hash: preview.hash,
+          confirmed: true,
         },
-        hash: preview.hash,
-        confirmed: true,
-      }),
+      ),
     );
     if (r) {
       setPreview(null);
@@ -1127,8 +1241,24 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
   };
 
   // Stable handlers for the memoized transcript; they call the latest closures.
-  const latest = useRef({ copyText, regenerate, openDelegation, decideOperation, retryTurn, setProvider, providers });
-  latest.current = { copyText, regenerate, openDelegation, decideOperation, retryTurn, setProvider, providers };
+  const latest = useRef({
+    copyText,
+    regenerate,
+    openDelegation,
+    decideOperation,
+    retryTurn,
+    setProvider,
+    providers,
+  });
+  latest.current = {
+    copyText,
+    regenerate,
+    openDelegation,
+    decideOperation,
+    retryTurn,
+    setProvider,
+    providers,
+  };
   const actions = useMemo<ChatActions>(
     () => ({
       copy: (text) => void latest.current.copyText(text),
@@ -1332,18 +1462,31 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                 />
 
                 {imports.map((im) => (
-                  <ChatImportReview key={im.id} scope={im.scope} proposals={im.proposals} errors={im.errors} />
+                  <ChatImportReview
+                    key={im.id}
+                    scope={im.scope}
+                    proposals={im.proposals}
+                    errors={im.errors}
+                  />
                 ))}
                 {(opsByTurn.get(null) ?? []).map((op) => (
-                  <OperationCard key={op.id} op={op} onDecide={(id, d) => void decideOperation(id, d)} />
+                  <OperationCard
+                    key={op.id}
+                    op={op}
+                    onDecide={(id, d) => void decideOperation(id, d)}
+                  />
                 ))}
 
                 {visiblePending.map((p) => (
                   <div key={p.cid} className="chat-block">
-                    <article className={`chat-bubble is-user is-pending${p.status === "failed" ? " is-failed" : ""}`}>
+                    <article
+                      className={`chat-bubble is-user is-pending${p.status === "failed" ? " is-failed" : ""}`}
+                    >
                       <div className="chat-bubble-meta">
                         <span>{t("chat.role.user")}</span>
-                        <span>{p.status === "sending" ? t("chat.sending") : t("chat.sendFailed")}</span>
+                        <span>
+                          {p.status === "sending" ? t("chat.sending") : t("chat.sendFailed")}
+                        </span>
                       </div>
                       <div style={{ whiteSpace: "pre-wrap" }}>{p.content}</div>
                       <Thumbs
@@ -1355,7 +1498,12 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                           key: i,
                           name: f.name,
                           bytes: f.size,
-                          state: p.status === "failed" ? t("chat.sendFailed") : p.attachmentIds ? t("chat.attach.uploaded") : t("chat.attach.uploading"),
+                          state:
+                            p.status === "failed"
+                              ? t("chat.sendFailed")
+                              : p.attachmentIds
+                                ? t("chat.attach.uploaded")
+                                : t("chat.attach.uploading"),
                         }))}
                       />
                     </article>
@@ -1365,12 +1513,18 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                         <div>
                           <div>{p.error}</div>
                           <div className="chat-failure-actions">
-                            <button className="sm" onClick={() => retrySend(p)} disabled={busy || !!detail.active_turn}>
+                            <button
+                              className="sm"
+                              onClick={() => retrySend(p)}
+                              disabled={busy || !!detail.active_turn}
+                            >
                               {t("chat.retry")}
                             </button>
                             <button
                               className="ghost sm"
-                              onClick={() => setPending((all) => all.filter((x) => x.cid !== p.cid))}
+                              onClick={() =>
+                                setPending((all) => all.filter((x) => x.cid !== p.cid))
+                              }
                             >
                               {t("chat.discard")}
                             </button>
@@ -1387,7 +1541,11 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                       <div className="chat-bubble-meta">
                         <span>{t("chat.role.assistant")}</span>
                         <span className="chat-meta-pill">
-                          {[detail.active_turn?.provider, detail.active_turn?.model, detail.active_turn?.route]
+                          {[
+                            detail.active_turn?.provider,
+                            detail.active_turn?.model,
+                            detail.active_turn?.route,
+                          ]
                             .filter(Boolean)
                             .join(" · ") || "…"}
                         </span>
@@ -1403,7 +1561,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                           }
                         />
                       </div>
-                      {!!live?.text && <Markdown text={live.text} />}
+                      {!!live?.text && !live.held && <Markdown text={live.text} />}
                     </article>
                   </div>
                 )}
@@ -1447,13 +1605,18 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   }}
                 >
                   {providerOptions
-                    .filter((p) => p.id === "auto" || (p.enabled && p.ok && p.quota !== "exhausted") || p.id === provider)
+                    .filter(
+                      (p) =>
+                        p.id === "auto" ||
+                        (p.enabled && p.ok && p.quota !== "exhausted") ||
+                        p.id === provider,
+                    )
                     .map((p) => (
-                    <option key={p.id} value={p.id} disabled={p.id !== "auto" && !p.enabled}>
-                      {p.label}
-                      {p.id !== "auto" && !p.ok ? ` — ${t("chat.provider.unhealthy")}` : ""}
-                    </option>
-                  ))}
+                      <option key={p.id} value={p.id} disabled={p.id !== "auto" && !p.enabled}>
+                        {p.label}
+                        {p.id !== "auto" && !p.ok ? ` — ${t("chat.provider.unhealthy")}` : ""}
+                      </option>
+                    ))}
                 </select>
                 <select
                   aria-label={t("chat.repos")}
@@ -1477,12 +1640,25 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   aria-expanded={advanced}
                 >
                   <Settings2 size={15} />
-                  <ChevronRight size={14} style={{ transform: advanced ? "rotate(90deg)" : undefined }} />
+                  <ChevronRight
+                    size={14}
+                    style={{ transform: advanced ? "rotate(90deg)" : undefined }}
+                  />
                 </button>
                 <input
                   ref={fileInput}
                   type="file"
-                  accept={[...IMAGE_TYPES, ".pdf", ".docx", ".xlsx", ".md", ".markdown", ".txt", ".json", ".csv"].join(",")}
+                  accept={[
+                    ...IMAGE_TYPES,
+                    ".pdf",
+                    ".docx",
+                    ".xlsx",
+                    ".md",
+                    ".markdown",
+                    ".txt",
+                    ".json",
+                    ".csv",
+                  ].join(",")}
                   multiple
                   hidden
                   onChange={(e) => {
@@ -1495,7 +1671,11 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   className="ghost sm"
                   title={t("chat.attach")}
                   onClick={() => fileInput.current?.click()}
-                  disabled={!!detail.active_turn || (images.length >= IMAGES_PER_MESSAGE && documents.length >= DOCUMENTS_PER_MESSAGE)}
+                  disabled={
+                    !!detail.active_turn ||
+                    (images.length >= IMAGES_PER_MESSAGE &&
+                      documents.length >= DOCUMENTS_PER_MESSAGE)
+                  }
                 >
                   <Paperclip size={15} /> {t("chat.attach.short")}
                 </button>
@@ -1579,17 +1759,22 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
               <textarea
                 value={draft}
                 onPaste={(e) => {
-                  const files = Array.from(e.clipboardData.files).filter((f) => isImage(f) || isDocument(f));
+                  const files = Array.from(e.clipboardData.files).filter(
+                    (f) => isImage(f) || isDocument(f),
+                  );
                   if (!files.length) return;
                   // A pasted screenshot is an attachment; pasted text keeps its default behaviour.
                   if (!e.clipboardData.getData("text")) e.preventDefault();
                   addImages(files);
                 }}
                 onDragOver={(e) => {
-                  if (Array.from(e.dataTransfer.items).some((i) => i.kind === "file")) e.preventDefault();
+                  if (Array.from(e.dataTransfer.items).some((i) => i.kind === "file"))
+                    e.preventDefault();
                 }}
                 onDrop={(e) => {
-                  const files = Array.from(e.dataTransfer.files).filter((f) => isImage(f) || isDocument(f));
+                  const files = Array.from(e.dataTransfer.files).filter(
+                    (f) => isImage(f) || isDocument(f),
+                  );
                   if (!files.length) return;
                   e.preventDefault();
                   addImages(files);
@@ -1612,7 +1797,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     <>
                       {" · "}
                       {t("chat.usage", {
-                        cost: usage.cost_usd == null ? "—" : `$${Number(usage.cost_usd).toFixed(4)}`,
+                        cost:
+                          usage.cost_usd == null ? "—" : `$${Number(usage.cost_usd).toFixed(4)}`,
                         tokens:
                           usage.input_tokens == null && usage.output_tokens == null
                             ? "—"
@@ -1626,7 +1812,10 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     <Square size={15} /> {t("chat.stop")}
                   </button>
                 ) : (
-                  <button onClick={() => void send()} disabled={(!draft.trim() && !images.length && !documents.length) || busy}>
+                  <button
+                    onClick={() => void send()}
+                    disabled={(!draft.trim() && !images.length && !documents.length) || busy}
+                  >
                     <Send size={15} /> {t("chat.send")}
                   </button>
                 )}
@@ -1655,7 +1844,10 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   </div>
                   <div>{m.content}</div>
                   <div className="chat-failure-actions">
-                    <button className="ghost xs" onClick={() => void updateMemory(m.key, { enabled: !m.enabled })}>
+                    <button
+                      className="ghost xs"
+                      onClick={() => void updateMemory(m.key, { enabled: !m.enabled })}
+                    >
                       {m.enabled ? t("chat.memory.disable") : t("chat.memory.enable")}
                     </button>
                     <button
@@ -1665,7 +1857,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                           title: t("chat.memory.edit"),
                           defaultValue: m.content,
                         });
-                        if (content && content.trim() !== m.content) void updateMemory(m.key, { content: content.trim() });
+                        if (content && content.trim() !== m.content)
+                          void updateMemory(m.key, { content: content.trim() });
                       }}
                     >
                       {t("chat.memory.edit")}

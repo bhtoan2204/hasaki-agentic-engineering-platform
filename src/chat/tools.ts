@@ -94,6 +94,23 @@ interface ToolDef {
 
 const repoArg = z.array(z.string().min(1).max(200)).max(10).optional();
 
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DAY = z.string().regex(DAY_RE).optional();
+const DEFAULT_TZ = "Asia/Ho_Chi_Minh";
+const TZ = z
+  .string()
+  .max(60)
+  .refine((z) => {
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: z });
+      return true;
+    } catch {
+      return false;
+    }
+  }, "invalid timezone")
+  .optional();
+const WORK_STATUS = ["open", "in_progress", "done", "archived"] as const;
+
 function pickRepositories(ctx: ToolContext, requested: string[] | undefined) {
   const wanted = requested?.length ? requested : ctx.scoped;
   if (!wanted.length)
@@ -526,15 +543,82 @@ const TOOLS: ToolDef[] = [
   {
     name: "work_items.search",
     group: "platform",
-    description: "Search your work items by text (code, title, description).",
-    usage: '{"query?": "checkout", "limit?": 10}',
+    description:
+      "List your work items (newest update first), optionally by text (code, title, description), status and a day range of the last update.",
+    usage:
+      '{"query?": "checkout", "status?": "in_progress", "from?": "2026-11-17", "to?": "2026-11-17", "limit?": 10}',
     args: z
-      .object({ query: z.string().max(200).optional(), limit: z.number().int().min(1).max(20).optional() })
+      .object({
+        query: z.string().max(200).optional(),
+        status: z.enum(WORK_STATUS).optional(),
+        from: DAY,
+        to: DAY,
+        timezone: TZ,
+        limit: z.number().int().min(1).max(50).optional(),
+      })
       .strict(),
     async run(a, ctx) {
       return {
         label: "work items",
-        data: await chatRepository.searchWorkItems(ctx.binding.userId, (a.query ?? "").trim(), a.limit ?? 10),
+        data: await chatRepository.listWorkItems(ctx.binding.userId, {
+          text: (a.query ?? "").trim(),
+          status: a.status,
+          from: a.from,
+          to: a.to,
+          tz: a.timezone ?? DEFAULT_TZ,
+          limit: a.limit ?? 10,
+        }),
+      };
+    },
+  },
+  {
+    name: "runs.list",
+    group: "platform",
+    description:
+      "List your workflow runs (newest first), optionally by status, work item and a day range of creation.",
+    usage: '{"status?": "FAILED", "work_item_id?": 12, "from?": "2026-11-17", "to?": "2026-11-17", "limit?": 20}',
+    args: z
+      .object({
+        status: z.string().regex(/^[A-Z_]+$/).max(30).optional(),
+        work_item_id: z.number().int().positive().optional(),
+        from: DAY,
+        to: DAY,
+        timezone: TZ,
+        limit: z.number().int().min(1).max(50).optional(),
+      })
+      .strict(),
+    async run(a, ctx) {
+      return {
+        label: "runs",
+        data: await chatRepository.listRuns(ctx.binding.userId, {
+          status: a.status,
+          workItemId: a.work_item_id,
+          from: a.from,
+          to: a.to,
+          tz: a.timezone ?? DEFAULT_TZ,
+          limit: a.limit ?? 20,
+        }),
+      };
+    },
+  },
+  {
+    name: "activity.timeline",
+    group: "platform",
+    description:
+      "What you did in a day range, oldest first: work items updated, workflow runs created and finished. Use it for \"what did I work on on <date>\".",
+    usage: '{"from": "2026-11-17", "to": "2026-11-17"}',
+    args: z
+      .object({ from: z.string().regex(DAY_RE), to: z.string().regex(DAY_RE), timezone: TZ, limit: z.number().int().min(1).max(200).optional() })
+      .strict(),
+    async run(a, ctx) {
+      return {
+        label: `activity ${a.from}..${a.to}`,
+        data: await chatRepository.activityTimeline(ctx.binding.userId, {
+          from: a.from,
+          to: a.to,
+          tz: a.timezone ?? DEFAULT_TZ,
+          limit: a.limit ?? 100,
+        }),
       };
     },
   },

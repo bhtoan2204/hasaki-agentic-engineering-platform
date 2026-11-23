@@ -299,6 +299,8 @@ function outcomeText(op: OperationRow) {
   const target = Object.values(op.target).filter(Boolean).join("/");
   switch (op.status) {
     case "succeeded":
+      if (op.tool.startsWith("runs."))
+        return `Operation #${op.id} (${target}) was applied by the platform. Read the run back (runs.get) before reporting its new state.`;
       return `Operation #${op.id} (${op.tool} → ${target}) was accepted by the target (${op.tool === "kafka.publish" ? "the event was published" : "the service answered with success"}). The business outcome is NOT verified yet.`;
     case "unknown":
       return `Operation #${op.id} (${op.tool} → ${target}): outcome unknown (${op.error}). It may or may not have been published; it will not be repeated automatically — check the topic before retrying.`;
