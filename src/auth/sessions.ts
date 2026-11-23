@@ -1,8 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pool, q, one } from "../db/pool.ts";
+import { HttpError } from "../http/error.ts";
 import { randomToken, safeEqual, sessionHash } from "./crypto.ts";
 import { verifyPassword } from "./password.ts";
-import { publicUser, userByUsername, type PublicUser } from "./users.ts";
+import { assertUsername, publicUser, userByUsername, type PublicUser } from "./users.ts";
 import {
   cachedSession,
   forgetSession,
@@ -104,20 +105,22 @@ export async function login(
     .toLowerCase();
   if (await tooMany(name || "-", ip)) {
     await record(name || "-", ip, false);
-    const err = new Error(INVALID) as Error & { status: number };
-    err.status = 429;
-    throw err;
+    throw new HttpError(429, INVALID);
   }
-  const row = name ? await userByUsername(name).catch(() => undefined) : undefined;
+  let validName: string | undefined;
+  try {
+    validName = assertUsername(name);
+  } catch {
+    // Invalid usernames follow the same response and failure accounting as unknown users.
+  }
+  const row = validName ? await userByUsername(validName) : undefined;
   const ok =
     !!row && row.active && (await verifyPassword(row.password_hash, String(password ?? "")));
   if (!row || !ok) {
     if (row && !row.active)
       await verifyPassword(row.password_hash, String(password ?? "")).catch(() => false);
     await record(name || "-", ip, false);
-    const err = new Error(INVALID) as Error & { status: number };
-    err.status = 401;
-    throw err;
+    throw new HttpError(401, INVALID);
   }
   await record(row.username, ip, true);
   const token = randomToken();

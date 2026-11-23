@@ -1,3 +1,5 @@
+import { HttpError } from "../http/error.ts";
+import { positiveId } from "../http/params.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import pg from "pg";
 import { config } from "../config.ts";
@@ -232,12 +234,6 @@ async function runAllowed(runId: number, actor: Actor, support: boolean) {
   return visible({ runId, userId: actor.id, role: actor.role, support }, runId, ownerId);
 }
 
-function notFound(res: ServerResponse) {
-  res
-    .writeHead(404, { "Content-Type": "application/json" })
-    .end(JSON.stringify({ error: "not found" }));
-}
-
 export async function handleStream(
   req: IncomingMessage,
   res: ServerResponse,
@@ -245,8 +241,10 @@ export async function handleStream(
   actor: Actor,
   support: boolean,
 ) {
-  const runId = url.searchParams.get("run_id") ? Number(url.searchParams.get("run_id")) : null;
-  if (runId != null && !(await runAllowed(runId, actor, support))) return notFound(res);
+  const filter = url.searchParams.get("run_id");
+  const runId = filter ? positiveId(filter, "run_id") : null;
+  if (runId != null && !(await runAllowed(runId, actor, support)))
+    throw new HttpError(404, "not found");
   // The browser's own reconnect sends Last-Event-ID (newest); a reopened stream passes ?after=.
   const after =
     cursorParam(req.headers["last-event-id"]) ?? cursorParam(url.searchParams.get("after"));
@@ -299,7 +297,8 @@ export async function handleStream(
 
 /** Polling fallback: `GET /api/events?after=<id>[&run_id=]` → `{ events, reset, cursor }`, same filtering as the stream. */
 export async function handleEventsSince(url: URL, actor: Actor, support: boolean) {
-  const runId = url.searchParams.get("run_id") ? Number(url.searchParams.get("run_id")) : null;
+  const filter = url.searchParams.get("run_id");
+  const runId = filter ? positiveId(filter, "run_id") : null;
   if (runId != null && !(await runAllowed(runId, actor, support))) return null;
   const after = cursorParam(url.searchParams.get("after"));
   if (after == null) return { events: [], reset: true, cursor: await latestEventId() };

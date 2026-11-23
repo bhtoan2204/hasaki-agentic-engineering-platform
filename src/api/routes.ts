@@ -162,6 +162,7 @@ import {
   testTelegram,
 } from "../integrations/accounts.ts";
 import { HttpError } from "../http/error.ts";
+import { positiveId as num, queryInteger } from "../http/params.ts";
 import { chat } from "../chat/service.ts";
 import {
   disconnectSignoz,
@@ -358,11 +359,6 @@ const budgetOf = (body: { budget_usd?: unknown } | null | undefined) => {
 };
 const mine = (c: Ctx) => ({ ownerId: c.actor.id, all: support(c) });
 
-const num = (s: string) => {
-  const n = Number(s);
-  if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, `invalid id "${s}"`);
-  return n;
-};
 const must = <T>(v: T | undefined | null, what: string): T => {
   if (v == null) throw new HttpError(404, `${what} not found`);
   return v;
@@ -939,7 +935,7 @@ export const routes: Route[] = [
       requireAdmin(c.actor),
       listFindings({
         status: c.url.searchParams.get("status") ?? undefined,
-        limit: Number(c.url.searchParams.get("limit") ?? 50),
+        limit: queryInteger(c.url.searchParams, "limit") ?? 50,
       })
     ),
   ],
@@ -948,12 +944,14 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/radar\/findings\/(\d+)\/status$/,
-    (c) => {
+    async (c) => {
       requireAdmin(c.actor);
-      const status = String(c.body.status ?? "");
-      if (!["open", "resolved", "suppressed"].includes(status))
+      const status = c.body.status;
+      if (status !== "open" && status !== "resolved" && status !== "suppressed")
         throw new HttpError(400, "status must be open, resolved or suppressed");
-      return setFindingStatus(num(c.p[0]), status as "open", c.actor.id);
+      const result = await setFindingStatus(num(c.p[0]), status, c.actor.id);
+      if (!result.ok) throw new HttpError(404, "radar finding not found");
+      return result;
     },
   ],
   [
@@ -984,12 +982,11 @@ export const routes: Route[] = [
     /^\/api\/runs$/,
     async (c) => {
       if (support(c)) await audit(c.actor.id, "support.list", "run", "*");
+      const workItemId = c.url.searchParams.get("work_item_id");
       return withCosts(
         await listRuns({
           status: c.url.searchParams.get("status") ?? undefined,
-          workItemId: c.url.searchParams.get("work_item_id")
-            ? Number(c.url.searchParams.get("work_item_id"))
-            : undefined,
+          workItemId: workItemId ? num(workItemId, "work_item_id") : undefined,
           ...mine(c),
         }),
         "run",
@@ -1045,7 +1042,7 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/events$/,
     async (c) => (
       await requireRun(c.actor, num(c.p[0]), support(c)),
-      runEvents.list(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0))
+      runEvents.list(num(c.p[0]), queryInteger(c.url.searchParams, "after") ?? 0)
     ),
   ],
   [
@@ -1061,26 +1058,19 @@ export const routes: Route[] = [
       const sp = c.url.searchParams;
       const level = sp.get("level");
       if (level && !isTraceLevel(level)) throw new HttpError(400, "invalid level");
-      const id = (k: string) => {
-        const raw = sp.get(k);
-        if (raw == null || raw === "") return undefined;
-        const n = Number(raw);
-        if (!Number.isInteger(n) || n < 0) throw new HttpError(400, `invalid ${k}`);
-        return n;
-      };
       for (const k of ["from", "to"])
         if (sp.get(k) && Number.isNaN(Date.parse(sp.get(k)!)))
           throw new HttpError(400, `invalid ${k}`);
       return searchLogs(num(c.p[0]), {
-        stepId: id("step"),
-        attemptId: id("attempt"),
+        stepId: queryInteger(sp, "step"),
+        attemptId: queryInteger(sp, "attempt"),
         provider: sp.get("provider") ?? undefined,
         event: sp.get("event") ?? undefined,
         level: level && isTraceLevel(level) ? level : undefined,
         from: sp.get("from") ?? undefined,
         to: sp.get("to") ?? undefined,
-        afterId: id("after"),
-        limit: id("limit"),
+        afterId: queryInteger(sp, "after"),
+        limit: queryInteger(sp, "limit"),
       });
     },
   ],
@@ -1672,7 +1662,7 @@ export const routes: Route[] = [
     /^\/api\/attempts\/(\d+)\/transcript$/,
     async (c) => (
       await requireAttempt(c.actor, num(c.p[0]), support(c)),
-      runEvents.transcript(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0))
+      runEvents.transcript(num(c.p[0]), queryInteger(c.url.searchParams, "after") ?? 0)
     ),
   ],
   [
@@ -2964,7 +2954,7 @@ export const routes: Route[] = [
       chat.list(c.actor, {
         search: c.url.searchParams.get("q") ?? undefined,
         archived: c.url.searchParams.get("archived") === "1",
-        limit: Number(c.url.searchParams.get("limit") || 100) || 100,
+        limit: queryInteger(c.url.searchParams, "limit") || 100,
       }),
   ],
   ["POST", /^\/api\/chat\/conversations$/, (c) => chat.create(c.actor, c.body)],
@@ -2985,8 +2975,7 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/chat\/conversations\/(\d+)\/events$/,
     async (c) => {
-      const after = Number(c.url.searchParams.get("after") ?? "0");
-      if (!Number.isSafeInteger(after) || after < 0) throw new HttpError(400, "invalid after");
+      const after = queryInteger(c.url.searchParams, "after") ?? 0;
       return chat.events(c.actor, num(c.p[0]), after);
     },
   ],
@@ -3032,14 +3021,6 @@ function providerOf(body: { agent_provider?: unknown }) {
   } catch (e) {
     throw new HttpError(400, (e as Error).message);
   }
-}
-
-export function errorStatus(e: unknown) {
-  if (e instanceof HttpError || e instanceof EngineError) return e.status;
-  const code = (e as { code?: unknown } | null | undefined)?.code;
-  if (code === "23505") return 409; // unique violation
-  if (code === "23503" || code === "23514" || code === "22P02") return 400;
-  return 400;
 }
 
 /**

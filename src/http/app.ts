@@ -4,10 +4,12 @@ import { handleInternal } from "../prodErrors/gateway.ts";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
-import { pool } from "../db/pool.ts";
+import { isTransientDbError, pool } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
-import { errorStatus, routes } from "../api/routes.ts";
+import { routes } from "../api/routes.ts";
+import { EngineError } from "../workflow/mutations.ts";
+import { positiveId } from "./params.ts";
 import { claimIdempotency, needsIdempotency } from "./idempotency.ts";
 import { singleflight } from "../cache/index.ts";
 import { HttpError } from "./error.ts";
@@ -103,10 +105,14 @@ async function serveStatic(url: URL, req: IncomingMessage, res: ServerResponse) 
 async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
-  for await (const c of req) {
-    bytes += (c as Buffer).length;
-    if (bytes > maxBytes) throw new HttpError(413, "Body too large");
-    chunks.push(c as Buffer);
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > maxBytes) {
+      req.resume();
+      throw new HttpError(413, "Body too large");
+    }
+    chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
   try {
@@ -114,6 +120,41 @@ async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unkn
   } catch {
     throw new HttpError(400, "invalid JSON body");
   }
+}
+
+async function readObject(req: IncomingMessage, maxBytes = Infinity, nullAsEmpty = false) {
+  const body = await readJson(req, maxBytes);
+  if (body === null && nullAsEmpty) return {};
+  if (body === null || typeof body !== "object" || Array.isArray(body))
+    throw new HttpError(400, "JSON body must be an object");
+  return body as Record<string, unknown>;
+}
+
+function errorResponse(cause: unknown) {
+  if (!(cause instanceof HttpError || cause instanceof EngineError) && isTransientDbError(cause))
+    return {
+      status: 503,
+      body: { error: "Database temporarily unavailable" },
+      outcomeUncertain: true,
+    };
+
+  const status =
+    cause instanceof HttpError || cause instanceof EngineError
+      ? cause.status
+      : cause && typeof cause === "object" && "code" in cause && cause.code === "23505"
+        ? 409
+        : 400;
+  const details =
+    cause instanceof Error && "errors" in cause && Array.isArray(cause.errors)
+      ? cause.errors.filter((detail): detail is string => typeof detail === "string")
+      : [];
+  return {
+    status,
+    body: {
+      error: cause instanceof Error ? cause.message : "Request failed",
+      ...(details.length ? { details } : {}),
+    },
+  };
 }
 
 function send(res: ServerResponse, status: number, body: unknown, extra?: Record<string, string>) {
@@ -197,18 +238,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       );
     }
     if (key === "POST /api/auth/login") {
-      const body = (await readJson(req)) as { username?: unknown; password?: unknown };
-      try {
-        const result = await login(String(body.username ?? ""), String(body.password ?? ""), req);
-        setSessionCookie(res, req, result.token);
-        return send(res, 200, {
-          user: { id: result.user.id, username: result.user.username, role: result.user.role },
-          csrf: result.user.csrf,
-        });
-      } catch (e) {
-        const status = (e as { status?: number }).status ?? 401;
-        return send(res, status, { error: (e as Error).message });
-      }
+      const body = await readObject(req);
+      const result = await login(String(body.username ?? ""), String(body.password ?? ""), req);
+      setSessionCookie(res, req, result.token);
+      return send(res, 200, {
+        user: { id: result.user.id, username: result.user.username, role: result.user.role },
+        csrf: result.user.csrf,
+      });
     }
     if (method === "GET" && !url.pathname.startsWith("/api/")) {
       // Telegram links use 127.0.0.1 (localhost isn't clickable there); bounce to publicUrl so the session cookie matches.
@@ -236,7 +272,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       return send(res, 200, { ok: true });
     }
     if (key === "POST /api/auth/password") {
-      const body = (await readJson(req)) as { password?: unknown };
+      const body = await readObject(req);
       await setPassword(actor.id, String(body.password ?? ""));
       await logout(req);
       clearSessionCookie(res, req);
@@ -244,12 +280,18 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     }
 
     if (method === "GET" && url.pathname === "/api/stream") {
-      return handleStream(req, res, url, actor, wantsSupport(actor, url.searchParams.get("scope")));
+      return await handleStream(
+        req,
+        res,
+        url,
+        actor,
+        wantsSupport(actor, url.searchParams.get("scope")),
+      );
     }
     const chatStream =
       method === "GET" && url.pathname.match(/^\/api\/chat\/conversations\/(\d+)\/stream$/);
     if (chatStream) {
-      return handleChatStream(req, res, url, actor, Number(chatStream[1]));
+      return await handleChatStream(req, res, url, actor, positiveId(chatStream[1]));
     }
     if (key === "GET /api/events") {
       const slice = await handleEventsSince(
@@ -271,13 +313,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         res,
         200,
         // 10 MB document as base64 plus the JSON envelope.
-        await uploadAttachment(actor.id, Number(upload[1]), await readJson(req, 14_200_000)),
+        await uploadAttachment(actor.id, positiveId(upload[1]), await readObject(req, 14_200_000)),
       );
     }
     const image = method === "GET" && url.pathname.match(/^\/api\/chat\/attachments\/(\d+)$/);
     if (image) {
       const { readAttachment } = await import("../chat/attachments.ts");
-      const a = await readAttachment(actor.id, Number(image[1]));
+      const a = await readAttachment(actor.id, positiveId(image[1]));
       if (!a) return send(res, 404, { error: "not found" });
       // Documents are downloaded, never rendered in the platform's origin.
       const name = (a.filename || `attachment-${image[1]}`).replace(/[^\w.\- ]/g, "_");
@@ -296,17 +338,14 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     const raw = method === "GET" && url.pathname.match(/^\/api\/artifacts\/(\d+)\/raw$/);
     if (raw) {
       const { requireArtifact } = await import("../authz/access.ts");
-      await requireArtifact(
-        actor,
-        Number(raw[1]),
-        wantsSupport(actor, url.searchParams.get("scope")),
-      );
+      const artifactId = positiveId(raw[1]);
+      await requireArtifact(actor, artifactId, wantsSupport(actor, url.searchParams.get("scope")));
       const a = (
         await pool.query("SELECT name, content, data FROM workflow_artifacts WHERE id = $1", [
-          Number(raw[1]),
+          artifactId,
         ])
       ).rows[0];
-      if (!a) return res.writeHead(404).end();
+      if (!a) return send(res, 404, { error: "not found" });
       const bin = a.data?.encoding === "base64";
       const bytes = bin ? Buffer.from(a.content, "base64") : null;
       res.writeHead(200, artifactResponseHeaders(a.name, a.data?.mime, bytes));
@@ -316,7 +355,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     for (const [routeMethod, pattern, handler] of routes) {
       const m = url.pathname.match(pattern);
       if (!m || routeMethod !== method) continue;
-      const body = method === "POST" ? await readJson(req) : {};
+      // Budget endpoints also accept JSON null to clear an existing budget.
+      const legacyNullBudget = /^\/api\/(?:runs|work-items)\/\d+\/budget$/.test(url.pathname);
+      const body = method === "POST" ? await readObject(req, Infinity, legacyNullBudget) : {};
       // Create-type POSTs with an Idempotency-Key: a repeat replays the first response instead of creating twice.
       const idemKey = req.headers["idempotency-key"];
       const claim =
@@ -358,13 +399,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         if (claim) await claim.finish(200, out ?? null);
         return await sendResult(req, res, out ?? null);
       } catch (e) {
-        if (claim)
-          await claim
-            .finish(errorStatus(e), {
-              error: (e as Error).message,
-              details: (e as { errors?: unknown }).errors,
-            })
-            .catch(() => claim.release().catch(() => {}));
+        if (claim) {
+          const { status, body, outcomeUncertain } = errorResponse(e);
+          if (outcomeUncertain) {
+            // Keep the claim in progress if storing the error also fails. The write may already have committed.
+            await claim.finish(status, body, { outcomeUncertain }).catch(() => {});
+          } else {
+            await claim.finish(status, body).catch(() => claim.release().catch(() => {}));
+          }
+        }
         throw e;
       } finally {
         shared?.leave();
@@ -373,7 +416,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     return send(res, 404, { error: "not found" });
   } catch (e) {
     if (res.headersSent) return;
-    const status = errorStatus(e);
+    const { status, body } = errorResponse(e);
     if (status >= 500) {
       logError("http.request_failed", "HTTP request failed", e, {
         method,
@@ -383,9 +426,6 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         correlation_id: correlationHeader(req.headers["x-correlation-id"]),
       });
     }
-    return send(res, status, {
-      error: (e as Error).message,
-      details: (e as { errors?: unknown }).errors,
-    });
+    return send(res, status, body);
   }
 }
