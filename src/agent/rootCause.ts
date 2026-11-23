@@ -76,7 +76,7 @@ const RCA_CONTRACT =
 
 const REVIEW_CHECK =
   "root_cause_check: { remediation_kind (the kind the diff actually is — never upgrade the author's), addresses_root_cause: boolean, symptom_only_changes: [{ file, line, explanation }], " +
-  "justified_signals: [{ signal, justification }] (one per platform symptom-fix signal you accept), observability_reduced: boolean, regression_test_demonstrates_fix: boolean|null, limitations? }";
+  "justified_signals: [{ signal: '<file>:<line> <kind>' copied from the platform's symptom_signals entry, justification }] (one per platform symptom-fix signal you accept), observability_reduced: boolean, regression_test_demonstrates_fix: boolean|null, limitations? }";
 
 /** System-prompt lines for this depth and role; empty when the policy does not apply. One source for every provider. */
 export function rootCausePolicy(depth: RcaDepth, role: PolicyRole | null): string[] {
@@ -89,7 +89,7 @@ export function rootCausePolicy(depth: RcaDepth, role: PolicyRole | null): strin
       `- ${GUARDRAILS}`,
       ...(role === "review"
         ? [
-            `- When the platform lists symptom-fix signals for this diff, add root_cause_check: { justified_signals: [{ signal, justification }], symptom_only_changes: [] } to submit_result; an unjustified signal turns a PASS into FAIL.`,
+            `- When the platform lists symptom-fix signals for this diff, add root_cause_check: { justified_signals: [{ signal: "<file>:<line> <kind>" copied from the symptom_signals entry, justification }], symptom_only_changes: [] } to submit_result; an unjustified signal turns a PASS into FAIL.`,
           ]
         : []),
     ];
@@ -513,13 +513,29 @@ export function proofProblem(proof: RegressionProof | null, tested: Record<strin
   return null;
 }
 
-/** A signal is justified when the reviewer accepted it (or the author justified it and the reviewer did not reject). */
-function justified(s: SymptomSignal & { repo?: string }, entries: Array<{ signal?: unknown }>) {
+/**
+ * Whether an accepted-signal entry written by the independent reviewer names this platform signal. Accepted forms:
+ * the full path (optionally `repo:path`) with the kind or the line — or, unambiguously, `<file name>:<line>` together
+ * with the kind (reviewers often shorten `app/usecases/invoice.go:719` to `invoice.go:719`). Only the reviewer's
+ * root_cause_check entries are ever passed here: the author cannot accept its own signals.
+ */
+export function signalAccepted(
+  s: Pick<SymptomSignal, "file" | "line" | "kind">,
+  entries: Array<{ signal?: unknown }>,
+) {
+  const base = s.file.split("/").pop() ?? s.file;
+  const short = new RegExp(
+    `(?:^|[\\s/:'"(\`])${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${s.line}(?!\\d)`,
+  );
   return entries.some((j) => {
     const t = String(j?.signal ?? "");
-    return t.includes(s.file) && (t.includes(s.kind) || t.includes(String(s.line)));
+    if (t.includes(s.file) && (t.includes(s.kind) || t.includes(String(s.line)))) return true;
+    return s.line != null && t.includes(s.kind) && short.test(t);
   });
 }
+/** A signal is justified when the independent reviewer accepted it. */
+const justified = (s: SymptomSignal & { repo?: string }, entries: Array<{ signal?: unknown }>) =>
+  signalAccepted(s, entries);
 
 const finding = (
   file: string,

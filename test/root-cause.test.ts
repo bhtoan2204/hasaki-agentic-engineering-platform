@@ -6,6 +6,7 @@ import {
   policyRole,
   rootCauseDepth,
   rootCausePolicy,
+  signalAccepted,
   symptomFixSignals,
 } from "../src/agent/rootCause.ts";
 import { evidenceSummary } from "../src/agent/evidence.ts";
@@ -279,6 +280,95 @@ test("gate: a justified observability correction passes", () => {
   );
   assert.equal(v.verdict, "PASS");
   assert.equal(v.remediation_kind, "OBSERVABILITY_CORRECTION");
+});
+
+test("gate: the reviewer's accepted signal may name the file by its short name with line and kind (run 167)", () => {
+  // Recorded on run 167: the platform signal and the reviewer's acceptance text, verbatim.
+  const signal = { file: "app/usecases/invoice.go", line: 719, kind: "observability_removed" as const };
+  const reviewer = [{ signal: "observability_removed: log.Errorf tại invoice.go:719 bị gỡ" }];
+  assert.equal(
+    signalAccepted(signal, reviewer),
+    true,
+    "previously rejected: the full path was not in the text",
+  );
+  const v = enforceRootCauseReview(
+    pass,
+    {
+      ...check,
+      remediation_kind: "OBSERVABILITY_CORRECTION",
+      justified_signals: reviewer,
+      regression_test_demonstrates_fix: null,
+    },
+    {
+      ...rootCause("CONFIRMED"),
+      ...implement(
+        {
+          kind: "OBSERVABILITY_CORRECTION",
+          justifications: [{ signal: "observability_removed", reason: "r", evidence: "e" }],
+        },
+        { "oms-background": [{ ...signal, detail: "error log removed" }] },
+      ),
+    },
+    "standard",
+  );
+  assert.equal(v.verdict, "PASS");
+  // Still specific: a short name needs its line AND the kind; another file, line or kind is not accepted.
+  for (const text of [
+    "invoice.go:719 bị gỡ", // no kind
+    "observability_removed invoice.go:71", // other line
+    "observability_removed invoice.go:7190", // other line (prefix)
+    "observability_removed shipment_invoice.go:719", // other file with the same suffix
+    "log_downgrade invoice.go:719", // other kind
+  ])
+    assert.equal(signalAccepted(signal, [{ signal: text }]), false, text);
+  // The full path keeps working with the kind or the line, also as repo:path.
+  assert.equal(
+    signalAccepted(signal, [{ signal: "app/usecases/invoice.go observability_removed" }]),
+    true,
+  );
+  assert.equal(
+    signalAccepted(signal, [{ signal: "oms-background:app/usecases/invoice.go:719" }]),
+    true,
+  );
+});
+
+test("gate: the author's own justification never accepts a signal (only the reviewer's root_cause_check counts)", () => {
+  const v = enforceRootCauseReview(
+    pass,
+    {
+      ...check,
+      remediation_kind: "OBSERVABILITY_CORRECTION",
+      justified_signals: [],
+      regression_test_demonstrates_fix: null,
+    },
+    {
+      ...rootCause("CONFIRMED"),
+      ...implement(
+        {
+          kind: "OBSERVABILITY_CORRECTION",
+          justifications: [
+            {
+              signal: "observability_removed app/usecases/invoice.go:719",
+              reason: "r",
+              evidence: "e",
+            },
+          ],
+        },
+        {
+          "oms-background": [
+            {
+              file: "app/usecases/invoice.go",
+              line: 719,
+              kind: "observability_removed",
+              detail: "d",
+            },
+          ],
+        },
+      ),
+    },
+    "standard",
+  );
+  assert.equal(v.verdict, "FAIL");
 });
 
 test("gate: a documented mitigation passes as MITIGATION and is never upgraded; an undocumented one fails", () => {

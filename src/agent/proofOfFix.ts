@@ -1,4 +1,4 @@
-import { codingEvidence, proofProblem, type SymptomSignal } from "./rootCause.ts";
+import { codingEvidence, proofProblem, signalAccepted, type SymptomSignal } from "./rootCause.ts";
 import type { Claim, RootCauseAssessment } from "./evidence.ts";
 
 /**
@@ -115,12 +115,9 @@ const platformVerified = (c: Claim) =>
   c.provenance?.status !== "CONTRADICTED" &&
   ["OBSERVED_FACT", "CODE_FACT", "CONFIRMED_ROOT_CAUSE"].includes(c.classification);
 
-function justified(s: SymptomSignal, entries: Array<{ signal?: unknown }>) {
-  return entries.some((j) => {
-    const t = String(j?.signal ?? "");
-    return t.includes(s.file) && (t.includes(s.kind) || t.includes(String(s.line)));
-  });
-}
+/** The same acceptance rule as the review gate (rootCause.ts), so the proof and the gate never disagree. */
+const justified = (s: SymptomSignal, entries: Array<{ signal?: unknown }>) =>
+  signalAccepted(s, entries);
 
 export function buildFixProof(input: FixProofInput): FixProofReport {
   const up = input.upstream;
