@@ -11,6 +11,10 @@ import type {
 } from "./types.ts";
 
 /** Persistence for chat. Every read that a user can reach is owner-scoped in SQL. */
+/** Tools whose full result the chat UI renders (import review, delegation proposal). */
+const INLINE_RESULT_TOOLS = ["knowledge.propose_import", "work.delegate"];
+const INLINE_RESULT_BYTES = 2048;
+
 export const chatRepository = {
   createConversation(
     input: {
@@ -32,8 +36,7 @@ export const chatRepository = {
     },
     db: Db = pool,
   ) {
-    const titleSource: TitleSource =
-      input.titleSource ?? (input.title.trim() ? "manual" : "none");
+    const titleSource: TitleSource = input.titleSource ?? (input.title.trim() ? "manual" : "none");
     return one<ConversationRow>(
       db,
       `INSERT INTO chat_conversations (
@@ -414,7 +417,8 @@ export const chatRepository = {
         fields.error ?? null,
         json(fields.metrics),
         json(fields.failure ?? null),
-        fields.phase ?? (status === "completed" ? "completed" : status === "canceled" ? "canceled" : "failed"),
+        fields.phase ??
+          (status === "completed" ? "completed" : status === "canceled" ? "canceled" : "failed"),
         fields.attempts != null ? json(fields.attempts) : null,
       ],
     );
@@ -595,6 +599,25 @@ export const chatRepository = {
         fields.durationMs,
       ],
     ) as Promise<ToolCallRow>;
+  },
+
+  /**
+   * The newest tool calls of a conversation for the detail view. A result is inlined only when the UI reads it
+   * (INLINE_RESULT_TOOLS) or it is small; a larger one stays in the database (`result_omitted`, `result_bytes` is its
+   * stored size) so reloading a long conversation does not drag every file and document it read.
+   */
+  recentToolCalls(conversationId: number, limit: number, db: Db = pool) {
+    return q<ToolCallRow & { result_omitted: boolean; result_bytes: number }>(
+      db,
+      `SELECT id, turn_id, conversation_id, owner_id, seq, tool, arguments, status,
+              CASE WHEN tool = ANY($3) OR pg_column_size(result) <= $4 THEN result END AS result,
+              (NOT tool = ANY($3) AND pg_column_size(result) > $4) AS result_omitted,
+              coalesce(pg_column_size(result), 0) AS result_bytes,
+              repositories, evidence_ref, duration_ms, created_at
+         FROM (SELECT * FROM chat_tool_calls WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2) t
+        ORDER BY id`,
+      [conversationId, Math.min(Math.max(limit, 1), 500), INLINE_RESULT_TOOLS, INLINE_RESULT_BYTES],
+    );
   },
 
   toolCallsOf(conversationId: number, db: Db = pool) {
@@ -841,7 +864,14 @@ export const chatRepository = {
   /** The owner's workflow runs, filtered by status, work item and a created-at day range (inclusive, in `tz`). */
   listRuns(
     ownerId: number,
-    f: { status?: string; workItemId?: number; from?: string; to?: string; tz: string; limit: number },
+    f: {
+      status?: string;
+      workItemId?: number;
+      from?: string;
+      to?: string;
+      tz: string;
+      limit: number;
+    },
     db: Db = pool,
   ) {
     return q<{
@@ -861,7 +891,15 @@ export const chatRepository = {
           AND ($4::date IS NULL OR created_at >= $4::date::timestamp AT TIME ZONE $6)
           AND ($5::date IS NULL OR created_at < ($5::date + 1)::timestamp AT TIME ZONE $6)
         ORDER BY id DESC LIMIT $7`,
-      [ownerId, f.status ?? null, f.workItemId ?? null, f.from ?? null, f.to ?? null, f.tz, f.limit],
+      [
+        ownerId,
+        f.status ?? null,
+        f.workItemId ?? null,
+        f.from ?? null,
+        f.to ?? null,
+        f.tz,
+        f.limit,
+      ],
     );
   },
 

@@ -25,18 +25,25 @@ func bucketSQL(field string) string { return "date_trunc($4::text, " + field + "
 // only the columns the dashboards read instead of r.* and t.*, so the materialized CTEs carry no unused JSONB
 // (run inputs, graph, learning) and the telemetry view's unused derived columns (provenance, cost availability,
 // terminal status) are never computed. runSummary adds workflow_runs.summary for the health incident links.
-func executionCTE(runSummary bool) string { return executionCTEWith(runSummary, true) }
+func executionCTE(runSummary bool) string { return executionCTEWith(runSummary, true, false) }
 
 // leanExecutionCTE omits the attempt metrics JSONB and the context_snapshots join (metrics, context_preparation_ms):
 // dashboards that never read them skip detoasting those large documents for every attempt.
-func leanExecutionCTE() string { return executionCTEWith(false, false) }
+func leanExecutionCTE(tools bool) string { return executionCTEWith(false, false, tools) }
 
-func executionCTEWith(runSummary, attemptDetail bool) string {
+// executionCTEWith: `tools` projects tool_execution_ms. The telemetry view derives it per attempt from workflow_events
+// with a correlated subquery (the most expensive column); PostgreSQL drops that join when nothing reads the column, so
+// only the dashboard that shows tool time asks for it. (A set-based pairing of the cohort's events was tried: same
+// result, but slower than the view's per-attempt index probes.)
+func executionCTEWith(runSummary, attemptDetail, tools bool) string {
 	summary := ""
 	if runSummary {
 		summary = "r.summary,"
 	}
-	metricsCol, contextCol, contextJoin := "", "", ""
+	metricsCol, contextCol, contextJoin, toolsCol := "", "", "", ""
+	if tools {
+		toolsCol = "t.tool_execution_ms, "
+	}
 	if attemptDetail {
 		metricsCol = "a.metrics, "
 		contextCol = `,
@@ -68,7 +75,7 @@ run_candidates AS MATERIALIZED (
 ),
 attempt_candidates AS MATERIALIZED (
  SELECT t.attempt_id, t.run_id, t.step_id, t.number, t.provider, t.model, t.owner_id, t.start_time,
-   t.queue_duration_ms, t.provider_execution_ms, t.tool_execution_ms, t.human_wait_ms, t.wall_duration_ms,
+   t.queue_duration_ms, t.provider_execution_ms, ` + toolsCol + `t.human_wait_ms, t.wall_duration_ms,
    t.input_tokens, t.output_tokens, t.cache_read_tokens, t.cache_creation_tokens, t.reasoning_tokens,
    t.reported_cost_usd, t.tool_failures, t.status, t.normalized_failure_category, t.provider_sessions,
    ` + metricsCol + `COALESCE(a.input->'pending' ? 'resume',false) AS is_resume, a.invalidated_at, a.context_snapshot_id,
@@ -168,7 +175,7 @@ func (s *Service) usage(ctx context.Context, r *Request) (any, error) {
 		repoJoin = "LEFT JOIN LATERAL unnest(CASE WHEN cardinality(selected_repositories)>0 THEN selected_repositories ELSE ARRAY['unknown'] END) repo(name) ON true"
 	}
 	agg := usageAggregate()
-	sql := executionCTE(false) + `,
+	sql := leanExecutionCTE(false) + `,
 summary_row AS (
  SELECT count(*)::int AS invocations,count(DISTINCT attempt_id)::int AS attempts,` + agg + `,` + moneyRatios + `,
   (SELECT count(*)::int FROM (SELECT ` + group + ` FROM usage ` + repoJoin + ` GROUP BY 1) g) AS breakdown_total
@@ -230,7 +237,7 @@ func jsonFields(alias string, fields []string, missing bool) string {
 
 // Performance is already one statement in TypeScript; the cohort projection above is the change.
 func (s *Service) performance(ctx context.Context, r *Request) (any, error) {
-	sql := leanExecutionCTE() + `,
+	sql := leanExecutionCTE(true) + `,
 invocations AS (
   SELECT * FROM usage WHERE step_type IN ('agent','coding_agent') OR invocation_id IS NOT NULL
 ),

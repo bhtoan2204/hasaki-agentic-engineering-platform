@@ -51,6 +51,7 @@ interface Group {
     request_id?: string;
     trace_id?: string;
     stack?: string;
+    has_stack?: boolean;
     no_baseline?: boolean;
     pod?: string;
     sources?: Array<"splunk" | "signoz">;
@@ -426,6 +427,28 @@ function FixRef({
   );
 }
 
+/** The stack trace is not in the list payload: it is fetched with the incident the first time the trace is opened. */
+function StackTrace({ g }: { g: Group }) {
+  const { t } = useI18n();
+  const [stack, setStack] = useState<string | null>(g.detail.stack ?? null);
+  if (!g.detail.stack && !g.detail.has_stack) return null;
+  const load = async () => {
+    if (stack !== null) return;
+    try {
+      const r = await api<{ group: { detail: { stack?: string } } }>(`/api/prod-errors/${g.fingerprint}`);
+      setStack(r.group.detail.stack ?? "");
+    } catch (e) {
+      setStack((e as Error).message);
+    }
+  };
+  return (
+    <details onToggle={(e) => e.currentTarget.open && void load()}>
+      <summary className="small">{t("an.stackTrace")}</summary>
+      {stack === null ? <Loading /> : <pre className="pe-pre">{stack}</pre>}
+    </details>
+  );
+}
+
 type Source = "logs" | "traces";
 /** Trace groups come from SigNoz error spans; log groups from Splunk (groups saved before sources existed are logs). */
 const inSource = (g: Group, source: Source) =>
@@ -625,12 +648,7 @@ function GroupRow({
               {g.detail.err ? `\n\nerror: ${g.detail.err}` : ""}
             </pre>
           </div>
-          {g.detail.stack && (
-            <details>
-              <summary className="small">{t("an.stackTrace")}</summary>
-              <pre className="pe-pre">{g.detail.stack}</pre>
-            </details>
-          )}
+          <StackTrace g={g} />
           <BugHunterInline
             fingerprint={g.fingerprint}
             huntId={huntId}

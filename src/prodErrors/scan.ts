@@ -804,7 +804,10 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
   const key = byScan ?? day;
   const groupsQuery = q(
     pool,
-    `SELECT g.*, g.day::text AS day, w.owner_id AS work_item_owner_id, w.code AS work_item_code, w.title AS work_item_title, w.status AS work_item_status,
+    // The stack trace is over half of the list payload and is read only when a card's trace is opened (the incident
+    // detail route returns it): the list carries `has_stack` instead.
+    `SELECT (jsonb_populate_record(g, jsonb_build_object('detail', (g.detail - 'stack') || jsonb_build_object('has_stack', g.detail ? 'stack')))).*,
+            g.day::text AS day, w.owner_id AS work_item_owner_id, w.code AS work_item_code, w.title AS work_item_title, w.status AS work_item_status,
             r.id AS run_id, r.status AS run_status,
             (SELECT coalesce(json_agg(json_build_object('repo', p.repo, 'url', p.url, 'title', p.title) ORDER BY p.id), '[]')
                FROM pull_requests p WHERE p.work_item_id = g.work_item_id) AS pull_requests

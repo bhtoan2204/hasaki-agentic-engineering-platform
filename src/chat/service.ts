@@ -7,17 +7,17 @@ import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import { parseAgentProvider, AGENT_PROVIDERS } from "../agent/provider.ts";
 import { chatRepository } from "./repository.ts";
 import { isModelBlocked } from "../agent/modelPolicy.ts";
-import {
-  CHAT_MODES,
-  type ChatMode,
-  type ConversationRow,
-  type ProviderStrategy,
-} from "./types.ts";
+import { CHAT_MODES, type ChatMode, type ConversationRow, type ProviderStrategy } from "./types.ts";
 import { LIMITS } from "./policy.ts";
 import { emitChatEvent } from "./events.ts";
 import { abortLocal, recoverStaleTurns, scheduleTurn, withholdRevoked } from "./runtime.ts";
 import { readableRepositories, setDelegationPreview } from "./tools.ts";
-import { buildDelegationPreview, DelegationRequest, executeDelegation, delegatedRuns } from "./delegation.ts";
+import {
+  buildDelegationPreview,
+  DelegationRequest,
+  executeDelegation,
+  delegatedRuns,
+} from "./delegation.ts";
 
 setDelegationPreview(buildDelegationPreview);
 import { chatFailure } from "./failures.ts";
@@ -108,10 +108,15 @@ async function resolveProviderSelection(
   provider: string | null | undefined,
   strategyHint?: ProviderStrategy,
 ): Promise<{ provider: string | null; strategy: ProviderStrategy }> {
-  if (provider === "auto" || strategyHint === "auto" || (provider == null && strategyHint !== "manual")) {
+  if (
+    provider === "auto" ||
+    strategyHint === "auto" ||
+    (provider == null && strategyHint !== "manual")
+  ) {
     if (provider && provider !== "auto") {
       const p = parseAgentProvider(provider);
-      if (!p) throw new HttpError(400, `provider must be one of ${AGENT_PROVIDERS.join(", ")} or auto`);
+      if (!p)
+        throw new HttpError(400, `provider must be one of ${AGENT_PROVIDERS.join(", ")} or auto`);
       const cfg = await loadAgentConfiguration();
       if (!cfg.providers[p]?.enabled)
         throw new HttpError(400, `provider ${p} is disabled in Settings`);
@@ -119,7 +124,8 @@ async function resolveProviderSelection(
     }
     return { provider: null, strategy: "auto" };
   }
-  if (provider == null || provider === "") return { provider: null, strategy: strategyHint ?? "manual" };
+  if (provider == null || provider === "")
+    return { provider: null, strategy: strategyHint ?? "manual" };
   const p = parseAgentProvider(provider);
   if (!p) throw new HttpError(400, `provider must be one of ${AGENT_PROVIDERS.join(", ")} or auto`);
   const cfg = await loadAgentConfiguration();
@@ -201,7 +207,8 @@ export const chat = {
     const input = parse(ConversationCreate, body);
     const sel = await resolveProviderSelection(
       input.provider,
-      input.provider_strategy ?? (input.provider == null || input.provider === "auto" ? "auto" : "manual"),
+      input.provider_strategy ??
+        (input.provider == null || input.provider === "auto" ? "auto" : "manual"),
     );
     const repositories = await assertRepos(actor.id, input.repositories);
     const title = (input.title ?? "").trim();
@@ -236,7 +243,7 @@ export const chat = {
       await Promise.all([
         readableRepositories(actor.id),
         chatRepository.listMessages(id, { limit: 200 }),
-        chatRepository.toolCallsOf(id),
+        chatRepository.recentToolCalls(id, 300),
         chatRepository.listTurns(id, 50),
         chatRepository.activeTurn(id),
         chatRepository.delegationsOf(id),
@@ -247,7 +254,13 @@ export const chat = {
       ...m,
       attachments: attached
         .filter((a) => a.message_id === m.id)
-        .map(({ id, media_type, kind, filename, bytes }) => ({ id, media_type, kind, filename, bytes })),
+        .map(({ id, media_type, kind, filename, bytes }) => ({
+          id,
+          media_type,
+          kind,
+          filename,
+          bytes,
+        })),
     }));
     const tools = toolRows.map((t) => ({
       id: t.id,
@@ -260,6 +273,8 @@ export const chat = {
         ? { withheld: true, error: "repository access was revoked" }
         : t.result,
       repositories: t.repositories,
+      result_omitted: t.result_omitted,
+      result_bytes: t.result_bytes,
       evidence_ref: t.evidence_ref,
       duration_ms: t.duration_ms,
       created_at: t.created_at,
