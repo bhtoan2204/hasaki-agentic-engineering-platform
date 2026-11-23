@@ -757,12 +757,14 @@ export function listIntakeItems(opts: {
 }) {
   return q(
     pool,
-    `SELECT id, source, owner_id, work_item_id, incident_fingerprint, state, severity, environment, service, repo_candidate,
-            workflow, occurrences, first_seen, last_seen, next_eligible_at, reason, decision->'triage' AS triage,
-            decision->'would_start' AS would_start, decision->'stale_revision' AS stale_revision, run_id, permalink, updated_at
-       FROM intake_items
-      WHERE ($1::bigint IS NULL OR owner_id = $1) AND ($2::text IS NULL OR state = $2) AND ($3::text IS NULL OR source = $3)
-      ORDER BY updated_at DESC LIMIT 300`,
+    `SELECT i.id, i.source, i.owner_id, i.work_item_id, i.incident_fingerprint, i.state, i.severity, i.environment, i.service,
+            i.repo_candidate, i.workflow, i.occurrences, i.first_seen, i.last_seen, i.next_eligible_at, i.reason,
+            i.decision->'triage' AS triage, i.decision->'would_start' AS would_start,
+            i.decision->'stale_revision' AS stale_revision, i.run_id, i.permalink, i.updated_at,
+            w.code AS work_item_code, w.title AS work_item_title
+       FROM intake_items i LEFT JOIN work_items w ON w.id = i.work_item_id
+      WHERE ($1::bigint IS NULL OR i.owner_id = $1) AND ($2::text IS NULL OR i.state = $2) AND ($3::text IS NULL OR i.source = $3)
+      ORDER BY i.updated_at DESC LIMIT 300`,
     [opts.all ? null : (opts.ownerId ?? -1), opts.state ?? null, opts.source ?? null],
   );
 }

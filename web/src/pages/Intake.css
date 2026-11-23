@@ -1,0 +1,313 @@
+/* Intake queue: state tabs, item cards, decision callouts. Tokens only (dark theme follows). */
+.in-total {
+  margin-right: auto;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.in-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.in-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  box-shadow: none;
+}
+
+.in-tab.on {
+  border-color: var(--brand);
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.in-tab-n {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.in-none {
+  padding: var(--sp-4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--muted);
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+
+.in-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.in-item {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.in-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--st-idle);
+}
+
+.in-item.is-ok::before {
+  background: var(--st-ok);
+}
+
+.in-item.is-run::before {
+  background: var(--st-run);
+}
+
+.in-item.is-wait::before {
+  background: var(--st-wait);
+}
+
+.in-item-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.in-item-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.in-item-id,
+.in-item-time {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.in-item-time {
+  margin-left: auto;
+}
+
+.in-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: capitalize;
+  color: var(--st-idle);
+  background: var(--surface-3);
+}
+
+.in-chip.is-ok {
+  color: var(--st-ok);
+  background: var(--st-ok-bg);
+}
+
+.in-chip.is-run {
+  color: var(--st-run);
+  background: var(--st-run-bg);
+}
+
+.in-chip.is-wait {
+  color: var(--st-wait);
+  background: var(--st-wait-bg);
+}
+
+.in-chip.is-err {
+  color: var(--st-err);
+  background: var(--st-err-bg);
+}
+
+.in-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.in-item-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.in-callout {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+
+.in-callout.is-run {
+  color: var(--st-run);
+  background: var(--st-run-bg);
+}
+
+.in-callout.is-err {
+  color: var(--st-err);
+  background: var(--st-err-bg);
+}
+
+.in-item-reason {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.in-item-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* ---------------------------------------------------------------- policies */
+.in-policy-list {
+  display: grid;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.in-policy {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--st-idle);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.in-policy.is-shadow {
+  border-left-color: var(--st-wait);
+}
+
+.in-policy.is-autopilot {
+  border-left-color: var(--st-ok);
+}
+
+.in-policy.is-paused {
+  opacity: 0.75;
+}
+
+.in-policy-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.in-modes {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+
+.in-mode {
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.in-mode.on {
+  background: var(--brand);
+  color: #fff;
+}
+
+.in-policy-mode {
+  margin: 0;
+}
+
+.in-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+}
+
+.in-policy-grid dt {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.in-policy-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
+}
+
+.in-form {
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.in-form summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--brand-700);
+}
+
+.in-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  align-items: start;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0;
+}
+
+.in-field {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.in-field :is(input, select) {
+  height: var(--control-h-md);
+  margin: 0;
+}
+
+.in-field span {
+  font-weight: 600;
+}
