@@ -1,19 +1,42 @@
 import type { WorkItemRow } from "../workitems/repository.ts";
 import { needsReplayReconciliation, planContinuation, planReplay } from "./replay.ts";
-import { continuationEvidence, latestWaitCheckpoint, readExecutionCheckpoint, saveExecutionPause, validateContinuation } from "./checkpoints.ts";
+import {
+  continuationEvidence,
+  latestWaitCheckpoint,
+  readExecutionCheckpoint,
+  saveExecutionPause,
+  validateContinuation,
+} from "./checkpoints.ts";
 import { reapExpiredLeases as reapExpiredJobs } from "./recovery.ts";
-import { findRun, stepsOf, loadRunDetail, loadStepDetail, loadOpenApprovals, type OwnerScope } from "./runRepository.ts";
+import {
+  findRun,
+  stepsOf,
+  loadRunDetail,
+  loadStepDetail,
+  loadOpenApprovals,
+  type OwnerScope,
+} from "./runRepository.ts";
 export { listRuns, openQuestions, answeredQuestions } from "./runRepository.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import type { AgentConfiguration } from "../agent/configuration.ts";
-const frozenProviderFlags = (snapshot: AgentConfiguration | null | undefined) => snapshot ? Object.fromEntries(Object.entries(snapshot.providers).map(([key, entry]) => [key, entry.enabled])) : undefined;
+const frozenProviderFlags = (snapshot: AgentConfiguration | null | undefined) =>
+  snapshot
+    ? Object.fromEntries(
+        Object.entries(snapshot.providers).map(([key, entry]) => [key, entry.enabled]),
+      )
+    : undefined;
 import { completeForRun } from "../agent/complete.ts";
 export { releaseAttempt, safeRecovery } from "./recovery.ts";
 import { existsSync } from "node:fs";
 import { advance } from "./progression.ts";
 export { advance } from "./progression.ts";
 import { budgetPreflight, enforceBudget } from "./budgets.ts";
-import { delegationsOf, holdForChildren, kickDelegations, planChildWorkflows } from "./delegation.ts";
+import {
+  delegationsOf,
+  holdForChildren,
+  kickDelegations,
+  planChildWorkflows,
+} from "./delegation.ts";
 import {
   EngineError,
   lockRun,
@@ -65,11 +88,7 @@ import {
 } from "../git/provider.ts";
 import { instanceHealth, ownsInstance, instanceSession } from "../instances.ts";
 import { outputLocale, resolveOutputLocale, type OutputLocale } from "../agent/language.ts";
-import {
-  providerEnabled,
-  resolveAgentProvider,
-  type AgentProvider,
-} from "../agent/provider.ts";
+import { providerEnabled, resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
 import { pool, q, one, withTx, json, type Db } from "../db/pool.ts";
 import { notify, notifyStepWaiting } from "../notify.ts";
 import { selfRepositoryNames } from "../platform/selfDevelopment.ts";
@@ -429,7 +448,10 @@ export async function previewRun(input: StartRunInput) {
   };
 }
 
-export async function startRun(input: StartRunInput) {
+export async function startRun(
+  input: StartRunInput,
+  tx?: { client: pg.PoolClient; afterCommit: AfterCommit },
+) {
   let output_locale: OutputLocale;
   let agent_provider: AgentProvider;
   try {
@@ -438,10 +460,17 @@ export async function startRun(input: StartRunInput) {
   } catch (e) {
     throw new EngineError((e as Error).message, 400);
   }
-  return withTx(async (c, afterCommit) => {
-    const agent_configuration = { ...await loadAgentConfiguration(c), captured_at: new Date().toISOString(), capture_source: "run-start" as const };
-    agent_provider = resolveAgentProvider(input.agentProvider ?? agent_configuration.default_provider);
-    if (!agent_configuration.providers[agent_provider].enabled) throw new EngineError("Requested agent provider is disabled", 400);
+  const create = async (c: pg.PoolClient, afterCommit: AfterCommit) => {
+    const agent_configuration = {
+      ...(await loadAgentConfiguration(c)),
+      captured_at: new Date().toISOString(),
+      capture_source: "run-start" as const,
+    };
+    agent_provider = resolveAgentProvider(
+      input.agentProvider ?? agent_configuration.default_provider,
+    );
+    if (!agent_configuration.providers[agent_provider].enabled)
+      throw new EngineError("Requested agent provider is disabled", 400);
     const r = await resolveRunGraph(c, input);
     const { dv, wi, inputs, allowed, selected, graph } = r;
     const autonomy = await freezeAutonomy(c, input.autonomy, r.ownerId);
@@ -483,7 +512,10 @@ export async function startRun(input: StartRunInput) {
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
     try {
       for (const step of optimized.graph.steps)
-        resolveStepAgent({ agent_provider, profile: r.decision.profile, agent_configuration }, step);
+        resolveStepAgent(
+          { agent_provider, profile: r.decision.profile, agent_configuration },
+          step,
+        );
     } catch (error) {
       throw new EngineError((error as Error).message, 400);
     }
@@ -558,7 +590,8 @@ export async function startRun(input: StartRunInput) {
             config: s.config,
             run_if: s.run_if ?? null,
             requires_approval:
-              s.requires_approval || (s.type === "git_pull_request" && s.config.mode === "approval"),
+              s.requires_approval ||
+              (s.type === "git_pull_request" && s.config.mode === "approval"),
             max_attempts: s.max_attempts,
             retry_backoff_s: s.retry_backoff_seconds,
           })),
@@ -589,7 +622,8 @@ export async function startRun(input: StartRunInput) {
       await advance(c, id, afterCommit);
     }
     return getRun(id, c);
-  });
+  };
+  return tx ? create(tx.client, tx.afterCommit) : withTx(create);
 }
 
 /**
@@ -631,17 +665,25 @@ export async function startPendingRun(
   repositoriesOverride?: string[],
   stepMode = false,
 ) {
-  return txThenRun(runId, async (c, afterCommit) => {
-    const run = await lockRun(c, runId);
-    if (run.status !== "PENDING")
-      throw new EngineError(`run ${runId} is ${run.status}, not PENDING`);
-    await adoptRun(c, runId);
-    if (repositoriesOverride) await setSelectedRepositories(c, run, repositoriesOverride);
-    await setRunStatus(c, run, "RUNNING");
-    if (stepMode) await setRunStatus(c, run, "PAUSED");
-    await advance(c, runId, afterCommit);
-    return;
-  });
+  return txThenRun(runId, (c, afterCommit) =>
+    startPendingRunInTx(c, afterCommit, runId, repositoriesOverride, stepMode),
+  );
+}
+
+export async function startPendingRunInTx(
+  c: pg.PoolClient,
+  afterCommit: AfterCommit,
+  runId: number,
+  repositoriesOverride?: string[],
+  stepMode = false,
+) {
+  const run = await lockRun(c, runId);
+  if (run.status !== "PENDING") throw new EngineError(`run ${runId} is ${run.status}, not PENDING`);
+  await adoptRun(c, runId);
+  if (repositoriesOverride) await setSelectedRepositories(c, run, repositoriesOverride);
+  await setRunStatus(c, run, "RUNNING");
+  if (stepMode) await setRunStatus(c, run, "PAUSED");
+  await advance(c, runId, afterCommit);
 }
 
 /**
@@ -720,27 +762,36 @@ export async function resumeRun(runId: number) {
 export async function cancelRun(runId: number, reason = "canceled by user") {
   return txThenRun(runId, async (c, afterCommit) => {
     const run = await lockRun(c, runId);
-    if (run.status === "CANCELED") return;
-    const aborted: number[] = [];
-    for (const s of await stepsOf(c, runId)) {
-      if (["COMPLETED", "SKIPPED", "CANCELED", "FAILED"].includes(s.status)) continue;
-      aborted.push(...(await cancelStepJobs(c, s.id, reason)));
-      await setStepStatus(c, s, "CANCELED", { finished_at: new Date() }, reason);
-    }
-    await q(
-      c,
-      "UPDATE workflow_step_attempts SET status = 'CANCELED', finished_at = now(), error = $2 WHERE run_id = $1 AND status = 'RUNNING'",
-      [runId, json({ message: reason })],
-    );
-    await q(
-      c,
-      "UPDATE workflow_questions SET status = 'dismissed' WHERE run_id = $1 AND status = 'open'",
-      [runId],
-    );
-    await setRunStatus(c, run, "CANCELED", afterCommit, reason);
-    afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
-    return;
+    await cancelLockedRun(c, run, afterCommit, reason);
   });
+}
+
+/** Cancel a run locked by the caller in the current transaction. */
+export async function cancelLockedRun(
+  c: pg.PoolClient,
+  run: RunRow,
+  afterCommit: AfterCommit,
+  reason: string,
+) {
+  if (run.status === "CANCELED") return;
+  const aborted: number[] = [];
+  for (const s of await stepsOf(c, run.id)) {
+    if (["COMPLETED", "SKIPPED", "CANCELED", "FAILED"].includes(s.status)) continue;
+    aborted.push(...(await cancelStepJobs(c, s.id, reason)));
+    await setStepStatus(c, s, "CANCELED", { finished_at: new Date() }, reason);
+  }
+  await q(
+    c,
+    "UPDATE workflow_step_attempts SET status = 'CANCELED', finished_at = now(), error = $2 WHERE run_id = $1 AND status = 'RUNNING'",
+    [run.id, json({ message: reason })],
+  );
+  await q(
+    c,
+    "UPDATE workflow_questions SET status = 'dismissed' WHERE run_id = $1 AND status = 'open'",
+    [run.id],
+  );
+  await setRunStatus(c, run, "CANCELED", afterCommit, reason);
+  afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
 }
 
 async function setSelectedRepositories(c: Db, run: RunRow, repos: string[]) {
@@ -818,7 +869,11 @@ async function reexecuteTx(
   const plan = await planReplay(c, steps, target, force);
   observe("workflow.replay_plan_ms", performance.now() - planning);
   const blockedReplay = plan.find((item) => item.action === "RECONCILE");
-  if (blockedReplay) throw new EngineError(`Reconcile step "${blockedReplay.key}" before replaying its dependencies`, 409);
+  if (blockedReplay)
+    throw new EngineError(
+      `Reconcile step "${blockedReplay.key}" before replaying its dependencies`,
+      409,
+    );
   for (const item of plan) {
     const s = byKey.get(item.key)!;
     await recordDecision(c, {
@@ -850,7 +905,12 @@ async function reexecuteTx(
         forced: item.action === "FORCE_REEXECUTE",
         candidate: item.source_attempt_id as number | undefined,
       })),
-    { s: target, to: target.requires_approval ? ("PENDING" as const) : ("READY" as const), forced: true, candidate: undefined },
+    {
+      s: target,
+      to: target.requires_approval ? ("PENDING" as const) : ("READY" as const),
+      forced: true,
+      candidate: undefined,
+    },
   ];
   const ids = invalidated.map(({ s }) => s.id);
   const aborted = await cancelStepJobs(c, ids, `invalidated by re-execution of ${stepKey}`);
@@ -887,7 +947,9 @@ async function reexecuteTx(
         ready_at: to === "READY" ? new Date() : null,
         finished_at: null,
       },
-      s === target ? why : `invalidated by ${stepKey}${candidate ? "; compare result at dispatch" : ""}`,
+      s === target
+        ? why
+        : `invalidated by ${stepKey}${candidate ? "; compare result at dispatch" : ""}`,
     );
   if (run.status !== "PAUSED") await setRunStatus(c, run, "RUNNING");
   afterCommit(() => aborted.forEach((id) => localJobs.abort(id)));
@@ -915,18 +977,26 @@ export async function previewReplay(runId: number, stepKey: string, force = fals
   const summary: Record<string, number> = {};
   for (const item of plan) summary[item.action] = (summary[item.action] ?? 0) + 1;
   const sum = (field: "invocations" | "tokens" | "cost_usd") => {
-    const known = withEstimates.map((i) => i.estimate?.[field]).filter((v): v is number => v != null);
+    const known = withEstimates
+      .map((i) => i.estimate?.[field])
+      .filter((v): v is number => v != null);
     return known.length ? known.reduce((a, b) => a + b, 0) : null;
   };
   return {
-    can_reexecute: run.status !== "CANCELED" && RETRYABLE.includes(target.status) &&
+    can_reexecute:
+      run.status !== "CANCELED" &&
+      RETRYABLE.includes(target.status) &&
       !plan.some((item) => item.action === "RECONCILE") &&
       target.depends_on.every((key) => DONE.includes(stepsByKey.get(key)!.status)),
     continuation: await planContinuation(pool, target),
     steps: withEstimates,
     summary: {
       actions: summary,
-      estimated_avoided: { invocations: sum("invocations"), tokens: sum("tokens"), cost_usd: sum("cost_usd") },
+      estimated_avoided: {
+        invocations: sum("invocations"),
+        tokens: sum("tokens"),
+        cost_usd: sum("cost_usd"),
+      },
     },
   };
 }
@@ -974,11 +1044,12 @@ export async function reexecuteStep(
         400,
       );
     // A retry or feedback without a skill choice keeps the skills pinned for the current re-execution.
-    const current = await one<{ pending_input: { reexecute?: { skills?: unknown } | null } | null }>(
-      c,
-      "SELECT pending_input FROM workflow_steps WHERE run_id = $1 AND key = $2",
-      [runId, stepKey],
-    );
+    const current = await one<{
+      pending_input: { reexecute?: { skills?: unknown } | null } | null;
+    }>(c, "SELECT pending_input FROM workflow_steps WHERE run_id = $1 AND key = $2", [
+      runId,
+      stepKey,
+    ]);
     const pinned = keys.length
       ? pinnedNew
       : ((current?.pending_input?.reexecute?.skills ?? []) as typeof pinnedNew);
@@ -991,10 +1062,18 @@ export async function reexecuteStep(
             at: new Date().toISOString(),
           }
         : null;
-    const retrySource = opts.retry ? await one<{ current_attempt_id: number | null; status: string }>(c,
-      "SELECT current_attempt_id,status FROM workflow_steps WHERE run_id=$1 AND key=$2", [runId, stepKey]) : null;
-    const retry = retrySource?.current_attempt_id && ["FAILED", "CANCELED", "RETRYING"].includes(retrySource.status)
-      ? { source_attempt_id: retrySource.current_attempt_id } : undefined;
+    const retrySource = opts.retry
+      ? await one<{ current_attempt_id: number | null; status: string }>(
+          c,
+          "SELECT current_attempt_id,status FROM workflow_steps WHERE run_id=$1 AND key=$2",
+          [runId, stepKey],
+        )
+      : null;
+    const retry =
+      retrySource?.current_attempt_id &&
+      ["FAILED", "CANCELED", "RETRYING"].includes(retrySource.status)
+        ? { source_attempt_id: retrySource.current_attempt_id }
+        : undefined;
     const pending =
       feedback || opts.input || reexecute || retry
         ? {
@@ -1377,17 +1456,40 @@ export async function answerQuestions(
             "SELECT id, answer FROM workflow_questions WHERE attempt_id = $1 AND status = 'answered'",
             [s.current_attempt_id],
           );
-          if (cp?.data?.workspace_recovery &&
-              !replies.some((reply) => reply.answer.trim() === "Workspace reconciled — continue"))
+          if (
+            cp?.data?.workspace_recovery &&
+            !replies.some((reply) => reply.answer.trim() === "Workspace reconciled — continue")
+          )
             throw new EngineError("Confirm workspace reconciliation before continuing", 409);
           if (cp?.data?.agent_configuration_recovery) {
-            if (!replies.some((reply) => reply.answer.trim() === "Use current configuration for remaining steps"))
-              throw new EngineError("Choose the explicit configuration recovery option to continue", 409);
+            if (
+              !replies.some(
+                (reply) => reply.answer.trim() === "Use current configuration for remaining steps",
+              )
+            )
+              throw new EngineError(
+                "Choose the explicit configuration recovery option to continue",
+                409,
+              );
             const currentRun = await lockRun(c, runId);
             if (!currentRun.agent_configuration) {
-              const recovered = { ...await loadAgentConfiguration(c), captured_at: new Date().toISOString(), capture_source: "authorized-recovery" };
-              await q(c, "UPDATE workflow_runs SET agent_configuration=$2 WHERE id=$1 AND agent_configuration IS NULL", [runId, json(recovered)]);
-              await runEvents.add(c, runId, "user", `Agent configuration recovered from current settings by ${answeredBy}; historical attempts unchanged`, s.id);
+              const recovered = {
+                ...(await loadAgentConfiguration(c)),
+                captured_at: new Date().toISOString(),
+                capture_source: "authorized-recovery",
+              };
+              await q(
+                c,
+                "UPDATE workflow_runs SET agent_configuration=$2 WHERE id=$1 AND agent_configuration IS NULL",
+                [runId, json(recovered)],
+              );
+              await runEvents.add(
+                c,
+                runId,
+                "user",
+                `Agent configuration recovered from current settings by ${answeredBy}; historical attempts unchanged`,
+                s.id,
+              );
             }
           }
           // A step paused by failure recovery: "stop" ends it as FAILED; anything else runs it again.
@@ -1412,7 +1514,9 @@ export async function answerQuestions(
           } else {
             const pending = {
               ...(s.pending_input ?? {}),
-              ...(cp?.data?.workspace_recovery ? { provider_handoff: undefined, replay_workspace_recovery: undefined } : {}),
+              ...(cp?.data?.workspace_recovery
+                ? { provider_handoff: undefined, replay_workspace_recovery: undefined }
+                : {}),
               resume: { from_attempt_id: s.current_attempt_id, checkpoint: cp?.data ?? {} },
               ...(release && {
                 workspace_release: {
@@ -1532,9 +1636,9 @@ export async function approveStep(
       const scope = s.approval?.request?.scope;
       const acknowledged = Boolean(
         opts.data &&
-          typeof opts.data === "object" &&
-          "acknowledge_risk" in opts.data &&
-          opts.data.acknowledge_risk === true,
+        typeof opts.data === "object" &&
+        "acknowledge_risk" in opts.data &&
+        opts.data.acknowledge_risk === true,
       );
       if (scope && s.approval?.request?.requires_risk_acknowledgement && !acknowledged)
         throw new EngineError(
@@ -1687,7 +1791,12 @@ export function previewJob(jobId: number) {
 async function healthyProviderSwitch(jobId: number, known?: JobPreview | null) {
   try {
     const preview = known === undefined ? await previewJob(jobId) : known;
-    if (!preview || !preview.agent_configuration || !["agent", "coding_agent"].includes(preview.type)) return null;
+    if (
+      !preview ||
+      !preview.agent_configuration ||
+      !["agent", "coding_agent"].includes(preview.type)
+    )
+      return null;
     if (preview.config?.delegation?.enabled) return null;
     const policy = fallbackPolicy(preview);
     if (policy.mode === "disabled" || !policy.auto_health) return null;
@@ -1703,7 +1812,12 @@ async function healthyProviderSwitch(jobId: number, known?: JobPreview | null) {
     const health = await probeAgentHealth(policy.providers);
     const mine = health.find((h) => h.provider === effective.provider);
     if (isUsableAgent(mine)) return null;
-    const next = nextHealthyProvider(policy.providers, new Set([effective.provider]), health, frozenProviderFlags(preview.agent_configuration));
+    const next = nextHealthyProvider(
+      policy.providers,
+      new Set([effective.provider]),
+      health,
+      frozenProviderFlags(preview.agent_configuration),
+    );
     if (!next) return null;
     return { from: effective.provider, to: next, reason: healthSkipReason(mine) };
   } catch {
@@ -1869,7 +1983,8 @@ export async function beginAttempt(
       }
     }
     if (
-      healthSwitch && run.agent_configuration &&
+      healthSwitch &&
+      run.agent_configuration &&
       ["agent", "coding_agent"].includes(step.type) &&
       !step.config.delegation?.enabled
     ) {
@@ -1901,9 +2016,18 @@ export async function beginAttempt(
         );
       }
     }
-    const previous = run.agent_configuration === null ? await one<{ effective_agent: AttemptRow["effective_agent"] }>(c,
-      "SELECT effective_agent FROM workflow_step_attempts WHERE step_id=$1 AND effective_agent IS NOT NULL ORDER BY id DESC LIMIT 1", [step.id]) : null;
-    const effective = run.agent_configuration === null ? previous?.effective_agent ?? null : resolveStepAgent(run, step);
+    const previous =
+      run.agent_configuration === null
+        ? await one<{ effective_agent: AttemptRow["effective_agent"] }>(
+            c,
+            "SELECT effective_agent FROM workflow_step_attempts WHERE step_id=$1 AND effective_agent IS NOT NULL ORDER BY id DESC LIMIT 1",
+            [step.id],
+          )
+        : null;
+    const effective =
+      run.agent_configuration === null
+        ? (previous?.effective_agent ?? null)
+        : resolveStepAgent(run, step);
     step.config = effectiveStepConfig(step.config, effective);
     const { n } = (await one<{ n: number }>(
       c,
@@ -2114,7 +2238,12 @@ async function applyResult(
         await setSelectedRepositories(c, run, out.selected_repositories);
       // Workflow-to-workflow delegation: requested children are recorded with this completion (same transaction); a
       // blocking request holds the step until the children finish (workflow/delegation.ts).
-      if ((step.type === "agent" || step.type === "coding_agent") && out && typeof out === "object" && "child_workflows" in out) {
+      if (
+        (step.type === "agent" || step.type === "coding_agent") &&
+        out &&
+        typeof out === "object" &&
+        "child_workflows" in out
+      ) {
         const plan = await planChildWorkflows(c, run, step, attempt, out);
         out = plan.output as typeof out;
         if (plan.waitFor) {
@@ -2156,18 +2285,31 @@ async function applyResult(
         c,
         run,
         step,
-        await q(c, "SELECT question, options FROM workflow_questions WHERE attempt_id = $1 AND status = 'open'", [attempt.id]),
+        await q(
+          c,
+          "SELECT question, options FROM workflow_questions WHERE attempt_id = $1 AND status = 'open'",
+          [attempt.id],
+        ),
       );
       await closeAttempt("WAITING_INPUT", result.output ?? null);
       const sealed = await readExecutionCheckpoint(c, attempt.id);
-      await saveExecutionPause(c, attempt.id, "waiting_input", sealed
-        ? { ...result.checkpoint, execution: continuationEvidence(sealed) }
-        : result.checkpoint ?? {});
-      await setStepStatus(c, step, "WAITING_INPUT",
+      await saveExecutionPause(
+        c,
+        attempt.id,
+        "waiting_input",
+        sealed
+          ? { ...result.checkpoint, execution: continuationEvidence(sealed) }
+          : (result.checkpoint ?? {}),
+      );
+      await setStepStatus(
+        c,
+        step,
+        "WAITING_INPUT",
         result.checkpoint?.workspace_recovery
           ? { pending_input: { ...step.pending_input, replay_workspace_recovery: true } }
           : {},
-        `${open} question(s)`);
+        `${open} question(s)`,
+      );
       await closeJob("done");
       const diagnosisSummary = (
         result.output as { diagnosis?: { summary?: string } | null } | null | undefined
@@ -2205,9 +2347,26 @@ async function applyResult(
       const gate = await evaluateGate(c, run, step, await stepsOf(c, run.id), result.request);
       if (gate?.enforced) {
         step.approval = machineApproval(gate);
-        await q(c, "UPDATE workflow_steps SET approval = $2 WHERE id = $1", [step.id, json(step.approval)]);
-        await runEvents.add(c, run.id, "system", `${step.key} auto-approved (${gate.mode}): ${gate.reasons.join("; ")}`, step.id);
-        return applyResult(c, run, step, attempt, jobId, { kind: "completed", output: machineApprovalOutput(gate, result.request) }, afterCommit);
+        await q(c, "UPDATE workflow_steps SET approval = $2 WHERE id = $1", [
+          step.id,
+          json(step.approval),
+        ]);
+        await runEvents.add(
+          c,
+          run.id,
+          "system",
+          `${step.key} auto-approved (${gate.mode}): ${gate.reasons.join("; ")}`,
+          step.id,
+        );
+        return applyResult(
+          c,
+          run,
+          step,
+          attempt,
+          jobId,
+          { kind: "completed", output: machineApprovalOutput(gate, result.request) },
+          afterCommit,
+        );
       }
       const request = gate ? { ...(result.request as object), autonomy: gate } : result.request;
       await closeAttempt("WAITING_APPROVAL", request);
@@ -2272,14 +2431,22 @@ async function applyResult(
           WHERE a.step_id = $1 AND a.generation = $2 AND k.data ? 'workspace_conflict'`,
         [step.id, step.generation],
       );
-      const shaped = await recoveryForFailure(c, run, step, attempt, result, classifyFailure(result.error, {
-        failureClass: failurePolicy((result.details as { failure_code?: string } | undefined)?.failure_code)
-          ?.failureClass,
-        executorRetryable: result.retryable,
-        attempt: step.attempt_count - (pauses?.n ?? 0),
-        maxAttempts: attempt.effective_agent?.retry?.max_attempts ?? step.max_attempts,
-        baseBackoff: attempt.effective_agent?.retry?.backoff_seconds ?? step.retry_backoff_s,
-      }));
+      const shaped = await recoveryForFailure(
+        c,
+        run,
+        step,
+        attempt,
+        result,
+        classifyFailure(result.error, {
+          failureClass: failurePolicy(
+            (result.details as { failure_code?: string } | undefined)?.failure_code,
+          )?.failureClass,
+          executorRetryable: result.retryable,
+          attempt: step.attempt_count - (pauses?.n ?? 0),
+          maxAttempts: attempt.effective_agent?.retry?.max_attempts ?? step.max_attempts,
+          baseBackoff: attempt.effective_agent?.retry?.backoff_seconds ?? step.retry_backoff_s,
+        }),
+      );
       const decision = shaped.decision;
       await closeAttempt("FAILED", null, {
         message: result.error,
@@ -2310,32 +2477,33 @@ async function applyResult(
         if (shaped.notify) await markEscalationNotified(c, run.id, step.id);
         if (shaped.notify)
           afterCommit(() =>
-          background(`notify run ${run.id}`, () =>
-            notifyStepWaiting(
-              en
-                ? `⏸ Run #${run.id} (${run.title}) – ${step.name} is paused: ${decision.class}`
-                : `⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`,
-              {
-                runId: run.id,
-                runTitle: run.title,
-                stepKey: step.key,
-                stepName: step.name,
-                status: "WAITING_INPUT",
-                detail: decision.reason,
-                stepId: step.id,
-                generation: step.generation,
-                attemptId: attempt.id,
-                locale: outputLocale(run),
-                ownerId: run.owner_id ?? undefined,
-              },
+            background(`notify run ${run.id}`, () =>
+              notifyStepWaiting(
+                en
+                  ? `⏸ Run #${run.id} (${run.title}) – ${step.name} is paused: ${decision.class}`
+                  : `⏸ Run #${run.id} (${run.title}) – bước ${step.name} tạm dừng: ${decision.class}`,
+                {
+                  runId: run.id,
+                  runTitle: run.title,
+                  stepKey: step.key,
+                  stepName: step.name,
+                  status: "WAITING_INPUT",
+                  detail: decision.reason,
+                  stepId: step.id,
+                  generation: step.generation,
+                  attemptId: attempt.id,
+                  locale: outputLocale(run),
+                  ownerId: run.owner_id ?? undefined,
+                },
+              ),
             ),
-          ),
-        );
+          );
         break;
       }
       if (decision.action === "retry") {
         const sealed = ["agent", "coding_agent"].includes(step.type)
-          ? await readExecutionCheckpoint(c, attempt.id) : undefined;
+          ? await readExecutionCheckpoint(c, attempt.id)
+          : undefined;
         await setStepStatus(
           c,
           step,
@@ -2343,11 +2511,18 @@ async function applyResult(
           {
             error: result.error,
             ...(sealed && {
-              pending_input: { ...step.pending_input, resume: {
-                from_attempt_id: attempt.id, checkpoint: {
-                  execution: { ...continuationEvidence(sealed), workspace_reconciliation_required: true },
+              pending_input: {
+                ...step.pending_input,
+                resume: {
+                  from_attempt_id: attempt.id,
+                  checkpoint: {
+                    execution: {
+                      ...continuationEvidence(sealed),
+                      workspace_reconciliation_required: true,
+                    },
+                  },
                 },
-              } },
+              },
             }),
           },
           `attempt ${step.attempt_count}/${step.max_attempts} failed (${decision.class}); retry in ${decision.delay_s}s`,
@@ -2506,10 +2681,7 @@ async function adoptRun(c: Db, runId: number) {
 
 export async function getRun(runId: number, db: Db = pool) {
   // The pool can issue these reads concurrently; a transaction client queues them.
-  const [run, steps] = await Promise.all([
-    findRun(runId, db),
-    stepsOf(db, runId),
-  ]);
+  const [run, steps] = await Promise.all([findRun(runId, db), stepsOf(db, runId)]);
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
   return { ...run, steps };
 }
@@ -2528,7 +2700,8 @@ async function txThenRun(
 
 /** Run page view with worker state derived from the stored run and steps. */
 export async function runDetail(runId: number) {
-  const { run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints } = await loadRunDetail(runId);
+  const { run, steps, attempts, questions, artifacts, prs, workspaces, checkpoints } =
+    await loadRunDetail(runId);
   if (!run) throw new EngineError(`run ${runId} not found`, 404);
   const { wi_id, wi_code, wi_title, wi_source, wi_project, ...row } = run;
   const work_item =
@@ -2838,8 +3011,13 @@ async function persistProviderPause(
     package_reference: `provider_handoffs:${handoff.id}`,
     workspace_fingerprint: p.fingerprint ?? null,
   };
-  await saveExecutionPause(c, attempt.id, "provider_handoff", checkpoint,
-    p.fingerprint ? { fingerprint: p.fingerprint } : undefined);
+  await saveExecutionPause(
+    c,
+    attempt.id,
+    "provider_handoff",
+    checkpoint,
+    p.fingerprint ? { fingerprint: p.fingerprint } : undefined,
+  );
   await setStepStatus(
     c,
     step,
@@ -2861,7 +3039,11 @@ async function persistProviderPause(
     action: "HANDOFF",
     outcome: "planned",
     reason,
-    details: { handoff_id: handoff.id, status: handoff.status, failure_category: p.failure ?? null },
+    details: {
+      handoff_id: handoff.id,
+      status: handoff.status,
+      failure_category: p.failure ?? null,
+    },
   });
   await advance(c, run.id, afterCommit);
 }
@@ -3079,9 +3261,13 @@ export async function requestProviderHandoff(
         },
         error: input.reason,
       });
-      await saveExecutionPause(c, input.expected_attempt_id, "provider_handoff",
+      await saveExecutionPause(
+        c,
+        input.expected_attempt_id,
+        "provider_handoff",
         { provider_handoff: { id: requested.handoff.id } },
-        prepared.fingerprint ? { fingerprint: prepared.fingerprint } : undefined);
+        prepared.fingerprint ? { fingerprint: prepared.fingerprint } : undefined,
+      );
       await advance(c, runId, afterCommit);
     });
   }
@@ -3191,7 +3377,10 @@ export async function resumeProviderHandoff(
       s.approval?.actor_type === "machine" &&
       !(await evaluateGate(c, locked, s, await stepsOf(c, locked.id), null))?.enforced
     )
-      throw new EngineError("The machine approval no longer holds under the current autonomy policy", 409);
+      throw new EngineError(
+        "The machine approval no longer holds under the current autonomy policy",
+        409,
+      );
     const repos = [
       ...new Set([
         ...locked.selected_repositories,
@@ -3329,9 +3518,12 @@ export async function resumeProviderHandoff(
             id: h.id,
             source_attempt_id: h.source_attempt_id,
             workspace_fingerprint: h.workspace_fingerprint,
-            package: sealed ? {
-              ...h.package, execution_checkpoint: continuationEvidence(sealed),
-            } : h.package,
+            package: sealed
+              ? {
+                  ...h.package,
+                  execution_checkpoint: continuationEvidence(sealed),
+                }
+              : h.package,
           },
         },
         error: null,
@@ -3395,7 +3587,12 @@ async function continueHealthyProvider(
         : row,
     );
     const run = await one<RunRow>(pool, "SELECT * FROM workflow_runs WHERE id=$1", [runId]);
-    const next = nextHealthyProvider(order, new Set([failedProvider]), health, frozenProviderFlags(run?.agent_configuration));
+    const next = nextHealthyProvider(
+      order,
+      new Set([failedProvider]),
+      health,
+      frozenProviderFlags(run?.agent_configuration),
+    );
     if (!next) return;
     await resumeProviderHandoff(
       runId,
