@@ -63,6 +63,7 @@ import { TraceExplorer } from "./TraceExplorer.tsx";
 import "./RunView.css";
 import { latestStepDecisions, type Decision } from "../decisions";
 import { ReuseCard } from "./ExecutionCards";
+import { useRunEvents } from "./useRunEvents.ts";
 import {
   childActive,
   childGraph,
@@ -1618,63 +1619,51 @@ function RepoPicker({ run, onDone }: { run: RunDetail; onDone: () => void }) {
 /** Run timeline, fetched once and then incrementally (`?after=`) whenever an event arrives. */
 function RunTimeline({ runId, activity }: { runId: number; activity: number }) {
   const { t } = useI18n();
-  const [data, setData] = useState<TimelineEvent[] | null>(null);
-  const last = useRef(0);
-  useEffect(() => {
-    setData(null);
-    last.current = 0;
-  }, [runId]);
-  useEffect(() => {
-    let stop = false;
-    api<TimelineEvent[]>(`/api/runs/${runId}/events?after=${last.current}`)
-      .then((rows) => {
-        if (stop) return;
-        if (rows.length) last.current = rows[rows.length - 1].id;
-        setData((prev) => [...(prev ?? []), ...rows]);
-      })
-      .catch(() => !stop && setData((prev) => prev ?? []));
-    return () => {
-      stop = true;
-    };
-  }, [runId, activity]);
-  if (!data) return null;
+  const { events, error, loading, reload } = useRunEvents<TimelineEvent>(
+    `/api/runs/${runId}/events`,
+    activity,
+  );
   return (
     <div className="rv-sec">
       <div className="rv-sec-title">
         <Activity size={14} /> {t("common.timeline")}
       </div>
-      <div className="rv-tl">
-        {data
-          .slice()
-          .reverse()
-          .slice(0, 300)
-          .map((e) => (
-            <div key={e.id} className="rv-tl-row">
-              <span className="muted">
-                {time(e.created_at)}
-                <br />
-                <span className="mono">{e.step_key ?? "run"}</span>
-              </span>
-              <span>
-                <b className="muted small">{e.kind}</b>{" "}
-                <span
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    overflowWrap: "anywhere",
-                    color: e.kind === "user" ? "var(--brand-700)" : undefined,
-                  }}
-                >
-                  {e.content}
+      {error && <ErrorBox error={error} onRetry={reload} />}
+      {loading && <Loading />}
+      {(events.length > 0 || (!loading && !error)) && (
+        <div className="rv-tl">
+          {events
+            .slice()
+            .reverse()
+            .slice(0, 300)
+            .map((e) => (
+              <div key={e.id} className="rv-tl-row">
+                <span className="muted">
+                  {time(e.created_at)}
+                  <br />
+                  <span className="mono">{e.step_key ?? "run"}</span>
                 </span>
-              </span>
+                <span>
+                  <b className="muted small">{e.kind}</b>{" "}
+                  <span
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      overflowWrap: "anywhere",
+                      color: e.kind === "user" ? "var(--brand-700)" : undefined,
+                    }}
+                  >
+                    {e.content}
+                  </span>
+                </span>
+              </div>
+            ))}
+          {!events.length && (
+            <div className="muted small" style={{ padding: 12 }}>
+              {t("rv.noEvents")}
             </div>
-          ))}
-        {!data.length && (
-          <div className="muted small" style={{ padding: 12 }}>
-            {t("rv.noEvents")}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
