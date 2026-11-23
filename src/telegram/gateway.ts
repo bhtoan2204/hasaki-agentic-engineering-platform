@@ -8,10 +8,10 @@ import { loadChatHealth } from "../chat/admission.ts";
 import { decideOperation } from "../chat/operations.ts";
 import { executeDelegation, DelegationRequest } from "../chat/delegation.ts";
 import { ownerAutonomySummary, setOwnerAutonomy, type ChatAutonomyMode } from "../chat/autonomy.ts";
-import { botKey, safeTelegramText, textLimit } from "./client.ts";
+import { botKey, preview, safeTelegramText, textLimit } from "./client.ts";
 import { limited, preferences, queue, telegramAudit } from "./store.ts";
 import { conversationUrl, elapsed, runUrl, STATUS_ICON, tr } from "./format.ts";
-import { runStatusText } from "./sync.ts";
+import { editTracked, RUN_ACTIVE_STATUSES, runStatusText } from "./sync.ts";
 
 /**
  * Telegram as a transport for the existing Chat Runtime. Free text from a bound private chat becomes a chat message of
@@ -66,7 +66,7 @@ function reply(
     "sendMessage",
     {
       chat_id: identity.chat,
-      text: textLimit(text, 3900),
+      text: preview(text),
       disable_web_page_preview: true,
       ...(identity.message.message_id
         ? {
@@ -254,7 +254,10 @@ export async function handleChatMessage(
     [],
     undefined,
     userId,
-    { link: { kind: "turn_status", conversation_id: conversationId, turn_id: posted.turn.id } },
+    {
+      delaySeconds: 2,
+      link: { kind: "turn_status", conversation_id: conversationId, turn_id: posted.turn.id },
+    },
   );
   await telegramAudit(pool, userId, "chat.message", String(conversationId), {
     turnId: posted.turn.id,
@@ -602,38 +605,58 @@ export async function handleCommand(
 
 /** Follow a run: one status message, edited in place while the run moves (sync.ts). */
 export async function watchRun(db: Db, userId: number, chatId: string, runId: number, key: string) {
-  const run = await one<{ id: number }>(
+  const run = await one<{ status: string }>(
     db,
-    "SELECT id FROM workflow_runs WHERE id=$1 AND owner_id=$2",
+    "SELECT status FROM workflow_runs WHERE id=$1 AND owner_id=$2",
     [runId, userId],
   );
   if (!run) throw new HttpError(403, "run not found");
-  await q(
-    db,
-    `INSERT INTO telegram_run_watch(user_id,run_id,watched) VALUES($1,$2,true)
-    ON CONFLICT(user_id,run_id) DO UPDATE SET watched=true,updated_at=now()`,
-    [userId, runId],
-  );
+  const active = RUN_ACTIVE_STATUSES.includes(run.status);
+  if (
+    active &&
+    !(await one(
+      db,
+      `INSERT INTO telegram_run_watch(user_id,run_id,watched) VALUES($1,$2,true)
+    ON CONFLICT(user_id,run_id) DO UPDATE SET watched=true,updated_at=now()
+    WHERE NOT telegram_run_watch.watched RETURNING run_id`,
+      [userId, runId],
+    ))
+  )
+    return true;
   const L = String((await preferences(userId, db)).locale);
+  const text = await runStatusText(runId, L, db);
+  const keyboard = active
+    ? [[{ text: tr(L, "Bỏ theo dõi", "Unfollow"), callback_data: `u:${runId}` }]]
+    : [];
+  if (active) {
+    const card = await one<{ chat_id: string; message_id: number; last_text_hash: string | null }>(
+      db,
+      `SELECT chat_id,message_id,last_text_hash FROM telegram_messages
+       WHERE bot_key=$1 AND chat_id=$2 AND user_id=$3 AND run_id=$4 AND kind='run_status'
+       ORDER BY message_id DESC LIMIT 1`,
+      [botKey(), chatId, userId, runId],
+    );
+    if (card) {
+      await editTracked(db, card, userId, text, "run_status", keyboard);
+      return true;
+    }
+  }
   await queue(
     db,
     `run_watch:${userId}:${runId}:${key}`,
     "sendMessage",
     {
       chat_id: chatId,
-      text: await runStatusText(runId, L, db),
+      text,
       disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: tr(L, "Bỏ theo dõi", "Unfollow"), callback_data: `u:${runId}` }],
-        ],
-      },
+      reply_markup: { inline_keyboard: keyboard },
     },
     [],
     undefined,
     userId,
     { link: { kind: "run_status", run_id: runId } },
   );
+  return active;
 }
 
 interface ChatActionRow {
@@ -668,13 +691,14 @@ function editAction(
     {
       chat_id: a.chat_id,
       message_id: a.message_id,
-      text: textLimit(text, 3900),
+      text: preview(text),
       disable_web_page_preview: true,
       reply_markup: { inline_keyboard: keyboard },
     },
     [],
     undefined,
     a.user_id,
+    { chatActionIds: keyboard.length ? [a.action_id] : [] },
   );
 }
 
@@ -690,16 +714,34 @@ export async function handleGatewayCallback(
   if (data.startsWith("w:") || data.startsWith("u:")) {
     const runId = Number(data.slice(2));
     if (data.startsWith("u:")) {
-      await q(pool, "UPDATE telegram_run_watch SET watched=false WHERE user_id=$1 AND run_id=$2", [
-        userId,
-        runId,
-      ]);
+      await withTx(async (db) => {
+        const card = await one<{
+          chat_id: string;
+          message_id: number;
+          last_text_hash: string | null;
+        }>(
+          db,
+          `SELECT chat_id,message_id,last_text_hash FROM telegram_messages
+           WHERE bot_key=$1 AND chat_id=$2 AND message_id=$3 AND user_id=$4 AND run_id=$5 AND kind='run_status'`,
+          [botKey(), identity.chat, callbackMessageId, userId, runId],
+        );
+        if (!card) throw new HttpError(403, "denied");
+        const changed = await one(
+          db,
+          "UPDATE telegram_run_watch SET watched=false WHERE user_id=$1 AND run_id=$2 AND watched RETURNING run_id",
+          [userId, runId],
+        );
+        if (changed)
+          await editTracked(db, card, userId, await runStatusText(runId, L, db), "run_status", []);
+      });
       return tr(L, "Đã bỏ theo dõi", "Unfollowed");
     }
-    await withTx((db) =>
+    const active = await withTx((db) =>
       watchRun(db, userId, identity.chat, runId, String(callbackMessageId ?? 0)),
     );
-    return tr(L, "Đang theo dõi run", "Following the run");
+    return active
+      ? tr(L, "Đang theo dõi run", "Following the run")
+      : tr(L, "Run đã kết thúc", "Run has ended");
   }
   const [, id, choice] = data.split(":");
   const a = await one<ChatActionRow>(
@@ -746,12 +788,7 @@ export async function handleGatewayCallback(
       [id],
     );
     await telegramAudit(pool, userId, "chat_action.rejected", id, { kind: a.kind, ref: a.ref_id });
-    await editAction(
-      pool,
-      a,
-      "rejected",
-      `${summary}\n\n❌ ${tr(L, "Đã từ chối — không có gì được thực hiện.", "Rejected — nothing was executed.")}`,
-    );
+    await editAction(pool, a, "rejected", `${summary}\n\n❌ ${tr(L, "Đã từ chối.", "Rejected.")}`);
     return tr(L, "Đã từ chối", "Rejected");
   }
   // Protected actions (step approvals, external writes) need a second, explicit tap.

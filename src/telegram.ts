@@ -1,6 +1,7 @@
 import { config } from "./config.ts";
 import type { OutputLocale } from "./agent/language.ts";
 import { getUserSecret } from "./auth/secrets.ts";
+import { preview, safeTelegramText } from "./telegram/client.ts";
 
 /**
  * One-way Telegram notifications through the Bot API `sendMessage`. Optional: without a bot token and chat
@@ -55,17 +56,15 @@ export function buildStepMessage(w: StepWaiting) {
   const text = [
     input
       ? en
-        ? "❓ <b>NEEDS YOUR ANSWER</b>"
-        : "❓ <b>CẦN BẠN TRẢ LỜI</b>"
+        ? "❓ <b>Needs your answer</b>"
+        : "❓ <b>Cần bạn trả lời</b>"
       : en
-        ? "✋ <b>NEEDS YOUR APPROVAL</b>"
-        : "✋ <b>CẦN BẠN DUYỆT</b>",
-    RULE,
-    `📋 <b>${esc(w.runTitle)}</b>`,
+        ? "✋ <b>Needs your approval</b>"
+        : "✋ <b>Cần bạn duyệt</b>",
+    `Run #${w.runId} · <b>${esc(preview(safeTelegramText(w.runTitle), 160))}</b>`,
+    `${en ? "Step" : "Bước"} · ${esc(preview(safeTelegramText(w.stepName), 100))}`,
     "",
-    `▸ ${en ? "Step" : "Bước"}: <b>${esc(w.stepName)}</b> · <code>${esc(w.stepKey)}</code>`,
-    `▸ Run: #${w.runId}`,
-    `▸ ${en ? "Reason" : "Lý do"}: <i>${esc(w.detail)}</i>`,
+    esc(preview(safeTelegramText(w.detail), 800)),
     ...(footer.text ? ["", footer.text] : []),
   ].join("\n");
   return {

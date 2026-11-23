@@ -124,8 +124,20 @@ export async function deliverOutbox(limit = 50, signal?: AbortSignal) {
         await q(db, "UPDATE telegram_outbox SET status='dead' WHERE id=$1", [row.id]);
         return true;
       }
+      if (
+        row.method === "editMessageText" &&
+        row.dedupe_key.startsWith("confirm:") &&
+        action &&
+        (action.status !== "pending" || Date.parse(action.expires_at) <= Date.now())
+      ) {
+        await q(db, "UPDATE telegram_outbox SET status='dead' WHERE id=$1", [row.id]);
+        return true;
+      }
       // Chat-gateway buttons: a send for an action that was decided or expired meanwhile is dropped.
-      if (row.chat_action_ids?.length && row.method === "sendMessage") {
+      if (
+        row.chat_action_ids?.length &&
+        (row.method === "sendMessage" || row.method === "editMessageText")
+      ) {
         const live = await one(
           db,
           "SELECT 1 FROM telegram_chat_actions WHERE action_id=ANY($1) AND status IN ('pending','armed') AND expires_at>now() LIMIT 1",
@@ -135,6 +147,16 @@ export async function deliverOutbox(limit = 50, signal?: AbortSignal) {
           await q(db, "UPDATE telegram_outbox SET status='dead' WHERE id=$1", [row.id]);
           return true;
         }
+      }
+      if (
+        row.method === "sendMessage" &&
+        row.link?.kind === "turn_status" &&
+        !(await one(db, "SELECT 1 FROM chat_turns WHERE id=$1 AND status IN ('queued','running')", [
+          row.link.turn_id,
+        ]))
+      ) {
+        await q(db, "UPDATE telegram_outbox SET status='dead' WHERE id=$1", [row.id]);
+        return true;
       }
       // Quiet hours: messages still go out (held notifications are batched upstream) but without a sound.
       const payload =
@@ -194,6 +216,19 @@ export async function deliverOutbox(limit = 50, signal?: AbortSignal) {
         );
       } catch (e) {
         const error = e instanceof TelegramApiError ? e : new TelegramApiError(503);
+        if (error.messageMissing && row.link?.kind === "answer" && userId) {
+          const { message_id: _messageId, ...answer } = row.payload;
+          await queue(
+            db,
+            `turn_answer_fallback:${row.link.turn_id}`,
+            "sendMessage",
+            answer,
+            [],
+            undefined,
+            userId,
+            { link: row.link },
+          );
+        }
         const permanent = [400, 401, 403, 404].includes(error.code) || row.attempts >= 11;
         await q(
           db,

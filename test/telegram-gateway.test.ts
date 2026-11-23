@@ -1,13 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { actionRisk, resolveChatAutonomy, type ChatAutonomyPolicy } from "../src/chat/autonomy.ts";
-import {
-  chunkText,
-  inQuietHours,
-  severityAllowed,
-  telegramAnswer,
-  TELEGRAM_TEXT_MAX,
-} from "../src/telegram/format.ts";
+import { inQuietHours, severityAllowed, telegramAnswer } from "../src/telegram/format.ts";
+import { preview, TELEGRAM_TEXT_MAX } from "../src/telegram/client.ts";
 import { GATEWAY_CALLBACK, parseCommand } from "../src/telegram/gateway.ts";
 import { classifyArguments } from "../src/agent/taint.ts";
 
@@ -98,17 +93,25 @@ test("action risk: protected actions, protected workflows and risky subjects are
   );
 });
 
-test("format: chunking keeps every character, respects the limit and prefers paragraph breaks", () => {
-  const para = "Đoạn văn ".repeat(300);
-  const text = `${para}\n\n${para}\n\n${"x".repeat(9000)}`;
-  const parts = chunkText(text);
-  assert.ok(parts.length >= 3);
-  for (const p of parts) assert.ok(Array.from(p).length <= TELEGRAM_TEXT_MAX);
-  assert.equal(parts.join("").replace(/\s/g, "").length, text.replace(/\s/g, "").length);
-  assert.deepEqual(chunkText("short"), ["short"]);
-  const emoji = "🙂".repeat(TELEGRAM_TEXT_MAX + 5);
-  const split = chunkText(emoji);
-  assert.equal(split.join(""), emoji, "surrogate pairs are never cut");
+test("format: previews keep short text intact and fit emoji within the Telegram limit", () => {
+  assert.equal(preview("short"), "short");
+  assert.equal(preview("one two three four", 15), "one two three…");
+  assert.equal(preview("🙂🙂", 3), "🙂…");
+  const clipped = preview("🙂".repeat(TELEGRAM_TEXT_MAX));
+  assert.ok(clipped.length <= TELEGRAM_TEXT_MAX);
+  assert.match(clipped, /^(?:🙂)+…$/u);
+});
+
+test("format: escaped Markdown and inline code stay literal with safe link rendering", () => {
+  assert.equal(
+    telegramAnswer("\\*literal\\* and `**literal**` and [docs](https://example.com/a_(b))"),
+    "*literal* and **literal** and docs (https://example.com/a_(b))",
+  );
+  assert.equal(telegramAnswer("[label](javascript:alert(1))"), "label");
+  assert.equal(telegramAnswer("https://example.com/"), "https://example.com/");
+  assert.equal(telegramAnswer("- first\n  - nested\n- last"), "• first\n   • nested\n• last");
+  assert.equal(telegramAnswer("~~~js\nprivateCode()\n~~~"), "[Code available in platform]");
+  assert.equal(telegramAnswer("Code: ```privateCode()```"), "Code: [Code available in platform]");
 });
 
 test("format: answers redact credentials and keep code on the platform", () => {
@@ -144,7 +147,10 @@ test("format: markdown that Telegram cannot render becomes readable plain text (
   assert.doesNotMatch(out, /\|---|^\|/m, "no table syntax left");
   assert.doesNotMatch(out, /`|\*\*|^###/m, "no inline-code, bold or heading markers left");
   assert.match(out, /^▍4\. Ảnh hưởng đến các bộ phận khác$/m);
-  assert.match(out, /^• Kho \/ vận chuyển — Nhận event New cho 2 shipment mới và Cancel cho shipment cũ\.$/m);
+  assert.match(
+    out,
+    /^• Kho \/ vận chuyển — Nhận event New cho 2 shipment mới và Cancel cho shipment cũ\.$/m,
+  );
   assert.match(out, /^• CSKH — Khách thấy shipment cũ bị hủy\.$/m);
   assert.match(out, /^• Shipment Delay có ShipmentFee = 0\.$/m);
   assert.match(out, /^• bullet sao$/m);

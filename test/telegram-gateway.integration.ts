@@ -16,6 +16,7 @@ import { setChatHealthProbe } from "../src/chat/admission.ts";
 import { saveChatPolicy } from "../src/chat/autonomy.ts";
 import { createBinding, savePreferences } from "../src/telegram/store.ts";
 import { ingestUpdate, processInbox } from "../src/telegram/updates.ts";
+import { notifyTelegramRun } from "../src/telegram/workflow.ts";
 import { deliverOutbox, expireActions } from "../src/telegram/transport.ts";
 import {
   flushNotifications,
@@ -41,7 +42,9 @@ interface BotCall {
     text?: string;
     message_id?: number;
     disable_notification?: boolean;
-    reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
+    reply_markup?: {
+      inline_keyboard: Array<Array<{ text: string; callback_data?: string; url?: string }>>;
+    };
   };
 }
 const calls: BotCall[] = [];
@@ -55,6 +58,7 @@ const OWNER_TG = 7101,
 
 let replies: string[] = [];
 let gate: Promise<void> | null = null;
+let missingEditMessage: number | null = null;
 const prompts: string[] = [];
 const runner: CompletionRunner = async (prompt) => {
   prompts.push(prompt);
@@ -173,6 +177,16 @@ before(async () => {
     const method = req.url!.split("/").at(-1)!;
     const call: BotCall & { result?: number } = { method, body };
     calls.push(call);
+    if (method === "editMessageText" && body.message_id === missingEditMessage) {
+      res.writeHead(400, { "Content-Type": "application/json" }).end(
+        JSON.stringify({
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: message to edit not found",
+        }),
+      );
+      return;
+    }
     const result =
       method === "getMe"
         ? { id: 54321, username: "hasaki_gateway_bot" }
@@ -231,17 +245,19 @@ test("a verified user asks a normal question and gets an AI answer; replay and d
   const update = message(OWNER_TG, "What is REQ-126 doing?");
   await ingestUpdate(update);
   await ingestUpdate(update); // Telegram redelivery: same update id
+  await processInbox();
+  await q(
+    pool,
+    "UPDATE telegram_outbox SET next_at=now()+interval '1 minute' WHERE dedupe_key LIKE 'turn_status:%' AND status='pending'",
+  );
   await drain();
   const out = sent(OWNER_TG, from);
-  assert.match(out[0].body.text!, /Working on it/);
-  const answer = out.find((c) => /REQ-126/.test(c.body.text ?? ""))!;
-  assert.ok(answer, "the answer is delivered");
+  assert.equal(out.length, 1, "a quick turn sends only the answer");
+  const answer = out[0];
+  assert.match(answer.body.text!, /REQ-126/);
   assert.doesNotMatch(answer.body.text!, /privateCode|ghp_abcdef/, "no private code or secrets");
   assert.match(answer.body.text!, /Status: running the review step/);
-  assert.ok(
-    edits(from).some((e) => /Done/.test(e.body.text ?? "") && e.body.message_id === idOf(out[0])),
-    "the status message is edited in place",
-  );
+  assert.equal(edits(from).length, 0);
   const turns = await q(pool, "SELECT * FROM chat_turns WHERE owner_id=$1", [owner.id]);
   assert.equal(turns.length, 1, "one turn for the duplicated update");
   assert.match(String(turns[0].client_message_id), /^tg-/);
@@ -264,6 +280,100 @@ test("a verified user asks a normal question and gets an AI answer; replay and d
     "What is REQ-126 doing?",
     "the web conversation holds the same history",
   );
+});
+
+test("a long turn reuses its progress message for one answer preview and keeps edit backoff", async () => {
+  let release!: () => void;
+  gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  replies = ["🙂".repeat(2500)];
+  const from = calls.length;
+  await ingestUpdate(message(OWNER_TG, "Give me a detailed answer"));
+  await processInbox();
+  const status = (await one(
+    pool,
+    "SELECT id,link FROM telegram_outbox WHERE dedupe_key LIKE 'turn_status:%' AND status='pending' ORDER BY id DESC LIMIT 1",
+  ))!;
+  try {
+    assert.ok(status);
+    await deliverOutbox();
+    assert.equal(sent(OWNER_TG, from).length, 0, "progress starts after a delay");
+    await q(pool, "UPDATE chat_turns SET phase='calling_provider' WHERE id=$1", [
+      status.link.turn_id,
+    ]);
+    await q(pool, "UPDATE telegram_outbox SET next_at=now() WHERE id=$1", [status.id]);
+    await deliverOutbox();
+    const [progress] = sent(OWNER_TG, from);
+    assert.match(progress.body.text!, /Working on it/);
+    await gatewayTick();
+    const pending = (await one(
+      pool,
+      "SELECT id FROM telegram_outbox WHERE dedupe_key LIKE 'turn_progress:%' AND status='pending'",
+    ))!;
+    assert.ok(pending);
+    await q(
+      pool,
+      "UPDATE telegram_outbox SET next_at=now()+interval '1 minute',attempts=1 WHERE id=$1",
+      [pending.id],
+    );
+    release();
+    await drain();
+    const finalEdit = (await one(
+      pool,
+      "SELECT payload,link,attempts,next_at>now() AS backed_off FROM telegram_outbox WHERE id=$1",
+      [pending.id],
+    ))!;
+    assert.equal(finalEdit.attempts, 1);
+    assert.equal(finalEdit.backed_off, true);
+    assert.equal(finalEdit.link.kind, "answer");
+    await q(pool, "UPDATE telegram_outbox SET next_at=now() WHERE id=$1", [pending.id]);
+    await deliverOutbox();
+    assert.equal(sent(OWNER_TG, from).length, 1);
+    const final = edits(from).find((edit) => edit.body.message_id === idOf(progress))!;
+    assert.ok(final.body.text!.length <= 3900);
+    assert.match(final.body.text!, /^(?:🙂)+…$/u);
+    assert.match(buttons(final)[0].url!, /^https:\/\/platform\.example\/#\/chat\//);
+  } finally {
+    release();
+  }
+});
+
+test("a deleted progress message falls back to a single answer with its local conversation link", async () => {
+  let release!: () => void;
+  gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  replies = ["🙂".repeat(2500)];
+  const publicUrl = config.publicUrl;
+  config.publicUrl = "http://localhost:3000";
+  const from = calls.length;
+  try {
+    await ingestUpdate(message(OWNER_TG, "Give me another detailed answer"));
+    await processInbox();
+    await q(
+      pool,
+      "UPDATE telegram_outbox SET next_at=now() WHERE dedupe_key LIKE 'turn_status:%' AND status='pending'",
+    );
+    await deliverOutbox();
+    const [progress] = sent(OWNER_TG, from);
+    assert.match(progress.body.text!, /Working on it/);
+    missingEditMessage = idOf(progress);
+    release();
+    await drain();
+    const messages = sent(OWNER_TG, from);
+    assert.equal(messages.length, 2, "one progress send and one fallback");
+    assert.ok(messages[1].body.text!.length <= 3900);
+    assert.match(
+      messages[1].body.text!,
+      /…\n\nContinue on the web: http:\/\/127\.0\.0\.1:3000\/#\/chat\/\d+$/,
+    );
+    assert.deepEqual(buttons(messages[1]), []);
+  } finally {
+    release();
+    missingEditMessage = null;
+    config.publicUrl = publicUrl;
+  }
 });
 
 test("replying to an answer continues that conversation; /new starts another; /link attaches a web conversation", async () => {
@@ -309,7 +419,8 @@ test("replying to an answer continues that conversation; /new starts another; /l
   assert.ok(
     sent(OWNER_TG, from).some((c) => /From the web: asked on the web/.test(c.body.text ?? "")),
   );
-  assert.ok(sent(OWNER_TG, from).some((c) => c.body.text === "Answer to a web question."));
+  assert.equal(sent(OWNER_TG, from).length, 1);
+  assert.match(sent(OWNER_TG, from)[0].body.text!, /Answer to a web question\.$/);
   // /link to someone else's conversation is refused.
   const foreign = await chat.create(intruder, { mode: "ASK" });
   from = calls.length;
@@ -409,6 +520,19 @@ test("commands: /help, /status, /tasks and /runs show only the caller's own data
   const status = sent(OWNER_TG, from)[0];
   assert.match(status.body.text!, new RegExp(`Run #${mine.id}`));
   assert.match(status.body.text!, /waiting for your approval/);
+  const statusId = idOf(status);
+  from = calls.length;
+  await send(tap(`w:${mine.id}`, idOf(runs) + 1));
+  assert.equal(sent(OWNER_TG, from).length, 0, "following twice keeps one card");
+  await send(tap(`u:${mine.id}`, statusId));
+  assert.deepEqual(buttons(edits(from).find((c) => c.body.message_id === statusId)!), []);
+  from = calls.length;
+  await send(tap(`w:${mine.id}`, idOf(runs)));
+  assert.equal(sent(OWNER_TG, from).length, 0, "following again reuses the card");
+  assert.equal(
+    buttons(edits(from).find((c) => c.body.message_id === statusId)!)[0].callback_data,
+    `u:${mine.id}`,
+  );
 });
 
 test("mutating actions need explicit confirmation; taps are owner-, message- and replay-safe", async () => {
@@ -635,6 +759,8 @@ test("notifications: failures, blockers and PRs are deduplicated, aggregated and
   assert.equal(digest.length, 1, "one aggregated message");
   assert.match(digest[0].body.text!, /2 updates/);
   assert.match(digest[0].body.text!, /pull request created/);
+  assert.match(digest[0].body.text!, /https:\/\/bitbucket\.example\/pr\/1/);
+  assert.equal(buttons(digest[0])[0].url, `https://platform.example/#/runs/${run.id}`);
   // Quiet hours: an important notification waits, a critical one is sent silently.
   await savePreferences(owner.id, { quiet_start: 0, quiet_end: 23, timezone: "UTC" });
   const now = new Date("2026-11-23T05:00:00Z");
@@ -672,6 +798,26 @@ test("notifications: failures, blockers and PRs are deduplicated, aggregated and
     (await q(pool, "SELECT 1 FROM telegram_notifications WHERE dedupe_key='lvl-1'")).length,
     0,
   );
+});
+
+test("terminal notifications deduplicate by transition even after unrelated run edits", async () => {
+  const run = await ownRun(owner, "Notify once");
+  const finish =
+    "UPDATE workflow_runs SET status='FAILED',finished_at=now(),updated_at=now() WHERE id=$1";
+  await q(pool, finish, [run.id]);
+  const from = calls.length;
+  await notifyTelegramRun(run.id, "FAILED");
+  await q(pool, "UPDATE workflow_runs SET updated_at=now()+interval '1 minute' WHERE id=$1", [
+    run.id,
+  ]);
+  await notifyTelegramRun(run.id, "FAILED");
+  await notifyTelegramRun(run.id, "COMPLETED");
+  await deliverOutbox();
+  assert.equal(
+    sent(OWNER_TG, from).filter((c) => /Workflow failed/.test(c.body.text ?? "")).length,
+    1,
+  );
+  assert.ok(!sent(OWNER_TG, from).some((c) => /Workflow completed/.test(c.body.text ?? "")));
 });
 
 test("existing workflow ForceReply prompts keep working next to the chat gateway", async () => {

@@ -33,10 +33,10 @@ Free text goes to the Chat Runtime, for example:
 - "Create a task to fix this bug" / "Run the appropriate workflow" — a `work.delegate` proposal
 - "Explain why this step failed" / "Retry this step" — `runs.get`, then a `runs.retry_step` operation
 
-While a turn runs, one "⏳" message is edited in place with the phase, elapsed time and tool count. When it finishes,
-that message becomes "✅ Done · 12s · provider/model" and the answer follows, split into ≤3,900-character parts (at most
-four; the rest stays on the web). Code blocks are replaced by "[Code available in platform]", recognizable credentials
-are redacted, and markdown is flattened to plain text.
+A quick turn sends one answer. After two seconds, a turn that is still running can show a progress message that updates
+as the phase changes. The answer replaces that message when the turn finishes. Long answers show a preview with a link
+to the full conversation. Telegram displays Markdown as plain text, replaces code blocks with
+“[Code available in platform]” and redacts recognizable credentials.
 
 Replying to one of the bot's answers continues **that** conversation (and makes it the linked one). Turns started in the
 web chat of the linked conversation are mirrored to Telegram ("💻 From the web: …").
@@ -53,8 +53,8 @@ web chat of the linked conversation are mirrored to Telegram ("💻 From the web
 | `/stop` | Cancel the running answer. `/stop all`: emergency stop (pauses your autonomy policy and the runs it started) |
 | `/cancel` | Cancel a pending workflow ForceReply prompt (unchanged) |
 
-Following a run (👁) sends one status message that is edited in place: status, current step, elapsed time, last
-activity, blocker and PR links, with a deep link to the run page for logs, diffs and forms.
+Following a run (👁) keeps one status message with the current step, blocker, PR links and a link to the run.
+Unfollow removes the button. Following again reuses the existing message.
 
 ## Actions and confirmation
 
@@ -145,8 +145,8 @@ run; widen it through the API).
 
 ## Notifications
 
-Existing notices are unchanged: approval/question messages with buttons, run completed/failed. The gateway adds, from
-run state (a snapshot diff every ~10 s for bound users' active and recently changed runs):
+Approval and question notices link to the affected step. Run completion and failure notices are keyed to the status
+transition. The gateway also checks active and recently changed runs about every ten seconds:
 
 | Kind | Severity | When |
 |---|---|---|
@@ -157,10 +157,9 @@ run state (a snapshot diff every ~10 s for bound users' active and recently chan
 | autonomy | important | A workflow gate was decided by the workflow autonomy policy |
 | intake | critical/important | An intake item became eligible, or a high/critical one was deferred |
 
-Notifications are deduplicated per user (`telegram_notifications.dedupe_key`), filtered by subscription and level, and
-aggregated: non-critical ones wait 20 s for company and are sent as one digest. During quiet hours non-critical
-notifications are held until the quiet period ends; critical ones go out silently (`disable_notification`), as does
-every other bot message in quiet hours.
+Subscriptions and severity levels filter updates before they enter the notification queue. Non-critical updates wait
+20 seconds so they can arrive in one digest. Updates for a single run include a link to that run. During quiet hours,
+the digest holds non-critical updates and sends critical updates silently.
 
 ## Security model
 
@@ -220,7 +219,7 @@ or `paused: true` on the global policy (administrator) — effective on the next
 ## Limitations
 
 - Text only: photos, files and voice are refused (use the web chat for attachments).
-- Answers longer than four parts, code blocks, diffs, logs and complex forms (repository/branch selection, provider
+- Full-length answers, code blocks, diffs, logs and complex forms (repository/branch selection, provider
   handoffs, risk acknowledgement) are on the web via deep links.
 - No admin UI for chat autonomy policies yet: administrators use the API above; users use `/mode`.
 - The gateway runs on the elected receiver; when the receiver mode is `off`, Telegram chat is unavailable (the web chat

@@ -2,6 +2,9 @@ import { redactContextText } from "../context/redact.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { config } from "../config.ts";
 
+/** Stay below Telegram’s message limit, counting UTF-16 units conservatively. */
+export const TELEGRAM_TEXT_MAX = 3900;
+
 export const botKey = (token = config.telegram.botToken) =>
   createHash("sha256").update(token).digest("hex");
 export class TelegramApiError extends Error {
@@ -9,6 +12,7 @@ export class TelegramApiError extends Error {
   retryAfter: number;
   /** Set when Telegram was never reached (DNS, connect, TLS, timeout): the system error code, e.g. "ETIMEDOUT". */
   network?: string;
+  messageMissing = false;
   constructor(code: number, retryAfter = 5, network?: string) {
     super(network ? `Telegram unreachable (${network})` : `Telegram request failed (${code})`);
     this.code = code;
@@ -65,11 +69,17 @@ export async function telegramCall(
       /message is not modified/i.test(data.description ?? "")
     )
       return { not_modified: true };
-    if (!res.ok || data.ok !== true)
-      throw new TelegramApiError(
+    if (!res.ok || data.ok !== true) {
+      const error = new TelegramApiError(
         Number(data.error_code) || res.status,
         Math.min(3600, Math.max(1, Number(data.parameters?.retry_after) || 5)),
       );
+      error.messageMissing =
+        error.code === 400 &&
+        method === "editMessageText" &&
+        /message to edit not found|message can.t be edited/i.test(data.description ?? "");
+      throw error;
+    }
     return data.result;
   } catch (e) {
     if (e instanceof TelegramApiError) throw e;
@@ -96,4 +106,13 @@ export function safeTelegramText(value: unknown) {
   );
   if (config.telegram.botToken) text = text.split(config.telegram.botToken).join("[redacted]");
   return text;
+}
+
+/** Clip plain text before escaping or attaching a footer, keeping surrogate pairs intact. */
+export function preview(text: string, max = TELEGRAM_TEXT_MAX): string {
+  if (max <= 0) return "";
+  if (text.length <= max) return text;
+  const prefix = text.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "");
+  const boundary = Math.max(prefix.lastIndexOf("\n"), prefix.lastIndexOf(" "));
+  return (boundary >= max * 0.75 ? prefix.slice(0, boundary) : prefix).trimEnd() + "…";
 }

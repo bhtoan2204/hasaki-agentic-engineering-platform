@@ -6,14 +6,18 @@ import { readableRepositories } from "../chat/tools.ts";
 import { buildDelegationPreview, executeDelegation } from "../chat/delegation.ts";
 import { operationProvenance } from "../chat/operations.ts";
 import { AUTONOMOUS_ACTIONS, attachAutonomousRun, decideChatAutonomy } from "../chat/autonomy.ts";
-import { botKey, safeTelegramText, textLimit } from "./client.ts";
-import { opaqueId, preferences, queue, type TelegramPreferences } from "./store.ts";
+import { isPublicHttps } from "../telegram.ts";
+import { botKey, preview, safeTelegramText, TELEGRAM_TEXT_MAX, textLimit } from "./client.ts";
 import {
-  chunkText,
+  opaqueId,
+  preferences,
+  queue,
+  type OutboxLink,
+  type TelegramPreferences,
+} from "./store.ts";
+import {
   conversationUrl,
-  elapsed,
   inQuietHours,
-  MAX_PARTS,
   runUrl,
   severityAllowed,
   STATUS_ICON,
@@ -36,13 +40,15 @@ const TURN_EDIT_MS = 3000;
 const RUN_EDIT_MS = 5000;
 const AGGREGATE_MS = 20_000;
 const RUN_SWEEP_MS = 10_000;
-const ACTIVE_RUN = ["PENDING", "RUNNING", "WAITING", "PAUSED"];
+export const RUN_ACTIVE_STATUSES = ["PENDING", "RUNNING", "WAITING", "PAUSED"];
 const PHASE_LABEL: Record<string, [string, string]> = {
   routing: ["chọn cách xử lý", "routing"],
-  context: ["đọc ngữ cảnh", "reading context"],
-  thinking: ["suy nghĩ", "thinking"],
-  tools: ["tra cứu", "looking things up"],
-  answering: ["soạn trả lời", "writing the answer"],
+  validating_provider: ["chọn cách xử lý", "routing"],
+  switching_provider: ["đổi nhà cung cấp", "switching providers"],
+  preparing_context: ["đọc ngữ cảnh", "reading context"],
+  calling_provider: ["soạn trả lời", "writing the answer"],
+  receiving_response: ["soạn trả lời", "writing the answer"],
+  executing_tools: ["tra cứu", "looking things up"],
 };
 
 interface LinkRow {
@@ -74,7 +80,7 @@ export async function gatewayBusy() {
 
 // ---------------------------------------------------------------- chat turns
 
-async function statusMessage(turnId: number, db: Db = pool) {
+async function statusMessage(db: Db, link: LinkRow, turnId: number) {
   return one<{
     chat_id: string;
     message_id: number;
@@ -82,36 +88,62 @@ async function statusMessage(turnId: number, db: Db = pool) {
     edited_at: string | null;
   }>(
     db,
-    "SELECT chat_id,message_id,last_text_hash,edited_at FROM telegram_messages WHERE bot_key=$1 AND turn_id=$2 AND kind='turn_status' LIMIT 1",
-    [botKey(), turnId],
+    "SELECT chat_id,message_id,last_text_hash,edited_at FROM telegram_messages WHERE bot_key=$1 AND turn_id=$2 AND user_id=$3 AND chat_id=$4 AND kind='turn_status' LIMIT 1 FOR UPDATE",
+    [botKey(), turnId, link.user_id, link.chat_id],
   );
 }
 
-async function editTracked(
+export async function editTracked(
   db: Db,
   m: { chat_id: string; message_id: number; last_text_hash: string | null },
   userId: number,
   text: string,
-  keyPrefix: string,
+  keyPrefix: "turn_progress" | "turn_final" | "run_status",
   keyboard?: unknown[][],
+  link?: OutboxLink,
 ) {
-  const h = hash(text + JSON.stringify(keyboard ?? null));
+  const payload = {
+    chat_id: m.chat_id,
+    message_id: m.message_id,
+    text: preview(text),
+    disable_web_page_preview: true,
+    ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+  };
+  const h = hash(JSON.stringify([payload.text, keyboard ?? null, link?.kind ?? null]));
   if (m.last_text_hash === h) return;
-  await queue(
+  // Replace a pending edit in place so it keeps its delivery backoff and cannot overwrite newer content.
+  const replaced = await one(
     db,
-    `${keyPrefix}:${m.message_id}:${h}`,
-    "editMessageText",
-    {
-      chat_id: m.chat_id,
-      message_id: m.message_id,
-      text: textLimit(text, 3900),
-      disable_web_page_preview: true,
-      ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
-    },
-    [],
-    undefined,
-    userId,
+    `WITH pending AS (
+      SELECT id,next_at FROM telegram_outbox
+      WHERE bot_key=$1 AND user_id=$2 AND status='pending' AND dedupe_key LIKE ANY($3)
+        AND payload->>'message_id'=$6 AND payload->>'chat_id'=$7 FOR UPDATE
+    ), retained AS (SELECT min(id) AS id,max(next_at) AS next_at FROM pending)
+    UPDATE telegram_outbox o SET
+      status=CASE WHEN o.id=r.id THEN 'pending' ELSE 'dead' END,
+      payload=$4,link=$5,next_at=r.next_at
+    FROM retained r WHERE o.id IN (SELECT id FROM pending) RETURNING o.id`,
+    [
+      botKey(),
+      userId,
+      keyPrefix === "run_status" ? ["run_status:%"] : ["turn_progress:%", "turn_final:%"],
+      JSON.stringify(payload),
+      link ? JSON.stringify(link) : null,
+      String(m.message_id),
+      m.chat_id,
+    ],
   );
+  if (!replaced)
+    await queue(
+      db,
+      `${keyPrefix}:${m.message_id}:${opaqueId()}`,
+      "editMessageText",
+      payload,
+      [],
+      undefined,
+      userId,
+      { link },
+    );
   await q(
     db,
     "UPDATE telegram_messages SET last_text_hash=$4,edited_at=now() WHERE bot_key=$1 AND chat_id=$2 AND message_id=$3",
@@ -119,26 +151,25 @@ async function editTracked(
   );
 }
 
-async function progressText(turnId: number, L: string) {
-  const t = await chatRepository.getTurn(turnId);
-  if (!t) return null;
-  const tools = await one<{ n: number }>(
-    pool,
-    "SELECT count(*)::int AS n FROM chat_tool_calls WHERE turn_id=$1",
-    [turnId],
-  );
-  const phase = PHASE_LABEL[String(t.phase ?? "")]?.[L === "en" ? 1 : 0] ?? (t.phase || t.status);
-  return `⏳ ${tr(L, "Đang", "Working")}: ${phase} · ${elapsed(t.started_at ?? t.created_at)}${tools?.n ? ` · ${tools.n} ${tr(L, "công cụ", "tools")}` : ""}`;
-}
-
-/** Edit the status message of a running turn (bounded to one edit per few seconds). */
+/** Edit only on phase changes, keeping Telegram quiet while work continues in the same phase. */
 async function refreshRunningTurn(link: LinkRow, L: string) {
   const active = await chatRepository.activeTurn(link.conversation_id);
   if (!active) return;
-  const m = await statusMessage(active.id);
-  if (!m || (m.edited_at && Date.now() - new Date(m.edited_at).getTime() < TURN_EDIT_MS)) return;
-  const text = await progressText(active.id, L);
-  if (text) await editTracked(pool, m, link.user_id, text, "turn_progress");
+  await withTx(async (db) => {
+    const m = await statusMessage(db, link, active.id);
+    if (!m || (m.edited_at && Date.now() - new Date(m.edited_at).getTime() < TURN_EDIT_MS)) return;
+    const current = await chatRepository.activeTurn(link.conversation_id, db);
+    if (!current || current.id !== active.id) return;
+    const phase = PHASE_LABEL[String(current.phase ?? "")]?.[L === "en" ? 1 : 0];
+    if (phase)
+      await editTracked(
+        db,
+        m,
+        link.user_id,
+        `⏳ ${tr(L, "Đang", "Working")}: ${phase}`,
+        "turn_progress",
+      );
+  });
 }
 
 const PROTECTED_LABEL = (tool: string) => !(tool in AUTONOMOUS_ACTIONS);
@@ -441,18 +472,6 @@ async function deliverTurn(
   const turn = await chatRepository.getTurn(turnId);
   if (!turn) return "delivered";
   const fromTelegram = String(turn.client_message_id ?? "").startsWith("tg-");
-  const status = await statusMessage(turnId);
-  // The "⏳" message is still in the outbox: deliver on a later pass so it gets its final edit (keeps order).
-  if (
-    fromTelegram &&
-    !status &&
-    (await one(
-      pool,
-      "SELECT 1 FROM telegram_outbox WHERE bot_key=$1 AND dedupe_key=$2 AND status='pending'",
-      [botKey(), `turn_status:${turnId}`],
-    ))
-  )
-    return "deferred";
   // Proposals first (idempotent per tool call; preview/policy/delegation use their own connections): a failure leaves
   // the cursor where it is and the whole turn is retried on the next pass — nothing is lost after a crash.
   try {
@@ -463,15 +482,12 @@ async function deliverTurn(
     );
     return "deferred";
   }
-  const provider = [turn.effective_provider ?? turn.provider, turn.effective_model ?? turn.model]
-    .filter(Boolean)
-    .join("/");
   const finalLine =
     turn.status === "completed"
-      ? `✅ ${tr(L, "Xong", "Done")} · ${elapsed(turn.started_at ?? turn.created_at, new Date(turn.finished_at ?? Date.now()).getTime())}${provider ? ` · ${provider}` : ""}`
+      ? `✅ ${tr(L, "Xong", "Done")}`
       : turn.status === "canceled"
         ? `⛔ ${tr(L, "Đã dừng", "Stopped")}`
-        : `❌ ${tr(L, "Lỗi", "Failed")}: ${textLimit(safeTelegramText((turn.failure as { message?: string } | null)?.message ?? turn.error ?? "—"), 200)}`;
+        : `❌ ${tr(L, "Lỗi", "Failed")}: ${preview(safeTelegramText((turn.failure as { message?: string } | null)?.message ?? turn.error ?? "—"), 200)}`;
   const answer = await chatRepository.messageOfTurn(turnId, "assistant");
   const user = fromTelegram ? null : await chatRepository.messageOfTurn(turnId, "user");
   let body = "";
@@ -479,11 +495,24 @@ async function deliverTurn(
     const [visible] = withholdRevoked([answer], await readableRepositories(link.user_id));
     body = telegramAnswer(visible.content);
   }
-  const parts = body ? chunkText(body) : [];
-  const shown = parts.slice(0, MAX_PARTS);
-  if (parts.length > MAX_PARTS)
-    shown[MAX_PARTS - 1] +=
-      `\n\n… ${tr(L, "Xem tiếp trên web", "Continued on the web")}: ${conversationUrl(link.conversation_id)}`;
+  const context = user
+    ? `💻 ${tr(L, "Từ web", "From the web")}: ${preview(safeTelegramText(user.content), 200)}`
+    : "";
+  let text = [context, turn.status !== "completed" || !body ? finalLine : "", body]
+    .filter(Boolean)
+    .join("\n\n");
+  let keyboard: { text: string; url: string }[][] | undefined;
+  if (text.length > TELEGRAM_TEXT_MAX) {
+    const url = conversationUrl(link.conversation_id);
+    const label = tr(L, "Xem tiếp trên web", "Continue on the web");
+    if (isPublicHttps(url)) {
+      keyboard = [[{ text: label, url }]];
+      text = preview(text);
+    } else {
+      const footer = `\n\n${label}: ${url}`;
+      text = preview(text, TELEGRAM_TEXT_MAX - footer.length) + footer;
+    }
+  }
   await withTx(async (db) => {
     const locked = await one<{ delivered_turn_id: string }>(
       db,
@@ -491,50 +520,42 @@ async function deliverTurn(
       [link.user_id, link.conversation_id],
     );
     if (!locked || Number(locked.delivered_turn_id) >= turnId) return;
-    if (status) await editTracked(db, status, link.user_id, finalLine, "turn_final");
-    else if (!fromTelegram && user)
+    const progress = fromTelegram
+      ? await one(
+          db,
+          `UPDATE telegram_outbox SET status='dead'
+           WHERE bot_key=$1 AND dedupe_key=$2 AND status IN ('pending','dead') RETURNING payload`,
+          [botKey(), `turn_status:${turnId}`],
+        )
+      : undefined;
+    const status = fromTelegram ? await statusMessage(db, link, turnId) : undefined;
+    const answerLink = {
+      kind: "answer",
+      conversation_id: link.conversation_id,
+      turn_id: turnId,
+    } as const;
+    if (status) {
+      await editTracked(db, status, link.user_id, text, "turn_final", keyboard, answerLink);
+    } else {
       await queue(
         db,
-        `turn_web:${turnId}`,
+        `turn_answer:${turnId}:0`,
         "sendMessage",
         {
           chat_id: link.chat_id,
-          text: `💻 ${tr(L, "Từ web", "From the web")}: ${textLimit(safeTelegramText(user.content), 200)}\n${finalLine}`,
+          text,
           disable_web_page_preview: true,
+          ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+          ...(progress?.payload.reply_parameters
+            ? { reply_parameters: progress.payload.reply_parameters }
+            : {}),
         },
         [],
         undefined,
         link.user_id,
-        { link: { kind: "notice", conversation_id: link.conversation_id, turn_id: turnId } },
+        { link: answerLink },
       );
-    for (const [i, text] of shown.entries())
-      await queue(
-        db,
-        `turn_answer:${turnId}:${i}`,
-        "sendMessage",
-        {
-          chat_id: link.chat_id,
-          text: shown.length > 1 ? `${text}\n\n(${i + 1}/${shown.length})` : text,
-          disable_web_page_preview: true,
-        },
-        [],
-        undefined,
-        link.user_id,
-        { link: { kind: "answer", conversation_id: link.conversation_id, turn_id: turnId } },
-      );
-    if (turn.status === "failed" && !status)
-      await queue(
-        db,
-        `turn_failed:${turnId}`,
-        "sendMessage",
-        { chat_id: link.chat_id, text: finalLine },
-        [],
-        undefined,
-        link.user_id,
-        {
-          link: { kind: "notice", conversation_id: link.conversation_id, turn_id: turnId },
-        },
-      );
+    }
     await operationButtons(db, link, turnId, L);
     await q(db, "UPDATE telegram_chat_links SET delivered_turn_id=$2 WHERE user_id=$1", [
       link.user_id,
@@ -584,12 +605,10 @@ async function runFacts(runId: number, db: Db = pool) {
     status: string;
     definition_key: string;
     error: string | null;
-    created_at: string;
-    started_at: string | null;
     updated_at: string;
   }>(
     db,
-    "SELECT id,owner_id,title,status,definition_key,error,created_at,started_at,updated_at FROM workflow_runs WHERE id=$1",
+    "SELECT id,owner_id,title,status,definition_key,error,updated_at FROM workflow_runs WHERE id=$1",
     [runId],
   );
   if (!run) return null;
@@ -598,11 +617,9 @@ async function runFacts(runId: number, db: Db = pool) {
     name: string;
     status: string;
     attempt_count: number;
-    error: string | null;
-    updated_at: string;
   }>(
     db,
-    "SELECT key,name,status,attempt_count,error,updated_at FROM workflow_steps WHERE run_id=$1 ORDER BY position",
+    "SELECT key,name,status,attempt_count FROM workflow_steps WHERE run_id=$1 ORDER BY position",
     [runId],
   );
   const prs = await q<{ id: number; url: string; title: string }>(
@@ -630,10 +647,7 @@ async function runFacts(runId: number, db: Db = pool) {
     prs: prs.map((p) => Number(p.id)),
     autonomy: Number(autonomy?.id ?? 0),
   };
-  const lastActivity = [run.updated_at, ...steps.map((s) => s.updated_at)]
-    .map((d) => new Date(d).getTime())
-    .reduce((a, b) => Math.max(a, b), 0);
-  return { run, steps, prs, snapshot, lastActivity, autonomyReason: autonomy?.reason ?? null };
+  return { run, steps, prs, snapshot, autonomyReason: autonomy?.reason ?? null };
 }
 
 function blocker(f: NonNullable<Awaited<ReturnType<typeof runFacts>>>, L: string) {
@@ -649,19 +663,23 @@ function blocker(f: NonNullable<Awaited<ReturnType<typeof runFacts>>>, L: string
   return null;
 }
 
-/** The live per-run status message: status, current step, elapsed time, last activity and blockers. */
+/** The live per-run status message changes when the workflow state changes. */
 export async function runStatusText(runId: number, L: string, db: Db = pool) {
-  const f = await runFacts(runId, db);
-  if (!f) return tr(L, "Run không còn tồn tại.", "The run no longer exists.");
+  const facts = await runFacts(runId, db);
+  return facts
+    ? formatRunStatus(facts, L)
+    : tr(L, "Run không còn tồn tại.", "The run no longer exists.");
+}
+
+function formatRunStatus(f: NonNullable<Awaited<ReturnType<typeof runFacts>>>, L: string) {
   const { run, snapshot } = f;
-  const block = ACTIVE_RUN.includes(run.status) ? blocker(f, L) : null;
+  const block = RUN_ACTIVE_STATUSES.includes(run.status) ? blocker(f, L) : null;
   return [
     `${STATUS_ICON[run.status] ?? "•"} Run #${run.id} · ${textLimit(safeTelegramText(run.title), 120)}`,
     `Workflow: ${run.definition_key} · ${run.status}`,
     snapshot.step
       ? `${tr(L, "Bước", "Step")}: ${textLimit(safeTelegramText(snapshot.step.name), 80)} (${snapshot.step.status})`
       : "",
-    `${tr(L, "Thời gian", "Elapsed")}: ${elapsed(run.started_at ?? run.created_at)} · ${tr(L, "hoạt động cuối", "last activity")} ${elapsed(new Date(f.lastActivity))} ${tr(L, "trước", "ago")}`,
     block ? `⛔ ${tr(L, "Vướng", "Blocked")}: ${block}` : "",
     ...f.prs.slice(-2).map((p) => `🔀 PR: ${p.url}`),
     runUrl(run.id),
@@ -694,7 +712,7 @@ export async function enqueueNotification(
     db,
     `INSERT INTO telegram_notifications(user_id,kind,severity,run_id,dedupe_key,text) VALUES($1,$2,$3,$4,$5,$6)
     ON CONFLICT(user_id,dedupe_key) DO NOTHING`,
-    [userId, n.kind, n.severity, n.runId ?? null, n.dedupe, textLimit(n.text, 800)],
+    [userId, n.kind, n.severity, n.runId ?? null, n.dedupe, preview(n.text, 800)],
   );
 }
 
@@ -719,9 +737,8 @@ function diffEvents(
         text: `⚠️ ${head}: ${tr(L, "bước", "step")} “${stepName(k)}” ${tr(L, "thất bại", "failed")}${s?.attempt_count ? ` (${tr(L, "lần", "attempt")} ${s.attempt_count})` : ""}. ${tr(L, "Nhắn “giải thích vì sao bước này lỗi” hoặc “thử lại bước này”.", "Ask “explain why this step failed” or “retry this step”.")}`,
       });
     }
-  for (const k of [...prev.failed, ...prev.retrying].filter(
-    (k) => !now.failed.includes(k) && !now.retrying.includes(k),
-  )) {
+  for (const k of new Set([...prev.failed, ...prev.retrying])) {
+    if (now.failed.includes(k) || now.retrying.includes(k)) continue;
     const s = steps.find((x) => x.key === k);
     if (s && ["RUNNING", "COMPLETED", "READY"].includes(s.status))
       out.push({
@@ -769,16 +786,15 @@ export async function syncRunWatches(force = false) {
     owner_id: number;
     chat_id: string;
     state: RunSnapshot | null;
-    watched: boolean | null;
   }>(
     pool,
-    `SELECT r.id,r.owner_id,b.chat_id,w.state,w.watched FROM workflow_runs r
+    `SELECT r.id,r.owner_id,b.chat_id,w.state FROM workflow_runs r
        JOIN telegram_bindings b ON b.user_id=r.owner_id AND b.bot_key=$1 JOIN users u ON u.id=r.owner_id AND u.active
        LEFT JOIN telegram_run_watch w ON w.user_id=r.owner_id AND w.run_id=r.id
       WHERE (r.status = ANY($2) OR r.updated_at > now()-interval '30 minutes' OR w.watched)
         AND NOT EXISTS (SELECT 1 FROM evaluation_runs e WHERE e.workflow_run_id=r.id)
       ORDER BY r.updated_at DESC LIMIT 300`,
-    [botKey(), ACTIVE_RUN],
+    [botKey(), RUN_ACTIVE_STATUSES],
   );
   for (const r of rows) {
     try {
@@ -791,13 +807,13 @@ export async function syncRunWatches(force = false) {
         if (prev)
           for (const n of diffEvents(f, prev, L))
             await enqueueNotification(db, r.owner_id, { ...n, runId: r.id }, prefs);
-        await q(
+        const watch = await one<{ watched: boolean }>(
           db,
           `INSERT INTO telegram_run_watch(user_id,run_id,state) VALUES($1,$2,$3)
-          ON CONFLICT(user_id,run_id) DO UPDATE SET state=$3,updated_at=now()`,
+          ON CONFLICT(user_id,run_id) DO UPDATE SET state=$3,updated_at=now() RETURNING watched`,
           [r.owner_id, r.id, JSON.stringify(f.snapshot)],
         );
-        if (!r.watched) return;
+        if (!watch?.watched) return;
         const m = await one<{
           chat_id: string;
           message_id: number;
@@ -806,17 +822,20 @@ export async function syncRunWatches(force = false) {
         }>(
           db,
           `SELECT chat_id,message_id,last_text_hash,edited_at FROM telegram_messages
-            WHERE bot_key=$1 AND user_id=$2 AND run_id=$3 AND kind='run_status' ORDER BY created_at DESC LIMIT 1`,
-          [botKey(), r.owner_id, r.id],
+            WHERE bot_key=$1 AND user_id=$2 AND run_id=$3 AND chat_id=$4 AND kind='run_status' ORDER BY created_at DESC LIMIT 1`,
+          [botKey(), r.owner_id, r.id, r.chat_id],
         );
-        if (!m || (m.edited_at && Date.now() - new Date(m.edited_at).getTime() < RUN_EDIT_MS))
+        const terminal = !RUN_ACTIVE_STATUSES.includes(f.run.status);
+        if (
+          !m ||
+          (!terminal && m.edited_at && Date.now() - new Date(m.edited_at).getTime() < RUN_EDIT_MS)
+        )
           return;
-        const terminal = !ACTIVE_RUN.includes(f.run.status);
         await editTracked(
           db,
           m,
           r.owner_id,
-          await runStatusText(r.id, L, db),
+          formatRunStatus(f, L),
           "run_status",
           terminal
             ? []
@@ -894,30 +913,49 @@ export async function flushNotifications(now = new Date()) {
       continue;
     const L = String(prefs.locale);
     await withTx(async (db) => {
-      const rows = await q<{ id: number; text: string; severity: string }>(
+      const rows = await q<{ id: number; text: string; run_id: number | null; kind: string }>(
         db,
-        `SELECT id,text,severity FROM telegram_notifications WHERE user_id=$1 AND sent_at IS NULL
+        `SELECT id,text,run_id,kind FROM telegram_notifications WHERE user_id=$1 AND sent_at IS NULL
           AND ($2::boolean = false OR severity='critical') ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 50`,
         [u.user_id, quiet],
       );
       if (!rows.length) return;
-      const text =
-        rows.length === 1
-          ? rows[0].text
+      const visible = rows.slice(0, 10);
+      const runId = rows[0].run_id;
+      const url = runId != null && rows.every((row) => row.run_id === runId) ? runUrl(runId) : null;
+      const label = tr(L, "Xem run", "View run");
+      const keyboard =
+        url && isPublicHttps(url) ? { inline_keyboard: [[{ text: label, url }]] } : undefined;
+      const text = [
+        ...(rows.length === 1
+          ? [rows[0].text]
           : [
               `🔔 ${rows.length} ${tr(L, "cập nhật", "updates")}`,
-              ...rows.slice(0, 10).map((r) => `• ${textLimit(r.text.split("\n")[0], 220)}`),
-              ...(rows.length > 10
-                ? [`… ${tr(L, "và", "and")} ${rows.length - 10} ${tr(L, "cập nhật khác", "more")}`]
+              ...visible.map((r) => {
+                const [summary, link] = r.text.split("\n");
+                return `• ${preview(summary, 200)}${r.kind === "pr" && /^https?:\/\/\S{1,140}$/.test(link ?? "") ? `\n  ${link}` : ""}`;
+              }),
+              ...(rows.length > visible.length
+                ? [
+                    `… ${tr(L, "và", "and")} ${rows.length - visible.length} ${tr(L, "cập nhật khác", "more")}`,
+                  ]
                 : []),
-              "",
-              tr(L, "/runs blocked để xem run đang vướng.", "/runs blocked to see stuck runs."),
-            ].join("\n");
+            ]),
+        url && !keyboard ? `\n${url}` : "",
+        !url && rows.length > 1 ? "\n/runs" : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
       await queue(
         db,
         `notify:${u.user_id}:${rows[rows.length - 1].id}`,
         "sendMessage",
-        { chat_id: u.chat_id, text: textLimit(text, 3900), disable_web_page_preview: true },
+        {
+          chat_id: u.chat_id,
+          text: preview(text),
+          disable_web_page_preview: true,
+          ...(keyboard ? { reply_markup: keyboard } : {}),
+        },
         [],
         undefined,
         u.user_id,

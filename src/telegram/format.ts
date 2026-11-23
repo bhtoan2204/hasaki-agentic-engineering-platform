@@ -1,13 +1,9 @@
+import { marked, type MarkedToken, type Token } from "marked";
 import { config } from "../config.ts";
 import { pool, type Db } from "../db/pool.ts";
 import { telegramUrl } from "../telegram.ts";
 import { safeTelegramText } from "./client.ts";
 import { preferences, type TelegramPreferences } from "./store.ts";
-
-/** Telegram's sendMessage limit is 4096 characters; leave room for a part marker. */
-export const TELEGRAM_TEXT_MAX = 3900;
-/** At most this many parts of one answer are sent; the rest stays a link to the web conversation. */
-export const MAX_PARTS = 4;
 
 export type Locale = "vi" | "en";
 export const tr = (locale: string, vi: string, en: string) => (locale === "en" ? en : vi);
@@ -52,84 +48,84 @@ const LEVEL_MIN = { all: 0, important: 1, critical: 2 } as const;
 export const severityAllowed = (level: string, severity: Severity) =>
   SEVERITY_RANK[severity] >= (LEVEL_MIN[level as keyof typeof LEVEL_MIN] ?? 1);
 
-const TABLE_ROW = /^\s*\|.*\|\s*$/;
-const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
-const cells = (row: string) =>
-  row
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split(/(?<!\\)\|/)
-    .map((c) => c.trim().replace(/\\\|/g, "|"));
-
-/**
- * Markdown tables do not exist in Telegram and wrap into unreadable pipes on a phone: each row becomes a bullet. Two
- * columns: "• first — second". More: "• first" then one indented "Header: value" line per other column.
- */
-function tablesToLists(text: string) {
-  const lines = text.split("\n");
-  const out: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!(TABLE_ROW.test(lines[i]) && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]))) {
-      out.push(lines[i]);
-      continue;
-    }
-    const header = cells(lines[i]);
-    i += 2;
-    const rows: string[][] = [];
-    for (; i < lines.length && TABLE_ROW.test(lines[i]); i++) rows.push(cells(lines[i]));
-    i--;
-    for (const r of rows) {
-      const [first, ...rest] = r;
-      if (header.length <= 2) out.push(`• ${first}${rest[0] ? ` — ${rest[0]}` : ""}`);
-      else {
-        out.push(`• ${first}`);
-        rest.forEach((v, k) => v && out.push(`   ${header[k + 1] || "–"}: ${v}`));
+function renderMarkdown(tokens: Token[]): string {
+  return (tokens as MarkedToken[])
+    .map((token, index) => {
+      switch (token.type) {
+        case "heading":
+          return "▍" + renderMarkdown(token.tokens) + "\n";
+        case "paragraph":
+        case "list_item":
+          return renderMarkdown(token.tokens) + "\n";
+        case "list": {
+          const leadingBreak = tokens[index - 1]?.type === "text" ? "\n" : "";
+          return (
+            leadingBreak +
+            token.items
+              .map((item, index) => {
+                const prefix = token.ordered ? `${Number(token.start) + index}. ` : "• ";
+                return prefix + renderMarkdown(item.tokens).trimEnd().replaceAll("\n", "\n   ");
+              })
+              .join("\n") +
+            "\n"
+          );
+        }
+        case "table": {
+          const headers = token.header.map((cell) => renderMarkdown(cell.tokens));
+          return (
+            token.rows
+              .map((row) => {
+                const [first, ...rest] = row.map((cell) => renderMarkdown(cell.tokens));
+                if (headers.length <= 2) return `• ${first}${rest[0] ? ` — ${rest[0]}` : ""}`;
+                return [
+                  `• ${first}`,
+                  ...rest.flatMap((value, index) =>
+                    value ? [`   ${headers[index + 1] || "–"}: ${value}`] : [],
+                  ),
+                ].join("\n");
+              })
+              .join("\n") + "\n"
+          );
+        }
+        case "blockquote":
+          return renderMarkdown(token.tokens).trimEnd().replace(/^/gm, "│ ") + "\n";
+        case "link": {
+          const label = renderMarkdown(token.tokens);
+          return /^https?:\/\//i.test(token.href) && label !== token.href
+            ? `${label} (${token.href})`
+            : label;
+        }
+        case "image":
+        case "strong":
+        case "em":
+        case "del":
+          return renderMarkdown(token.tokens);
+        case "code":
+          return "[Code available in platform]\n";
+        case "checkbox":
+          return token.checked ? "☑ " : "☐ ";
+        case "text":
+          return token.tokens ? renderMarkdown(token.tokens) : token.text;
+        case "codespan":
+          return token.raw.startsWith("```") ? "[Code available in platform]" : token.text;
+        case "escape":
+        case "html":
+          return token.text;
+        case "br":
+        case "hr":
+          return "\n";
+        default:
+          return token.raw;
       }
-    }
-  }
-  return out.join("\n");
+    })
+    .join("");
 }
 
-/**
- * A chat answer as Telegram plain text (no parse mode: a long answer is split into parts, which would break HTML/
- * MarkdownV2 entities): credentials redacted, code blocks replaced by a pointer to the web conversation (private
- * source stays on the platform), tables turned into lists, headings, emphasis, inline code, bullets, quotes and rules
- * rendered as readable text.
- */
+/** Render Markdown for a plain Telegram message and redact the resulting visible text. */
 export function telegramAnswer(markdown: string) {
-  return tablesToLists(safeTelegramText(markdown))
-    .replace(/^#{1,6}\s+(.+?)\s*#*\s*$/gm, "▍$1")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/__(.+?)__/g, "$1")
-    .replace(/`([^`\n]+)`/g, "$1")
-    .replace(/^(\s*)[-*+]\s+(?=\S)/gm, "$1• ")
-    .replace(/^\s*>\s?/gm, "│ ")
-    .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, "")
-    .replace(/(^|[\s(])\*([^*\s][^*\n]*?)\*(?=[\s).,:;!?]|$)/gm, "$1$2")
-    .replace(/\[([^\]\n]{1,200})\]\((https?:\/\/[^)\s]+)\)/g, "$1 ($2)")
+  return safeTelegramText(renderMarkdown(marked.lexer(markdown)))
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-/** Split on paragraph, then line, then hard boundaries; never splits a surrogate pair. */
-export function chunkText(text: string, max = TELEGRAM_TEXT_MAX): string[] {
-  const chars = Array.from(text);
-  if (chars.length <= max) return [text];
-  const parts: string[] = [];
-  let rest = chars;
-  while (rest.length > max) {
-    const window = rest.slice(0, max).join("");
-    let cut = window.lastIndexOf("\n\n");
-    if (cut < max * 0.5) cut = window.lastIndexOf("\n");
-    if (cut < max * 0.5) cut = window.lastIndexOf(" ");
-    const take = cut < max * 0.3 ? max : Array.from(window.slice(0, cut)).length;
-    parts.push(rest.slice(0, take).join("").trimEnd());
-    rest = rest.slice(take);
-    while (rest[0] === "\n" || rest[0] === " ") rest = rest.slice(1);
-  }
-  if (rest.length) parts.push(rest.join(""));
-  return parts;
 }
 
 export function elapsed(fromIso: string | Date | null | undefined, now = Date.now()) {

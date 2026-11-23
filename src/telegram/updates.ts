@@ -5,9 +5,10 @@ import { requireOwner } from "../authz/access.ts";
 import { execution } from "../auth/execution.ts";
 import { approveStep, rejectStep, answerQuestions } from "../workflow/engine.ts";
 import { runEvents } from "../workflow/events.ts";
+import { stepLink, telegramUrl } from "../telegram.ts";
 import { botKey, textLimit, safeTelegramText, telegramCall } from "./client.ts";
 import { opaqueId, bindFromStart, limited, preferences, queue, telegramAudit } from "./store.ts";
-import { contextHash, decisionMessage, makeAction } from "./workflow.ts";
+import { contextHash, decisionMessage, makeAction, navigation } from "./workflow.ts";
 import {
   GATEWAY_CALLBACK,
   handleChatMessage,
@@ -273,6 +274,8 @@ async function prompt(
     await q(db, "SELECT id FROM workflow_runs WHERE id=$1 FOR UPDATE", [original.run_id]);
     const { a, question, step } = await validate(db, id, identity, userId),
       en = a.locale === "en";
+    const nav = navigation(a.run_id, step.key, a.locale);
+    const navUrl = nav.text ? `\n${telegramUrl(stepLink(a.run_id, step.key))}` : "";
     if (
       (a.action_type === "approve" && a.option_value === "confirm") ||
       (a.action_type === "answer" && a.requires_confirmation)
@@ -298,10 +301,14 @@ async function prompt(
         {
           chat_id: a.chat_id,
           message_id: a.message_id,
-          text: en
-            ? `Confirm ${a.question_id ? "answer" : "approval"} for Run #${a.run_id}${a.question_id ? `: ${textLimit(safeTelegramText(a.option_value), 120)}` : ""}?`
-            : `Xác nhận ${a.question_id ? "trả lời" : "duyệt"} Run #${a.run_id}${a.question_id ? `: ${textLimit(safeTelegramText(a.option_value), 120)}` : ""}?`,
-          reply_markup: { inline_keyboard: [buttons] },
+          text:
+            (en
+              ? `Confirm ${a.question_id ? "answer" : "approval"} for Run #${a.run_id}${a.question_id ? `: ${textLimit(safeTelegramText(a.option_value), 120)}` : ""}?`
+              : `Xác nhận ${a.question_id ? "trả lời" : "duyệt"} Run #${a.run_id}${a.question_id ? `: ${textLimit(safeTelegramText(a.option_value), 120)}` : ""}?`) +
+            navUrl,
+          reply_markup: {
+            inline_keyboard: [buttons, ...(nav.reply_markup?.inline_keyboard ?? [])],
+          },
         },
         buttons.map((b) => b.callback_data.slice(2)),
       );
@@ -318,10 +325,11 @@ async function prompt(
         {
           chat_id: a.chat_id,
           message_id: a.message_id,
-          text: en
-            ? "Canceled. No workflow decision was recorded. Open the run to continue."
-            : "Đã hủy. Chưa ghi quyết định workflow. Mở run để tiếp tục.",
-          reply_markup: { inline_keyboard: [] },
+          text:
+            (en
+              ? `Confirmation canceled · Run #${a.run_id}`
+              : `Đã hủy xác nhận · Run #${a.run_id}`) + navUrl,
+          reply_markup: nav.reply_markup ?? { inline_keyboard: [] },
         },
         [id],
       );
