@@ -47,7 +47,7 @@
   display: grid;
   align-items: center;
   gap: var(--sp-3);
-  grid-template-columns: 16px 72px minmax(110px, 190px) minmax(0, 1fr) 64px 64px 52px minmax(
+  grid-template-columns: 16px 72px minmax(110px, 190px) minmax(0, 1fr) 64px 64px 84px minmax(
       0,
       150px
     );
@@ -71,7 +71,7 @@
   display: grid;
   align-items: center;
   gap: var(--sp-3);
-  grid-template-columns: 16px 72px minmax(110px, 190px) minmax(0, 1fr) 64px 64px 52px minmax(
+  grid-template-columns: 16px 72px minmax(110px, 190px) minmax(0, 1fr) 64px 64px 84px minmax(
       0,
       150px
     );
@@ -724,4 +724,11 @@
 
 .pe-source {
   margin-bottom: 12px;
+}
+
+.pe-time {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  white-space: nowrap;
 }

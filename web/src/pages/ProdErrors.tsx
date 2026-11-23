@@ -272,6 +272,13 @@ const hm = (t: string | null) =>
         hour12: false,
       })
     : "–";
+const dmy = (t: string) =>
+  new Date(t).toLocaleDateString(uiLocale() === "vi" ? "vi-VN" : "en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+const dmyHm = (t: string | null) => (t ? `${dmy(t)} ${hm(t)}` : "–");
 function reasonText(
   t: (key: string, params?: Record<string, string | number>) => string,
   reason: string,
@@ -544,8 +551,18 @@ function GroupRow({
             noBaseline={g.detail.no_baseline}
           />
         </span>
-        <span className="pe-time muted small" title={t("pe.latestTip")}>
-          {hm(g.last_at)}
+        <span
+          className="pe-time muted small"
+          title={`${t("pe.latestTip")}: ${dmyHm(g.last_at)}`}
+        >
+          {g.last_at ? (
+            <>
+              <span>{dmy(g.last_at)}</span>
+              <span>{hm(g.last_at)}</span>
+            </>
+          ) : (
+            "–"
+          )}
         </span>
         <span className="pe-state small">
           {g.work_item_code ? (
@@ -609,8 +626,8 @@ function GroupRow({
             <dd>
               {t("pe.todayLine", {
                 count: g.today_count,
-                first: hm(g.first_at),
-                last: hm(g.last_at),
+                first: dmyHm(g.first_at),
+                last: dmyHm(g.last_at),
                 yesterday: g.detail.no_baseline ? t("pe.noBaselineLong") : g.yesterday_count,
               })}
             </dd>
