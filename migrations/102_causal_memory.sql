@@ -30,14 +30,13 @@ CREATE TABLE causal_memories (
  commits jsonb NOT NULL DEFAULT '{}',
  -- Validity boundary: where/when the finding applies (repository base commit, files); invalidated when they change.
  validity jsonb NOT NULL DEFAULT '{}',
+ contradicts bigint[] NOT NULL DEFAULT '{}',
  provenance jsonb NOT NULL DEFAULT '{}',
  run_id bigint REFERENCES workflow_runs(id) ON DELETE SET NULL,
  fix_proof_id bigint REFERENCES fix_proofs(id) ON DELETE SET NULL,
  knowledge_proposal_id bigint,
  knowledge_key text,
  invalidated_at timestamptz,
- -- Invalidation cursor: every record is re-checked in turn (no starvation behind the oldest).
- checked_at timestamptz,
  invalidation_reason text,
  created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now(),
@@ -46,7 +45,6 @@ CREATE TABLE causal_memories (
 CREATE INDEX causal_memories_owner ON causal_memories (owner_id, status, updated_at DESC);
 CREATE INDEX causal_memories_signatures ON causal_memories USING gin (error_signatures);
 CREATE INDEX causal_memories_files ON causal_memories USING gin (files);
-CREATE INDEX causal_memories_check ON causal_memories (checked_at NULLS FIRST) WHERE status IN ('verified','proposed');
 
 CREATE TABLE causal_memory_versions (
  id bigserial PRIMARY KEY,
