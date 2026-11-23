@@ -30,6 +30,8 @@ import {
 import { STATUS_COLORS } from "./api.ts";
 import { autoLayout, edgeEnds, placeSteps } from "./dagLayout.ts";
 import { useI18n } from "./i18n/index.tsx";
+import { StepChibi } from "./office/StepChibi.tsx";
+import type { Role } from "./office/types.ts";
 // Node / edge styles (gn-*) live with the run page CSS; imported here so the Workflow Studio editor gets them too.
 import "./pages/RunView.css";
 import { DECISION_COLORS, type DecisionAction } from "./decisions";
@@ -154,6 +156,8 @@ export type StepNodeData = {
   transition?: { from: string; to: string; reason: string; revision: number };
   step: StepLike;
   status?: string;
+  /** Chibi owner of the step (rolesOfSteps); derived from the step alone when absent. */
+  role?: Role;
   attempts?: number;
   openQuestions?: number;
   selected?: boolean;
@@ -209,6 +213,7 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
       <Handle type="target" position={Position.Left} id="tl" />
       <Handle type="target" position={Position.Right} id="tr" />
       <span className="gn-rail" aria-hidden />
+      <StepChibi step={step} status={status} role={data.role} />
       <div className="gn-head">
         <span className="gn-type" title={step.type}>
           <TypeIcon size={15} strokeWidth={2} />

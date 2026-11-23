@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { rolesOfSteps } from "../office/StepChibi.tsx";
 import { ReactFlow, Background, type Node } from "@xyflow/react";
 import { api } from "../api.ts";
 import {
@@ -112,11 +113,12 @@ export function ProfilePreview({
     const steps = Array.isArray(data?.graph?.steps) ? data.graph.steps : [];
     if (!steps.length) return { nodes: [], edges: [] };
     const pos = autoLayout(steps);
+    const roles = rolesOfSteps(steps);
     const nodes: Node<StepNodeData>[] = steps.map((s) => ({
       id: s.key,
       type: "step",
       position: pos[s.key],
-      data: { step: s },
+      data: { step: s, role: roles[s.key] },
     }));
     return { nodes, edges: toEdges(steps, undefined, pos) };
   }, [data]);

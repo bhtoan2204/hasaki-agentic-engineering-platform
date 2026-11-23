@@ -1,4 +1,5 @@
 import { StepAgentFields, type StepAgentConfig } from "../StepAgentFields.tsx";
+import { rolesOfSteps } from "../office/StepChibi.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Background,
@@ -250,19 +251,22 @@ function Editor({ wfKey }: { wfKey: string }) {
     setSelected(key);
   }, []);
   const nodes: Node<StepNodeData>[] = useMemo(
-    () =>
-      (spec?.steps ?? []).map((s) => ({
+    () => {
+      const roles = rolesOfSteps(spec?.steps ?? []);
+      return (spec?.steps ?? []).map((s) => ({
         id: s.key,
         type: "step",
         position: positions[s.key] ?? { x: 0, y: 0 },
         selected: s.key === selected,
         data: {
           step: s,
+          role: roles[s.key],
           selected: s.key === selected,
           invalid: invalidKeys.has(s.key),
           onPick: pickStep,
         },
-      })),
+      }));
+    },
     [spec, positions, selected, invalidKeys, pickStep],
   );
   const edges: Edge[] = useMemo(

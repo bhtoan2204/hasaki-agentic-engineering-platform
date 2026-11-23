@@ -1,0 +1,28 @@
+.gn-chibi {
+  position: absolute;
+  top: -34px;
+  right: 14px;
+  line-height: 0;
+  pointer-events: auto;
+}
+
+.gn-chibi svg {
+  shape-rendering: crispEdges;
+  overflow: visible;
+}
+
+.gn-chibi .chibi {
+  transition: none;
+  cursor: inherit;
+}
+
+/* Idle nodes keep a still pose; only live and just-finished steps move. */
+.gn-chibi .chibi:not([data-pose="work"]):not([data-pose="celebrate"]):not([data-pose="ask"]) * {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gn-chibi .chibi * {
+    animation: none !important;
+  }
+}

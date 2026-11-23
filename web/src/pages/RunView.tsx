@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { rolesOfSteps } from "../office/StepChibi.tsx";
 import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
@@ -398,6 +399,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     const lastReplan = run.inputs?.replans?.at(-1);
     const decided = latestStepDecisions(run.decisions, run.steps);
     const rerun = new Set<string>(lastReplan?.invalidated ?? []);
+    const roles = rolesOfSteps(specSteps);
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
       const latestAttempt = latest.get(s.key);
@@ -429,6 +431,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           },
           transition: s.type === "coding_agent" ? run.graph?.transitions?.at(-1) : undefined,
           status: row?.status,
+          role: roles[s.key],
           attempts: attempts[s.key],
           openQuestions: openQ[s.key],
           selected: false,
