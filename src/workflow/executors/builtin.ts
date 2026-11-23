@@ -1,4 +1,6 @@
 import { isVerificationCommand, verificationReplay } from "../replay.ts";
+import { proofOfFixStep } from "../proofOfFixStep.ts";
+import { impactAnalysisStep } from "../../impact/step.ts";
 import { fileURLToPath } from "node:url";
 import { verifyPublication } from "../../agent/publicationVerification.ts";
 import {
@@ -1286,6 +1288,10 @@ export const integrationExecutor: StepExecutor = {
         return investigationReport(ctx);
       case "evidence_report":
         return evidenceReportStep(ctx);
+      case "proof_of_fix":
+        return proofOfFixStep(ctx);
+      case "impact_analysis":
+        return impactAnalysisStep(ctx);
       case "noop":
         return { kind: "completed", output: { ok: true } };
       default: {

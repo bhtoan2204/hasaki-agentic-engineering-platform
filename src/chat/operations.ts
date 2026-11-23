@@ -236,11 +236,17 @@ export async function proposeOperation(
       : null;
   if (autonomy?.allowed) {
     await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row!.id]);
-    const done = await decideOperation({ id: binding.userId }, row!.id, "confirm", (op) => {
-      const runId = Number(op.arguments.run_id);
-      if (Number.isSafeInteger(runId) && runId > 0)
-        void attachAutonomousRun(autonomy, runId).catch(() => {});
-    });
+    const done = await decideOperation({ id: binding.userId }, row!.id, "confirm");
+    // Timeout, budget and emergency stop belong to runs the policy STARTED — not to runs it paused, resumed, cancelled
+    // or retried for the owner. Awaited: a started run is never left without them.
+    const runId = Number(done.arguments.run_id);
+    if (
+      done.status === "succeeded" &&
+      tool === "runs.start" &&
+      Number.isSafeInteger(runId) &&
+      runId > 0
+    )
+      await attachAutonomousRun(autonomy, runId);
     return {
       status: done.status,
       operation_id: done.id,
@@ -324,7 +330,8 @@ async function autonomyFor(
       : run.allowed_repositories,
     texts: [run.title, ...(typeof args.step_key === "string" ? [args.step_key] : [])],
     runId: run.id,
-    runActive: ["RUNNING", "WAITING"].includes(run.status),
+    // The target run itself is already counted among the owner's active (PENDING/RUNNING/WAITING) runs.
+    runActive: ["PENDING", "RUNNING", "WAITING"].includes(run.status),
     conversationId: binding.conversationId,
     operationId,
   });

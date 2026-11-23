@@ -766,7 +766,7 @@ test("delegation: a proposed workflow starts only after the Start tap; the tap i
   );
 });
 
-test("delegation: an allowlisted workflow under an AUTONOMOUS policy starts on its own, with budget and audit", async () => {
+test("delegation under an AUTONOMOUS policy: instructions the assistant composed are never started without a tap", async () => {
   await investigationWorkflow();
   await saveChatPolicy(
     {
@@ -795,43 +795,98 @@ test("delegation: an allowlisted workflow under an AUTONOMOUS policy starts on i
   );
   await send(message(OWNER_TG, "/new"));
   await send(message(OWNER_TG, "/mode chat DELEGATE"));
+  // The delegated run's instructions (description) include the assistant's own answer, which may summarise logs or
+  // tool output: not the owner's words → the policy must not start it unattended.
   replies = [delegateCall("Investigate slow search page latency"), "Started under your policy."];
   const from = calls.length;
   await send(message(OWNER_TG, "Investigate slow search page latency"));
-  const auto = sent(OWNER_TG, from).find((c) => /Started automatically/.test(c.body.text ?? ""));
-  assert.ok(auto, "started by the policy without a tap");
+  assert.ok(!sent(OWNER_TG, from).some((c) => /Started automatically/.test(c.body.text ?? "")));
+  const proposal = sent(OWNER_TG, from).find((c) => /Delegation proposal/.test(c.body.text ?? ""))!;
+  assert.ok(proposal && buttons(proposal).some((b) => /Start/.test(b.text)), "the owner decides");
   const decision = (await one(
     pool,
-    "SELECT * FROM chat_autonomy_decisions WHERE owner_id=$1 AND action='work.delegate' AND allowed ORDER BY id DESC LIMIT 1",
+    "SELECT * FROM chat_autonomy_decisions WHERE owner_id=$1 AND action='work.delegate' ORDER BY id DESC LIMIT 1",
     [owner.id],
   ))!;
-  assert.ok(decision.run_id && decision.timeout_at, "the run is tracked for its timeout");
-  const run = (await one(pool, "SELECT budget_usd FROM workflow_runs WHERE id=$1", [
-    decision.run_id,
-  ]))!;
-  assert.equal(Number(run.budget_usd), 3, "the policy's per-run budget applies");
-  // The run's own approval gate is untouched: autonomy never decides workflow gates.
-  assert.equal(
-    (await one(pool, "SELECT status FROM workflow_steps WHERE run_id=$1", [decision.run_id]))!
-      .status,
-    "WAITING_APPROVAL",
-  );
-  // A risky subject (payments) is HIGH: it falls back to buttons.
-  replies = [
-    delegateCall("Investigate payment refund settlement errors"),
-    "Needs your confirmation.",
-  ];
-  const mark = calls.length;
-  await send(message(OWNER_TG, "Investigate payment refund settlement errors"));
+  assert.equal(decision.allowed, false);
+  assert.match(JSON.stringify(decision.reasons), /not authored by the owner/);
   assert.ok(
-    sent(OWNER_TG, mark).some(
-      (c) => /Delegation proposal/.test(c.body.text ?? "") && buttons(c).length,
-    ),
+    (
+      await q(
+        pool,
+        "SELECT 1 FROM audit_log WHERE action='chat.autonomy.require_human' AND resource_id=$1",
+        [String(decision.id)],
+      )
+    ).length,
+  );
+  // The owner's tap starts it, through the same idempotent delegation service.
+  await send(
+    tap(buttons(proposal).find((b) => /Start/.test(b.text))!.callback_data!, idOf(proposal)),
+  );
+  assert.equal(
+    (
+      await q(
+        pool,
+        "SELECT 1 FROM workflow_runs WHERE owner_id=$1 AND title='Investigate slow search page latency'",
+        [owner.id],
+      )
+    ).length,
+    1,
   );
   // Revoking the owner's opt-in returns to manual immediately.
   await q(
     pool,
     "UPDATE chat_autonomy_policies SET revoked_at=now() WHERE scope_kind='owner' AND scope_ref=$1",
     [String(owner.id)],
+  );
+});
+
+test("forwarded slash commands are not executed", async () => {
+  const before = await one(
+    pool,
+    "SELECT revision FROM chat_autonomy_policies WHERE scope_kind='owner' AND scope_ref=$1 AND revoked_at IS NULL",
+    [String(owner.id)],
+  );
+  const from = calls.length;
+  await send(message(OWNER_TG, "/mode auto", { forward_origin: { type: "user" } }));
+  assert.match(sent(OWNER_TG, from)[0].body.text!, /Forwarded messages are not accepted/);
+  const after = await one(
+    pool,
+    "SELECT revision FROM chat_autonomy_policies WHERE scope_kind='owner' AND scope_ref=$1 AND revoked_at IS NULL",
+    [String(owner.id)],
+  );
+  assert.deepEqual(after, before);
+});
+
+test("autonomy timeouts apply only to runs the policy started; the sweep pauses a started one", async () => {
+  const { enforceAutonomyTimeouts } = await import("../src/chat/autonomy.ts");
+  // An autonomous pause of the owner's own run attaches nothing to it.
+  const paused = await one(
+    pool,
+    "SELECT run_id, timeout_at FROM chat_autonomy_decisions WHERE owner_id=$1 AND action='runs.pause' AND allowed ORDER BY id DESC LIMIT 1",
+    [owner.id],
+  );
+  assert.ok(paused, "an autonomous pause happened earlier in this suite");
+  assert.equal(paused!.timeout_at, null);
+  // A policy-started run past its timeout is paused by the sweep (a PENDING one executes nothing and is not swept).
+  const run = await ownRun(owner, "Autonomously started");
+  await q(
+    pool,
+    "INSERT INTO chat_autonomy_decisions(owner_id,action,allowed,risk,mode,run_id,timeout_at) VALUES($1,'runs.start',true,'MEDIUM','AUTONOMOUS',$2,now()-interval '1 minute')",
+    [owner.id, run.id],
+  );
+  await enforceAutonomyTimeouts();
+  assert.equal(
+    (await one(pool, "SELECT status FROM workflow_runs WHERE id=$1", [run.id]))!.status,
+    "PAUSED",
+  );
+  assert.ok(
+    (
+      await q(
+        pool,
+        "SELECT 1 FROM audit_log WHERE action='chat.autonomy.timeout' AND resource_id=$1",
+        [String(run.id)],
+      )
+    ).length,
   );
 });

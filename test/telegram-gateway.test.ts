@@ -166,3 +166,34 @@ test("delegation provenance: a title lifted from observed data (prompt injection
     "confirm",
   );
 });
+
+test("chat autonomy: the administrator's global workflow list is a ceiling (null = none), owners only narrow it", () => {
+  const owner7 = (p: Partial<ChatAutonomyPolicy>) =>
+    policy({ scope_kind: "owner", scope_ref: "7", ...p });
+  // Global names no workflow: an owner cannot allowlist one by naming it.
+  assert.deepEqual(
+    resolveChatAutonomy([policy({ workflows: null }), owner7({ workflows: ["bugfix"] })], {
+      ownerId: 7,
+    }).workflows,
+    [],
+  );
+  // Owner list is intersected with the global ceiling.
+  assert.deepEqual(
+    resolveChatAutonomy(
+      [
+        policy({ workflows: ["incident-investigation"] }),
+        owner7({ workflows: ["incident-investigation", "bugfix"] }),
+      ],
+      { ownerId: 7 },
+    ).workflows,
+    ["incident-investigation"],
+  );
+  // An owner without a list inherits the ceiling.
+  assert.deepEqual(
+    resolveChatAutonomy(
+      [policy({ workflows: ["incident-investigation"] }), owner7({ workflows: null })],
+      { ownerId: 7 },
+    ).workflows,
+    ["incident-investigation"],
+  );
+});

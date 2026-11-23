@@ -270,9 +270,13 @@ export function environmentUnavailable(code: number | null, output: string): str
  */
 export function platformEnvironmentError(code: number | null, output: string): string | null {
   if (code !== 128) return null;
-  const line = output.split("\n").find((l) =>
-    /^fatal: (?:not a git repository|gitfile does not point to a valid repository)/.test(l.trim()),
-  );
+  const line = output
+    .split("\n")
+    .find((l) =>
+      /^fatal: (?:not a git repository|gitfile does not point to a valid repository)/.test(
+        l.trim(),
+      ),
+    );
   return line
     ? `the verification environment could not read the worktree's git metadata (${line.trim().slice(0, 300)}) — a platform/workspace problem, not a code failure`
     : null;
@@ -288,7 +292,9 @@ export function transientEnvironmentFailure(code: number | null, output: string)
   const tail = output.slice(-20_000);
   const m =
     /npm (?:ERR!|error) Exit handler never called!/.exec(tail) ??
-    /npm (?:ERR!|error) code (?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ENOSPC|EAI_FAIL)\b/.exec(tail) ??
+    /npm (?:ERR!|error) code (?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ENOSPC|EAI_FAIL)\b/.exec(
+      tail,
+    ) ??
     /\bENOSPC\b|no space left on device/i.exec(tail);
   return m ? m[0].slice(0, 200) : null;
 }
@@ -403,8 +409,35 @@ export function failureSignature(repos: RepoVerification[]): string {
 const ASSERTION =
   /\bt\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\(|\b(assert|require)\.\w+\(|\.Expect\(|\bgomock\.|\bt\.Run\(/;
 
+/** Assertions in JS/TS (expect/assert), Python (assert, self.assert*) and Java (assertEquals, assertThat, ...). */
+const OTHER_ASSERTION =
+  /\bexpect\(|\bassert(?:Equals|True|False|That|Throws|NotNull|Null|Equal\w*|\.\w+)?\s*\(|^[-+]\s*assert\s|\bself\.assert\w+\(/;
+/** Test files of every supported language (the Go rules below keep their own patterns). */
+const WEAKENABLE_TEST_FILE =
+  /_test\.go$|\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]+\.py$|_test\.py$|(?:Test|Tests)\.java$|(?:^|\/)__tests__\//;
+/** Markers that skip, focus (and so silently drop the rest) or disable tests outside Go. */
+/** Conditional or expected-failure markers with a stated reason: a human judges them (soft). */
+const CONDITIONAL_MARKERS: Array<[RegExp, string]> = [
+  [/^\+\s*@pytest\.mark\.(?:skipif|xfail)\b/, "conditional pytest skip/xfail added"],
+  [/^\+.*\b(?:it|test|describe)\.skipIf\(/, "conditional skip added"],
+];
+/** Vendored/third-party code is not this change's test suite. */
+const THIRD_PARTY = /(^|\/)(vendor|node_modules|third_party|external)\//;
+const DISABLE_MARKERS: Array<[RegExp, string]> = [
+  [/^\+.*\b(?:it|test|describe|context|suite)\.skip\(/, "test skipped (.skip)"],
+  [/^\+\s*x(?:it|test|describe|context)\(/, "test disabled (x-prefix)"],
+  [
+    /^\+.*\b(?:it|test|describe|context|suite)\.only\(/,
+    ".only() focuses one test and drops the others",
+  ],
+  [/^\+\s*@pytest\.mark\.skip\b(?!if)/, "pytest skip marker added"],
+  [/^\+\s*@unittest\.(?:skip\w*|expectedFailure)\b/, "unittest skip marker added"],
+  [/^\+.*\b(?:pytest\.skip|self\.skipTest)\(/, "test skipped at runtime"],
+  [/^\+\s*@(?:Disabled|Ignore)\b/, "JUnit test disabled"],
+];
+
 /**
- * Obvious test-weakening signals in a unified diff of *_test.go files (branch vs base). Regex heuristics: they catch
+ * Obvious test-weakening signals in a unified diff of test files (branch vs base): Go, JS/TS, Python, Java. Regex heuristics: they catch
  * blatant cases (deleted/skipped/disabled tests) and flag suspicious ones for a human; they cannot prove test integrity.
  */
 export function testWeakeningSignals(diff: string): { hard: string[]; soft: string[] } {
@@ -413,6 +446,8 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
   const hard: string[] = [];
   const soft: string[] = [];
   const assertDelta = new Map<string, number>();
+  const otherRemoved = new Set<string>();
+  const otherAdded = new Set<string>();
   let file = "";
   let oldFile = "";
   for (const line of diff.split("\n")) {
@@ -423,7 +458,7 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
     }
     const minus = line.match(/^--- a\/(.+)$/);
     if (minus) oldFile = minus[1];
-    if (line === "+++ /dev/null" && /_test\.go$/.test(oldFile))
+    if (line === "+++ /dev/null" && WEAKENABLE_TEST_FILE.test(oldFile) && !THIRD_PARTY.test(oldFile))
       hard.push(`${oldFile}: test file deleted`);
     const plus = line.match(/^\+\+\+ b\/(.+)$/);
     if (plus) file = plus[1];
@@ -436,10 +471,29 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
     if (/^\+\s*\/\/(go:build| \+build)\s.*\bignore\b/.test(line))
       hard.push(`${file}: build tag disables the file`);
     if (/^\+\s*if\s+false\s*\{/.test(line)) soft.push(`${file}: "if false" block added`);
-    if (/^[-+]/.test(line) && !/^(\+\+\+|---)/.test(line) && ASSERTION.test(line))
+    if (!/_test\.go$/.test(file) && WEAKENABLE_TEST_FILE.test(file) && !THIRD_PARTY.test(file)) {
+      for (const [re, what] of DISABLE_MARKERS) if (re.test(line)) hard.push(`${file}: ${what}`);
+      for (const [re, what] of CONDITIONAL_MARKERS) if (re.test(line)) soft.push(`${file}: ${what}`);
+      // By name across files: a test moved to another file is not removed; a renamed one is for a human to judge.
+      const rn =
+        line.match(/^-\s*(?:it|test)\(\s*(["'`])(.+?)\1/) ??
+        line.match(/^-\s*(?:async\s+)?def\s+(test_\w+)\(()/);
+      if (rn) otherRemoved.add(rn[2] || rn[1]);
+      const an =
+        line.match(/^\+\s*(?:it|test)\(\s*(["'`])(.+?)\1/) ??
+        line.match(/^\+\s*(?:async\s+)?def\s+(test_\w+)\(()/);
+      if (an) otherAdded.add(an[2] || an[1]);
+    }
+    if (
+      /^[-+]/.test(line) &&
+      !/^(\+\+\+|---)/.test(line) &&
+      (/_test\.go$/.test(file) ? ASSERTION : OTHER_ASSERTION).test(line)
+    )
       assertDelta.set(file, (assertDelta.get(file) ?? 0) + (line.startsWith("+") ? 1 : -1));
   }
   for (const t of removed) if (!added.has(t)) hard.push(`${t} removed`);
+  for (const t of otherRemoved)
+    if (!otherAdded.has(t)) soft.push(`test "${t.slice(0, 80)}" removed or renamed`);
   for (const [f, d] of assertDelta) if (d <= -3) soft.push(`${f}: ${-d} assertion line(s) removed`);
   return { hard: [...new Set(hard)], soft: [...new Set(soft)] };
 }
@@ -1031,7 +1085,8 @@ export async function verifyWorkspaces(
                   if (x.buildErrors.length || !x.tests.length) explained = false;
                   for (const t of x.tests) {
                     if (excluded.includes(t.split("/")[0])) continue;
-                    if (baseTests.has(t) || baseTests.has(t.split("/")[0])) fresh.add(t.split("/")[0]);
+                    if (baseTests.has(t) || baseTests.has(t.split("/")[0]))
+                      fresh.add(t.split("/")[0]);
                     else explained = false;
                   }
                 }
@@ -1559,9 +1614,30 @@ export async function diffAgainstBase(path: string, baseBranch: string) {
 }
 
 export async function diffTestsAgainstBase(path: string, baseBranch: string) {
+  // Against the merge base (this branch's own changes, including uncommitted ones): tests added on the base after the
+  // branch was cut are not "removed" by this change.
+  const mergeBase = await exec("git", ["-C", path, "merge-base", `origin/${baseBranch}`, "HEAD"])
+    .then((r) => r.stdout.trim())
+    .catch(() => `origin/${baseBranch}`);
   const { stdout } = await exec(
     "git",
-    ["-C", path, "diff", "--no-color", `origin/${baseBranch}`, "--", "*_test.go"],
+    [
+      "-C",
+      path,
+      "diff",
+      "--no-color",
+      mergeBase,
+      "--",
+      "*_test.go",
+      "*.test.*",
+      "*.spec.*",
+      "*_test.py",
+      "test_*.py",
+      "*/test_*.py",
+      "*Test.java",
+      "*Tests.java",
+      "*/__tests__/*",
+    ],
     { maxBuffer: 16 * 1024 * 1024 },
   );
   return stdout;

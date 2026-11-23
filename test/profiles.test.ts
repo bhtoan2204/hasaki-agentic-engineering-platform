@@ -144,8 +144,21 @@ test("FAST DAG: analysis folded into the coding step, plan approval and AI revie
   ]);
   assert.deepEqual(
     bug.steps.map((s) => s.key),
-    ["discover", "confirm_repos", "implement", "regression_test", "pr", "qc_merge", "cleanup"],
+    // The deterministic Proof-of-Fix step stays (it records PARTIAL at best without an independent review).
+    // Deterministic, read-only steps stay: cross-repository impact and the Proof-of-Fix verdict.
+    [
+      "discover",
+      "confirm_repos",
+      "implement",
+      "regression_test",
+      "impact",
+      "proof",
+      "pr",
+      "qc_merge",
+      "cleanup",
+    ],
   );
+  assert.deepEqual(bug.steps.find((s) => s.key === "pr")!.depends_on, ["proof"]);
 });
 
 test("FAST not applicable: no coding step, or a branch depends on a removed step → caller falls back", () => {
@@ -170,8 +183,13 @@ test("STANDARD is the identity; DEEP removes auto-approval and enables AI discov
   const spec = tpl("bug-investigation");
   assert.deepEqual(
     spec.steps.find((s) => s.key === "pr")!.depends_on,
+    ["proof"],
+    "the PR waits for the Proof-of-Fix verdict",
+  );
+  assert.deepEqual(
+    spec.steps.find((s) => s.key === "proof")!.depends_on,
     ["review"],
-    "bug fixes are code-reviewed before the PR",
+    "bug fixes are code-reviewed before the proof and the PR",
   );
   assert.equal(applyProfile(spec, "STANDARD").spec, spec);
   const deep = applyProfile(spec, "DEEP");

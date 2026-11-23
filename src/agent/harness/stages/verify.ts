@@ -56,6 +56,20 @@ import {
   symptomFixSignals,
 } from "../../rootCause.ts";
 
+/** Keys only the platform may write on a coding step's output (see rootCause.ts codingEvidence, proofOfFix.ts). */
+export const PLATFORM_EVIDENCE_KEYS = [
+  "regression_proof",
+  "tested_heads",
+  "symptom_signals",
+  "verification",
+] as const;
+export function withoutPlatformEvidence<T>(o: T): T {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return o;
+  const copy = { ...(o as Record<string, unknown>) };
+  for (const k of PLATFORM_EVIDENCE_KEYS) delete copy[k];
+  return copy as T;
+}
+
 /** Deterministic verification: the independent verdict gates, or the bounded verify-and-repair loop for implementation steps. */
 export async function verifyStage(s: LifecycleState): Promise<ExecResult | void> {
   const {
@@ -78,7 +92,9 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
     terminalCodingFailure,
     restoreWorkspaces,
   } = s;
-  let output = s.output;
+  // Platform evidence is written by the platform only: an implementer's submission can never supply (forge) a
+  // regression proof, tested heads, symptom signals or a verification summary — they are recomputed below or absent.
+  let output = independent ? s.output : withoutPlatformEvidence(s.output);
   if (independent) {
     const gap = independentSubmissionGap(s.submitted, {
       toolNames: Object.keys(metrics.tool_calls),
@@ -486,7 +502,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         if (await openQuestions()) return pause(r.text);
         const terminalRepair = terminalCodingFailure(s.submitted);
         if (terminalRepair) return terminalRepair;
-        if (s.submitted) accepted = s.submitted;
+        if (s.submitted) accepted = withoutPlatformEvidence(s.submitted);
         if (ctx.run.profile === "MICRO") {
           const check = await assessMicroScope();
           if (check.escalate) return check.result;

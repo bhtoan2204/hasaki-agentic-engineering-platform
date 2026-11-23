@@ -86,8 +86,11 @@ Resolution is most-restrictive across the applicable policies:
 - **owner** (the user's explicit opt-in, `/mode` or the API) — required; absent means MANUAL;
 - **repository** policies for the run's repositories and a **workflow** policy for its workflow, where present.
 
-Mode is the minimum; allowlisted `actions` and `workflows` are intersected (no workflow list anywhere means no workflow
-can be started autonomously); limits take the minimum. `paused` at any level is an emergency stop.
+Mode is the minimum; allowlisted `actions` are intersected; limits take the minimum. `workflows`: the **global** list is
+the ceiling — `null` there means no workflow can be started autonomously, whatever an owner policy names — and owner,
+repository and workflow policies can only narrow it. `paused` at any level is an emergency stop. Decisions are
+serialised per owner; the concurrency limit counts PENDING/RUNNING/WAITING runs plus starts allowed in the last ten
+minutes whose run is not attached yet.
 
 | Field | Meaning |
 |---|---|
@@ -108,6 +111,14 @@ merging, database mutations and secrets therefore stay with a human.
 
 An action also runs autonomously only if its values come from the owner's own words: the runtime provenance check
 (ADR 0010) must return `allow` — a run id, title or repository taken from logs, documents or tool results needs a tap.
+For `work.delegate` **every** field must be traced to the owner's messages — title, repositories, the workflow and the
+description that becomes the run's instructions. Today's delegation description includes the assistant's answer, so
+an autonomous delegation is refused (recorded as `require_human` with the reason) and the owner gets **Start/Dismiss**;
+autonomous starts in practice come from `runs.start` on an existing pending run, or from the radar/intake path.
+
+`run_budget_usd` and `timeout_minutes` attach only to runs the policy **started** (`runs.start`, `work.delegate`), never
+to runs it paused, resumed, cancelled or retried for the owner. The timeout sweep pauses started runs past their
+timeout (a failed pause is retried after five minutes); a PENDING run executes nothing and is not swept.
 
 Every decision (allowed or not) is stored in `chat_autonomy_decisions` with mode, risk, reasons and policy sources, and
 audited as `chat.autonomy.allow` / `chat.autonomy.require_human`. Policy changes are audited as
@@ -158,7 +169,8 @@ every other bot message in quiet hours.
 - Authorization: every read and write goes through the owner-scoped chat tools and engine functions; administrators
   get no cross-owner Telegram override.
 - Prompt injection: Telegram text is the owner's own message (the same authority as the web chat). Forwarded messages
-  are refused as instructions; non-text media is refused. Values observed from tools/documents cannot select targets
+  are refused as instructions **and as commands** (a forwarded `/mode auto` or `/stop all` does nothing); non-text media
+  is refused. Values observed from tools/documents cannot select targets
   or run autonomously (provenance check). Tool output is never sent raw to Telegram.
 - Data leaving the platform: answers are redacted and stripped of code blocks; run/step titles and reasons are bounded
   and redacted; logs, diffs and evidence stay behind a deep link.
@@ -174,7 +186,9 @@ every other bot message in quiet hours.
   creates a second turn.
 - Answers are delivered from a per-user cursor (`telegram_chat_links.delivered_turn_id`) advanced in the same
   transaction that queues the outbox rows; all outbox rows carry deterministic dedupe keys. A crash re-derives the same
-  keys.
+  keys. Delegation proposals of a turn are processed before the cursor moves (idempotent per tool call); a turn that
+  cannot be delivered yet (its status message still queued, or a proposal failed) stops the pass, so no later turn
+  moves the cursor past it.
 - Chat turns run in the receiver's process and are recovered by the existing chat turn recovery after a restart.
 - The receiver polls Telegram with a 1 s timeout while a linked conversation has a turn in flight, else 10 s.
 - Telegram cannot confirm sendMessage idempotently: a crash between send and commit can duplicate one message (same as

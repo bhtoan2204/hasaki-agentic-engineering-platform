@@ -150,12 +150,13 @@ export function resolveChatAutonomy(
       (acc, p) => acc.filter((a) => p.actions.includes(a)),
       Object.keys(AUTONOMOUS_ACTIONS),
     ),
-    workflows: named.length
-      ? named.reduce<string[]>(
-          (acc, p) => acc.filter((w) => p.workflows!.includes(w)),
-          [...named[0].workflows!],
-        )
-      : null,
+    // The administrator's global list is the ceiling: none (null) means no workflow; lower levels only narrow it.
+    workflows: named
+      .filter((p) => p !== global)
+      .reduce<string[]>(
+        (acc, p) => acc.filter((w) => p.workflows!.includes(w)),
+        [...(global.workflows ?? [])],
+      ),
     max_risk: applicable.every((p) => p.max_risk === "MEDIUM") ? "MEDIUM" : "LOW",
     max_cost_usd_per_day: minNullable(applicable.map((p) => num(p.max_cost_usd_per_day))),
     max_tokens_per_day: minNullable(applicable.map((p) => num(p.max_tokens_per_day))),
@@ -206,7 +207,11 @@ async function usage(ownerId: number, db: Db) {
          WHERE owner_id = $1 AND created_at > now() - interval '1 day' AND metrics ? 'cost_usd') AS cost,
        (SELECT COALESCE(sum(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) FROM execution_attempt_telemetry
          WHERE owner_id = $1 AND start_time > now() - interval '1 day') AS tokens,
-       (SELECT count(*)::int FROM workflow_runs WHERE owner_id = $1 AND status IN ('RUNNING', 'WAITING')) AS active`,
+       -- Active runs (PENDING included) plus starts allowed in the last 10 minutes whose run is not attached yet: a
+       -- decision taken a moment ago counts before its run exists (decisions are serialised per owner).
+       (SELECT count(*)::int FROM workflow_runs WHERE owner_id = $1 AND status IN ('PENDING', 'RUNNING', 'WAITING')) +
+       (SELECT count(*)::int FROM chat_autonomy_decisions WHERE owner_id = $1 AND allowed AND run_id IS NULL
+          AND action IN ('runs.start', 'work.delegate') AND created_at > now() - interval '10 minutes') AS active`,
     [ownerId],
   );
   return {
@@ -227,6 +232,8 @@ export interface AutonomyRequest {
   runActive?: boolean;
   conversationId?: number | null;
   operationId?: number | null;
+  /** A reason found by the caller that forces a human decision (recorded with the decision). */
+  requireHuman?: string;
 }
 export interface AutonomyVerdict {
   allowed: boolean;
@@ -238,10 +245,14 @@ export interface AutonomyVerdict {
 }
 
 /** The decision, recorded (allowed or not) with its reasons and policy sources, and audited. */
-export async function decideChatAutonomy(
-  req: AutonomyRequest,
-  db: Db = pool,
-): Promise<AutonomyVerdict> {
+export async function decideChatAutonomy(req: AutonomyRequest, db?: Db): Promise<AutonomyVerdict> {
+  // One decision at a time per owner (transaction-scoped lock): limits are checked and the allowed decision recorded
+  // atomically, so concurrent turns cannot each see room for "one more" run.
+  if (!db)
+    return withTx(async (tx) => {
+      await q(tx, "SELECT pg_advisory_xact_lock(hashtext($1))", [`chat_autonomy:${req.ownerId}`]);
+      return decideChatAutonomy(req, tx);
+    });
   const policy = resolveChatAutonomy(await loadChatAutonomyPolicies(db), {
     ownerId: req.ownerId,
     repositories: req.repositories,
@@ -255,6 +266,7 @@ export async function decideChatAutonomy(
     reasons.push(why);
   };
   if (policy.mode === "MANUAL") reasons.push("mode MANUAL: the owner confirms every action");
+  if (allowed && req.requireHuman) deny(req.requireHuman);
   if (allowed && !policy.actions.includes(req.action)) deny(`${req.action} is not allowlisted`);
   if (allowed && risk === "HIGH") deny(`risk HIGH: ${riskReasons.join("; ") || "protected"}`);
   if (allowed && policy.mode === "SEMI" && risk !== "LOW")
@@ -342,6 +354,7 @@ export async function enforceAutonomyTimeouts() {
   const due = await q<{ id: number; run_id: number; owner_id: number }>(
     pool,
     `SELECT d.id, d.run_id, d.owner_id FROM chat_autonomy_decisions d JOIN workflow_runs r ON r.id = d.run_id
+      -- A PENDING run executes nothing (and cannot be paused): only started runs time out.
       WHERE d.timeout_at < now() AND d.timed_out_at IS NULL AND r.status IN ('RUNNING', 'WAITING')
       ORDER BY d.timeout_at LIMIT 20`,
   );
@@ -360,6 +373,12 @@ export async function enforceAutonomyTimeouts() {
         decision_id: d.id,
       });
     } catch (e) {
+      // Not enforced yet: release the claim and retry in 5 minutes (never "timed out" without a pause).
+      await q(
+        pool,
+        "UPDATE chat_autonomy_decisions SET timed_out_at = NULL, timeout_at = now() + interval '5 minutes' WHERE id = $1",
+        [d.id],
+      );
       await audit(d.owner_id, "chat.autonomy.timeout_failed", "workflow_run", String(d.run_id), {
         decision_id: d.id,
         error: (e as Error).message.slice(0, 200),
@@ -394,6 +413,16 @@ function validatePolicy(input: ChatPolicyInput) {
   const ref = input.scope_kind === "global" ? "" : String(input.scope_ref ?? "").trim();
   if (input.scope_kind !== "global" && !/^[A-Za-z0-9._/-]{1,200}$/.test(ref))
     throw new HttpError(400, "scope_ref is required");
+  if (
+    input.actions !== undefined &&
+    !(Array.isArray(input.actions) && input.actions.every((a) => typeof a === "string"))
+  )
+    throw new HttpError(400, "actions must be an array of strings");
+  if (
+    input.workflows != null &&
+    !(Array.isArray(input.workflows) && input.workflows.every((w) => typeof w === "string"))
+  )
+    throw new HttpError(400, "workflows must be an array of strings or null");
   const actions = input.actions ?? [];
   const unknown = actions.filter((a) => !(a in AUTONOMOUS_ACTIONS));
   if (unknown.length)

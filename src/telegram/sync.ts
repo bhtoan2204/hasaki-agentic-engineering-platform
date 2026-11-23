@@ -151,9 +151,13 @@ async function operationButtons(db: Db, link: LinkRow, turnId: number, L: string
     expires_at: string;
     status: string;
     auto: boolean;
+    by_policy: boolean;
   }>(
     db,
-    "SELECT id,tool,target,expires_at,status,auto FROM chat_operations WHERE turn_id=$1 AND owner_id=$2 ORDER BY id",
+    // `by_policy`: executed by the owner's chat autonomy policy (a pre-authorized QC/Kafka call is auto too, but not that).
+    `SELECT o.id,o.tool,o.target,o.expires_at,o.status,o.auto,
+       EXISTS (SELECT 1 FROM chat_autonomy_decisions d WHERE d.operation_id = o.id AND d.allowed) AS by_policy
+       FROM chat_operations o WHERE o.turn_id=$1 AND o.owner_id=$2 ORDER BY o.id`,
     [turnId, link.user_id],
   );
   for (const op of ops) {
@@ -166,7 +170,7 @@ async function operationButtons(db: Db, link: LinkRow, turnId: number, L: string
       300,
     );
     if (op.status !== "pending") {
-      if (op.auto)
+      if (op.auto && op.by_policy)
         await queue(
           db,
           `op_auto:${op.id}`,
@@ -287,12 +291,28 @@ async function delegationProposals(link: LinkRow, turnId: number, L: string) {
     // Autonomy: only when the title is backed by the owner's own messages (not by logs/documents the chat read).
     let autoStarted = false;
     if (preview.workflow && !preview.warnings.some((w) => /disabled|no workflow/.test(w))) {
+      // Unattended start only when EVERY part of the delegation — title, repositories, the description that becomes
+      // the run's instructions, the workflow — is the owner's own wording. Anything the model composed or read
+      // (logs, tool output, documents) makes it unknown/untrusted → the owner taps.
       const provenance = await operationProvenance(
         { userId: link.user_id, conversationId: link.conversation_id },
         "work.delegate",
-        { title: preview.title, repositories: preview.repositories },
+        {
+          title: preview.title,
+          repositories: preview.repositories,
+          description: preview.description,
+          workflow: preview.workflow.key,
+        },
       ).catch(() => null);
-      if (provenance?.decision === "allow") {
+      const untrusted = !provenance
+        ? "provenance could not be checked"
+        : provenance.decision === "deny" || provenance.fields.some((f) => f.origin !== "trusted")
+          ? `delegation content not authored by the owner (${provenance.fields
+              .filter((f) => f.origin !== "trusted")
+              .map((f) => `${f.field}: ${f.origin}`)
+              .join(", ")})`
+          : undefined;
+      {
         const verdict = await decideChatAutonomy({
           ownerId: link.user_id,
           action: "work.delegate",
@@ -300,6 +320,7 @@ async function delegationProposals(link: LinkRow, turnId: number, L: string) {
           repositories: preview.repositories,
           texts: [preview.title, preview.description],
           conversationId: link.conversation_id,
+          requireHuman: untrusted,
         });
         if (verdict.allowed) {
           const d = await executeDelegation(conversation, request as never, {
@@ -411,9 +432,14 @@ async function delegationProposals(link: LinkRow, turnId: number, L: string) {
 }
 
 /** One finished turn: final status line, the answer in parts, then its operations and proposals. */
-async function deliverTurn(link: LinkRow, turnId: number, L: string) {
+/** "deferred": not deliverable yet — the caller stops here so no later turn moves the cursor past it. */
+async function deliverTurn(
+  link: LinkRow,
+  turnId: number,
+  L: string,
+): Promise<"delivered" | "deferred"> {
   const turn = await chatRepository.getTurn(turnId);
-  if (!turn) return;
+  if (!turn) return "delivered";
   const fromTelegram = String(turn.client_message_id ?? "").startsWith("tg-");
   const status = await statusMessage(turnId);
   // The "⏳" message is still in the outbox: deliver on a later pass so it gets its final edit (keeps order).
@@ -426,7 +452,17 @@ async function deliverTurn(link: LinkRow, turnId: number, L: string) {
       [botKey(), `turn_status:${turnId}`],
     ))
   )
-    return;
+    return "deferred";
+  // Proposals first (idempotent per tool call; preview/policy/delegation use their own connections): a failure leaves
+  // the cursor where it is and the whole turn is retried on the next pass — nothing is lost after a crash.
+  try {
+    await delegationProposals(link, turnId, L);
+  } catch (e) {
+    console.warn(
+      `telegram gateway: delegation proposal of turn ${turnId} (retried): ${(e as Error).message.slice(0, 200)}`,
+    );
+    return "deferred";
+  }
   const provider = [turn.effective_provider ?? turn.provider, turn.effective_model ?? turn.model]
     .filter(Boolean)
     .join("/");
@@ -505,12 +541,7 @@ async function deliverTurn(link: LinkRow, turnId: number, L: string) {
       turnId,
     ]);
   });
-  // After the cursor moved: proposals call services (preview, policy, delegation) that use their own connections.
-  await delegationProposals(link, turnId, L).catch((e) =>
-    console.warn(
-      `telegram gateway: delegation proposal of turn ${turnId}: ${(e as Error).message.slice(0, 200)}`,
-    ),
-  );
+  return "delivered";
 }
 
 export async function syncChatTurns() {
@@ -525,7 +556,7 @@ export async function syncChatTurns() {
           ORDER BY id LIMIT 5`,
         [link.conversation_id, link.delivered_turn_id],
       );
-      for (const t of done) await deliverTurn(link, Number(t.id), L);
+      for (const t of done) if ((await deliverTurn(link, Number(t.id), L)) === "deferred") break;
     } catch (e) {
       console.warn(
         `telegram gateway: chat sync for user ${link.user_id}: ${(e as Error).message.slice(0, 200)}`,

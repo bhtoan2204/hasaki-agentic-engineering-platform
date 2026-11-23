@@ -436,9 +436,17 @@ async function handleUpdate(update: TelegramUpdate, retry = false) {
           [replyTo, botKey(), actorId, identity.chat],
         ));
       if (!promptReply) {
-        const command = parseCommand(text);
+        const m = identity.message;
+        // Forwarded text is someone else's: never a command either (handleChatMessage refuses it with a notice).
+        const forwarded = !!(
+          m.forward_origin ||
+          m.forward_from ||
+          m.forward_from_chat ||
+          m.forward_date
+        );
+        const command = forwarded ? null : parseCommand(text);
         if (command) await handleCommand(identity, actor, Number(update.update_id), command);
-        else if (text.startsWith("/"))
+        else if (text.startsWith("/") && !forwarded)
           await queue(pool, `notice:${update.update_id}`, "sendMessage", {
             chat_id: identity.chat,
             text: "Unknown command / Lệnh không hợp lệ. /help",

@@ -411,7 +411,10 @@ const INCIDENT_INVESTIGATE = {
     "{ summary, hypotheses: string[], next_steps: string[], missing_evidence?: string[], " +
     ROOT_CAUSE_CONTRACT +
     ", " +
-    CLAIMS_CONTRACT.replace("contradicts?: string[] }]", "contradicts?: string[], observed?: { pointer, equals?, count?, includes? } }]") +
+    CLAIMS_CONTRACT.replace(
+      "contradicts?: string[] }]",
+      "contradicts?: string[], observed?: { pointer, equals?, count?, includes? } }]",
+    ) +
     " }",
 };
 
@@ -824,7 +827,12 @@ export const PRODUCTION_BUG_HUNT = {
     request: { description: "the incident, as the investigation's request", required: true },
   },
   steps: [
-    { key: "context", type: "integration", name: "Incident Context", config: { action: "bug_hunt_context" } },
+    {
+      key: "context",
+      type: "integration",
+      name: "Incident Context",
+      config: { action: "bug_hunt_context" },
+    },
     {
       key: "scope",
       type: "integration",
@@ -1080,6 +1088,19 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
             objectives: { required_sources: ["trace", "log", "code"], require_root_cause: true },
           },
         },
+        {
+          key: "proof",
+          type: "integration",
+          name: "Proof of Diagnosis",
+          depends_on: ["report"],
+          // Read-only: records the diagnosis verdict (no fix), never blocks the report.
+          config: {
+            action: "proof_of_fix",
+            root_cause_from: "investigate",
+            report_from: "report",
+            block_on: [],
+          },
+        },
       ],
     },
   },
@@ -1153,17 +1174,39 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           },
         },
         {
+          key: "impact",
+          type: "integration",
+          name: "Cross-Repository Impact",
+          depends_on: ["implement"],
+          // Read-only: dependencies and breaking changes in other repositories, for the reviewer and the PR.
+          config: { action: "impact_analysis" },
+        },
+        {
           key: "review",
           type: "agent",
           name: "Code Review",
-          depends_on: ["regression_test"],
+          depends_on: ["regression_test", "impact"],
           config: BUG_REVIEW,
+        },
+        {
+          key: "proof",
+          type: "integration",
+          name: "Proof of Fix",
+          depends_on: ["review"],
+          // Deterministic verdict from the recorded evidence; FAILED blocks the PR (agent/proofOfFix.ts).
+          config: {
+            action: "proof_of_fix",
+            root_cause_from: "root_cause",
+            implement_from: "implement",
+            test_from: "regression_test",
+            review_from: "review",
+          },
         },
         {
           key: "pr",
           type: "git_pull_request",
           name: "Pull Request",
-          depends_on: ["review"],
+          depends_on: ["proof"],
           config: { mode: "approval", content_from: "implement" },
         },
         qcMerge("pr"),

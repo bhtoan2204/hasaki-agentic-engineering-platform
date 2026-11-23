@@ -388,6 +388,25 @@ export async function executeContextTool(
       }
       return hits;
     }
+    case "search_causal_memory": {
+      if (!env.ownerId) return [];
+      const { recallCausal } = await import("../memory/causal.ts");
+      const r = await recallCausal(env.ownerId, {
+        text: args.query ?? "",
+        allowedRepositories: env.allowed,
+        repositories: env.selected.length ? env.selected : env.allowed,
+        limit: Math.min(5, Number(args.limit ?? 5)),
+        tokenBudget: 600,
+      });
+      return r.items.map((i) => ({
+        id: i.id,
+        status: i.status,
+        caution: i.negative,
+        authoritative: i.authoritative,
+        text: i.text,
+        provenance: source(`causal_memory:${i.id}`, i.version, null, "owner", i.why.join("; "), i.status),
+      }));
+    }
     case "get_work_item": {
       const row = await one(
         pool,

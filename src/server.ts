@@ -1,5 +1,7 @@
 import { startTelegramTransport } from "./telegram/transport.ts";
 import { enforceAutonomyTimeouts } from "./chat/autonomy.ts";
+import { radarTick } from "./radar/scan.ts";
+import { invalidateCausalMemories } from "./memory/causal.ts";
 import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
 import { repositories } from "./repos/service.ts";
 import { background, settleBackground } from "./workflow/background.ts";
@@ -103,6 +105,15 @@ registerReconcileTask(() => dispatchIntake());
 registerReconcileTask(() => syncPullRequestLifecycles());
 // Chat autonomy: runs started by an autonomy policy that outlive its timeout are paused for the owner.
 registerReconcileTask(() => enforceAutonomyTimeouts());
+// Engineering Radar: interval-gated deterministic detection over stored signals → findings → Intake Queue.
+registerReconcileTask(() => radarTick());
+// Causal memory: records whose cited files changed on the base become "outdated" (bounded, every 30 minutes).
+let causalCheckedAt = 0;
+registerReconcileTask(async () => {
+  if (Date.now() - causalCheckedAt < 30 * 60_000) return;
+  causalCheckedAt = Date.now();
+  await invalidateCausalMemories();
+});
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
 const goService = startGoService();

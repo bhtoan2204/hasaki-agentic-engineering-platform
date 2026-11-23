@@ -136,6 +136,12 @@ export interface Config {
    * (go/internal/analytics, ADR 0003); "typescript" is the in-process implementation and the fallback.
    */
   analytics: AnalyticsConfig;
+  /**
+   * Engineering Radar (src/radar): deterministic detection over stored production-error observations, workflow and CI
+   * failures. Reads only the platform's own database; RADAR_ENABLED=0 turns it off. Intake ingestion additionally
+   * needs an intake policy for source "radar".
+   */
+  radar: { enabled: boolean; intervalSeconds: number; maxSeries: number; maxIngestPerScan: number };
   /** LOCAL checkout overrides, never synchronized to PostgreSQL. */
   repositories: Record<string, string>;
   /** LOCAL: shared registry entries this machine never checks out (no startup checkout warning). */
@@ -663,6 +669,7 @@ const defaults: Config = {
     },
   },
   analytics: { timeoutMs: 15000 },
+  radar: { enabled: LIVE, intervalSeconds: 300, maxSeries: 500, maxIngestPerScan: 5 },
   codeIntelligence: {
     enabled: LIVE,
     includeGenerated: false,
@@ -1059,6 +1066,10 @@ function load(): Config {
       .map((x) => x.trim())
       .filter(Boolean);
   const semantic = cfg.retrieval.semantic;
+  if (process.env.RADAR_ENABLED)
+    cfg.radar.enabled = ["1", "true"].includes(process.env.RADAR_ENABLED);
+  if (process.env.RADAR_INTERVAL_SECONDS)
+    cfg.radar.intervalSeconds = Math.max(60, Number(process.env.RADAR_INTERVAL_SECONDS) || 300);
   if (process.env.RETRIEVAL_SEMANTIC_ENABLED)
     semantic.enabled = ["1", "true"].includes(process.env.RETRIEVAL_SEMANTIC_ENABLED);
   if (process.env.RETRIEVAL_SEMANTIC_URL) semantic.url = process.env.RETRIEVAL_SEMANTIC_URL;
@@ -1156,7 +1167,14 @@ function load(): Config {
   mkdirSync(cfg.dataDir, { recursive: true });
   if (LIVE) {
     // The Claude CLI bundled with the Agent SDK (skips the SDK's per-query musl detection) unless one is configured.
-    const bundled = join(import.meta.dirname, "..", "node_modules", "@anthropic-ai", "claude-agent-sdk-linux-x64", "claude");
+    const bundled = join(
+      import.meta.dirname,
+      "..",
+      "node_modules",
+      "@anthropic-ai",
+      "claude-agent-sdk-linux-x64",
+      "claude",
+    );
     if (!cfg.agent.claudeBin && !process.env.CLAUDE_CODE_EXECUTABLE && existsSync(bundled))
       cfg.agent.claudeBin = bundled;
     // The token between this server and platform-go: generated once per data directory (0600), not kept in .env.

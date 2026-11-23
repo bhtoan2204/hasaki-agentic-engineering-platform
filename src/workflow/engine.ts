@@ -476,6 +476,8 @@ export async function startRun(input: StartRunInput) {
       input.agentProvider != null,
       r.decision.profile,
       r.decision.complexity?.class ?? null,
+      agent_provider ?? null,
+      dv.key,
     );
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
     try {
@@ -522,8 +524,15 @@ export async function startRun(input: StartRunInput) {
     for (const decision of optimized.decisions)
       await q(
         c,
-        "INSERT INTO agent_optimization_decisions(run_id,step_key,recommendation_id,policy_id,provenance) VALUES($1,$2,$3,$4,$5)",
-        [id, decision.step_key, decision.recommendation_id, decision.policy_id, json(decision)],
+        "INSERT INTO agent_optimization_decisions(run_id,step_key,recommendation_id,policy_id,provenance,source) VALUES($1,$2,$3,$4,$5,$6)",
+        [
+          id,
+          decision.step_key,
+          decision.recommendation_id ?? null,
+          decision.policy_id ?? null,
+          json(decision),
+          decision.source === "adaptive_routing" ? "adaptive_routing" : "recommendation",
+        ],
       );
     const order = topoOrder(optimized.graph.steps);
     // One statement for the whole graph (a round trip per step inside the transaction was the cost of starting a run).

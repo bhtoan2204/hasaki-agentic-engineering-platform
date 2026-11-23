@@ -345,6 +345,75 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "memory.causal",
+    group: "knowledge",
+    description:
+      "Your own causal engineering memory: earlier incidents with their verified root cause, fix, regression tests and the approaches that did NOT work (cautions, not rules). Search by text, error signature, file, service or repository. Only VERIFIED records are authoritative; proposed/hypothesis/outdated ones are labelled.",
+    usage: '{"query": "refund settle timeout", "signatures?": ["refund settle timeout"], "files?": ["internal/settle.go"], "repositories?": ["payment-src"]}',
+    args: z
+      .object({
+        query: z.string().min(2).max(500),
+        signatures: z.array(z.string().min(2).max(300)).max(5).optional(),
+        files: z.array(z.string().min(1).max(400)).max(20).optional(),
+        repositories: repoArg,
+        include_outdated: z.boolean().optional(),
+      })
+      .strict(),
+    async run(a, ctx) {
+      const { recallCausal } = await import("../memory/causal.ts");
+      const r = await recallCausal(ctx.binding.userId, {
+        text: a.query,
+        errorSignatures: a.signatures,
+        files: a.files,
+        repositories: a.repositories,
+        includeOutdated: a.include_outdated,
+        allowedRepositories: ctx.readable,
+        limit: 5,
+        tokenBudget: 800,
+      });
+      return {
+        label: `causal memory "${cut(a.query, 60)}"`,
+        repositories: [...new Set(r.items.flatMap((i) => i.repositories))],
+        data: r,
+      };
+    },
+  },
+  {
+    name: "impact.analyze",
+    group: "repo",
+    description:
+      "Cross-repository change impact: which other repositories provide or consume what a change touches (Kafka topics, HTTP routes, gRPC services, DB tables, shared enums), breaking changes, compatibility checks, regression tests and repositories needing a coordinated update. Pass the changed files, a branch to diff against the base, or explicit contracts/symbols. Static links are literal on both sides; inferred links must be confirmed; stale indexes are reported.",
+    usage:
+      '{"repository": "payment-src", "files?": ["internal/refund/handler.go"], "branch?": "fix/refund", "contracts?": [{"kind": "kafka_topic", "key": "order.shipped"}], "symbols?": ["PaymentStatus"]}',
+    args: z
+      .object({
+        repository: z.string().min(1).max(200),
+        files: z.array(z.string().min(1).max(400)).max(50).optional(),
+        branch: z.string().min(1).max(200).optional(),
+        contracts: z
+          .array(
+            z.object({
+              kind: z.enum(["kafka_topic", "http_route", "grpc_service", "db_table", "shared_enum"]),
+              key: z.string().min(1).max(200),
+            }),
+          )
+          .max(20)
+          .optional(),
+        symbols: z.array(z.string().regex(/^[A-Za-z_]\w{2,80}$/)).max(20).optional(),
+      })
+      .strict(),
+    async run(a, ctx) {
+      const [repository] = pickRepositories(ctx, [a.repository]);
+      const { analyzeImpact } = await import("../impact/analyze.ts");
+      const r = await analyzeImpact(ctx.binding.userId, { ...a, repository });
+      return {
+        label: `impact of a change in ${repository}`,
+        repositories: [repository, ...new Set(r.impacts.map((i) => i.repo))],
+        data: { ...r, impacts: r.impacts.slice(0, 40), breaking: r.breaking.slice(0, 30) },
+      };
+    },
+  },
+  {
     name: "code.navigate",
     group: "repo",
     description:

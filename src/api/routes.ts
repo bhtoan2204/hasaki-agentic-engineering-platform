@@ -18,6 +18,17 @@ import {
   disconnect as disconnectTelegram,
   savePreferences,
 } from "../telegram/store.ts";
+import { fixProofOf } from "../workflow/proofOfFixStep.ts";
+import { listFindings, radarScan, setFindingStatus } from "../radar/scan.ts";
+import { analyzeImpact } from "../impact/analyze.ts";
+import { causalHistory, recallCausal, rollbackCausal, setCausalStatus } from "../memory/causal.ts";
+import {
+  eligibility,
+  loadOutcomes,
+  replayEvaluation,
+  routingPreference,
+  saveRoutingPreference,
+} from "../routing/adaptive.ts";
 import {
   listChatPolicies,
   ownerAutonomySummary,
@@ -787,6 +798,166 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/metrics\/runs\/(\d+)$/,
     async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runMetrics(num(c.p[0]))),
+  ],
+  // Causal engineering memory (src/memory/causal.ts): the caller's own records only.
+  [
+    "GET",
+    /^\/api\/causal-memory$/,
+    (c) =>
+      recallCausal(c.actor.id, {
+        text: c.url.searchParams.get("q") ?? undefined,
+        repositories: c.url.searchParams.getAll("repository"),
+        files: c.url.searchParams.getAll("file"),
+        errorSignatures: c.url.searchParams.getAll("signature"),
+        services: c.url.searchParams.getAll("service"),
+        includeOutdated: c.url.searchParams.get("outdated") === "1",
+        limit: Number(c.url.searchParams.get("limit") ?? 5),
+      }),
+  ],
+  ["GET", /^\/api\/causal-memory\/(\d+)$/, (c) => causalHistory(c.actor.id, num(c.p[0]))],
+  [
+    "POST",
+    /^\/api\/causal-memory\/(\d+)\/status$/,
+    (c) =>
+      setCausalStatus(
+        c.actor.id,
+        num(c.p[0]),
+        String(c.body.status ?? "") as "verified",
+        String(c.body.reason ?? ""),
+      ),
+  ],
+  [
+    "POST",
+    /^\/api\/causal-memory\/(\d+)\/rollback$/,
+    (c) => rollbackCausal(c.actor.id, num(c.p[0]), Number(c.body.version)),
+  ],
+  // Evaluation-driven routing (src/routing): the owner's opt-in preference; replay evaluation for administrators.
+  [
+    "GET",
+    /^\/api\/routing\/preference$/,
+    async (c) =>
+      (await routingPreference(c.actor.id)) ?? {
+        enabled: false,
+        preference: "balanced",
+        min_samples: 10,
+      },
+  ],
+  ["POST", /^\/api\/routing\/preference$/, (c) => saveRoutingPreference(c.actor.id, c.body)],
+  [
+    "GET",
+    /^\/api\/routing\/evaluation$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const days = Math.min(90, Math.max(1, Number(c.url.searchParams.get("test_days") ?? 14)));
+      const preference = String(c.url.searchParams.get("preference") ?? "balanced");
+      if (!["quality_first", "balanced", "cost_first"].includes(preference))
+        throw new HttpError(400, "invalid preference");
+      const samples = await loadOutcomes({});
+      const { eligible } = eligibility({
+        stepType: "agent",
+        complexity: null,
+        isolation: {
+          enforce: config.isolation.mode === "enforce",
+          runtimeAvailable: config.isolation.mode === "enforce",
+        },
+      });
+      return replayEvaluation({
+        samples,
+        cutoff: new Date(Date.now() - days * 86_400_000),
+        defaults: await import("../agent/configurationStore.ts").then(async (m) => {
+          const d = (await m.loadAgentConfiguration()).default_provider;
+          return { agent: d, coding_agent: d };
+        }),
+        eligible,
+        preference: preference as "balanced",
+        minSamples: Math.max(3, Number(c.url.searchParams.get("min_samples") ?? 10)),
+      });
+    },
+  ],
+  // Cross-repository impact (src/impact): only repositories the caller can read are analysed and searched.
+  [
+    "POST",
+    /^\/api\/impact\/analyze$/,
+    (c) => {
+      const kinds = ["kafka_topic", "http_route", "grpc_service", "db_table", "shared_enum"];
+      const strs = (v: unknown, n: number) =>
+        Array.isArray(v)
+          ? v.filter((x): x is string => typeof x === "string").slice(0, n)
+          : undefined;
+      const contracts = Array.isArray(c.body.contracts)
+        ? (c.body.contracts as unknown[]).slice(0, 20).map((x) => {
+            const r = (x ?? {}) as { kind?: unknown; key?: unknown };
+            if (
+              !kinds.includes(String(r.kind)) ||
+              typeof r.key !== "string" ||
+              !r.key ||
+              r.key.length > 200
+            )
+              throw new HttpError(
+                400,
+                `contracts: kind must be one of ${kinds.join(", ")} with a key`,
+              );
+            return { kind: r.kind as "kafka_topic", key: r.key };
+          })
+        : undefined;
+      if (c.body.diff !== undefined && typeof c.body.diff !== "string")
+        throw new HttpError(400, "diff must be a string");
+      return analyzeImpact(c.actor.id, {
+        repository: String(c.body.repository ?? ""),
+        diff: c.body.diff as string | undefined,
+        files: strs(c.body.files, 200),
+        branch: typeof c.body.branch === "string" ? c.body.branch : undefined,
+        symbols: strs(c.body.symbols, 20),
+        contracts,
+      });
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/impact\/contracts\/([\w.-]+)$/,
+    async (c) => {
+      const { readableOf } = await import("../impact/analyze.ts");
+      if (!(await readableOf(c.actor.id)).includes(c.p[0])) throw new HttpError(404, "not found");
+      const { contractsOf, freshnessOf } = await import("../impact/index.ts");
+      return { freshness: await freshnessOf(c.p[0]), contracts: await contractsOf(c.p[0]) };
+    },
+  ],
+  // Engineering Radar findings (src/radar): administrators only (signatures come from production logs).
+  [
+    "GET",
+    /^\/api\/radar\/findings$/,
+    (c) => (
+      requireAdmin(c.actor),
+      listFindings({
+        status: c.url.searchParams.get("status") ?? undefined,
+        limit: Number(c.url.searchParams.get("limit") ?? 50),
+      })
+    ),
+  ],
+  [
+    "POST",
+    /^\/api\/radar\/findings\/(\d+)\/status$/,
+    (c) => {
+      requireAdmin(c.actor);
+      const status = String(c.body.status ?? "");
+      if (!["open", "resolved", "suppressed"].includes(status))
+        throw new HttpError(400, "status must be open, resolved or suppressed");
+      return setFindingStatus(num(c.p[0]), status as "open", c.actor.id);
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/radar\/scan$/,
+    async (c) => (
+      requireAdmin(c.actor),
+      (await radarScan()) ?? { skipped: "another scan is running" }
+    ),
+  ],
+  // Proof-of-Fix report (agent/proofOfFix.ts): the run's current verdict and its history; access follows the run.
+  [
+    "GET",
+    /^\/api\/runs\/(\d+)\/proof-of-fix$/,
+    async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), fixProofOf(num(c.p[0]))),
   ],
   [
     "GET",

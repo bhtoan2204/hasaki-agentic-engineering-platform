@@ -42,7 +42,8 @@ export const SINKS: Record<string, SinkSpec> = {
   "runs.reject_step": { targets: [], payload: ["run_id", "step_key", "comment"] },
   // Chat delegation under an autonomy policy (telegram/sync.ts): a title or repository taken from observed data (logs,
   // documents, tool results) needs the owner's tap; only the owner's own wording may start work unattended.
-  "work.delegate": { targets: [], payload: ["title", "repositories"] },
+  // The description becomes the run's instructions and the workflow decides what runs: both are classified too.
+  "work.delegate": { targets: [], payload: ["title", "repositories", "description", "workflow"] },
 };
 export interface Sources {
   trusted: Array<{ ref: string; text: string }>;
