@@ -6,6 +6,8 @@ import { pool, q, one, withTx } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { botKey, telegramCall, TelegramApiError, validWebhookSecret } from "./client.ts";
 import { advisoryKey, queue } from "./store.ts";
+import { quietNow } from "./format.ts";
+import { gatewayBusy, gatewayTick } from "./sync.ts";
 import { ingestUpdate, processInbox, telegramUpdateId } from "./updates.ts";
 
 /** Session lock + renewable DB lease: dropped DB sessions cannot keep consuming after another owner takes over. */
@@ -122,8 +124,55 @@ export async function deliverOutbox(limit = 50, signal?: AbortSignal) {
         await q(db, "UPDATE telegram_outbox SET status='dead' WHERE id=$1", [row.id]);
         return true;
       }
+      // Chat-gateway buttons: a send for an action that was decided or expired meanwhile is dropped.
+      if (row.chat_action_ids?.length && row.method === "sendMessage") {
+        const live = await one(
+          db,
+          "SELECT 1 FROM telegram_chat_actions WHERE action_id=ANY($1) AND status IN ('pending','armed') AND expires_at>now() LIMIT 1",
+          [row.chat_action_ids],
+        );
+        if (!live) {
+          await q(db, "UPDATE telegram_outbox SET status='dead' WHERE id=$1", [row.id]);
+          return true;
+        }
+      }
+      // Quiet hours: messages still go out (held notifications are batched upstream) but without a sound.
+      const payload =
+        row.method === "sendMessage" && userId && (await quietNow(userId, db))
+          ? { ...row.payload, disable_notification: true }
+          : row.payload;
       try {
-        const result = await telegramCall(row.method, row.payload, { signal, token });
+        const result = await telegramCall(row.method, payload, { signal, token });
+        if (
+          row.method === "sendMessage" &&
+          row.link &&
+          Number.isSafeInteger(result?.message_id) &&
+          userId
+        )
+          await q(
+            db,
+            `INSERT INTO telegram_messages(bot_key,chat_id,message_id,user_id,kind,conversation_id,turn_id,run_id)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`,
+            [
+              key,
+              String(row.payload.chat_id),
+              result.message_id,
+              userId,
+              row.link.kind,
+              row.link.conversation_id ?? null,
+              row.link.turn_id ?? null,
+              row.link.run_id ?? null,
+            ],
+          );
+        if (
+          row.method === "sendMessage" &&
+          row.chat_action_ids?.length &&
+          Number.isSafeInteger(result?.message_id)
+        )
+          await q(db, "UPDATE telegram_chat_actions SET message_id=$2 WHERE action_id=ANY($1)", [
+            row.chat_action_ids,
+            result.message_id,
+          ]);
         if (row.method === "sendMessage") {
           if (!Number.isSafeInteger(result?.message_id)) throw new TelegramApiError(503);
           if (row.conversation_action_id)
@@ -185,6 +234,25 @@ export async function expireActions() {
     await q(
       db,
       "UPDATE telegram_conversations SET status='canceled' WHERE status='pending' AND expires_at<=now()",
+    );
+    // Chat-gateway buttons (operations/delegations) past their expiry lose their keyboard.
+    for (const a of await q(
+      db,
+      `UPDATE telegram_chat_actions SET status='expired' WHERE bot_key=$1 AND status IN ('pending','armed') AND expires_at<=now()
+      RETURNING action_id,chat_id,message_id,user_id`,
+      [botKey()],
+    ))
+      if (a.message_id)
+        await queue(db, `chat_expired:${a.action_id}`, "editMessageReplyMarkup", {
+          chat_id: a.chat_id,
+          message_id: a.message_id,
+          reply_markup: { inline_keyboard: [] },
+        });
+    await q(db, "DELETE FROM telegram_notifications WHERE sent_at<now()-interval '7 days'");
+    await q(db, "DELETE FROM telegram_messages WHERE created_at<now()-interval '30 days'");
+    await q(
+      db,
+      "DELETE FROM telegram_chat_actions WHERE status NOT IN ('pending','armed') AND created_at<now()-interval '30 days'",
     );
     await q(db, "DELETE FROM telegram_rate_limits WHERE minute<now()-interval '1 day'");
     await q(db, "DELETE FROM telegram_bind_tokens WHERE expires_at<now()-interval '1 day'");
@@ -328,14 +396,17 @@ export function startTelegramTransport() {
           );
           if (!lease) break;
           await processInbox();
+          await gatewayTick();
           await expireActions();
           await deliverOutbox(30, session.signal);
           if (mode === "polling") {
+            // While a chat answer is in flight, poll briefly so it is delivered within a second of finishing.
+            const busy = await gatewayBusy().catch(() => false);
             const updates: unknown = await telegramCall(
               "getUpdates",
               {
                 offset: lease.update_offset,
-                timeout: 10,
+                timeout: busy ? 1 : 10,
                 limit: 50,
                 allowed_updates: ["message", "callback_query"],
               },

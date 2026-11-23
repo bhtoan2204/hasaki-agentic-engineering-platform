@@ -8,6 +8,13 @@ import { runEvents } from "../workflow/events.ts";
 import { botKey, textLimit, safeTelegramText, telegramCall } from "./client.ts";
 import { opaqueId, bindFromStart, limited, preferences, queue, telegramAudit } from "./store.ts";
 import { contextHash, decisionMessage, makeAction } from "./workflow.ts";
+import {
+  GATEWAY_CALLBACK,
+  handleChatMessage,
+  handleCommand,
+  handleGatewayCallback,
+  parseCommand,
+} from "./gateway.ts";
 
 const validId = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
 const denied = "Action unavailable or unauthorized / Thao tác không khả dụng hoặc không được phép.";
@@ -17,6 +24,10 @@ interface TelegramMessage {
   chat?: { id?: unknown; type?: string };
   from?: { id?: unknown; is_bot?: boolean };
   reply_to_message?: { message_id?: number };
+  forward_origin?: unknown;
+  forward_from?: unknown;
+  forward_from_chat?: unknown;
+  forward_date?: unknown;
 }
 interface TelegramUpdate {
   update_id?: number;
@@ -362,7 +373,15 @@ async function handleUpdate(update: TelegramUpdate, retry = false) {
       throw new HttpError(429, "Too many requests / Quá nhiều yêu cầu");
     const actor = await actorFor(identity);
     actorId = actor?.user_id ?? null;
-    if (callback) {
+    if (callback && typeof callback.data === "string" && GATEWAY_CALLBACK.test(callback.data)) {
+      if (!actor) throw new HttpError(403, denied);
+      result = await handleGatewayCallback(
+        identity,
+        actor,
+        callback.data,
+        identity.message.message_id,
+      );
+    } else if (callback) {
       if (
         typeof callback.data !== "string" ||
         !/^a:[A-Za-z0-9_-]{24}$/.test(callback.data) ||
@@ -403,6 +422,28 @@ async function handleUpdate(update: TelegramUpdate, retry = false) {
             text: "Canceled / Đã hủy. No workflow decision changed.",
           });
         });
+        return;
+      }
+      // A reply to a workflow question/rejection prompt (pending or not) stays on the ForceReply path below; any other
+      // private text is a command or a chat message for the Agent Gateway.
+      const replyTo = identity.message.reply_to_message?.message_id ?? null;
+      const promptReply =
+        replyTo != null &&
+        !!(await one(
+          pool,
+          `SELECT 1 FROM telegram_conversations c JOIN telegram_actions a ON a.action_id=c.action_id
+          WHERE c.prompt_message_id=$1 AND a.bot_key=$2 AND a.user_id=$3 AND a.chat_id=$4`,
+          [replyTo, botKey(), actorId, identity.chat],
+        ));
+      if (!promptReply) {
+        const command = parseCommand(text);
+        if (command) await handleCommand(identity, actor, Number(update.update_id), command);
+        else if (text.startsWith("/"))
+          await queue(pool, `notice:${update.update_id}`, "sendMessage", {
+            chat_id: identity.chat,
+            text: "Unknown command / Lệnh không hợp lệ. /help",
+          });
+        else await handleChatMessage(identity, actor, Number(update.update_id));
         return;
       }
       const conversation = await one(

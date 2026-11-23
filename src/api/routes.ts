@@ -18,6 +18,13 @@ import {
   disconnect as disconnectTelegram,
   savePreferences,
 } from "../telegram/store.ts";
+import {
+  listChatPolicies,
+  ownerAutonomySummary,
+  revokeChatPolicy,
+  saveChatPolicy,
+  type ChatPolicyInput,
+} from "../chat/autonomy.ts";
 import { evaluationAnalytics } from "../eval/analytics.ts";
 import {
   createRecommendation,
@@ -2557,6 +2564,26 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/integrations\/telegram\/clear$/,
     ({ actor }) => (requireAdmin(actor), clearTelegram()),
+  ],
+  // Chat autonomy policies (chat/autonomy.ts): administrators manage global/repository/workflow scopes, every user
+  // only their own owner scope. Revocation and pause are immediate.
+  [
+    "GET",
+    /^\/api\/chat\/autonomy\/policies$/,
+    async ({ actor }) => ({
+      policies: await listChatPolicies(actor),
+      summary: await ownerAutonomySummary(actor.id),
+    }),
+  ],
+  [
+    "POST",
+    /^\/api\/chat\/autonomy\/policies$/,
+    ({ actor, body }) => saveChatPolicy(body as unknown as ChatPolicyInput, actor),
+  ],
+  [
+    "POST",
+    /^\/api\/chat\/autonomy\/policies\/(\d+)\/revoke$/,
+    ({ actor, p }) => revokeChatPolicy(Number(p[0]), actor),
   ],
   // Background Git sync by consent (repos/backgroundGit.ts): the caller's own switch, stored with the caller's secrets.
   ["GET", /^\/api\/integrations\/background-git$/, ({ actor }) => backgroundGitStatus(actor.id)],

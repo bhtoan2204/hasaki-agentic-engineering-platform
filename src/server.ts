@@ -1,4 +1,5 @@
 import { startTelegramTransport } from "./telegram/transport.ts";
+import { enforceAutonomyTimeouts } from "./chat/autonomy.ts";
 import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
 import { repositories } from "./repos/service.ts";
 import { background, settleBackground } from "./workflow/background.ts";
@@ -100,6 +101,8 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 registerReconcileTask(() => dispatchIntake());
 // PR delivery lifecycle (no-op while prLifecycle.mode is "off"): bounded polling with per-PR backoff.
 registerReconcileTask(() => syncPullRequestLifecycles());
+// Chat autonomy: runs started by an autonomy policy that outlive its timeout are paused for the owner.
+registerReconcileTask(() => enforceAutonomyTimeouts());
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
 const goService = startGoService();

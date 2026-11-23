@@ -1,5 +1,9 @@
 # Interactive Telegram workflows
 
+> Natural-language chat, commands, confirmed operations, autonomy policies and proactive notifications are described in
+> [telegram-agent-gateway.md](telegram-agent-gateway.md). Messages that do not reply to a workflow prompt now go to the
+> chat gateway instead of being refused.
+
 The bot uses the existing approval, rejection and question-answer services. It does not execute commands or implement another workflow engine. Ordinary approvals and predefined choices can be completed inside Telegram. Rejection requires a reason through a specific ForceReply prompt. Free-text answers must reply to the exact question prompt. Multiple pending questions are independent.
 
 ## Local / WSL setup (long polling)
@@ -58,7 +62,7 @@ Set the platform's existing `publicUrl` configuration to a public HTTPS address 
 - High-impact approval/option steps: set `config.telegram_confirm: true` or `config.high_impact: true` to require an explicit confirmation keyboard before applying the decision. Rejections already require the separate reason/confirmation reply.
 - Questions with more than 20 string options get a **Reply with answer** prompt instead of buttons; the reply must match one of the exact options.
 - Approval forms requiring repository/branch selections, questions with non-text options, and provider handoffs remain **View run** actions. Telegram never guesses missing form data or bypasses workspace inspection/fencing.
-- Retry failed step, provider switching, arbitrary shell commands and generic paused-run continuation are not exposed as Telegram write actions. Existing web/domain services retain those workflows.
+- Provider switching and arbitrary shell commands are not exposed in Telegram. Retrying a step, pausing/resuming/canceling or starting a run goes through the chat's confirmed operations — see [telegram-agent-gateway.md](telegram-agent-gateway.md).
 
 Prompts expire after 15 minutes; action buttons expire after 24 hours or become invalid as soon as their workflow context changes. Successful decisions replace the original message's buttons with its final decision, actor and time. Final messages say the decision was saved; they do not imply that an offline or paused worker has executed anything. Assigned worker ownership/fencing and pause policy remain unchanged.
 

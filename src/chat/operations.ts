@@ -12,6 +12,7 @@ import { emitChatEvent } from "./events.ts";
 import { classifyArguments, type Classification } from "../agent/taint.ts";
 import { qcPreauthorized } from "../integrations/qcHttp.ts";
 import { kafkaPreauthorized } from "../integrations/kafka.ts";
+import { AUTONOMOUS_ACTIONS, attachAutonomousRun, decideChatAutonomy } from "./autonomy.ts";
 
 /**
  * Mutating integration calls from chat. The model can only *propose* one: the platform validates the schema and the
@@ -228,6 +229,32 @@ export async function proposeOperation(
     row!.inserted &&
     provenance.decision === "allow" &&
     !!mutatingTool(tool)?.preauthorized?.(args as never);
+  // Chat autonomy policy (chat/autonomy.ts): only allowlisted run actions, only with untainted values, recorded.
+  const autonomy =
+    !preauthorized && row!.inserted && provenance.decision === "allow" && tool in AUTONOMOUS_ACTIONS
+      ? await autonomyFor(binding, tool, args, row!.id)
+      : null;
+  if (autonomy?.allowed) {
+    await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row!.id]);
+    const done = await decideOperation({ id: binding.userId }, row!.id, "confirm", (op) => {
+      const runId = Number(op.arguments.run_id);
+      if (Number.isSafeInteger(runId) && runId > 0)
+        void attachAutonomousRun(autonomy, runId).catch(() => {});
+    });
+    return {
+      status: done.status,
+      operation_id: done.id,
+      tool,
+      target,
+      autonomous: { mode: autonomy.mode, risk: autonomy.risk, decision_id: autonomy.decisionId },
+      ...(done.result != null ? { result: done.result } : {}),
+      ...(done.error ? { error: done.error } : {}),
+      message:
+        done.status === "succeeded"
+          ? "Executed by the owner's chat autonomy policy (recorded and audited). Read the run back before reporting its new state."
+          : `Not completed (${done.status}). Do not retry blindly.`,
+    };
+  }
   if (preauthorized) {
     await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row!.id]);
     await audit(binding.userId, "chat.operation.preauthorized", "chat_operation", String(row!.id), {
@@ -266,6 +293,41 @@ export async function proposeOperation(
       "Not executed. The user must confirm this operation in the chat UI; tell them what it will do" +
       (provenance.reasons.length ? " and that some of its values come from untrusted data." : "."),
   };
+}
+
+/** Policy decision for a run operation: the run's own workflow, repositories and title decide scope and risk. */
+async function autonomyFor(
+  binding: { userId: number; conversationId: number },
+  tool: string,
+  args: Record<string, unknown>,
+  operationId: number,
+) {
+  const run = await one<{
+    id: number;
+    title: string;
+    status: string;
+    definition_key: string;
+    selected_repositories: string[];
+    allowed_repositories: string[];
+  }>(
+    pool,
+    "SELECT id, title, status, definition_key, selected_repositories, allowed_repositories FROM workflow_runs WHERE id = $1 AND owner_id = $2",
+    [Number(args.run_id), binding.userId],
+  );
+  if (!run) return null;
+  return decideChatAutonomy({
+    ownerId: binding.userId,
+    action: tool,
+    workflow: run.definition_key,
+    repositories: run.selected_repositories.length
+      ? run.selected_repositories
+      : run.allowed_repositories,
+    texts: [run.title, ...(typeof args.step_key === "string" ? [args.step_key] : [])],
+    runId: run.id,
+    runActive: ["RUNNING", "WAITING"].includes(run.status),
+    conversationId: binding.conversationId,
+    operationId,
+  });
 }
 
 export const operationsOf = (conversationId: number, ownerId: number) =>
