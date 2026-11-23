@@ -1,6 +1,7 @@
 import { startTelegramTransport } from "./telegram/transport.ts";
 import { enforceAutonomyTimeouts } from "./chat/autonomy.ts";
 import { radarTick } from "./radar/scan.ts";
+import { dispatchDelegations } from "./workflow/delegationDispatch.ts";
 import { invalidateCausalMemories } from "./memory/causal.ts";
 import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
 import { repositories } from "./repos/service.ts";
@@ -107,6 +108,8 @@ registerReconcileTask(() => syncPullRequestLifecycles());
 registerReconcileTask(() => enforceAutonomyTimeouts());
 // Engineering Radar: interval-gated deterministic detection over stored signals → findings → Intake Queue.
 registerReconcileTask(() => radarTick());
+// Workflow-to-workflow delegation: spawn queued children, record finished ones, resume waiting parents, cascade cancels.
+registerReconcileTask(() => dispatchDelegations());
 // Causal memory: records whose cited files changed on the base become "outdated" (bounded, every 30 minutes).
 let causalCheckedAt = 0;
 registerReconcileTask(async () => {

@@ -63,6 +63,16 @@ import { TraceExplorer } from "./TraceExplorer.tsx";
 import "./RunView.css";
 import { latestStepDecisions, type Decision } from "../decisions";
 import { ReuseCard } from "./ExecutionCards";
+import {
+  childActive,
+  childGraph,
+  childNodeTypes,
+  childSummary,
+  type ChildWorkflow,
+} from "./childWorkflows.tsx";
+
+/** Step nodes plus the child-workflow cards and their lane (stable object: React Flow warns on a new one per render). */
+const allNodeTypes = { ...nodeTypes, ...childNodeTypes } as typeof nodeTypes;
 
 interface ReplanRecord {
   invalidated?: string[];
@@ -129,6 +139,11 @@ interface RunDetail extends InspectorRun {
     replans?: ReplanRecord[];
   } | null;
   work_item: { id: number; code: string } | null;
+  /** Workflow-to-workflow delegation: the run that started this one, and the runs this one started. */
+  delegation?: {
+    parent: { run_id: number; title: string; status: string; mode: string } | null;
+    children: ChildWorkflow[];
+  };
   worker:
     | (WorkerHealth & { local: boolean; available: boolean; recovery: string | null })
     | null;
@@ -324,6 +339,15 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     reloadFresh,
   } = useApi<RunDetail>(`/api/runs/${id}`);
   const { data: health, reload: reloadHealth } = useApi<WorkerHealth>(`/api/runs/${id}/worker`);
+  // Child runs publish events on their own run: while any is active, the parent page refreshes itself.
+  const reloadRef = useRef(() => {});
+  reloadRef.current = reload;
+  const childrenLive = !!run?.delegation?.children.some(childActive);
+  useEffect(() => {
+    if (!childrenLive) return;
+    const timer = setInterval(() => document.visibilityState === "visible" && reload(), 5000);
+    return () => clearInterval(timer);
+  }, [childrenLive, reload]);
   // Worker heartbeats are not workflow events: poll them, but only for a run that can still execute and a visible tab.
   const finished = !!run && ["COMPLETED", "FAILED", "CANCELED"].includes(run.status);
   useEffect(() => {
@@ -382,7 +406,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const stableNodes = useStableById<Node<StepNodeData>>();
   const stableEdges = useStableById<Edge>();
   const graph = useMemo(() => {
-    if (!run) return { nodes: [] as Node<StepNodeData>[], edges: [] as Edge[] };
+    if (!run) return { nodes: [] as Node<StepNodeData>[], childNodes: [] as Node[], edges: [] as Edge[] };
     const specSteps = run.graph.steps;
     const placed = arranged && hasSavedLayout ? autoLayout(specSteps) : placeSteps(specSteps);
     const st = new Map(run.steps.map((s) => [s.key, s] as const));
@@ -400,6 +424,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     const decided = latestStepDecisions(run.decisions, run.steps);
     const rerun = new Set<string>(lastReplan?.invalidated ?? []);
     const roles = rolesOfSteps(specSteps);
+    const children = childSummary(run.delegation?.children ?? []);
     const nodes: Node<StepNodeData>[] = specSteps.map((s) => {
       const row = st.get(s.key);
       const latestAttempt = latest.get(s.key);
@@ -447,24 +472,31 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             ? { action: decided[s.key].action, outcome: decided[s.key].outcome, reason: decided[s.key].reason }
             : undefined,
           preview: replayPreview?.[s.key],
+          childWorkflows: children[s.key],
+          waitingChildren: row?.status === "WAITING_INPUT" && !!row?.pending_input?.child_workflows,
           onPick: pickStep,
         },
       };
     });
+    // Child workflows (delegation): a lane under the steps, each card linked to the step that started it.
+    const kids = childGraph(run.delegation?.children ?? [], placed, run.id, () => reloadRef.current());
     return {
       nodes: stableNodes(nodes),
-      edges: stableEdges(toEdges(specSteps, (k) => st.get(k)?.status, placed)),
+      childNodes: kids.nodes,
+      edges: [...stableEdges(toEdges(specSteps, (k) => st.get(k)?.status, placed)), ...kids.edges],
     };
   }, [run, pickStep, arranged, hasSavedLayout, replayPreview, stableNodes, stableEdges]);
   const edges = graph.edges;
   const nodes = useMemo(
-    () =>
-      stepKey
+    () => [
+      ...(stepKey
         ? graph.nodes.map((n) =>
             n.id === stepKey ? { ...n, selected: true, data: { ...n.data, selected: true } } : n,
           )
-        : graph.nodes,
-    [graph.nodes, stepKey],
+        : graph.nodes),
+      ...(graph.childNodes as Node<StepNodeData>[]),
+    ],
+    [graph.nodes, graph.childNodes, stepKey],
   );
   const fitViewOptions = useMemo(
     () => ({
@@ -472,11 +504,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       maxZoom: 1,
       minZoom: 0.7,
       nodes: focusNodes(
-        graph.nodes.map((n) => n.id),
+        [...graph.nodes.map((n) => n.id), ...graph.childNodes.filter((n) => n.type === "child").map((n) => n.id)],
         stepKey,
       ),
     }),
-    [graph.nodes, stepKey],
+    [graph.nodes, graph.childNodes, stepKey],
   );
   const flowLabels = useMemo(
     () => ({
@@ -524,8 +556,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       await reloadFresh();
     });
   };
+  // A step waiting for its child workflows waits for them, not for the user.
   const blocked = run.steps.filter(
-    (s) => s.status === "WAITING_INPUT" || s.status === "WAITING_APPROVAL",
+    (s) =>
+      (s.status === "WAITING_INPUT" && !s.pending_input?.child_workflows) ||
+      s.status === "WAITING_APPROVAL",
   );
   const counts: Record<string, number> = {};
   for (const s of run.steps) counts[s.status] = (counts[s.status] ?? 0) + 1;
@@ -839,14 +874,27 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           <span>{t("rv.pausedHint")}</span>
         </div>
       )}
+      {run.delegation?.parent && (
+        <div className="rv-banner idle rv-delegation" data-testid="run-delegation">
+          <Info size={15} />
+          <span>
+            {t("rv.childOf")}{" "}
+            <a href={`#/runs/${run.delegation.parent.run_id}`}>
+              #{run.delegation.parent.run_id} {run.delegation.parent.title}
+            </a>{" "}
+            · {t(`child.mode.${run.delegation.parent.mode}`)}
+          </span>
+        </div>
+      )}
       <div className="split">
         <div className="canvas">
           <ReactFlow
             key={arranged && hasSavedLayout ? "arranged" : "saved"}
             nodes={nodes}
             edges={edges}
-            nodeTypes={nodeTypes}
-            onNodeClick={(_, n) => pickStep(n.id)}
+            nodeTypes={allNodeTypes}
+            // Child-workflow cards handle their own clicks (open, start, cancel); only steps open the inspector.
+            onNodeClick={(_, n) => n.type === "step" && pickStep(n.id)}
             onPaneClick={() => {
               if (performance.now() - pickedAt.current < 500) return;
               if (stepKey) navigate(`/runs/${id}`);

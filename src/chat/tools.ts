@@ -700,7 +700,12 @@ const TOOLS: ToolDef[] = [
     async run(a, ctx) {
       const run = await chatRepository.ownedRun(a.run_id, ctx.binding.userId);
       if (!run) throw new ChatToolDenied(`run ${a.run_id} not found`);
-      return { label: `run #${run.id}`, data: { ...run, steps: await chatRepository.runSteps(run.id) } };
+      // Parent and child workflows (delegation) come with the run, so chat and Telegram answers can report them.
+      const { delegationsOf } = await import("../workflow/delegation.ts");
+      return {
+        label: `run #${run.id}`,
+        data: { ...run, steps: await chatRepository.runSteps(run.id), delegation: await delegationsOf(run.id) },
+      };
     },
   },
   {

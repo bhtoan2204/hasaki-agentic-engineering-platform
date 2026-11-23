@@ -13,6 +13,7 @@ import { existsSync } from "node:fs";
 import { advance } from "./progression.ts";
 export { advance } from "./progression.ts";
 import { budgetPreflight, enforceBudget } from "./budgets.ts";
+import { delegationsOf, holdForChildren, kickDelegations, planChildWorkflows } from "./delegation.ts";
 import {
   EngineError,
   lockRun,
@@ -2104,13 +2105,26 @@ async function applyResult(
       break;
     }
     case "completed": {
-      const out = result.output ?? {};
+      let out = result.output ?? {};
       if (
         typeof out === "object" &&
         "selected_repositories" in out &&
         Array.isArray(out.selected_repositories)
       )
         await setSelectedRepositories(c, run, out.selected_repositories);
+      // Workflow-to-workflow delegation: requested children are recorded with this completion (same transaction); a
+      // blocking request holds the step until the children finish (workflow/delegation.ts).
+      if ((step.type === "agent" || step.type === "coding_agent") && out && typeof out === "object" && "child_workflows" in out) {
+        const plan = await planChildWorkflows(c, run, step, attempt, out);
+        out = plan.output as typeof out;
+        if (plan.waitFor) {
+          await closeAttempt("WAITING_INPUT", out);
+          await holdForChildren(c, step, plan.waitFor, afterCommit);
+          await closeJob("done");
+          break;
+        }
+        afterCommit(() => kickDelegations());
+      }
       await closeAttempt("COMPLETED", out);
       await setStepStatus(c, step, "COMPLETED", {
         output: out,
@@ -2521,10 +2535,11 @@ export async function runDetail(runId: number) {
     wi_id != null
       ? { id: wi_id, code: wi_code, title: wi_title, source: wi_source, project: wi_project }
       : null;
-  const [worker, decisions, recovery_episodes] = await Promise.all([
+  const [worker, decisions, recovery_episodes, delegation] = await Promise.all([
     instanceHealth(row.worker_instance ?? null),
     decisionsOf(runId),
     recoveryEpisodesOf(runId),
+    delegationsOf(runId),
   ]);
   const recovery = steps.some((s) => s.status === "WAITING_INPUT" && s.pending_input?.recovery)
     ? "NEEDS_ATTENTION"
@@ -2554,6 +2569,7 @@ export async function runDetail(runId: number) {
     })),
     decisions,
     recovery_episodes,
+    delegation,
   };
 }
 

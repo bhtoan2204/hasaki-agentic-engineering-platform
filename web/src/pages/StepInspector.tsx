@@ -196,7 +196,7 @@ export interface StepRow {
   current_attempt_id: number | null;
   config: StepConfig;
   agent_override?: { provider?: string; model?: string | null; [key: string]: unknown } | null;
-  pending_input?: { provider_handoff?: StepHandoff } | null;
+  pending_input?: { provider_handoff?: StepHandoff; child_workflows?: number[] } | null;
   approval?: { request?: ApprovalRequest; gate?: boolean; granted?: boolean } | null;
   output?: StepOutput | null;
   error: string | null;

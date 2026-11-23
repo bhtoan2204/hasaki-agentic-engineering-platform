@@ -338,7 +338,8 @@ async function statusText(actor: Actor, L: string) {
     pool,
     `SELECT count(*) FILTER (WHERE status IN ('RUNNING','WAITING'))::int AS active,
        (SELECT count(*)::int FROM workflow_steps s JOIN workflow_runs r ON r.id=s.run_id
-         WHERE r.owner_id=$1 AND s.status IN ('WAITING_INPUT','WAITING_APPROVAL') AND r.status NOT IN ('COMPLETED','FAILED','CANCELED')) AS waiting,
+         WHERE r.owner_id=$1 AND s.status IN ('WAITING_INPUT','WAITING_APPROVAL') AND NOT COALESCE(s.pending_input ? 'child_workflows', false)
+           AND r.status NOT IN ('COMPLETED','FAILED','CANCELED')) AS waiting,
        count(*) FILTER (WHERE status='PAUSED')::int AS paused
      FROM workflow_runs WHERE owner_id=$1`,
     [actor.id],
@@ -381,7 +382,9 @@ async function tasksText(actor: Actor, L: string) {
 async function runsView(actor: Actor, L: string, filter: string) {
   const where =
     filter === "blocked"
-      ? `AND (r.status IN ('PAUSED','WAITING') OR EXISTS (SELECT 1 FROM workflow_steps s WHERE s.run_id=r.id AND s.status IN ('WAITING_INPUT','WAITING_APPROVAL','FAILED')))
+      ? // WAITING only because of child workflows (a held step or a parallel join) is not blocked on the user.
+        `AND (r.status = 'PAUSED' OR EXISTS (SELECT 1 FROM workflow_steps s WHERE s.run_id=r.id AND s.status IN ('WAITING_INPUT','WAITING_APPROVAL','FAILED')
+              AND NOT COALESCE(s.pending_input ? 'child_workflows', false)))
          AND r.status NOT IN ('COMPLETED','FAILED','CANCELED')`
       : filter === "failed"
         ? "AND r.status='FAILED'"
