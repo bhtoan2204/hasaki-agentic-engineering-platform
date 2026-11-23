@@ -27,8 +27,12 @@ import {
   independentSubmissionGap,
   normalizeVerdict,
   repairTargetFor,
+  reviewEvidenceKey,
+  reviewStall,
+  testDigestOf,
   unresolvedScope,
 } from "../../independentReview.ts";
+import { approvedScopeIn } from "../../evidence.ts";
 import { outputLocale } from "../../language.ts";
 import { changedFiles, collectScopeState } from "../../scopeGuard.ts";
 import { selectVerificationScope } from "../../verificationScope.ts";
@@ -140,6 +144,56 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         verdict: "BLOCKED",
         blocked_reason: `the verdict no longer matches the code: ${drift.join("; ")}`,
       };
+    // The material evidence this verdict judged. Recorded on every verdict (FAIL included) so that a repeat of the same
+    // FAIL on the same evidence — a repair that changed nothing — is recognised instead of being repaired again.
+    const scopeNow = approvedScopeIn(ctx.input.upstream);
+    const evidenceKey = evidence
+      ? reviewEvidenceKey({
+          heads: evidence.heads,
+          baseTips,
+          diffText: evidence.text,
+          tests: testDigestOf(ctx.input.upstream),
+          scope: scopeNow
+            ? [
+                scopeNow.proposal_hash,
+                Object.values(ctx.input.upstream).map(
+                  (u) => u.output?.scope_check?.reapproved?.revision ?? null,
+                ),
+              ]
+            : null,
+        })
+      : undefined;
+    if (v.verdict === "FAIL" && evidenceKey && evidence) {
+      const prior = await one<{ id: number; output: unknown }>(
+        pool,
+        `SELECT a.id, a.output FROM workflow_step_attempts a
+          WHERE a.step_id = $1 AND a.output->>'verdict' IS NOT NULL AND ${SINCE_HUMAN_REEXECUTE}
+          ORDER BY a.id DESC LIMIT 1`,
+        [ctx.step.id, ctx.run.id],
+      );
+      const stall = reviewStall(prior, v, { heads: evidence.heads, baseTips, evidenceKey });
+      if (stall) {
+        v = { ...v, verdict: "BLOCKED", blocked_reason: stall.reason };
+        await ctx.log("system", `independent verification: ${stall.reason}`, {
+          verdict: "BLOCKED",
+          no_progress: true,
+          prior_attempt: prior!.id,
+        });
+        await noteDecision({
+          runId: ctx.run.id,
+          stepId: ctx.step.id,
+          attemptId: ctx.attempt.id,
+          generation: ctx.attempt.generation,
+          kind: "recovery",
+          action: "STOP",
+          outcome: "applied",
+          reason:
+            "review → repair made no progress: same findings on unchanged source and evidence",
+          sourceAttemptId: prior!.id,
+          details: { evidence_key: evidenceKey },
+        });
+      }
+    }
     const repairsUsed = (await one<{ n: number }>(
       pool,
       // Repair budget restarts when a human re-executes (re-run / instructions / rejection): automatic repair rounds
@@ -169,6 +223,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       heads: evidence?.heads ?? {},
       baseTips,
       incrementalFrom: incremental?.attemptId,
+      evidenceKey,
     });
     if (decided.kind === "completed" && reviewKey)
       decided.output = {

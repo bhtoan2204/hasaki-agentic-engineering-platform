@@ -533,6 +533,10 @@ export function signalAccepted(
     return s.line != null && t.includes(s.kind) && short.test(t);
   });
 }
+/** The exact text a reviewer lists in root_cause_check.justified_signals to accept a platform signal. */
+export const signalId = (s: Pick<SymptomSignal, "file" | "line" | "kind">) =>
+  `${s.file}:${s.line} ${s.kind}`;
+
 /** A signal is justified when the independent reviewer accepted it. */
 const justified = (s: SymptomSignal & { repo?: string }, entries: Array<{ signal?: unknown }>) =>
   signalAccepted(s, entries);
@@ -602,20 +606,33 @@ export function enforceRootCauseReview(
     ? (c.justified_signals as Array<{ signal?: unknown }>)
     : [];
   const unjustified = signals.filter((s) => !justified(s, accepted));
-  if (unjustified.length)
-    return fail(
-      unjustified
-        .slice(0, 10)
-        .map((s) =>
-          finding(
-            `${s.repo}:${s.file}`,
-            s.line,
-            `symptom-fix pattern (${s.kind}) without an accepted justification: fix the cause, or keep it only if expected behaviour requires it and explain that in remediation.justifications with evidence`,
-            s.detail,
+  if (unjustified.length) {
+    // What the reviewer actually listed, so a repeat of this FAIL can say why none of it matched.
+    const submitted = accepted
+      .map((j) => String(j?.signal ?? "").slice(0, 200))
+      .filter(Boolean)
+      .slice(0, 10);
+    return {
+      ...fail(
+        unjustified
+          .slice(0, 10)
+          .map((s) =>
+            finding(
+              `${s.repo}:${s.file}`,
+              s.line,
+              `symptom-fix pattern (${s.kind}) without an accepted justification: fix the cause, or keep it only if expected behaviour requires it and explain that in remediation.justifications with evidence. Only the independent reviewer can accept it: it must list "${signalId(s)}" in root_cause_check.justified_signals`,
+              s.detail,
+            ),
           ),
-        ),
-      `${unjustified.length} symptom-fix signal(s) not justified`,
-    );
+        `${unjustified.length} symptom-fix signal(s) not justified`,
+      ),
+      unjustified_signals: unjustified.slice(0, 10).map((s) => ({
+        repo: s.repo,
+        signal: signalId(s),
+        submitted,
+      })),
+    };
+  }
   const symptomOnly = (
     Array.isArray(c?.symptom_only_changes) ? c!.symptom_only_changes : []
   ).filter((x: unknown) => String(loose(x)?.explanation ?? x ?? "").trim());
