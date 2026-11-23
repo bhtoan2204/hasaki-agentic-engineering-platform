@@ -19,7 +19,7 @@ import {
   savePreferences,
 } from "../telegram/store.ts";
 import { fixProofOf } from "../workflow/proofOfFixStep.ts";
-import { listFindings, radarScan, setFindingStatus } from "../radar/scan.ts";
+import { latestCoverage, listFindings, radarScan, setFindingStatus } from "../radar/scan.ts";
 import { analyzeImpact } from "../impact/analyze.ts";
 import { causalHistory, recallCausal, rollbackCausal, setCausalStatus } from "../memory/causal.ts";
 import {
@@ -942,6 +942,8 @@ export const routes: Route[] = [
       })
     ),
   ],
+  // What the newest radar pass actually evaluated (skipped signatures, partial/stale coverage).
+  ["GET", /^\/api\/radar\/coverage$/, async (c) => (requireAdmin(c.actor), (await latestCoverage()) ?? { coverage: null })],
   [
     "POST",
     /^\/api\/radar\/findings\/(\d+)\/status$/,

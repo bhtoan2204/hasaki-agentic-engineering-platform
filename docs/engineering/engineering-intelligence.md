@@ -202,20 +202,35 @@ replay evaluation.
 
 **What was built:**
 - **Data:** outcomes of the final attempt of each agent/coding step generation.
-  - *Verified* means the platform's own verification passed (coding) or the step completed (analysis). It is never
-    the agent's claim.
-  - Plus: the run's independent review verdict, latency, tokens, known cost (unknown cost is not zero), retries,
-    re-execution as human rework, and failure category.
+  - Three signals, kept apart (since the 2026-11-24 hardening):
+    - *executed*: the attempt completed (execution success);
+    - *verified*: deterministic correctness. For a coding step, the platform's own verification passed: from the
+      attempt output, or from its metrics when a failed verification failed the attempt. Analysis steps have no
+      deterministic check, so their correctness is **unknown**. Completion is never counted as correct.
+    - *reviewed*: the run's latest independent review verdict, attributed to coding steps only.
+  - A configuration is its **configured** provider/model/effort (`null` = provider default), not the model the provider
+    reported, so the incumbent is compared exactly.
+  - Plus: latency, tokens, known cost (unknown cost is not zero), retries, re-execution as human rework, and failure
+    category.
   - Evaluation (benchmark) runs are excluded.
 - **Eligibility comes first:** enabled providers, required guarantees under enforced isolation, the HIGH_RISK
   sensitive-provider policy, and blocked models. Health (handoff readiness) is checked before applying a choice.
-- **Ranking:** by Wilson lower bound on the verified rate, adjusted by preference (`quality_first`, `balanced`,
-  `cost_first`).
-- **When it acts:** only when:
-  - at least two configurations have at least `min_samples` samples; and
-  - either verified quality is clearly better (the winner's lower bound exceeds the incumbent's rate), or quality is
-    no worse and the winner is at least 20% cheaper (known cost) or faster.
-  - Otherwise the defaults stay, with an explicit reason.
+- **Ranking:** by Wilson lower bound on the verified rate, computed over samples with known correctness, adjusted by
+  preference (`quality_first`, `balanced`, `cost_first`).
+- **When it acts:** only when all of the following hold:
+  - at least two configurations have at least `min_samples` samples **with known correctness**;
+  - the **exact incumbent** configuration has at least that many. With no measured incumbent, non-inferiority cannot
+    be tested, so the defaults stay (sparse-data fallback);
+  - **correctness is non-inferior.** Formally: the Newcombe hybrid-score 95% interval of (candidate − incumbent) lies
+    entirely above −5 points (`NON_INFERIORITY_MARGIN`);
+  - **execution success and, when both sides have at least `min_samples` reviews, independent review do no harm.**
+    The point estimate is not below −5 points, and the interval is not entirely below 0. These are secondary guards;
+    requiring formal non-inferiority on every rate would block any switch at realistic sample sizes;
+  - and either correctness is **superior** (interval lower bound > 0), or (not `quality_first`) the candidate is at
+    least 20% cheaper (known cost) or faster.
+  - Otherwise the defaults stay, with the reason and the intervals recorded in `routing_decision.non_inferiority`.
+  - Consequence: analysis (`agent`) steps keep their defaults until a deterministic correctness signal exists for
+    them.
 - **When decisions happen:** only at run start, through the existing hook. A running step's provider never changes.
 - **Overrides respected:** an explicit run provider, a step agent/model, and an applied category recommendation are
   never overridden.
@@ -228,10 +243,19 @@ replay evaluation.
   output carries that caveat), not a controlled experiment.
 
 **Measured:**
-- `test/adaptive-routing.test.ts` (8 tests): sparse fallback, clear winner, quality guard, unknown cost, eligibility,
-  negligible difference (no action), workflow-specific scope, and replay IMPROVED versus a drift case.
-- `test/adaptive-routing.integration.ts`: real engine history; opt-in, explicit override, and the unhealthy-provider
-  fallback.
+- `test/adaptive-routing.test.ts` (14 tests): sparse fallback, clear winner, quality guard, unknown cost,
+  eligibility, negligible difference (no action), workflow-specific scope, replay IMPROVED versus a drift case, and:
+  - analysis completion is not correctness;
+  - exact incumbent (model and effort);
+  - non-inferiority needs evidence: 40 vs 40 at 90% is kept, 400 vs 400 switches on cost;
+  - the execution-success and review guards;
+  - the Newcombe interval against the published example (56/70 vs 48/80 → [0.0524, 0.3339]).
+- `test/adaptive-routing.integration.ts`: real engine history, covering:
+  - opt-in;
+  - explicit override;
+  - the unhealthy-provider fallback;
+  - analysis steps never routed;
+  - a failed verification (recorded in metrics) counted as incorrect, not unknown.
 
 **Limitations:**
 - Off by default. It needs enough production history per step type before it acts.
@@ -311,6 +335,31 @@ handling, exact-match recall, and promotion through proposals.
   - Proof-of-Fix and impact steps: remove them from a custom workflow definition.
 - **Audit actions:** `radar.finding.*`, `routing.preference.save`, `causal_memory.status`, plus the existing knowledge
   proposal and run audits.
+
+## Hardening (2026-11-24): verified findings and fixes
+
+Each finding was checked against the source first. Each fix has a regression test, and the tests fail on the previous
+code where that applies.
+
+| Area | Finding (verified in source) | Fix |
+|---|---|---|
+| Routing | Analysis "verified" = `status = 'COMPLETED'`. Execution, correctness and review were one signal. The incumbent was matched by provider only (any model/effort). A sample's model fell back to the provider-reported model, so a default-model incumbent never matched. The quality guard compared two Wilson lower bounds (not a test). A failed coding verification fails the attempt without an output, so a nullable reading would have made it "unknown". | Separate `executed` / `verified` (coding only, from output or metrics) / `reviewed`. Configured-identity keys. Exact incumbent. Newcombe 95% non-inferiority on correctness plus no-harm guards on execution and review. Defaults are kept when the incumbent is unmeasured. Analysis steps are never routed on completion. `ROUTING_VERSION` bumped to `adaptive-routing-2`. |
+| Radar | The `maxSeries` cap silently dropped signatures. Ignored signatures used up the cap (`LIMIT` before the ignore filter). Workflow and CI failure groups were silently capped at 50. **Every quiet open finding auto-resolved, even when its source was never evaluated** (cut by the cap, absent from the newest scan's namespaces, or failure groups truncated). The newest scan's age was never checked. | Per-pass `coverage` (`complete/partial/stale/none`), persisted in `radar_scans.coverage` (migration 105) and served at `GET /api/radar/coverage`. It includes signatures in scan, evaluated, skipped (count and the 20 largest), ignored, failure groups total vs evaluated, scan age and namespaces, and deferred resolutions. Ignored signatures are filtered before the cap. Auto-resolution only applies to findings whose source this pass evaluated on a scan newer than 12 h. Queries stay bounded (one extra aggregate) and deduplication is unchanged. |
+| Proof-of-Fix | A Node test that fails to **load** on the pre-fix source (it imports what only the fix adds, or a dependency missing from the throw-away worktree) was reported as `failed` → "fails before" → verified. One flaky pre-fix failure verified a proof. The "after" run used the live worktree, so an **uncommitted** fix could verify a `head_sha` that does not contain it. | The reporter separates file-level load errors (`errored` → `not_executed`). The pre-fix failure must repeat (2/2). Before and after both run in throw-away detached worktrees at the committed HEAD, so the run worktree is untouched. Installed `node_modules` is linked so dependencies cannot pose as a reproduction. Both worktrees are removed and pruned. |
+| Impact | `partial.complete` reflected index freshness only, so an empty `impacts` list over fresh indexes read as "no impact". Changed contract sites with runtime-built keys, configuration files, unsupported languages and counterparts with runtime-keyed sites were all silent. | `analysis.status` (`complete/partial/stale/unsupported`) with `limitations`, `dynamic_sites`, `blind_counterparts` and a file classification. `conclusion` is `impact_found`, `no_static_dependency_found` or `unknown`, never "no impact". The indexer counts runtime-keyed sites per kind (migration 106, extractor `contracts-regex-3`). The workflow step reports per-repository statuses. `partial.complete` keeps its index-freshness meaning. |
+
+Pre-implementation reproduction was not added. In `bug-investigation`, the regression test is written together with
+the fix, so before implementation there is no test to run. The platform's pre-fix run (the reverted source in an
+isolated worktree) is that reproduction. Incidents that come through the Bug Hunter already get a network-isolated
+reproduction before any fix task exists. A test-first stage would be a workflow change and needs its own decision.
+
+Remaining limitations:
+- Node attribution is file-level: another failing test in the same file can stand in for the regression test. Go
+  selectors are test-level.
+- Radar coverage cannot see signatures a production scan never collected.
+- Dynamic-site recognition is pattern-based. Keys built in another function, or by reflection, are not seen; that is
+  why `no_static_dependency_found` is never "no impact".
+- Routing's non-inferiority is per decision; there is no correction for repeated decisions.
 
 ## Verification
 

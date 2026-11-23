@@ -211,14 +211,19 @@ async function applyAdaptiveRouting(
   const isolation = { enforce, runtimeAvailable: enforce ? await isolationEnforced() : false };
   for (const step of steps) {
     const { eligible, excluded } = eligibility({ stepType: step.type, complexity, isolation });
-    const fallback =
-      resolveStepAgent({ agent_provider: defaultProvider ?? undefined, profile }, step)?.provider ??
-      "claude";
+    const current = resolveStepAgent({ agent_provider: defaultProvider ?? undefined, profile }, step);
+    const fallback = current?.provider ?? "claude";
     const decision = decideRoute({
       samples,
       stepType: step.type,
       workflow,
       defaultProvider: fallback,
+      // The exact configuration the step would otherwise run with (provider, configured model and effort).
+      incumbent: {
+        provider: fallback,
+        model: current?.model ?? null,
+        effort: current?.reasoning_effort ?? null,
+      },
       eligible,
       excluded,
       preference: pref.preference,

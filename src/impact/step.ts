@@ -103,12 +103,25 @@ export async function impactAnalysisStep(ctx: ImpactContext): Promise<ExecResult
     const impacts = results.flatMap((r) => (Array.isArray(r.impacts) ? r.impacts : []));
     const breaking = results.flatMap((r) => (Array.isArray(r.breaking) ? r.breaking : []));
     const partial = results.some(
-      (r) => r.error || (r.partial as { complete?: boolean } | undefined)?.complete === false,
+      (r) =>
+        r.error ||
+        (!r.empty_diff && (r.analysis as { status?: string } | undefined)?.status !== "complete"),
+    );
+    // Per repository: complete / partial / stale / unsupported (or error) — never an implicit "no impact".
+    const statuses = Object.fromEntries(
+      results.map((r) => [
+        String(r.repository),
+        r.error
+          ? "error"
+          : r.empty_diff
+            ? "empty_diff"
+            : String((r.analysis as { status?: string } | undefined)?.status ?? "unknown"),
+      ]),
     );
     await ctx.log(
       "system",
-      `impact analysis: ${impacts.length} cross-repository dependency(ies), ${breaking.length} breaking change(s)${results.some((r) => r.empty_diff) ? ", empty diff in some repositories" : ""}${partial ? " (partial: some indexes stale, unavailable or failed)" : ""}`,
-      { impact: { impacts: impacts.length, breaking: breaking.length, partial } },
+      `impact analysis: ${impacts.length} cross-repository dependency(ies), ${breaking.length} breaking change(s)${results.some((r) => r.empty_diff) ? ", empty diff in some repositories" : ""}${partial ? ` (INCOMPLETE — ${Object.entries(statuses).map(([k, v]) => `${k}: ${v}`).join(", ")}; no dependency found does not mean no impact)` : ""}`,
+      { impact: { impacts: impacts.length, breaking: breaking.length, partial, statuses } },
     );
     return {
       kind: "completed",
@@ -125,6 +138,7 @@ export async function impactAnalysisStep(ctx: ImpactContext): Promise<ExecResult
         ],
         breaking_changes: breaking.length,
         partial,
+        statuses,
       },
     };
   } catch (e) {

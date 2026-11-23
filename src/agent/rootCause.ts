@@ -498,6 +498,8 @@ export interface RegressionProof {
   reverted_files?: string[];
   command?: string;
   before?: string;
+  /** Second pre-fix run (only after a first failure): attribution needs the failure to repeat. */
+  before_repeat?: string | null;
   after?: string;
 }
 

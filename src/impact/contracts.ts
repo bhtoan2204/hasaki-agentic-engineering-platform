@@ -8,7 +8,7 @@
  * Keys computed at runtime (config, env, concatenation) are NOT guessed: such sites produce no contract.
  */
 
-export const EXTRACTOR_VERSION = "contracts-regex-2";
+export const EXTRACTOR_VERSION = "contracts-regex-3";
 /** Longest line the recognisers look at (longer ones are generated or minified). */
 export const MAX_LINE = 4096;
 const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -283,6 +283,62 @@ export function extractLine(
   return out;
 }
 
+export interface DynamicSite {
+  kind: Exclude<ContractKind, "grpc_service" | "shared_enum">;
+  file: string;
+  line: number;
+  snippet: string;
+  reason: string;
+}
+
+const IDENT = "[A-Za-z_$][\\w.$]{0,100}";
+/**
+ * Contract call sites whose key is built at runtime (a variable, a configuration placeholder, concatenation, a template
+ * or format string): they are deliberately NOT turned into contracts, but they are reported, because a counterpart
+ * may exist that no literal join can find. Bounded patterns over bounded lines (no nested quantifiers).
+ */
+const DYNAMIC: Array<{ kind: DynamicSite["kind"]; re: RegExp; reason: string }> = [
+  { kind: "kafka_topic", re: new RegExp(`\\.send\\(\\s*\\{\\s*topic\\s*:\\s*${IDENT}`), reason: "topic from a variable" },
+  { kind: "kafka_topic", re: new RegExp(`\\b(?:kafkaTemplate|producer|kafkaProducer)\\.send\\(\\s*${IDENT}\\s*,`, "i"), reason: "topic from a variable" },
+  { kind: "kafka_topic", re: new RegExp(`\\.produce\\(\\s*${IDENT}\\s*,`), reason: "topic from a variable" },
+  { kind: "kafka_topic", re: /\bTopic\s*:\s*[A-Za-z_][\w.]{0,100}\s*(?:,|\}|$)/, reason: "topic from a variable" },
+  { kind: "kafka_topic", re: /@KafkaListener\([^)]{0,200}topics\s*=\s*\{?\s*(?:"\$\{|[A-Za-z_])/, reason: "topic from a property placeholder or constant" },
+  { kind: "kafka_topic", re: new RegExp(`\\bsubscribe\\(\\s*\\{\\s*topics?\\s*:\\s*\\[?\\s*${IDENT}`), reason: "topic from a variable" },
+  { kind: "kafka_topic", re: new RegExp(`\\bsubscribe\\(\\s*\\[\\s*${IDENT}`), reason: "topic from a variable" },
+  { kind: "http_route", re: new RegExp(`\\b(?:axios|httpClient|got|ky|restTemplate|apiClient)\\s*\\.\\s*(?:get|post|put|patch|delete)(?:ForObject|ForEntity)?\\s*\\(\\s*${IDENT}\\s*[,)]`, "i"), reason: "URL from a variable" },
+  { kind: "http_route", re: new RegExp(`\\bfetch\\(\\s*${IDENT}\\s*[,)]`), reason: "URL from a variable" },
+  { kind: "http_route", re: /\bfetch\(\s*`\$\{[^}`]{1,100}\}`/, reason: "URL entirely from a template expression" },
+  { kind: "http_route", re: /http\.NewRequest(?:WithContext)?\([^,()]{1,100},\s*(?:"[A-Z]+"|http\.Method\w+|\w+)\s*,\s*[A-Za-z_][\w.]{0,100}\s*,/, reason: "URL from a variable" },
+  { kind: "http_route", re: /\bhttp\.NewRequest\(\s*(?:"[A-Z]+"|http\.Method\w+|\w+)\s*,\s*[A-Za-z_][\w.]{0,100}\s*,/, reason: "URL from a variable" },
+  { kind: "http_route", re: /\bhttp\.(?:Get|Post)\(\s*[A-Za-z_][\w.]{0,100}\s*[,)]/, reason: "URL from a variable" },
+  { kind: "http_route", re: /\b(?:HandleFunc|Handle)\(\s*[A-Za-z_][\w.]{0,100}\s*,/, reason: "route from a variable" },
+  { kind: "http_route", re: /@(?:Get|Post|Put|Patch|Delete|Request)Mapping\(\s*(?:value\s*=\s*|path\s*=\s*)?(?:"\$\{|[A-Z_][A-Z0-9_]{1,100}\b)/, reason: "route from a property placeholder or constant" },
+  { kind: "db_table", re: /\b(?:FROM|JOIN|INTO|UPDATE)\s*["'`]\s*\+/i, reason: "table name concatenated at runtime" },
+  { kind: "db_table", re: /\b(?:FROM|JOIN|INTO|UPDATE)\s+(?:\$\{|%[sv]\b|\{[A-Za-z_])/i, reason: "table name formatted at runtime" },
+];
+
+/** Runtime-keyed contract sites on one line that produced no static/inferred contract of their kind. */
+export function dynamicSites(file: string, line: number, text: string, context: string[] = []): DynamicSite[] {
+  if (isTestPath(file) || text.length > MAX_LINE || !SUPPORTED_SOURCE.test(file)) return [];
+  const found = extractLine(file, line, text, context);
+  const out: DynamicSite[] = [];
+  for (const d of DYNAMIC) {
+    if (out.some((o) => o.kind === d.kind) || found.some((c) => c.kind === d.kind)) continue;
+    if (d.re.test(text))
+      out.push({ kind: d.kind, file, line, snippet: text.trim().slice(0, 200), reason: d.reason });
+  }
+  return out;
+}
+
+/** Files the recognisers read (the same set as SOURCE_PATHSPECS). */
+export const SUPPORTED_SOURCE = /\.(?:go|tsx?|[cm]?js|py|java|kt|proto|sql)$/;
+/** Files that commonly DEFINE contract keys (topics, URLs, tables) but are not parsed: a change there is not analysed. */
+export const CONFIG_FILE =
+  /\.(?:ya?ml|json|properties|env|toml|ini|conf|cfg|tf|hcl)$|(?:^|\/)\.env(?:\.|$)|(?:^|\/)Dockerfile$/i;
+/** Source in a language no recogniser handles. */
+export const UNSUPPORTED_SOURCE =
+  /\.(?:rb|php|cs|scala|rs|swift|c|cc|cpp|h|hpp|ex|exs|lua|dart|vue|svelte|groovy|m|mm|pl|sh)$/i;
+
 /** Grep trigger: lines that may hold a contract (the recognisers above decide). One extended regex for git grep. */
 export const GREP_PATTERN = [
   "KafkaListener",
@@ -304,6 +360,9 @@ export const GREP_PATTERN = [
   "new [A-Za-z]+ServiceClient\\(",
   "CREATE +TABLE",
   '(FROM|JOIN|INTO|UPDATE|from|join|into|update) +["`]?[a-zA-Z_]',
+  // Runtime-built table names (reported as dynamic sites, never contracts).
+  '(FROM|JOIN|INTO|UPDATE|from|join|into|update) *["\'`] *\\+',
+  '(FROM|JOIN|INTO|UPDATE|from|join|into|update) +(\\$\\{|%[sv]|\\{)',
 ].join("|");
 export const SOURCE_PATHSPECS = [
   "*.go",

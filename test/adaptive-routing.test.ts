@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   decideRoute,
+  differenceInterval,
   eligibility,
   replayEvaluation,
   scoreCandidates,
@@ -26,6 +27,7 @@ function samples(
     effort: null,
     workflow: "bug-investigation",
     stepType: "coding_agent",
+    executed: true,
     verified: i < ok,
     reviewed: i < ok,
     latencyMs: 60_000,
@@ -177,18 +179,30 @@ test("offline replay: time-split (no leakage) A/B against the default reports IM
   assert.notEqual((drift.results[0] as { verdict: string }).verdict, "IMPROVED_OBSERVED");
 });
 
-test("equal verified quality and clearly lower known cost: chosen for cost-first/balanced, not for quality-first", () => {
-  const s = [
+test("equal verified quality and clearly lower known cost: chosen only once non-inferiority is shown, never for quality-first", () => {
+  // 40 vs 40 at 90%: the interval of the difference is far wider than the 5-point margin — equality is not shown.
+  const thin = [
     ...samples("claude", 40, 0.9, { costUsd: 2 }),
     ...samples("codex", 40, 0.9, { costUsd: 0.8 }),
+  ];
+  const kept = route(thin, { preference: "cost_first" });
+  assert.equal(kept.applied, false);
+  assert.match(kept.reason, /not shown non-inferior/);
+  assert.ok(kept.non_inferiority!.correctness!.low < -0.05);
+  const s = [
+    ...samples("claude", 400, 0.9, { costUsd: 2 }),
+    ...samples("codex", 400, 0.9, { costUsd: 0.8 }),
   ];
   const cost = route(s, { preference: "cost_first" });
   assert.equal(cost.chosen?.provider, "codex");
   assert.match(cost.reason, /lower known cost/);
+  assert.equal(cost.non_inferiority!.non_inferior, true);
+  assert.equal(cost.non_inferiority!.superior, false);
+  assert.ok(cost.non_inferiority!.correctness!.low > -0.05);
   assert.equal(route(s, { preference: "quality_first" }).applied, false);
 });
 
-test("without a measured default, a weak configuration is never chosen just for being the best of the rest", () => {
+test("without a measured incumbent, nothing is switched: non-inferiority cannot be tested", () => {
   // codex and copilot are eligible and measured; the default (claude) has too few samples to compare against.
   const d = route([
     ...samples("claude", 5, 1),
@@ -196,15 +210,90 @@ test("without a measured default, a weak configuration is never chosen just for 
     ...samples("copilot", 10, 0.2),
   ]);
   assert.equal(d.applied, false, d.reason);
-  assert.notEqual(
-    d.confidence,
-    "insufficient",
-    "decided by the quality floor, not by missing data",
-  );
   const strong = route([
     ...samples("claude", 5, 1),
     ...samples("codex", 40, 0.95),
     ...samples("copilot", 40, 0.4),
   ]);
-  assert.equal(strong.chosen?.provider, "codex", "a clearly strong configuration still wins");
+  // Previously a strong alternative replaced an unmeasured default. Without a measured incumbent there is no baseline
+  // to be non-inferior to, so the sparse-data fallback (existing defaults) applies.
+  assert.equal(strong.applied, false);
+  assert.equal(strong.confidence, "insufficient");
+  assert.match(strong.reason, /incumbent configuration claude has 5 sample/);
+});
+
+test("analysis steps: completion is not correctness — completed analysis never supports a quality switch", () => {
+  const analysis = (provider: string, n: number) =>
+    samples(provider, n, 1, { stepType: "agent", verified: null, reviewed: null });
+  const d = route([...analysis("claude", 60), ...analysis("codex", 60)], { stepType: "agent" });
+  assert.equal(d.applied, false);
+  assert.equal(d.confidence, "insufficient");
+  assert.match(d.reason, /completion is not counted as correct/);
+  const c = scoreCandidates(analysis("codex", 60), "balanced")[0];
+  assert.equal(c.execution_rate, 1, "execution success is still reported");
+  assert.equal(c.n_verified, 0, "…separately from correctness, which is unknown");
+});
+
+test("the exact incumbent configuration is compared, not the best configuration of the same provider", () => {
+  // The step runs claude with the provider-default model; a different claude model and codex have better records.
+  const s = [
+    ...samples("claude", 60, 0.6),
+    ...samples("claude", 60, 0.97, { model: "claude-opus" }),
+    ...samples("codex", 60, 0.9),
+  ];
+  const d = route(s, { incumbent: { provider: "claude", model: null, effort: null } });
+  assert.equal(d.non_inferiority!.incumbent, "claude", "baseline = the configured incumbent (60% correct)");
+  assert.equal(d.applied, true);
+  assert.deepEqual(d.chosen, { provider: "claude", model: "claude-opus", reasoning_effort: null });
+  assert.equal(d.non_inferiority!.superior, true);
+  // When the incumbent IS the strong model, nothing else is better.
+  const same = route(s, { incumbent: { provider: "claude", model: "claude-opus", effort: null } });
+  assert.equal(same.applied, false);
+  assert.match(same.reason, /already the best/);
+  // Effort is part of the identity too.
+  const effort = route(
+    [...samples("codex", 60, 0.95, { effort: "high" }), ...samples("codex", 60, 0.5, { effort: "low" })],
+    { incumbent: { provider: "codex", model: null, effort: "low" }, eligible: ["codex"] },
+  );
+  assert.deepEqual(effort.chosen, { provider: "codex", model: null, reasoning_effort: "high" });
+});
+
+test("execution success is a separate non-inferiority gate: correct-when-finished but often failing is not equal", () => {
+  const s = [
+    ...samples("claude", 400, 0.9, { costUsd: 2 }),
+    ...samples("codex", 400, 0.9, { costUsd: 0.5 }),
+    // codex also crashed 120 times without producing anything to verify (correctness unknown, not counted as wrong).
+    ...samples("codex", 120, 0, { executed: false, verified: null, failure: "PROVIDER_ERROR", costUsd: 0.5 }),
+  ];
+  const d = route(s, { preference: "cost_first" });
+  assert.equal(d.applied, false);
+  assert.match(d.reason, /execution success Δ/);
+  assert.ok(d.non_inferiority!.correctness!.low > -0.05, "correctness alone would have passed");
+});
+
+test("independent review is a separate gate when both sides have enough reviews", () => {
+  const s = [
+    ...samples("claude", 400, 0.9, { costUsd: 2 }),
+    ...samples("codex", 400, 0.9, { costUsd: 0.5 }).map((x, i) => ({ ...x, reviewed: i % 2 === 0 })),
+  ];
+  const d = route(s, { preference: "cost_first" });
+  assert.equal(d.applied, false);
+  assert.equal(d.non_inferiority!.review_assessed, true);
+  assert.match(d.reason, /independent review Δ/);
+  // Too few reviews: not assessed (reported), and does not block on its own.
+  const few = s.map((x) => ({ ...x, reviewed: x.provider === "codex" && x.runId % 50 === 0 ? false : x.provider === "codex" ? null : x.reviewed }));
+  const e = route(few, { preference: "cost_first" });
+  assert.equal(e.non_inferiority!.review_assessed, false);
+  assert.equal(e.applied, true);
+});
+
+test("difference interval (Newcombe): contains the difference, narrows with n, matches published values", () => {
+  // Newcombe (1998) example: 56/70 vs 48/80 → difference 0.2, 95% CI [0.0524, 0.3339] (method 10).
+  const i = differenceInterval(56, 70, 48, 80)!;
+  assert.ok(Math.abs(i.diff - 0.2) < 1e-9);
+  assert.ok(Math.abs(i.low - 0.0524) < 0.001 && Math.abs(i.high - 0.3339) < 0.001, JSON.stringify(i));
+  const small = differenceInterval(36, 40, 36, 40)!;
+  const large = differenceInterval(360, 400, 360, 400)!;
+  assert.ok(small.low < large.low && large.low < 0 && large.high > 0);
+  assert.equal(differenceInterval(0, 0, 1, 1), null);
 });

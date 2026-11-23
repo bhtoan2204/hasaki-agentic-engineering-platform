@@ -5,7 +5,8 @@ import { migrate } from "../src/db/migrate.ts";
 import { createUser } from "../src/auth/users.ts";
 import { registerInstance } from "../src/instances.ts";
 import { saveIntakePolicy } from "../src/workitems/intake.ts";
-import { radarScan, listFindings } from "../src/radar/scan.ts";
+import { radarScan, listFindings, latestCoverage, STALE_SCAN_HOURS } from "../src/radar/scan.ts";
+import { config } from "../src/config.ts";
 import { settleBackground } from "../src/workflow/background.ts";
 import { definitions } from "../src/workflow/definitions.ts";
 import { startRun } from "../src/workflow/engine.ts";
@@ -273,4 +274,89 @@ test("a long manual scan over an unchanged hourly rate is not a spike and sends 
     notified,
   );
   assert.ok(r.queries > 0);
+});
+
+// ---------------------------------------------------------------- coverage: what a pass did NOT look at is not "quiet"
+
+const PAY = "aaaaaaaaaaaaaaaaaaaa";
+const OMS = "bbbbbbbbbbbbbbbbbbbb";
+/**
+ * An open finding on the STABLE OMS signature, quiet for 2 days: it auto-resolves exactly when its series is
+ * evaluated on fresh data (nothing re-detects it).
+ */
+async function quietOmsFinding() {
+  const row = await one<{ id: number }>(
+    pool,
+    `INSERT INTO radar_findings(fingerprint,kinds,service,environment,signature,severity,confidence,prod_fingerprint,last_detected_at)
+     VALUES('coverage-test-oms',ARRAY['error_spike'],'oms-api','prod','order lookup not found','medium','low',$1,now() - interval '2 days')
+     ON CONFLICT(fingerprint) DO UPDATE SET status='open',resolved_at=NULL,last_detected_at=now() - interval '2 days'
+     RETURNING id`,
+    [OMS],
+  );
+  return Number(row!.id);
+}
+const statusOf = async (id: number) =>
+  (await one<{ status: string }>(pool, "SELECT status FROM radar_findings WHERE id=$1", [id]))!.status;
+
+test("series cap: skipped signatures are reported (partial coverage) and their quiet findings are NOT resolved", async () => {
+  await seedScan(new Date(Date.now() + 300_000), [
+    { fp: PAY, count: 300 },
+    { fp: OMS, count: 40 },
+  ]);
+  const id = await quietOmsFinding();
+  const saved = config.radar.maxSeries;
+  config.radar.maxSeries = 1;
+  try {
+    const r = (await radarScan())!;
+    assert.equal(r.coverage.status, "partial");
+    assert.equal(r.coverage.signatures_in_scan, 2);
+    assert.equal(r.coverage.signatures_evaluated, 1);
+    assert.equal(r.coverage.signatures_skipped, 1);
+    assert.deepEqual(r.coverage.skipped_sample.map((x) => x.fingerprint), [OMS], "the lower-volume signature was cut");
+    assert.equal(await statusOf(id), "open", "not evaluated ≠ quiet: the finding stays open");
+    assert.ok(r.coverage.resolution_deferred >= 1);
+    assert.ok(r.coverage.notes.some((n) => /1 of 2 signatures not evaluated/.test(n)));
+    const persisted = await latestCoverage();
+    assert.equal(persisted!.coverage!.status, "partial", "coverage is persisted with the pass");
+  } finally {
+    config.radar.maxSeries = saved;
+  }
+  // Full coverage: the same quiet finding now resolves.
+  const r = (await radarScan())!;
+  assert.equal(r.coverage.signatures_skipped, 0);
+  assert.equal(await statusOf(id), "resolved");
+});
+
+test("ignored signatures do not consume the series budget", async () => {
+  // PAY has the larger count in the newest scan; ignore it so it must not take the only slot.
+  await q(pool, "UPDATE prod_error_groups SET status='ignored' WHERE fingerprint=$1", [PAY]);
+  const saved = config.radar.maxSeries;
+  config.radar.maxSeries = 1;
+  try {
+    const r = (await radarScan())!;
+    // Before the fix the ignored PAY took the only slot and was then filtered out (0 evaluated).
+    assert.equal(r.coverage.signatures_evaluated, 1);
+    assert.equal(r.coverage.ignored_signatures, 1);
+    assert.equal(r.coverage.signatures_skipped, 0);
+  } finally {
+    config.radar.maxSeries = saved;
+    await q(pool, "UPDATE prod_error_groups SET status='open' WHERE fingerprint=$1", [PAY]);
+  }
+});
+
+test("a stale newest scan is reported and resolves nothing", async () => {
+  const at = new Date(Date.now() - (STALE_SCAN_HOURS + 30) * 3_600_000);
+  // Newest by id (what the radar reads), but its data is old: the prod-error scanner has not succeeded since.
+  const scanId = await seedScan(at, [{ fp: OMS, count: 40 }]);
+  const id = await quietOmsFinding();
+  try {
+    const r = (await radarScan())!;
+    assert.equal(r.coverage.status, "stale");
+    assert.ok(r.coverage.latest_scan_age_hours! > STALE_SCAN_HOURS);
+    assert.equal(await statusOf(id), "open");
+    assert.ok(r.coverage.notes.some((n) => /quiet findings are not resolved/.test(n)));
+  } finally {
+    await q(pool, "DELETE FROM prod_error_observations WHERE scan_id=$1", [scanId]);
+    await q(pool, "DELETE FROM prod_error_scans WHERE id=$1", [scanId]);
+  }
 });

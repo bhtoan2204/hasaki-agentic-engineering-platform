@@ -14,7 +14,7 @@ import {
   type EvidenceStats,
 } from "./verifyEvidence.ts";
 import { execFile } from "node:child_process";
-import { mkdtemp, realpath, rm, stat, readFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, stat, readFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
 import { promisify } from "node:util";
@@ -703,7 +703,10 @@ function requiredTestStatus(
         )
       )
         next =
-          event.failed > 0
+          // The file did not load or exited abnormally: whatever else it reported, it did not run to a verdict.
+          Number(event.errored) > 0
+            ? "not_executed"
+            : event.failed > 0
             ? "failed"
             : event.skipped > 0
               ? "skipped"
@@ -719,10 +722,12 @@ function requiredTestStatus(
 }
 
 /**
- * Before/after regression proof. The fix's non-test files are reverted to the merge base in a throw-away detached worktree
- * (tests kept), the named test runs there and then on the fixed worktree. Verified only when it fails at test level
- * before (an assertion, not a build or infrastructure failure: "not_executed") and passes after. Never touches the run's
- * worktree; the temporary one is removed.
+ * Before/after regression proof, both measured on the committed HEAD in throw-away detached worktrees (the run's worktree,
+ * and any uncommitted change in it, is never used or touched). "Before": the fix's non-test files reverted to the merge
+ * base, tests kept. Verified only when the named test fails at test level before — a test verdict, not a load, build or
+ * infrastructure failure ("not_executed") — on TWO consecutive runs (a flaky failure is not attributable to the defect),
+ * and passes after. The repository's installed node_modules, if any, is linked into both worktrees so a missing
+ * dependency cannot pose as a reproduction. Temporary worktrees are removed.
  */
 export async function beforeAfterProof(
   w: { repo: string; path: string; baseBranch: string },
@@ -755,8 +760,21 @@ export async function beforeAfterProof(
   if (!reverted.length) return unmeasured("the change has no non-test file to revert");
   const dir = await mkdtemp(resolve(tmpdir(), "regression-proof-"));
   const tmp = resolve(dir, "wt");
+  const fixed = resolve(dir, "fixed");
+  // Installed dependencies are untracked: without them every Node test would fail to load in a fresh worktree.
+  const linkDependencies = async (into: string) => {
+    const modules = resolve(w.path, "node_modules");
+    if (
+      (await stat(modules).then((x) => x.isDirectory()).catch(() => false)) &&
+      !(await stat(resolve(into, "node_modules")).catch(() => null))
+    )
+      await symlink(modules, resolve(into, "node_modules"), "dir");
+  };
   try {
     await git(w.path, "worktree", "add", "--detach", "-q", tmp, head);
+    await git(w.path, "worktree", "add", "--detach", "-q", fixed, head);
+    await linkDependencies(tmp);
+    await linkDependencies(fixed);
     const atBase = new Set(
       (await git(tmp, "ls-tree", "-r", "--name-only", base, "--", ...reverted))
         .split("\n")
@@ -769,8 +787,14 @@ export async function beforeAfterProof(
       w.repo,
     )?.[0];
     if (!before) return unmeasured("the test cannot be resolved on the pre-fix source");
+    const fixedTarget = (await requiredTestTargets([{ repo: w.repo, path: fixed }], [id])).targets.get(
+      w.repo,
+    )?.[0];
+    if (!fixedTarget) return unmeasured("the test cannot be resolved on the fixed commit");
     const b = requiredTestStatus((await run(before.command, tmp)).output, before);
-    const a = requiredTestStatus((await run(target.command, w.path)).output, target);
+    // Attribution: the failure must reproduce. A second pre-fix run only when the first one failed.
+    const b2 = b === "failed" ? requiredTestStatus((await run(before.command, tmp)).output, before) : null;
+    const a = requiredTestStatus((await run(fixedTarget.command, fixed)).output, fixedTarget);
     const proof = {
       repo: w.repo,
       test_id: id,
@@ -779,10 +803,15 @@ export async function beforeAfterProof(
       reverted_files: reverted,
       command: target.command,
       before: b,
+      before_repeat: b2,
       after: a,
     };
-    if (b === "failed" && a === "passed")
-      return { ...proof, status: "verified", reason: "fails before the fix, passes after" };
+    if (b === "failed" && b2 === "failed" && a === "passed")
+      return {
+        ...proof,
+        status: "verified",
+        reason: "fails before the fix (2 of 2 runs), passes after, both on the committed source",
+      };
     return {
       ...proof,
       status: "invalid",
@@ -790,13 +819,17 @@ export async function beforeAfterProof(
         b === "passed"
           ? "the test already passes without the fix: it does not reproduce the defect"
           : b !== "failed"
-            ? `the test did not run to an assertion before the fix (${b}): a build or infrastructure failure is not a reproduction`
-            : `the test does not pass with the fix (${a})`,
+            ? `the test did not run to an assertion before the fix (${b}): a load, build or infrastructure failure is not a reproduction`
+            : b2 !== "failed"
+              ? `the pre-fix failure did not repeat (${b2} on the second run): a flaky failure is not attributable to the defect`
+              : `the test does not pass with the fix on the committed source (${a})`,
     };
   } catch (e) {
     return unmeasured(`proof workspace: ${(e as Error).message.slice(0, 200)}`);
   } finally {
-    await exec("git", ["-C", w.path, "worktree", "remove", "--force", tmp]).catch(() => {});
+    for (const t of [tmp, fixed])
+      await exec("git", ["-C", w.path, "worktree", "remove", "--force", t]).catch(() => {});
+    await exec("git", ["-C", w.path, "worktree", "prune"]).catch(() => {});
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }

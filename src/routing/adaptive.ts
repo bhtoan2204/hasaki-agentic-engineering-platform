@@ -9,14 +9,22 @@ import { wilson } from "../eval/scoring.ts";
 /**
  * Evaluation-driven routing: rank the provider/model/effort configurations that are ELIGIBLE for a step (deterministic
  * filters first: enabled, required execution guarantees, model policy, sensitive-work policy, health) by measured
- * PRODUCTION outcomes of the same step type (and workflow, when there is enough of it):
- *   verified = the platform's own verification passed (coding) / the step completed (analysis) — never the agent's word;
- *   reviewed = an independent verifier of the run passed; plus latency, tokens, known cost, retries, human rework.
+ * PRODUCTION outcomes of the same step type (and workflow, when there is enough of it). Three signals, kept apart:
+ *   executed = the attempt completed (execution success — says nothing about correctness);
+ *   verified = deterministic correctness: the platform's own verification of a coding step passed. Analysis steps have
+ *              no deterministic correctness check, so their correctness is UNKNOWN (null) — never inferred from
+ *              completion — and they cannot support a quality-based switch;
+ *   reviewed = the run's latest independent review verdict (coding steps only: the review judges the code changes);
+ * plus latency, tokens, known cost, retries, human rework. A switch must be non-inferior to the EXACT incumbent
+ * configuration (provider/model/effort): correctness by an explicit non-inferiority test (Newcombe 95% interval of the
+ * difference above a fixed margin); execution success and (when measured) independent review by no-harm guards.
  * Evaluation (benchmark) runs are excluded: synthetic results never stand in for production reliability. Too little
  * evidence → no change (existing defaults) and an explicit low-confidence decision. Explicit choices are never touched.
  */
 
-export const ROUTING_VERSION = "adaptive-routing-1";
+export const ROUTING_VERSION = "adaptive-routing-2";
+/** Largest acceptable loss (absolute rate) for a non-inferior switch. */
+export const NON_INFERIORITY_MARGIN = 0.05;
 export type Preference = "quality_first" | "balanced" | "cost_first";
 
 export interface OutcomeSample {
@@ -25,7 +33,11 @@ export interface OutcomeSample {
   effort: string | null;
   workflow: string;
   stepType: string;
-  verified: boolean;
+  /** The attempt completed (execution success). */
+  executed: boolean;
+  /** Deterministic correctness; null = not verifiable (analysis steps, verification disabled or missing). */
+  verified: boolean | null;
+  /** The run's latest independent review verdict; null = no review / not attributable to this step. */
   reviewed: boolean | null;
   latencyMs: number | null;
   tokens: number | null;
@@ -43,8 +55,16 @@ export interface CandidateScore {
   model: string | null;
   effort: string | null;
   n: number;
+  /** Execution success (completed attempts), over all n samples. */
+  executed: number;
+  execution_rate: number;
+  /** Correctness: over the n_verified samples whose correctness is known. */
+  n_verified: number;
+  verified_ok: number;
   verified_rate: number;
   verified_low: number;
+  review_n: number;
+  review_ok: number;
   review_pass_rate: number | null;
   median_latency_ms: number | null;
   median_tokens: number | null;
@@ -103,13 +123,18 @@ export async function loadOutcomes(
   }>(
     db,
     `SELECT COALESCE(a.agent_provider, t.provider) AS provider,
-            COALESCE(a.agent_model, t.model) AS model,
+            -- The CONFIGURED model/effort (what routing can set; null = provider default), not the model the provider
+            -- reported: an exact incumbent comparison needs the configuration identity.
+            COALESCE(a.agent_model, CASE WHEN a.effective_agent IS NULL THEN t.model END) AS model,
             a.effective_agent->>'reasoning_effort' AS effort,
             r.definition_key AS workflow, s.type AS step_type, a.status,
-            CASE WHEN s.type = 'coding_agent' THEN (a.output->'verification'->>'passed')::boolean
-                 ELSE a.status = 'COMPLETED' END AS verified,
-            (SELECT bool_or(v.output->>'verdict' = 'PASS') FROM workflow_steps v
-              WHERE v.run_id = r.id AND (v.config->>'independent')::boolean IS TRUE AND v.status = 'COMPLETED') AS reviewed,
+            -- A failed verification fails the attempt without an output: its result is in the attempt metrics.
+            CASE WHEN s.type = 'coding_agent' THEN COALESCE((a.output->'verification'->>'passed')::boolean,
+                                                           (a.metrics->'verification'->>'passed')::boolean) END AS verified,
+            CASE WHEN s.type = 'coding_agent' THEN
+              (SELECT v.output->>'verdict' = 'PASS' FROM workflow_steps v
+                WHERE v.run_id = r.id AND (v.config->>'independent')::boolean IS TRUE AND v.status = 'COMPLETED'
+                  AND v.output ? 'verdict' ORDER BY v.finished_at DESC NULLS LAST, v.id DESC LIMIT 1) END AS reviewed,
             t.wall_duration_ms AS wall_ms,
             COALESCE(t.input_tokens, 0) + COALESCE(t.output_tokens, 0) AS tokens,
             t.reported_cost_usd AS cost, t.cost_availability,
@@ -140,7 +165,8 @@ export async function loadOutcomes(
       effort: r.effort,
       workflow: r.workflow,
       stepType: r.step_type,
-      verified: r.verified === true,
+      executed: r.status === "COMPLETED",
+      verified: r.verified,
       reviewed: r.reviewed,
       latencyMs: r.wall_ms == null ? null : Number(r.wall_ms),
       tokens: r.tokens == null ? null : Number(r.tokens),
@@ -165,28 +191,37 @@ export function scoreCandidates(
   for (const s of samples) groups.set(keyOf(s), [...(groups.get(keyOf(s)) ?? []), s]);
   const scored = [...groups.values()].map((g) => {
     const n = g.length;
-    const ok = g.filter((s) => s.verified).length;
+    const known = g.filter((s) => s.verified != null);
+    const ok = known.filter((s) => s.verified).length;
+    const executed = g.filter((s) => s.executed).length;
     const reviewed = g.filter((s) => s.reviewed != null);
-    const known = g.filter((s) => s.costKnown);
+    const priced = g.filter((s) => s.costKnown);
     const failures = new Map<string, number>();
     for (const s of g)
-      if (!s.verified && s.failure) failures.set(s.failure, (failures.get(s.failure) ?? 0) + 1);
+      if ((s.verified === false || !s.executed) && s.failure)
+        failures.set(s.failure, (failures.get(s.failure) ?? 0) + 1);
     return {
       provider: g[0].provider,
       model: g[0].model,
       effort: g[0].effort,
       n,
-      verified_rate: ok / n,
-      verified_low: wilson(ok, n)?.low ?? 0,
+      executed,
+      execution_rate: executed / n,
+      n_verified: known.length,
+      verified_ok: ok,
+      verified_rate: known.length ? ok / known.length : 0,
+      verified_low: wilson(ok, known.length)?.low ?? 0,
+      review_n: reviewed.length,
+      review_ok: reviewed.filter((s) => s.reviewed).length,
       review_pass_rate: reviewed.length
         ? reviewed.filter((s) => s.reviewed).length / reviewed.length
         : null,
       median_latency_ms: median(g.flatMap((s) => (s.latencyMs == null ? [] : [s.latencyMs]))),
       median_tokens: median(g.flatMap((s) => (s.tokens == null ? [] : [s.tokens]))),
-      mean_known_cost_usd: known.length
-        ? known.reduce((a, s) => a + (s.costUsd ?? 0), 0) / known.length
+      mean_known_cost_usd: priced.length
+        ? priced.reduce((a, s) => a + (s.costUsd ?? 0), 0) / priced.length
         : null,
-      cost_coverage: known.length / n,
+      cost_coverage: priced.length / n,
       retry_rate: g.filter((s) => s.retries > 0).length / n,
       human_rate: g.filter((s) => s.human).length / n,
       top_failures: [...failures.entries()]
@@ -228,7 +263,19 @@ export interface RoutingDecision {
   excluded: Array<{ provider: string; reason: string }>;
   chosen: { provider: string; model: string | null; reasoning_effort: string | null } | null;
   default_provider: string;
+  incumbent: Configuration;
   confidence: "high" | "medium" | "low" | "insufficient";
+  non_inferiority: {
+    margin: number;
+    candidate: string;
+    incumbent: string;
+    correctness: ReturnType<typeof differenceInterval>;
+    execution: ReturnType<typeof differenceInterval>;
+    review: ReturnType<typeof differenceInterval>;
+    review_assessed: boolean;
+    non_inferior: boolean;
+    superior: boolean;
+  } | null;
   evidence: CandidateScore[];
   estimate: {
     verified_rate: number | null;
@@ -265,20 +312,59 @@ export function eligibility(input: {
 }
 
 /**
+ * 95% interval of the difference of two proportions (a − b), Newcombe's hybrid score method (Wilson intervals of each
+ * arm). Non-inferiority of a against b with margin m holds when the lower bound is above −m; superiority when it is
+ * above 0. null when either arm has no samples.
+ */
+export function differenceInterval(okA: number, nA: number, okB: number, nB: number) {
+  const a = wilson(okA, nA);
+  const b = wilson(okB, nB);
+  if (!a || !b) return null;
+  const pa = okA / nA;
+  const pb = okB / nB;
+  const diff = pa - pb;
+  return {
+    diff,
+    low: diff - Math.sqrt((pa - a.low) ** 2 + (b.high - pb) ** 2),
+    high: diff + Math.sqrt((a.high - pa) ** 2 + (pb - b.low) ** 2),
+    n: [nA, nB] as [number, number],
+    method: "Newcombe hybrid score 95%",
+  };
+}
+type Interval = NonNullable<ReturnType<typeof differenceInterval>>;
+
+export interface Configuration {
+  provider: string;
+  model: string | null;
+  effort: string | null;
+}
+
+/**
  * The routing decision for one step. Workflow-specific evidence is used when it is sufficient for at least two
- * configurations, otherwise evidence of the same step type across workflows. A winner must clear the minimum sample
- * size and beat the default configuration's lower bound; ties or thin data keep the default.
+ * configurations, otherwise evidence of the same step type across workflows. Only samples with deterministic
+ * correctness count toward the minimum. The best-scoring configuration replaces the EXACT incumbent configuration only
+ * when it is shown non-inferior on correctness, execution success and (when both are measured) independent review,
+ * and then either superior on correctness or clearly cheaper/faster. An unmeasured incumbent, or thin data, keeps it.
  */
 export function decideRoute(input: {
   samples: OutcomeSample[];
   stepType: string;
   workflow: string;
   defaultProvider: string;
+  /** The exact configuration the step would run with; defaults to the provider's default model/effort. */
+  incumbent?: Configuration;
   eligible: string[];
   excluded: Array<{ provider: string; reason: string }>;
   preference: Preference;
   minSamples: number;
+  margin?: number;
 }): RoutingDecision {
+  const margin = input.margin ?? NON_INFERIORITY_MARGIN;
+  const incumbentConfig: Configuration = input.incumbent ?? {
+    provider: input.defaultProvider,
+    model: null,
+    effort: null,
+  };
   const usable = (xs: OutcomeSample[]) =>
     xs.filter(
       (s) =>
@@ -286,13 +372,14 @@ export function decideRoute(input: {
         input.eligible.includes(s.provider) &&
         !(s.model && isModelBlocked(s.model)),
     );
+  const measured = (c: CandidateScore) => c.n_verified >= input.minSamples;
   const wf = usable(input.samples.filter((s) => s.workflow === input.workflow));
   const enough = (xs: OutcomeSample[]) =>
-    scoreCandidates(xs, input.preference).filter((c) => c.n >= input.minSamples).length >= 2;
+    scoreCandidates(xs, input.preference).filter(measured).length >= 2;
   const scope: RoutingDecision["scope"] = enough(wf) ? "workflow" : "step_type";
   const pool_ = scope === "workflow" ? wf : usable(input.samples);
   const ranked = scoreCandidates(pool_, input.preference);
-  const qualified = ranked.filter((c) => c.n >= input.minSamples);
+  const qualified = ranked.filter(measured);
   const base = {
     version: ROUTING_VERSION,
     source: "adaptive_routing" as const,
@@ -303,8 +390,11 @@ export function decideRoute(input: {
     eligible: input.eligible,
     excluded: input.excluded,
     default_provider: input.defaultProvider,
+    incumbent: incumbentConfig,
     evidence: ranked.slice(0, 6),
   };
+  const label = (c: Configuration) =>
+    `${c.provider}${c.model ? `/${c.model}` : ""}${c.effort ? ` (${c.effort})` : ""}`;
   if (qualified.length < 2)
     return {
       ...base,
@@ -312,36 +402,64 @@ export function decideRoute(input: {
       chosen: null,
       confidence: "insufficient",
       estimate: null,
-      reason: `insufficient evidence: ${qualified.length} configuration(s) with ≥${input.minSamples} production samples; existing defaults kept`,
+      non_inferiority: null,
+      reason: `insufficient evidence: ${qualified.length} configuration(s) with ≥${input.minSamples} production samples of verified correctness${input.stepType === "agent" ? " (analysis steps have no deterministic correctness check: completion is not counted as correct)" : ""}; existing defaults kept`,
+    };
+  const incumbent = ranked.find((c) => keyOf(c) === keyOf(incumbentConfig));
+  if (!incumbent || !measured(incumbent))
+    return {
+      ...base,
+      applied: false,
+      chosen: null,
+      confidence: "insufficient",
+      estimate: null,
+      non_inferiority: null,
+      reason: `the incumbent configuration ${label(incumbentConfig)} has ${incumbent?.n_verified ?? 0} sample(s) of verified correctness (<${input.minSamples}): non-inferiority cannot be tested; existing defaults kept`,
     };
   const best = qualified[0];
-  const incumbent = qualified.find((c) => c.provider === input.defaultProvider);
-  const same = !!incumbent && keyOf(best) === keyOf(incumbent);
-  // Never trade verified quality away: the winner's lower bound must stay within 2 points of the incumbent's.
-  const qualityOk = !incumbent || best.verified_low >= incumbent.verified_low - 0.02;
-  // Act only on a measured difference: clearly better quality, or equal quality and clearly cheaper/faster.
-  // Without a measured incumbent there is nothing to beat: the winner must at least clear the pooled verified rate of
-  // all measured configurations of this scope (never a switch to a configuration that is merely "least bad").
-  const pooled = pool_.length ? pool_.filter((x) => x.verified).length / pool_.length : 1;
-  const qualityGain = incumbent
-    ? best.verified_low > incumbent.verified_rate
-    : best.verified_low >= pooled;
+  const same = keyOf(best) === keyOf(incumbent);
+  const correctness = differenceInterval(
+    best.verified_ok,
+    best.n_verified,
+    incumbent.verified_ok,
+    incumbent.n_verified,
+  )!;
+  const execution = differenceInterval(best.executed, best.n, incumbent.executed, incumbent.n)!;
+  const review =
+    best.review_n >= input.minSamples && incumbent.review_n >= input.minSamples
+      ? differenceInterval(best.review_ok, best.review_n, incumbent.review_ok, incumbent.review_n)
+      : null;
+  // Primary endpoint (correctness): formal non-inferiority — the whole 95% interval must stay above −margin.
+  const ni = (i: Interval) => i.low > -margin;
+  // Secondary endpoints (execution success, independent review): safety guards — no material loss (point estimate
+  // beyond −margin) and no statistically significant loss (interval entirely below 0). Requiring formal
+  // non-inferiority on every secondary rate would block any switch at realistic sample sizes.
+  const noHarm = (i: Interval | null) => !i || (i.diff >= -margin && i.high >= 0);
+  const nonInferior = ni(correctness) && noHarm(execution) && noHarm(review);
+  const superior = correctness.low > 0;
   const knownCost = (c: CandidateScore) => (c.cost_coverage >= 0.8 ? c.mean_known_cost_usd : null);
   const cheaper =
-    !!incumbent &&
     knownCost(best) != null &&
     knownCost(incumbent) != null &&
     knownCost(best)! <= 0.8 * knownCost(incumbent)!;
   const faster =
-    !!incumbent &&
     best.median_latency_ms != null &&
     incumbent.median_latency_ms != null &&
     best.median_latency_ms <= 0.8 * incumbent.median_latency_ms;
-  const efficiencyGain = input.preference !== "quality_first" && qualityOk && (cheaper || faster);
-  const margin = best.score - (qualified[1]?.score ?? 0);
+  const efficiencyGain = input.preference !== "quality_first" && (cheaper || faster);
+  const scoreMargin = best.score - (qualified[1]?.score ?? 0);
   const confidence: RoutingDecision["confidence"] =
-    best.n >= input.minSamples * 3 && margin > 0.05 ? "high" : margin > 0.02 ? "medium" : "low";
-  const apply = !same && qualityOk && (qualityGain || efficiencyGain);
+    best.n_verified >= input.minSamples * 3 && scoreMargin > 0.05
+      ? "high"
+      : scoreMargin > 0.02
+        ? "medium"
+        : "low";
+  const apply = !same && nonInferior && (superior || efficiencyGain);
+  const failed = [
+    !ni(correctness) && `correctness Δ ${pct(correctness)}`,
+    !noHarm(execution) && `execution success Δ ${pct(execution)}`,
+    !noHarm(review) && `independent review Δ ${pct(review!)}`,
+  ].filter(Boolean);
   return {
     ...base,
     applied: apply,
@@ -354,15 +472,28 @@ export function decideRoute(input: {
       median_latency_ms: best.median_latency_ms,
       mean_known_cost_usd: best.mean_known_cost_usd,
     },
+    non_inferiority: {
+      margin,
+      candidate: label(best),
+      incumbent: label(incumbent),
+      correctness,
+      execution,
+      review,
+      review_assessed: review != null,
+      non_inferior: nonInferior,
+      superior,
+    },
     reason: same
-      ? "the default configuration is already the best measured one"
-      : !qualityOk
-        ? "the best-scoring alternative would lower verified quality; default kept"
+      ? "the incumbent configuration is already the best measured one"
+      : !nonInferior
+        ? `${label(best)} is not shown non-inferior to the incumbent ${label(incumbent)} (margin ${margin * 100} points: ${failed.join("; ")}); default kept`
         : !apply
-          ? "the measured difference is not significant (quality within the confidence interval, no ≥20% cost or latency gain); default kept"
-          : `${qualityGain ? "higher verified quality" : cheaper ? "≥20% lower known cost at equal quality" : "≥20% lower latency at equal quality"}: ${best.provider}${best.model ? `/${best.model}` : ""} ranks first for ${input.preference} on ${best.n} ${scope === "workflow" ? input.workflow : input.stepType} samples`,
+          ? "non-inferior but neither superior in correctness nor ≥20% cheaper/faster (or quality-first); default kept"
+          : `${superior ? `higher verified correctness (Δ ${pct(correctness)})` : cheaper ? "≥20% lower known cost, non-inferior correctness" : "≥20% lower latency, non-inferior correctness"}: ${label(best)} over ${label(incumbent)} for ${input.preference} on ${best.n_verified} vs ${incumbent.n_verified} verified ${scope === "workflow" ? input.workflow : input.stepType} samples`,
   };
 }
+const pct = (i: Interval) =>
+  `${(i.diff * 100).toFixed(1)} pts, 95% CI [${(i.low * 100).toFixed(1)}, ${(i.high * 100).toFixed(1)}]`;
 
 export async function routingPreference(ownerId: number, db: Db = pool) {
   return one<{ enabled: boolean; preference: Preference; min_samples: number }>(
@@ -428,12 +559,15 @@ export function replayEvaluation(input: {
     });
     const inStep = test.filter((s) => s.stepType === stepType);
     const summarize = (xs: OutcomeSample[]) => {
-      const ok = xs.filter((s) => s.verified).length;
+      const checked = xs.filter((s) => s.verified != null);
+      const ok = checked.filter((s) => s.verified).length;
       const known = xs.filter((s) => s.costKnown);
       return {
         n: xs.length,
-        verified_rate: xs.length ? ok / xs.length : null,
-        verified_ci: wilson(ok, xs.length),
+        n_verified: checked.length,
+        execution_rate: xs.length ? xs.filter((s) => s.executed).length / xs.length : null,
+        verified_rate: checked.length ? ok / checked.length : null,
+        verified_ci: wilson(ok, checked.length),
         median_latency_ms: median(xs.flatMap((s) => (s.latencyMs == null ? [] : [s.latencyMs]))),
         mean_known_cost_usd: known.length
           ? known.reduce((a, s) => a + (s.costUsd ?? 0), 0) / known.length

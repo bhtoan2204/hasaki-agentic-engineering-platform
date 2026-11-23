@@ -25,6 +25,36 @@ import {
 const LOCK = 727_101;
 const RESOLVE_AFTER_HOURS = 24;
 const MAX_EVIDENCE = 20;
+/** Newest successful production-error scan older than this: the radar's view is stale (no auto-resolution). */
+export const STALE_SCAN_HOURS = 12;
+const MAX_FAILURE_GROUPS = 50;
+const SKIPPED_SAMPLE = 20;
+
+/**
+ * What one pass evaluated. `status`: complete — every non-ignored signature of a fresh newest scan and every failure
+ * group was evaluated; partial — some were skipped (series cap, group cap); stale — the newest successful scan is older
+ * than STALE_SCAN_HOURS; none — no successful scan at all. Only complete or partial passes resolve quiet findings, and
+ * only those whose source was actually evaluated.
+ */
+export interface RadarCoverage {
+  status: "complete" | "partial" | "stale" | "none";
+  latest_scan_id: number | null;
+  latest_scan_at: string | null;
+  latest_scan_age_hours: number | null;
+  latest_scan_namespaces: string[] | null;
+  signatures_in_scan: number;
+  signatures_evaluated: number;
+  signatures_skipped: number;
+  ignored_signatures: number;
+  max_series: number;
+  skipped_sample: Array<{ fingerprint: string; service: string; event_count: number }>;
+  failure_groups_evaluated: number;
+  failure_groups_total: number;
+  failure_groups_truncated: boolean;
+  /** Quiet open findings left open because their source was not evaluated this pass (or the data is stale). */
+  resolution_deferred: number;
+  notes: string[];
+}
 
 type FindingRow = {
   id: number;
@@ -67,11 +97,30 @@ export function counting(db: Db) {
  * two scans keeps the larger, more complete count). Versions are remembered in radar_series_state (one statement).
  */
 export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = pool) {
-  const latest = await one<{ id: number; window_start: Date | null; started_at: Date }>(
+  const latest = await one<{
+    id: number;
+    window_start: Date | null;
+    started_at: Date;
+    namespaces: string[] | null;
+  }>(
     db,
-    "SELECT id, window_start, started_at FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1",
+    "SELECT id, window_start, started_at, namespaces FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1",
   );
-  if (!latest) return { series: [] as ErrorSeries[], latestScan: null };
+  if (!latest)
+    return { series: [] as ErrorSeries[], latestScan: null, seriesCoverage: null };
+  // How much of the newest scan the cap leaves out (counted, plus a bounded sample of the largest skipped).
+  const totals = (await one<{ total: number; ignored: number; skipped: unknown }>(
+    db,
+    `WITH obs AS (
+       SELECT o.fingerprint, o.event_count, g.service, g.status FROM prod_error_observations o
+         JOIN prod_error_groups g ON g.fingerprint = o.fingerprint WHERE o.scan_id = $1),
+     ranked AS (SELECT *, row_number() OVER (ORDER BY event_count DESC, fingerprint) AS rn FROM obs WHERE status <> 'ignored')
+     SELECT (SELECT count(*)::int FROM ranked) AS total,
+            (SELECT count(*)::int FROM obs WHERE status = 'ignored') AS ignored,
+            (SELECT COALESCE(json_agg(json_build_object('fingerprint', fingerprint, 'service', service, 'event_count', event_count)
+                     ORDER BY rn), '[]') FROM ranked WHERE rn > $2 AND rn <= $2 + $3) AS skipped`,
+    [latest.id, limit, SKIPPED_SAMPLE],
+  ))!;
   const covered = await q<{ day: string }>(
     db,
     `SELECT DISTINCT to_char(d, 'YYYY-MM-DD') AS day FROM prod_error_scans s,
@@ -95,8 +144,10 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
     hours: Array<{ hour: string; count: number }> | null;
   }>(
     db,
+    // Ignored signatures are filtered BEFORE the cap: they must not use up the series budget.
     `WITH active AS (
-       SELECT o.fingerprint FROM prod_error_observations o WHERE o.scan_id = $1 ORDER BY o.event_count DESC LIMIT $2)
+       SELECT o.fingerprint FROM prod_error_observations o JOIN prod_error_groups ig ON ig.fingerprint = o.fingerprint
+        WHERE o.scan_id = $1 AND ig.status <> 'ignored' ORDER BY o.event_count DESC, o.fingerprint LIMIT $2)
      SELECT g.fingerprint, g.namespace, g.service, g.level, g.signature, g.first_seen_at, g.detail->>'image' AS image,
             st.version, st.previous_version, st.version_changed_at,
             (SELECT max(e.created_at) FROM prod_error_lifecycle_events e WHERE e.fingerprint = g.fingerprint AND e.action = 'reopen') AS reopened_at,
@@ -145,33 +196,53 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
          version_changed_at=CASE WHEN radar_series_state.version IS NULL THEN radar_series_state.version_changed_at ELSE now() END,updated_at=now()`,
       [changedVersions.map((r) => r.fingerprint), changedVersions.map((r) => r.image!)],
     );
-  return { series, latestScan: latest };
+  const ageHours = (Date.now() - new Date(latest.started_at).getTime()) / 3_600_000;
+  return {
+    series,
+    latestScan: latest,
+    seriesCoverage: {
+      latest_scan_id: Number(latest.id),
+      latest_scan_at: new Date(latest.started_at).toISOString(),
+      latest_scan_age_hours: Math.round(ageHours * 10) / 10,
+      latest_scan_namespaces: latest.namespaces ?? null,
+      signatures_in_scan: Number(totals.total),
+      signatures_evaluated: series.length,
+      signatures_skipped: Math.max(0, Number(totals.total) - series.length),
+      ignored_signatures: Number(totals.ignored),
+      max_series: limit,
+      skipped_sample: totals.skipped as RadarCoverage["skipped_sample"],
+      stale: ageHours > STALE_SCAN_HOURS,
+    },
+  };
 }
 
 /** Same workflow step failing with the same normalized error across runs, and repeated CI failures per repository. */
-export async function loadFailureGroups(db: Db = pool): Promise<FailureGroup[]> {
+export async function loadFailureGroups(
+  db: Db = pool,
+): Promise<FailureGroup[] & { total?: number }> {
   const steps = await q<{
     key: string;
     label: string;
     signature: string;
     runs: number[];
     last_at: Date;
+    total: number;
   }>(
     db,
     `SELECT r.definition_key || ':' || s.key AS key, r.definition_key || ' / ' || s.key AS label,
             left(regexp_replace(regexp_replace(COALESCE(s.error, ''), '[0-9a-f]{8,}', '#', 'gi'), '[0-9]+', '#', 'g'), 160) AS signature,
-            array_agg(DISTINCT r.id) AS runs, max(s.updated_at) AS last_at
+            array_agg(DISTINCT r.id) AS runs, max(s.updated_at) AS last_at, (count(*) OVER ())::int AS total
        FROM workflow_steps s JOIN workflow_runs r ON r.id = s.run_id
       WHERE s.status = 'FAILED' AND s.updated_at > now() - interval '7 days' AND COALESCE(s.error, '') <> ''
         AND NOT EXISTS (SELECT 1 FROM evaluation_runs e WHERE e.workflow_run_id = r.id)
-      GROUP BY 1, 2, 3 HAVING count(DISTINCT r.id) >= 2 ORDER BY count(DISTINCT r.id) DESC LIMIT 50`,
+      GROUP BY 1, 2, 3 HAVING count(DISTINCT r.id) >= 2 ORDER BY count(DISTINCT r.id) DESC LIMIT ${MAX_FAILURE_GROUPS}`,
   );
-  const ci = await q<{ repo: string; runs: number[]; last_at: Date }>(
+  const ci = await q<{ repo: string; runs: number[]; last_at: Date; total: number }>(
     db,
-    `SELECT repo, array_agg(DISTINCT id) AS runs, max(updated_at) AS last_at FROM pull_requests
-      WHERE lifecycle = 'CI_FAILED' AND updated_at > now() - interval '7 days' GROUP BY repo LIMIT 50`,
+    `SELECT repo, array_agg(DISTINCT id) AS runs, max(updated_at) AS last_at, (count(*) OVER ())::int AS total FROM pull_requests
+      WHERE lifecycle = 'CI_FAILED' AND updated_at > now() - interval '7 days' GROUP BY repo ORDER BY repo LIMIT ${MAX_FAILURE_GROUPS}`,
   );
-  return [
+  const groups: FailureGroup[] & { total?: number } = [
     ...steps.map((s) => ({
       scope: "workflow" as const,
       key: s.key,
@@ -189,6 +260,9 @@ export async function loadFailureGroups(db: Db = pool): Promise<FailureGroup[]> 
       lastAt: new Date(c.last_at),
     })),
   ];
+  // Total groups before the caps (window counts over the grouped rows): truncation is reported, not hidden.
+  groups.total = Number(steps[0]?.total ?? 0) + Number(ci[0]?.total ?? 0);
+  return groups;
 }
 
 function findingText(f: Detection & { kinds: FindingKind[] }) {
@@ -220,6 +294,7 @@ export interface RadarReport {
   ingested: number;
   queries: number;
   durationMs: number;
+  coverage: RadarCoverage;
 }
 
 /** One radar pass. Returns null when another instance holds the lock. */
@@ -242,8 +317,51 @@ export async function radarScan(
     const reads = counting(pool);
     const counters = [reads.counter];
     try {
-      const { series } = await loadErrorSeries(config.radar.maxSeries, reads.db);
+      const { series, seriesCoverage } = await loadErrorSeries(config.radar.maxSeries, reads.db);
       const failures = await loadFailureGroups(reads.db);
+      const failureTotal = failures.total ?? failures.length;
+      const coverage: RadarCoverage = {
+        status: !seriesCoverage
+          ? "none"
+          : seriesCoverage.stale
+            ? "stale"
+            : seriesCoverage.signatures_skipped > 0 || failureTotal > failures.length
+              ? "partial"
+              : "complete",
+        latest_scan_id: seriesCoverage?.latest_scan_id ?? null,
+        latest_scan_at: seriesCoverage?.latest_scan_at ?? null,
+        latest_scan_age_hours: seriesCoverage?.latest_scan_age_hours ?? null,
+        latest_scan_namespaces: seriesCoverage?.latest_scan_namespaces ?? null,
+        signatures_in_scan: seriesCoverage?.signatures_in_scan ?? 0,
+        signatures_evaluated: seriesCoverage?.signatures_evaluated ?? 0,
+        signatures_skipped: seriesCoverage?.signatures_skipped ?? 0,
+        ignored_signatures: seriesCoverage?.ignored_signatures ?? 0,
+        max_series: config.radar.maxSeries,
+        skipped_sample: seriesCoverage?.skipped_sample ?? [],
+        failure_groups_evaluated: failures.length,
+        failure_groups_total: failureTotal,
+        failure_groups_truncated: failureTotal > failures.length,
+        resolution_deferred: 0,
+        notes: [],
+      };
+      if (coverage.status === "none")
+        coverage.notes.push("no successful production-error scan: error series were not evaluated");
+      if (coverage.status === "stale")
+        coverage.notes.push(
+          `newest successful production-error scan is ${coverage.latest_scan_age_hours} h old (> ${STALE_SCAN_HOURS} h): quiet findings are not resolved`,
+        );
+      if (coverage.signatures_skipped)
+        coverage.notes.push(
+          `${coverage.signatures_skipped} of ${coverage.signatures_in_scan} signatures not evaluated (maxSeries ${coverage.max_series})`,
+        );
+      if (coverage.failure_groups_truncated)
+        coverage.notes.push(
+          `${failureTotal - failures.length} workflow/CI failure group(s) beyond the ${MAX_FAILURE_GROUPS}-group cap not evaluated`,
+        );
+      if (coverage.latest_scan_namespaces?.length)
+        coverage.notes.push(
+          `newest scan covered namespaces ${coverage.latest_scan_namespaces.join(", ")} only`,
+        );
       const detections = [
         ...series.flatMap((s) => detectSeries(s, t, now)),
         ...detectFailures(failures, t),
@@ -337,13 +455,31 @@ export async function radarScan(
         else r.updated++;
         changed.push({ ...res, finding: f });
       }
-      // Quiet findings resolve on their own; a recurrence reopens them (and counts as recurring next time).
+      // Quiet findings resolve on their own (a recurrence reopens them) — but only when this pass actually evaluated
+      // their source on fresh data: a signature skipped by the cap, absent from the newest scan's namespaces, or a
+      // failure group beyond the cap is "not looked at", not "quiet".
+      const evaluated = coverage.status === "stale" || coverage.status === "none" ? [] : series.map((x) => x.fingerprint);
+      const failuresComplete = !coverage.failure_groups_truncated;
       const quiet = await q<{ id: number }>(
         reads.db,
         `UPDATE radar_findings SET status='resolved',resolved_at=now(),updated_at=now()
-          WHERE status='open' AND last_detected_at < now() - make_interval(hours => $1) RETURNING id`,
-        [RESOLVE_AFTER_HOURS],
+          WHERE status='open' AND last_detected_at < now() - make_interval(hours => $1)
+            AND (prod_fingerprint = ANY($2::text[]) OR (prod_fingerprint IS NULL AND $3::boolean))
+          RETURNING id`,
+        [RESOLVE_AFTER_HOURS, evaluated, failuresComplete],
       );
+      coverage.resolution_deferred = Number(
+        (await one<{ n: number }>(
+          reads.db,
+          `SELECT count(*)::int AS n FROM radar_findings
+            WHERE status='open' AND last_detected_at < now() - make_interval(hours => $1)`,
+          [RESOLVE_AFTER_HOURS],
+        ))!.n,
+      );
+      if (coverage.resolution_deferred)
+        coverage.notes.push(
+          `${coverage.resolution_deferred} quiet finding(s) left open: their source was not evaluated this pass`,
+        );
       if (quiet.length)
         await q(
           reads.db,
@@ -362,10 +498,11 @@ export async function radarScan(
         ...r,
         queries,
         durationMs: Date.now() - t0,
+        coverage,
       };
       await q(
         pool,
-        `UPDATE radar_scans SET finished_at=now(),series=$2,queries=$3,detected=$4,created=$5,updated=$6,resolved=$7,ingested=$8,duration_ms=$9 WHERE id=$1`,
+        `UPDATE radar_scans SET finished_at=now(),series=$2,queries=$3,detected=$4,created=$5,updated=$6,resolved=$7,ingested=$8,duration_ms=$9,coverage=$10 WHERE id=$1`,
         [
           scan.id,
           report.series,
@@ -376,6 +513,7 @@ export async function radarScan(
           r.resolved,
           r.ingested,
           report.durationMs,
+          JSON.stringify(coverage),
         ],
       );
       return report;
@@ -530,6 +668,14 @@ export async function radarTick() {
   if (!config.radar.enabled || Date.now() - lastTick < config.radar.intervalSeconds * 1000) return;
   lastTick = Date.now();
   await radarScan();
+}
+
+/** Coverage of the newest finished radar pass: findings are only as complete as what that pass evaluated. */
+export async function latestCoverage() {
+  return one<{ id: number; finished_at: string; error: string | null; coverage: RadarCoverage | null }>(
+    pool,
+    "SELECT id, finished_at, error, coverage FROM radar_scans WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1",
+  );
 }
 
 export async function listFindings(opts: { status?: string; limit?: number } = {}) {

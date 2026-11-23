@@ -4,7 +4,17 @@ import { pool, q } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { listAccessibleRepositories } from "../repos/access.ts";
 import { repositoryBaseBranch } from "../repos/service.ts";
-import { extractLine, MAX_LINE, type Contract, type ContractKind } from "./contracts.ts";
+import {
+  CONFIG_FILE,
+  dynamicSites,
+  extractLine,
+  MAX_LINE,
+  SUPPORTED_SOURCE,
+  UNSUPPORTED_SOURCE,
+  type Contract,
+  type ContractKind,
+  type DynamicSite,
+} from "./contracts.ts";
 import {
   checkoutOf,
   ensureFresh,
@@ -21,6 +31,12 @@ const exec = promisify(execFile);
  * actor can read (with file:line@commit evidence), breaking changes, compatibility checks, candidate regression tests
  * and the repositories that need a coordinated update. Inferred links are labelled as such; stale or missing indexes
  * are reported, never treated as complete.
+ *
+ * Coverage is explicit (`analysis.status`): complete — every changed file was analysable, no changed contract site has
+ * a runtime-built key, every searched index is fresh and no counterpart repository has unresolvable sites of a changed
+ * kind; partial — some of that is missing (listed in `analysis.limitations`); stale — an index is stale or unavailable;
+ * unsupported — nothing in the change could be analysed. An empty impact list is NEVER "no impact": `conclusion` is
+ * `impact_found`, `no_static_dependency_found` (complete analysis, still only static/inferred links) or `unknown`.
  */
 
 export interface ImpactRequest {
@@ -323,9 +339,13 @@ export async function analyzeImpact(actorId: number, req: ImpactRequest) {
     ...readable.filter((r) => r !== req.repository),
   ]);
   const { changed, removedContracts, breaking } = breakingChanges(diff);
-  const files = [...new Set([...(req.files ?? []), ...hunks(diff).map((h) => h.file)])].filter(
-    Boolean,
-  );
+  const parsed = hunks(diff);
+  const files = [...new Set([...(req.files ?? []), ...parsed.map((h) => h.file)])].filter(Boolean);
+  // Contract sites in the change whose key is built at runtime: never joined, always reported.
+  const dynamic: DynamicSite[] = [];
+  for (const h of parsed)
+    for (const l of [...h.removed, ...h.added])
+      if (dynamic.length < 50) dynamic.push(...dynamicSites(h.file, l.line, l.text));
   // Contracts declared in the changed files (file-level: the change may alter their payload without touching the key).
   const touched = files.length
     ? await q<Row>(pool, "SELECT * FROM impact_contracts WHERE repo=$1 AND file = ANY($2)", [
@@ -485,6 +505,63 @@ export async function analyzeImpact(actorId: number, req: ImpactRequest) {
       : []),
   ];
   const fresh = Object.values(freshness);
+  // ---- coverage: what this analysis could NOT see
+  const config = files.filter((f) => CONFIG_FILE.test(f));
+  const unsupported = files.filter((f) => UNSUPPORTED_SOURCE.test(f));
+  const analysable = files.filter((f) => SUPPORTED_SOURCE.test(f));
+  const changedKinds = new Set<string>([...subject.values()].map((x) => x.kind));
+  for (const d of dynamic) changedKinds.add(d.kind);
+  const blindCounterparts = fresh
+    .filter((f) => f.repo !== req.repository)
+    .flatMap((f) =>
+      Object.entries(f.dynamic_sites ?? {})
+        .filter(([kind, n]) => n > 0 && changedKinds.has(kind))
+        .map(([kind, n]) => ({ repo: f.repo, kind, sites: n })),
+    );
+  const staleRepos = fresh.filter((f) => f.stale || !f.available);
+  const limitations: string[] = [];
+  if (dynamic.length)
+    limitations.push(
+      `${dynamic.length} changed contract site(s) build their key at runtime (${[...new Set(dynamic.map((d) => d.reason))].join("; ")}): counterparts cannot be matched`,
+    );
+  if (config.length)
+    limitations.push(
+      `${config.length} configuration file(s) changed (${config.slice(0, 5).join(", ")}): keys defined in configuration are not analysed`,
+    );
+  if (unsupported.length)
+    limitations.push(
+      `${unsupported.length} file(s) in a language without contract recognisers (${unsupported.slice(0, 5).join(", ")})`,
+    );
+  if (blindCounterparts.length)
+    limitations.push(
+      `counterpart repositories with runtime-keyed sites of a changed kind: ${blindCounterparts
+        .slice(0, 8)
+        .map((b) => `${b.repo} (${b.sites} ${b.kind})`)
+        .join(", ")}`,
+    );
+  if (staleRepos.length)
+    limitations.push(
+      `stale or unavailable indexes: ${staleRepos
+        .slice(0, 8)
+        .map((f) => `${f.repo}${f.reason ? ` (${f.reason})` : ""}`)
+        .join(", ")}`,
+    );
+  if (!diff && files.length)
+    limitations.push("only file names were given: removed or renamed contracts cannot be detected");
+  const nothingAnalysable =
+    !analysable.length && !(req.contracts?.length || req.symbols?.length) && files.length > 0;
+  const status: "complete" | "partial" | "stale" | "unsupported" = nothingAnalysable
+    ? "unsupported"
+    : staleRepos.length
+      ? "stale"
+      : limitations.length
+        ? "partial"
+        : "complete";
+  const conclusion = impacts.length
+    ? "impact_found"
+    : status === "complete"
+      ? "no_static_dependency_found"
+      : "unknown";
   // Causal memory of the affected code (the actor's own verified outcomes and failed approaches), token-bounded.
   const { recallCausal } = await import("../memory/causal.ts");
   const memories = await recallCausal(actorId, {
@@ -509,8 +586,27 @@ export async function analyzeImpact(actorId: number, req: ImpactRequest) {
       unavailable: fresh
         .filter((f) => !f.available)
         .map((f: Freshness) => ({ repo: f.repo, reason: f.reason ?? "unavailable" })),
+      // Index freshness only; whether the ANALYSIS is complete is `analysis.status`.
       complete: fresh.every((f) => !f.stale && f.available),
     },
+    analysis: {
+      status,
+      limitations,
+      dynamic_sites: dynamic.slice(0, 20),
+      blind_counterparts: blindCounterparts.slice(0, 20),
+      files: {
+        analysed: analysable.length,
+        configuration: config,
+        unsupported,
+      },
+    },
+    conclusion,
+    conclusion_note:
+      conclusion === "impact_found"
+        ? "dependencies found; others may exist where keys are built at runtime"
+        : conclusion === "no_static_dependency_found"
+          ? "no static or inferred dependency found; dependencies through runtime-built keys, reflection or external configuration are not excluded"
+          : "unknown: the analysis was incomplete, so finding nothing is not evidence of no impact",
     related_memories: memories.items,
     metrics: { latency_ms: Date.now() - t0, repositories: fresh.length, reindexed },
     note: "Static links join literal keys on both sides; inferred links come from naming conventions or identifiers and need confirmation. Repositories you cannot read are not searched.",

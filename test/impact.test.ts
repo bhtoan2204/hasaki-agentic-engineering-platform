@@ -384,3 +384,48 @@ test("a removed line whose text looks like a diff header stays content", () => {
   ].join("\n");
   assert.equal(breakingChanges(d).changed[0]?.file, "m.sql");
 });
+
+test("adversarial dynamic contracts: runtime-built keys are never contracts, but are reported as unresolved sites", async () => {
+  const { dynamicSites } = await import("../src/impact/contracts.ts");
+  const DYNAMIC: Array<[string, string, string]> = [
+    ["p.ts", "await producer.send({ topic: config.ordersTopic, messages })", "kafka_topic"],
+    ["p.ts", "await kafkaProducer.send(TOPIC, payload)", "kafka_topic"],
+    ["w.go", "w := kafka.Writer{Topic: cfg.Topic}", "kafka_topic"],
+    ["c.ts", "await consumer.subscribe({ topics: [process.env.TOPIC] })", "kafka_topic"],
+    ["L.java", '@KafkaListener(topics = "${app.orders.topic}")', "kafka_topic"],
+    ["L.java", "@KafkaListener(topics = ORDERS_TOPIC)", "kafka_topic"],
+    ["f.ts", 'const r = await fetch(url, { method: "POST" })', "http_route"],
+    ["f.ts", "const r = await fetch(`${endpoint}`)", "http_route"],
+    ["a.ts", "await axios.post(target, body)", "http_route"],
+    ["h.go", "req, _ := http.NewRequest(http.MethodPost, target, body)", "http_route"],
+    ["h.go", "resp, err := http.Get(u)", "http_route"],
+    ["m.go", "mux.HandleFunc(routes.Orders, h)", "http_route"],
+    ["C.java", "@GetMapping(ORDERS_PATH)", "http_route"],
+    ["C.java", '@PostMapping("${api.refund.path}")', "http_route"],
+    ["q.ts", 'db.query("SELECT * FROM " + table + " WHERE id=$1")', "db_table"],
+    ["q.ts", "db.query(`DELETE FROM ${table} WHERE id = $1`)", "db_table"],
+    ["q.py", 'cur.execute(f"SELECT * FROM {table} WHERE id=%s")', "db_table"],
+    ["q.go", 'q := fmt.Sprintf("UPDATE %s SET status=$1", tbl)', "db_table"],
+  ];
+  for (const [file, line, kind] of DYNAMIC) {
+    const contracts = extractLine(file, 1, line).filter((c) => c.kind === kind && c.confidence === "static");
+    assert.deepEqual(contracts, [], `no static ${kind} from a runtime key: ${line}`);
+    assert.deepEqual(dynamicSites(file, 1, line).map((d) => d.kind), [kind], `reported: ${line}`);
+  }
+  // Literal keys are contracts, not unresolved sites; unrelated look-alikes, tests and unsupported languages are neither.
+  const CLEAN: Array<[string, string]> = [
+    ["p.ts", "await producer.send({ topic: 'orders.created', messages })"],
+    ["f.ts", "const r = await fetch(`${base}/v1/orders/${id}`)"],
+    ["q.ts", 'db.query("SELECT * FROM orders WHERE id=$1")'],
+    ["k.ts", "const v = cache.get(key)"],
+    ["k.ts", "const v = map.get(id); headers.set(name, value)"],
+    ["p.test.ts", "await producer.send({ topic: t })"],
+    ["p.rb", "producer.send(topic)"],
+  ];
+  for (const [file, line] of CLEAN) assert.deepEqual(dynamicSites(file, 1, line), [], line);
+  // Bounded: adversarial repetition stays linear.
+  const t = Date.now();
+  for (const unit of ["fetch(", "http.NewRequest(", "FROM \" + ", "Topic: ", "@KafkaListener(topics = "])
+    dynamicSites("a.go", 1, unit.repeat(Math.floor(4000 / unit.length)));
+  assert.ok(Date.now() - t < 300, `dynamic-site scan took ${Date.now() - t} ms`);
+});

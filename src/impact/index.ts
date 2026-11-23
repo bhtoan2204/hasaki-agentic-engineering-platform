@@ -8,6 +8,7 @@ import {
   EXTRACTOR_VERSION,
   GREP_PATTERN,
   SOURCE_PATHSPECS,
+  dynamicSites,
   extractLine,
   parseGrep,
 } from "./contracts.ts";
@@ -46,13 +47,15 @@ export interface Freshness {
   stale: boolean;
   available: boolean;
   reason?: string;
+  /** Runtime-keyed contract sites per kind at the indexed commit (cannot be joined). */
+  dynamic_sites?: Record<string, number>;
 }
 
 export async function freshnessOf(name: string): Promise<Freshness> {
   const path = await checkoutOf(name);
-  const state = await one<{ commit: string; extractor: string }>(
+  const state = await one<{ commit: string; extractor: string; dynamic_sites: Record<string, number> }>(
     pool,
-    "SELECT commit, extractor FROM impact_index_state WHERE repo=$1",
+    "SELECT commit, extractor, dynamic_sites FROM impact_index_state WHERE repo=$1",
     [name],
   );
   if (!path)
@@ -63,6 +66,7 @@ export async function freshnessOf(name: string): Promise<Freshness> {
       stale: !state,
       available: false,
       reason: "no local checkout",
+      dynamic_sites: state?.dynamic_sites ?? {},
     };
   const current = await baseCommit(path, await repositoryBaseBranch(name));
   return {
@@ -71,6 +75,7 @@ export async function freshnessOf(name: string): Promise<Freshness> {
     current_commit: current,
     stale: !state || state.commit !== current || state.extractor !== EXTRACTOR_VERSION,
     available: !!current,
+    dynamic_sites: state?.dynamic_sites ?? {},
   };
 }
 
@@ -132,9 +137,12 @@ async function extract(name: string, opts: { force?: boolean }): Promise<IndexRe
   ).catch((e: { code?: number; stdout?: string }) =>
     e.code === 1 ? { stdout: "" } : Promise.reject(e),
   );
-  const contracts = parseGrep(rev, r.stdout).flatMap((m) =>
-    extractLine(m.file, m.line, m.text, m.context),
-  );
+  const matches = parseGrep(rev, r.stdout);
+  const contracts = matches.flatMap((m) => extractLine(m.file, m.line, m.text, m.context));
+  const dynamic: Record<string, number> = {};
+  for (const m of matches)
+    for (const d of dynamicSites(m.file, m.line, m.text, m.context))
+      dynamic[d.kind] = (dynamic[d.kind] ?? 0) + 1;
   const files = new Set(contracts.map((c) => c.file)).size;
   const written = await withTx(async (db) => {
     // Serialise writers of this repository across instances; a writer that lost the race sees the state already
@@ -159,9 +167,9 @@ async function extract(name: string, opts: { force?: boolean }): Promise<IndexRe
     }
     await q(
       db,
-      `INSERT INTO impact_index_state(repo,commit,extractor,contracts,files,duration_ms) VALUES($1,$2,$3,$4,$5,$6)
-       ON CONFLICT(repo) DO UPDATE SET commit=$2,extractor=$3,contracts=$4,files=$5,duration_ms=$6,indexed_at=now()`,
-      [name, rev, EXTRACTOR_VERSION, contracts.length, files, Date.now() - t0],
+      `INSERT INTO impact_index_state(repo,commit,extractor,contracts,files,duration_ms,dynamic_sites) VALUES($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT(repo) DO UPDATE SET commit=$2,extractor=$3,contracts=$4,files=$5,duration_ms=$6,dynamic_sites=$7,indexed_at=now()`,
+      [name, rev, EXTRACTOR_VERSION, contracts.length, files, Date.now() - t0, JSON.stringify(dynamic)],
     );
     return true;
   });

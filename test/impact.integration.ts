@@ -58,6 +58,10 @@ const REPOS: Record<string, Record<string, string>> = {
     "reader_test.go":
       'package worker\n\nfunc TestReadsOrderShipped(t *testing.T) { topic := "order.shipped"; _ = topic }\n',
   },
+  // A consumer whose topic comes from the environment: cannot be joined, must make kafka analyses partial.
+  "imp-dyn": {
+    "src/listen.ts": "await consumer.subscribe({ topics: [process.env.SHIPPED_TOPIC] });\n",
+  },
   "imp-private": {
     "consumer.ts": "await consumer.subscribe({ topic: 'order.shipped' });\n",
   },
@@ -304,4 +308,55 @@ test("oversized diffs and invalid branches are refused, not parsed", async () =>
       analyzeImpact(userId, { repository: "imp-oms", branch }),
       /invalid branch/,
     );
+});
+
+test("coverage is explicit: runtime-keyed counterparts, dynamic changed sites, config-only and complete analyses", async () => {
+  // An earlier test registers a repository without a checkout: every analysis would (correctly) be stale.
+  const stale = await analyzeImpact(userId, { repository: "imp-oms", diff: diff("src/x.ts", [], ["const a = 1;"]) });
+  assert.equal(stale.analysis.status, "stale");
+  await q(pool, "DELETE FROM repositories WHERE name='imp-missing'");
+  // The rename still finds its static consumers — and says another repository may consume it through a runtime key.
+  const rename = await analyzeImpact(userId, {
+    repository: "imp-oms",
+    diff: diff(
+      "src/ship.ts",
+      ["  await producer.send({ topic: 'order.shipped', messages });"],
+      ["  await producer.send({ topic: 'order.dispatched', messages });"],
+    ),
+  });
+  assert.equal(rename.conclusion, "impact_found");
+  assert.equal(rename.analysis.status, "partial");
+  assert.deepEqual(rename.analysis.blind_counterparts, [{ repo: "imp-dyn", kind: "kafka_topic", sites: 1 }]);
+  assert.ok(!rename.impacts.some((i) => i.repo === "imp-dyn"), "a runtime-keyed site is never claimed as a static link");
+
+  // A new producer whose topic is configuration: nothing can be joined → unknown, never "no impact".
+  const dynamic = await analyzeImpact(userId, {
+    repository: "imp-oms",
+    diff: diff("src/notify.ts", [], ["await producer.send({ topic: cfg.notifyTopic, messages });"]),
+  });
+  assert.equal(dynamic.impacts.length, 0);
+  assert.equal(dynamic.analysis.status, "partial");
+  assert.equal(dynamic.conclusion, "unknown");
+  assert.equal(dynamic.analysis.dynamic_sites[0].kind, "kafka_topic");
+  assert.match(dynamic.conclusion_note, /not evidence of no impact/);
+
+  // Only configuration changed (where topics are often defined): nothing analysable.
+  const config_ = await analyzeImpact(userId, {
+    repository: "imp-oms",
+    diff: diff("config/application.yml", ["orders.topic: order.shipped"], ["orders.topic: order.dispatched"]),
+  });
+  assert.equal(config_.analysis.status, "unsupported");
+  assert.equal(config_.conclusion, "unknown");
+  assert.ok(config_.analysis.limitations.some((l) => /configuration file/.test(l)));
+
+  // Fully analysable change of a kind nobody resolves at runtime, with no counterpart: the strongest negative answer is
+  // still only "no static dependency found".
+  const route = await analyzeImpact(userId, {
+    repository: "imp-pay",
+    diff: diff("src/health.ts", [], ["router.get('/v1/health', health);"]),
+  });
+  assert.equal(route.analysis.status, "complete", route.analysis.limitations.join("; "));
+  assert.equal(route.conclusion, "no_static_dependency_found");
+  assert.notEqual(route.conclusion, "no_impact");
+  assert.match(route.conclusion_note, /not excluded/);
 });

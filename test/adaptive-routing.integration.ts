@@ -34,26 +34,42 @@ before(async () => {
         : { kind: "completed", output: { summary: "ok" } };
     },
   });
+  // Coding steps: the platform's verification result is the correctness signal. A pass is in the attempt output; a
+  // failed verification fails the attempt and is recorded in its metrics (as the harness does).
+  registerExecutor("coding_agent", {
+    async execute(ctx) {
+      if (/fail/.test(ctx.run.title)) {
+        await ctx.recordMetrics({ verification: { outcome: "failed", status: "failed", passed: false } });
+        return { kind: "failed", error: "Mandatory verification failed", retryable: false };
+      }
+      return { kind: "completed", output: { summary: "ok", verification: { outcome: "passed", passed: true } } };
+    },
+  });
   await definitions.create({
     key: "route-wf",
     spec: { name: "Routing workflow", steps: [{ key: "analyze", type: "agent" }] },
+  });
+  await definitions.create({
+    key: "route-code",
+    spec: { name: "Routing coding workflow", steps: [{ key: "implement", type: "coding_agent" }] },
   });
   // History: claude analyses succeed half the time, codex analyses nearly always (provider recorded per attempt).
   const history: Array<[string, boolean]> = [
     ...Array.from({ length: 16 }, (_, i): [string, boolean] => ["claude", i % 2 === 0]),
     ...Array.from({ length: 16 }, (_, i): [string, boolean] => ["codex", i !== 0]),
   ];
-  for (const [provider, ok] of history) {
-    // The engine records the provider on each attempt (attempt agent configuration is immutable afterwards).
-    const run = await startRun({
-      definitionKey: "route-wf",
-      title: `${provider} ${ok ? "ok" : "fail"}`,
-      ownerId,
-      agentProvider: provider as "claude",
-    });
-    runs.push(Number((run as { id: number }).id));
-    await drain();
-  }
+  for (const key of ["route-wf", "route-code"])
+    for (const [provider, ok] of history) {
+      // The engine records the provider on each attempt (attempt agent configuration is immutable afterwards).
+      const run = await startRun({
+        definitionKey: key,
+        title: `${provider} ${ok ? "ok" : "fail"}`,
+        ownerId,
+        agentProvider: provider as "claude",
+      });
+      runs.push(Number((run as { id: number }).id));
+      await drain();
+    }
 });
 after(async () => {
   setHandoffReadinessForTests(undefined);
@@ -62,22 +78,32 @@ after(async () => {
   await pool.end();
 });
 
-const stepConfig = async (runId: number) =>
+const stepConfig = async (runId: number, key = "analyze") =>
   (await one<{ config: Record<string, unknown> }>(
     pool,
-    "SELECT config FROM workflow_steps WHERE run_id=$1 AND key='analyze'",
-    [runId],
+    "SELECT config FROM workflow_steps WHERE run_id=$1 AND key=$2",
+    [runId, key],
   ))!.config;
 
-test("history is read from platform outcomes (completed vs failed attempts), excluding nothing it should not", async () => {
-  const outcomes = await loadOutcomes({ stepType: "agent" });
-  const by = (p: string) => outcomes.filter((o) => o.provider === p);
-  assert.equal(by("claude").length, 16);
-  assert.equal(by("claude").filter((o) => o.verified).length, 8);
-  assert.equal(by("codex").filter((o) => o.verified).length, 15);
+test("history keeps execution success, correctness and review apart; analysis completion is not correctness", async () => {
+  const analysis = await loadOutcomes({ stepType: "agent" });
+  const a = (p: string) => analysis.filter((o) => o.provider === p);
+  assert.equal(a("claude").length, 16);
+  assert.equal(a("claude").filter((o) => o.executed).length, 8, "execution success is recorded");
+  assert.ok(analysis.every((o) => o.verified === null), "no deterministic correctness for analysis steps");
+  assert.ok(analysis.every((o) => o.reviewed === null), "a run-level review is not attributed to analysis steps");
+  const coding = await loadOutcomes({ stepType: "coding_agent" });
+  const c = (p: string) => coding.filter((o) => o.provider === p);
+  assert.equal(c("claude").filter((o) => o.verified === true).length, 8);
+  assert.equal(
+    c("claude").filter((o) => o.verified === false).length,
+    8,
+    "a failed verification (recorded in metrics, no output) counts as incorrect, not unknown",
+  );
+  assert.equal(c("codex").filter((o) => o.verified === true).length, 15);
 });
 
-test("without an opt-in preference nothing changes; with it the better measured provider is chosen and recorded", async () => {
+test("without an opt-in preference nothing changes; with it the measured-better coding configuration is chosen; analysis keeps its default", async () => {
   const plain = await startRun({
     definitionKey: "route-wf",
     title: "no preference",
@@ -88,14 +114,23 @@ test("without an opt-in preference nothing changes; with it the better measured 
   assert.equal((await stepConfig(Number(plain.id))).routing_decision, undefined);
 
   await saveRoutingPreference(ownerId, { enabled: true, preference: "balanced", min_samples: 10 });
+  // Analysis: codex "completed" more often, but completion is not verified correctness → default kept.
+  const analysis = await startRun({ definitionKey: "route-wf", title: "routed analysis", ownerId, start: false });
+  runs.push(Number(analysis.id));
+  const ad = (await stepConfig(Number(analysis.id))).routing_decision as { applied: boolean; confidence: string; reason: string };
+  assert.equal(ad.applied, false);
+  assert.equal(ad.confidence, "insufficient");
+  assert.match(ad.reason, /completion is not counted as correct/);
+  assert.equal((await stepConfig(Number(analysis.id))).agent, undefined);
+
   const routed = await startRun({
-    definitionKey: "route-wf",
+    definitionKey: "route-code",
     title: "routed",
     ownerId,
     start: false,
   });
   runs.push(Number(routed.id));
-  const cfg = await stepConfig(Number(routed.id));
+  const cfg = await stepConfig(Number(routed.id), "implement");
   const decision = cfg.routing_decision as {
     applied: boolean;
     chosen: { provider: string };
@@ -103,14 +138,19 @@ test("without an opt-in preference nothing changes; with it the better measured 
     evidence: unknown[];
     confidence: string;
     reason: string;
+    incumbent: { provider: string };
+    non_inferiority: { superior: boolean; non_inferior: boolean; correctness: { low: number } };
   };
   assert.equal(decision.applied, true, decision.reason);
   assert.equal(decision.chosen.provider, "codex");
+  assert.equal(decision.incumbent.provider, "claude");
+  assert.equal(decision.non_inferiority.superior, true);
+  assert.ok(decision.non_inferiority.correctness.low > 0);
   assert.equal((cfg.agent as { provider: string }).provider, "codex");
   assert.ok(decision.eligible.includes("codex") && decision.evidence.length >= 2);
   const recorded = await one(
     pool,
-    "SELECT source, provenance FROM agent_optimization_decisions WHERE run_id=$1 AND step_key='analyze'",
+    "SELECT source, provenance FROM agent_optimization_decisions WHERE run_id=$1 AND step_key='implement'",
     [routed.id],
   );
   assert.equal(recorded!.source, "adaptive_routing");
@@ -144,13 +184,13 @@ test("a chosen provider that is not usable now falls back to the default, with t
   );
   try {
     const r = await startRun({
-      definitionKey: "route-wf",
+      definitionKey: "route-code",
       title: "unhealthy",
       ownerId,
       start: false,
     });
     runs.push(Number(r.id));
-    const cfg = await stepConfig(Number(r.id));
+    const cfg = await stepConfig(Number(r.id), "implement");
     assert.equal((cfg.routing_decision as { applied: boolean }).applied, false);
     assert.match(String((cfg.routing_decision as { reason: string }).reason), /not usable now/);
     assert.equal(cfg.agent, undefined);
