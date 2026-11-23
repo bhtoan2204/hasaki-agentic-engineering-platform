@@ -170,10 +170,15 @@ async function insertCheckpoint(
         ? normalized
         : null,
   };
-  const stored = await one<{ bytes: number | null }>(
+  // RETURNING also reports how many executor_returned checkpoints the step had BEFORE this row (the statement's snapshot
+  // excludes it), so retention below only runs a DELETE when something can actually be retired.
+  const stored = await one<{ bytes: number | null; previous: number | null }>(
     db,
     `INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data,execution,execution_digest,workspace_artifact_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING octet_length(execution::text) AS bytes`,
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING octet_length(execution::text) AS bytes,
+       CASE WHEN $4='executor_returned'
+         THEN (SELECT count(*)::int FROM workflow_checkpoints WHERE step_id=$2 AND reason='executor_returned') END AS previous`,
     [
       source.run_id,
       source.step_id,
@@ -186,7 +191,7 @@ async function insertCheckpoint(
     ],
   );
   // bytes: the envelope as PostgreSQL stores it (jsonb text), returned by the INSERT instead of read back.
-  return { execution, bytes: Number(stored?.bytes ?? 0) };
+  return { execution, bytes: Number(stored?.bytes ?? 0), previous: Number(stored?.previous ?? 0) };
 }
 
 /** The caller owns the run lock and the status transition that makes this checkpoint recoverable. */
@@ -226,9 +231,12 @@ export async function recordExecutorReturn(
       [job.run_id, config.instanceId],
     );
     if (!run || !(await ownsInstance(db))) return false;
-    const live = await one(
+    // `recorded`: this attempt's executor_returned checkpoint already exists (answered in the same read as the fence).
+    const live = await one<{ id: number; recorded: boolean }>(
       db,
-      `SELECT j.id FROM workflow_jobs j JOIN workflow_step_attempts a ON a.job_id=j.id
+      `SELECT j.id,
+              EXISTS (SELECT 1 FROM workflow_checkpoints c WHERE c.attempt_id=a.id AND c.reason='executor_returned') AS recorded
+         FROM workflow_jobs j JOIN workflow_step_attempts a ON a.job_id=j.id
          JOIN workflow_steps s ON s.id=a.step_id AND s.run_id=a.run_id
         WHERE j.id=$1 AND j.fencing_token=$2 AND j.status='running' AND j.lease_expires_at>clock_timestamp()
           AND j.run_id=$4 AND j.lease_owner=$5
@@ -239,14 +247,7 @@ export async function recordExecutorReturn(
       [job.id, job.fencing_token, attemptId, job.run_id, job.lease_owner],
     );
     if (!live) return false;
-    if (
-      await one(
-        db,
-        "SELECT id FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='executor_returned'",
-        [attemptId],
-      )
-    )
-      return true;
+    if (live.recorded) return true;
 
     const source = await sourceOf(db, attemptId);
     if (!source) return false;
@@ -305,10 +306,19 @@ export async function recordExecutorReturn(
       [attemptId, json(replay?.fingerprint ?? null), replay?.reusedFrom ?? null],
     );
     if (replay?.reusedFrom != null) {
-      await runEvents.add(db, source.run_id, "system", "Reused compatible execution result",
-        source.step_id, attemptId, {
-          action: "REUSE", source_attempt_id: replay.reusedFrom, fingerprint: replay.fingerprint.digest,
-        });
+      await runEvents.add(
+        db,
+        source.run_id,
+        "system",
+        "Reused compatible execution result",
+        source.step_id,
+        attemptId,
+        {
+          action: "REUSE",
+          source_attempt_id: replay.reusedFrom,
+          fingerprint: replay.fingerprint.digest,
+        },
+      );
       await recordDecision(db, {
         runId: source.run_id,
         stepId: source.step_id,
@@ -324,16 +334,18 @@ export async function recordExecutorReturn(
         details: { fingerprint: replay.fingerprint.digest },
       });
     }
-    await q(
-      db,
-      `WITH retired AS (
+    // At most RETURNED_RETENTION per step are kept: nothing to retire until the step already holds that many.
+    if (size.previous >= RETURNED_RETENTION)
+      await q(
+        db,
+        `WITH retired AS (
       DELETE FROM workflow_checkpoints WHERE id IN (
         SELECT id FROM workflow_checkpoints WHERE step_id=$1 AND reason='executor_returned'
         ORDER BY id DESC OFFSET $2
       ) RETURNING workspace_artifact_id
     ) DELETE FROM workflow_artifacts WHERE kind=$3 AND id IN (SELECT workspace_artifact_id FROM retired)`,
-      [source.step_id, RETURNED_RETENTION, EXECUTION_WORKSPACE_ARTIFACT],
-    );
+        [source.step_id, RETURNED_RETENTION, EXECUTION_WORKSPACE_ARTIFACT],
+      );
     return true;
   });
 }
