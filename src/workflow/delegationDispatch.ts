@@ -95,13 +95,22 @@ async function pass() {
           row.child_run_id ?? (await findUnlinkedChild(c, row, row.parent_owner_id))?.id ?? null;
         if (childId != null) {
           const child = await lockRun(c, childId);
-          if (!TERMINAL_RUN.includes(child.status))
-            await cancelLockedRun(
+          if (TERMINAL_RUN.includes(child.status)) {
+            // Already finished on its own: link it and let step 3 record its real outcome and result, instead of
+            // overwriting them with "canceled".
+            await q(
               c,
-              child,
-              afterCommit,
-              `parent run #${row.parent_run_id} ${row.parent_status.toLowerCase()}`,
+              "UPDATE workflow_delegations SET status=CASE WHEN status='queued' THEN 'started' ELSE status END, child_run_id=$2, updated_at=now() WHERE id=$1",
+              [row.id, childId],
             );
+            return false;
+          }
+          await cancelLockedRun(
+            c,
+            child,
+            afterCommit,
+            `parent run #${row.parent_run_id} ${row.parent_status.toLowerCase()}`,
+          );
         }
         await q(
           c,
@@ -248,21 +257,28 @@ async function pass() {
        ) last ON true`,
   );
   for (const d of done) {
-    const result = resultOf(d);
-    await q(
-      pool,
-      "UPDATE workflow_delegations SET status=$2, result=$3, updated_at=now() WHERE id=$1 AND status IN ('started','proposed')",
-      [
-        d.id,
-        d.child_status === "COMPLETED"
-          ? "completed"
-          : d.child_status === "FAILED"
-            ? "failed"
-            : "canceled",
-        json(result),
-      ],
-    );
-    report.finished++;
+    try {
+      await q(
+        pool,
+        "UPDATE workflow_delegations SET status=$2, result=$3, updated_at=now() WHERE id=$1 AND status IN ('started','proposed')",
+        [
+          d.id,
+          d.child_status === "COMPLETED"
+            ? "completed"
+            : d.child_status === "FAILED"
+              ? "failed"
+              : "canceled",
+          json(resultOf(d)),
+        ],
+      );
+      report.finished++;
+    } catch (error) {
+      report.errors++;
+      logError("workflow.delegation_record_failed", "Recording a finished child failed", error, {
+        delegation_id: d.id,
+        child_run_id: d.child_run_id,
+      });
+    }
   }
 
   // 4. Resume parent steps whose blocking children are all finished.
@@ -272,65 +288,81 @@ async function pass() {
        FROM workflow_steps s WHERE s.status='WAITING_INPUT' AND s.pending_input ? 'child_workflows'`,
   );
   for (const w of waiting) {
-    const rows = await q<Row>(pool, "SELECT * FROM workflow_delegations WHERE id = ANY($1)", [
-      w.ids,
-    ]);
-    if (
-      rows.length !== w.ids.length ||
-      rows.some((r) => !["completed", "failed", "canceled"].includes(r.status))
-    )
-      continue;
-    await withTx(async (c, afterCommit) => {
-      await lockRun(c, Number(w.run_id));
-      const step = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id=$1 FOR UPDATE", [
-        w.id,
+    try {
+      const rows = await q<Row>(pool, "SELECT * FROM workflow_delegations WHERE id = ANY($1)", [
+        w.ids,
       ]);
-      if (!step || step.status !== "WAITING_INPUT" || !step.pending_input?.child_workflows) return;
-      const attempt = await one<AttemptRow>(c, "SELECT * FROM workflow_step_attempts WHERE id=$1", [
-        step.current_attempt_id,
-      ]);
-      const results = rows.map((r) => ({
-        ...(r.result ?? {}),
-        delegation_id: Number(r.id),
-        workflow: r.workflow_key,
-        mode: r.mode,
-        status: r.status,
-      }));
-      const base = (attempt?.output ?? {}) as Record<string, unknown>;
-      const prior = (base.child_workflows ?? {}) as Record<string, unknown>;
-      const output = { ...base, child_workflows: { ...prior, results } };
-      const failed = rows.filter((r) => r.status !== "completed");
-      if (failed.length) {
-        const error = `blocking child workflow(s) did not complete: ${failed.map((r) => `#${r.child_run_id ?? "?"} ${r.workflow_key} ${r.status}`).join(", ")}`;
-        await q(
+      if (
+        rows.length !== w.ids.length ||
+        rows.some((r) => !["completed", "failed", "canceled"].includes(r.status))
+      )
+        continue;
+      await withTx(async (c, afterCommit) => {
+        await lockRun(c, Number(w.run_id));
+        const step = await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id=$1 FOR UPDATE", [
+          w.id,
+        ]);
+        if (!step || step.status !== "WAITING_INPUT" || !step.pending_input?.child_workflows)
+          return;
+        const attempt = await one<AttemptRow>(
           c,
-          "UPDATE workflow_step_attempts SET status='FAILED', output=$2, error=$3, finished_at=now(), resolved_at=now() WHERE id=$1",
-          [step.current_attempt_id, json(output), json({ message: error })],
+          "SELECT * FROM workflow_step_attempts WHERE id=$1",
+          [step.current_attempt_id],
         );
-        await setStepStatus(
-          c,
-          step,
-          "FAILED",
-          { output, pending_input: null, error, finished_at: new Date() },
-          "child workflow failed",
-        );
-      } else {
-        await q(
-          c,
-          "UPDATE workflow_step_attempts SET status='COMPLETED', output=$2, finished_at=now(), resolved_at=now() WHERE id=$1",
-          [step.current_attempt_id, json(output)],
-        );
-        await setStepStatus(
-          c,
-          step,
-          "COMPLETED",
-          { output, pending_input: null, error: null, finished_at: new Date() },
-          "child workflows completed",
-        );
-      }
-      await advance(c, Number(w.run_id), afterCommit);
-    });
-    report.resumed++;
+        const results = rows.map((r) => ({
+          ...(r.result ?? {}),
+          delegation_id: Number(r.id),
+          workflow: r.workflow_key,
+          mode: r.mode,
+          status: r.status,
+        }));
+        const base = (attempt?.output ?? {}) as Record<string, unknown>;
+        const prior = (base.child_workflows ?? {}) as Record<string, unknown>;
+        const output = { ...base, child_workflows: { ...prior, results } };
+        const failed = rows.filter((r) => r.status !== "completed");
+        if (failed.length) {
+          const error = `blocking child workflow(s) did not complete: ${failed.map((r) => `#${r.child_run_id ?? "?"} ${r.workflow_key} ${r.status}`).join(", ")}`;
+          await q(
+            c,
+            "UPDATE workflow_step_attempts SET status='FAILED', output=$2, error=$3, finished_at=now(), resolved_at=now() WHERE id=$1",
+            [step.current_attempt_id, json(output), json({ message: error })],
+          );
+          await setStepStatus(
+            c,
+            step,
+            "FAILED",
+            { output, pending_input: null, error, finished_at: new Date() },
+            "child workflow failed",
+          );
+        } else {
+          await q(
+            c,
+            "UPDATE workflow_step_attempts SET status='COMPLETED', output=$2, finished_at=now(), resolved_at=now() WHERE id=$1",
+            [step.current_attempt_id, json(output)],
+          );
+          await setStepStatus(
+            c,
+            step,
+            "COMPLETED",
+            { output, pending_input: null, error: null, finished_at: new Date() },
+            "child workflows completed",
+          );
+        }
+        await advance(c, Number(w.run_id), afterCommit);
+      });
+      report.resumed++;
+    } catch (error) {
+      report.errors++;
+      logError(
+        "workflow.delegation_resume_failed",
+        "Resuming a waiting parent step failed",
+        error,
+        {
+          parent_run_id: w.run_id,
+          parent_step_id: w.id,
+        },
+      );
+    }
   }
 
   // 5. Parallel join: a run held in WAITING only by parallel children moves on once they are all finished.
@@ -343,8 +375,15 @@ async function pass() {
       LIMIT 50`,
   );
   for (const h of held) {
-    await withTx((c, afterCommit) => advance(c, Number(h.id), afterCommit));
-    report.joined++;
+    try {
+      await withTx((c, afterCommit) => advance(c, Number(h.id), afterCommit));
+      report.joined++;
+    } catch (error) {
+      report.errors++;
+      logError("workflow.delegation_join_failed", "Joining a parent run failed", error, {
+        parent_run_id: h.id,
+      });
+    }
   }
   return report;
 }

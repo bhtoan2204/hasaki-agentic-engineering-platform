@@ -442,6 +442,88 @@ test("a transient link failure rolls back the child and preserves the last spawn
   assert.equal((await dispatchDelegations()).spawned, 0);
 });
 
+test("cascade keeps the real outcome of a child that finished before the parent ended", async () => {
+  const parent = await startRun({ definitionKey: "deleg-parent", ownerId, start: false });
+  runs.push(parent.id);
+  const child = await startRun({
+    definitionKey: "deleg-child",
+    title: "done",
+    ownerId,
+    start: false,
+  });
+  await q(pool, "UPDATE workflow_runs SET status='COMPLETED' WHERE id=$1", [child.id]);
+  await q(pool, "UPDATE workflow_steps SET status='COMPLETED', output=$2 WHERE run_id=$1", [
+    child.id,
+    JSON.stringify({ summary: "finished before cancel" }),
+  ]);
+  await q(
+    pool,
+    `INSERT INTO workflow_delegations
+      (parent_run_id, parent_step_id, root_run_id, depth, dedupe_key, workflow_key, mode, request, status, child_run_id)
+     SELECT $1, id, $1, 1, 'finished-first', 'deleg-child', 'parallel', '{}', 'started', $2
+       FROM workflow_steps WHERE run_id=$1 AND key='plan'`,
+    [parent.id, child.id],
+  );
+  await q(pool, "UPDATE workflow_runs SET status='CANCELED' WHERE id=$1", [parent.id]);
+  await dispatchDelegations();
+  const [row] = await rowsOf(parent.id);
+  assert.equal(row.status, "completed", "a child that completed is not recorded as canceled");
+  assert.equal(row.result?.summary, "finished before cancel");
+  assert.equal((await getRun(child.id)).status, "COMPLETED");
+  assert.equal((await dispatchDelegations()).canceled, 0);
+});
+
+test("one parent that cannot be resumed does not stop other waiting parents from resuming", async (t) => {
+  for (const poisonFirst of [true, false]) {
+    const tag = poisonFirst ? "first" : "second";
+    const ids = [
+      await parent(`poison-a-${tag}`, [
+        ask({ workflow: "deleg-gated", request: `gated a ${tag}` }),
+      ]),
+      await parent(`poison-b-${tag}`, [
+        ask({ workflow: "deleg-gated", request: `gated b ${tag}` }),
+      ]),
+    ];
+    const kids: number[] = [];
+    for (const id of ids) {
+      const [row] = await rowsOf(id);
+      assert.equal((await step(id, "plan")).status, "WAITING_INPUT");
+      kids.push(Number(row.child_run_id));
+      runs.push(Number(row.child_run_id));
+      await q(pool, "UPDATE workflow_runs SET status='COMPLETED' WHERE id=$1", [row.child_run_id]);
+    }
+    const [poisoned, healthy] = poisonFirst ? ids : [ids[1], ids[0]];
+    const poisonedStep = (await one<{ id: number }>(
+      pool,
+      "SELECT id FROM workflow_steps WHERE run_id=$1 AND key='plan'",
+      [poisoned],
+    ))!.id;
+    await pool.query(`CREATE FUNCTION fail_resume() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = ${poisonedStep} AND NEW.status = 'COMPLETED' THEN
+          RAISE EXCEPTION 'injected resume failure';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await pool.query(`CREATE TRIGGER fail_resume BEFORE UPDATE ON workflow_steps
+      FOR EACH ROW EXECUTE FUNCTION fail_resume()`);
+    const logged = t.mock.method(console, "error", () => {});
+    try {
+      const report = await dispatchDelegations();
+      assert.equal(report.errors, 1, "the failure is reported, not thrown");
+      assert.equal(report.resumed, 1);
+      assert.notEqual((await step(healthy, "plan")).status, "WAITING_INPUT");
+      assert.equal((await step(poisoned, "plan")).status, "WAITING_INPUT", "retried next pass");
+    } finally {
+      logged.mock.restore();
+      await pool.query("DROP TRIGGER fail_resume ON workflow_steps");
+      await pool.query("DROP FUNCTION fail_resume()");
+    }
+    await settle();
+    assert.notEqual((await step(poisoned, "plan")).status, "WAITING_INPUT");
+  }
+});
+
 test("guards: allowlist, justification, scope, per-step bound, read-only parent, unconfigured step — refused with reasons", async () => {
   const id = await parent("guards", [
     ask({ workflow: "deleg-plain", request: "not allowed" }),
