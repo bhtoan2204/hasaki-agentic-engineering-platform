@@ -247,6 +247,42 @@ export interface ExecutionFingerprint {
   output_hash?: string;
 }
 
+export interface CheckpointRowInput {
+  id: number;
+  attempt_id: number | null;
+  reason: string;
+  data?: Record<string, unknown> | null;
+  execution?: {
+    version?: number;
+    milestone?: string;
+    binding?: {
+      attempt_id?: number;
+      generation?: number;
+      snapshot_id?: number | null;
+      context_hash?: string | null;
+    };
+    workspace_fingerprint?: string | null;
+    workspace_unavailable?: boolean;
+    workspace_artifact_id?: number | null;
+    verification?: { digest: string; artifact_ids: number[] } | null;
+    artifact_ids?: number[];
+    completed_actions?: string[];
+  } | null;
+  created_at: string | Date;
+}
+
+export interface CheckpointAttemptInput {
+  id: number;
+  generation: number;
+  invalidated_at?: unknown;
+  metrics?: { verification?: { passed?: boolean } } | null;
+}
+
+export interface CheckpointArtifactInput {
+  id: number;
+  size?: number | string | null;
+}
+
 export interface AttemptRow {
   id: number;
   step_id: number;

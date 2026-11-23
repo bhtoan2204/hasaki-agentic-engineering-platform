@@ -1,5 +1,11 @@
 import { pool, q, one, type Db } from "../db/pool.ts";
-import type { RunRow, StepRow } from "./types.ts";
+import type {
+  CheckpointArtifactInput,
+  CheckpointAttemptInput,
+  CheckpointRowInput,
+  RunRow,
+  StepRow,
+} from "./types.ts";
 
 export type OwnerScope = { ownerId?: number; all?: boolean };
 
@@ -222,7 +228,7 @@ export async function loadStepDetail(runId: number, stepKey: string) {
   const [step, attempts, questions, checkpoints, artifacts, sessions, snapshots, jobs, handoffs] =
     await Promise.all([
       one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", args),
-      q<Record<string, unknown>>(
+      q<CheckpointAttemptInput & Record<string, unknown>>(
         pool,
         // Inputs, execution contracts and slop findings are the bulk of an attempt and are only shown as raw JSON:
         // the list carries what the inspector renders and the full payload loads on demand
@@ -256,14 +262,14 @@ export async function loadStepDetail(runId: number, stepKey: string) {
         `SELECT * FROM workflow_questions WHERE step_id = ${sid} ORDER BY id`,
         args,
       ),
-      q<Record<string, unknown>>(
+      q<CheckpointRowInput & { run_id: number; step_id: number }>(
         pool,
         `SELECT id, run_id, step_id, attempt_id, reason, data, created_at,
                 execution - 'result' AS execution
            FROM workflow_checkpoints WHERE step_id = ${sid} ORDER BY id`,
         args,
       ),
-      q<Record<string, unknown>>(
+      q<CheckpointArtifactInput & Record<string, unknown>>(
         pool,
         // An execution contract's data repeats its content (opened through /api/artifacts/:id): not shipped in the list.
         `SELECT id, attempt_id, kind, name, length(content) AS size,

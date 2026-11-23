@@ -525,6 +525,33 @@ test("a corrupt checkpoint or a late result after cancellation cannot advance th
   assert.equal((await rows(second.run.id)).checkpoints.length, 0);
 });
 
+test("a checkpoint with a matching digest still needs a valid executor result", async () => {
+  const { checkpointHash, recordExecutorReturn, readExecutionCheckpoint } =
+    await import("../src/workflow/checkpoints.ts");
+  const { run, job, begun } = await claimed("reliability-execution-checkpoint");
+  try {
+    assert.equal(
+      await recordExecutorReturn(job, begun.attempt.id, { kind: "completed", output: {} }),
+      true,
+    );
+    const row = await one<{ execution: Record<string, unknown> }>(
+      pool,
+      "SELECT execution FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='executor_returned'",
+      [begun.attempt.id],
+    );
+    assert.ok(row);
+    const invalid = { ...row.execution, result: { kind: "completed" } };
+    await q(
+      pool,
+      "UPDATE workflow_checkpoints SET execution=$2,execution_digest=$3 WHERE attempt_id=$1",
+      [begun.attempt.id, JSON.stringify(invalid), checkpointHash(invalid)],
+    );
+    assert.equal(await readExecutionCheckpoint(pool, begun.attempt.id), undefined);
+  } finally {
+    await cancelRun(run.id);
+  }
+});
+
 test("the latest eight returned checkpoints retain their artifacts after repeated interruption", async () => {
   const { recordExecutorReturn, readExecutionCheckpoint } =
     await import("../src/workflow/checkpoints.ts");

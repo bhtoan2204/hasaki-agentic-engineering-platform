@@ -145,7 +145,6 @@ import {
   checkpointView,
   isRecoverable,
   latestRecoverable,
-  type CheckpointRowInput,
 } from "./checkpointView.ts";
 import {
   resolveProfile,
@@ -2756,10 +2755,10 @@ export async function stepDetail(runId: number, stepKey: string) {
     planContinuation(pool, step).catch(() => null),
   ]);
   const views = detail.checkpoints.map((row) =>
-    checkpointView(row as unknown as CheckpointRowInput, {
+    checkpointView(row, {
       stepGeneration: step.generation,
-      attempts: detail.attempts as Parameters<typeof checkpointView>[1]["attempts"],
-      artifacts: detail.artifacts as Parameters<typeof checkpointView>[1]["artifacts"],
+      attempts: detail.attempts,
+      artifacts: detail.artifacts,
       reconciledAt: decisions.filter((d) => d.kind === "reconcile" && d.outcome === "applied"),
     }),
   );

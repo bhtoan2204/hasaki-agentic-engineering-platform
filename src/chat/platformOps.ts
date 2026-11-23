@@ -50,7 +50,7 @@ export function registerPlatformOps() {
     name: string,
     summary: string,
     input: S,
-    preflight: (a: z.infer<S>) => Promise<unknown>,
+    preflight: (a: z.infer<S>) => Promise<Record<string, unknown>>,
     handler: (a: z.infer<S>) => Promise<unknown>,
   ) =>
     registerIntegrationTool({

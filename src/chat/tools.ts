@@ -84,12 +84,28 @@ interface ToolDef {
   name: string;
   group: ToolGroup;
   description: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each tool binds its own zod-inferred args
-  args: z.ZodType<any>;
-  /** Argument shape shown to the model. */
+  args: z.ZodObject;
   usage: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  run: (args: any, ctx: ToolContext) => Promise<ToolResult>;
+  prepare: (raw: unknown) =>
+    | { ok: true; run: (ctx: ToolContext) => Promise<ToolResult> }
+    | { ok: false; error: z.ZodError };
+}
+
+function defineChatTool<S extends z.ZodObject>(
+  definition: Omit<ToolDef, "args" | "prepare"> & {
+    args: S;
+    run: (args: z.output<S>, ctx: ToolContext) => Promise<ToolResult>;
+  },
+): ToolDef {
+  const { run, ...metadata } = definition;
+  return {
+    ...metadata,
+    prepare(raw) {
+      const parsed = definition.args.safeParse(raw);
+      if (!parsed.success) return { ok: false, error: parsed.error };
+      return { ok: true, run: (ctx) => run(parsed.data, ctx) };
+    },
+  };
 }
 
 const repoArg = z.array(z.string().min(1).max(200)).max(10).optional();
@@ -138,7 +154,7 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}… (${s.
 const chatVisible = (name: string) => !name.startsWith("run.");
 
 const TOOLS: ToolDef[] = [
-  {
+  defineChatTool({
     name: "tools.search",
     group: "integrations",
     description:
@@ -155,8 +171,8 @@ const TOOLS: ToolDef[] = [
           .map(({ score: _s, ...t }) => t),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "tools.describe",
     group: "integrations",
     description: "Full description and JSON input schema of one integration tool (read it before tools.call).",
@@ -167,8 +183,8 @@ const TOOLS: ToolDef[] = [
       await loadPersonalIntegrations();
       return { label: `tool ${a.name}`, data: describeTool(a.name) };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "evidence.get",
     group: "evidence",
     description:
@@ -199,8 +215,8 @@ const TOOLS: ToolDef[] = [
         },
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "operations.verify",
     group: "integrations",
     description:
@@ -221,8 +237,8 @@ const TOOLS: ToolDef[] = [
         ),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "tools.call",
     group: "integrations",
     description:
@@ -252,8 +268,8 @@ const TOOLS: ToolDef[] = [
       if (!r.ok) throw new Error(r.error ?? `${a.name} failed`);
       return { label: a.name, data: r.result };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "code.execute",
     group: "observability",
     description:
@@ -282,8 +298,8 @@ const TOOLS: ToolDef[] = [
       if (answer.category === "unsupported") throw new ChatToolDenied(answer.error ?? "CodeAct unavailable");
       return { label: "code.execute", data: answer };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "repo.list",
     group: "repo",
     description: "Repositories you may read in this conversation.",
@@ -307,8 +323,8 @@ const TOOLS: ToolDef[] = [
           })),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "code.search",
     group: "repo",
     description:
@@ -343,8 +359,8 @@ const TOOLS: ToolDef[] = [
         })),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "memory.causal",
     group: "knowledge",
     description:
@@ -377,8 +393,8 @@ const TOOLS: ToolDef[] = [
         data: r,
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "impact.analyze",
     group: "repo",
     description:
@@ -412,8 +428,8 @@ const TOOLS: ToolDef[] = [
         data: { ...r, impacts: r.impacts.slice(0, 40), breaking: r.breaking.slice(0, 30) },
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "code.navigate",
     group: "repo",
     description:
@@ -430,8 +446,8 @@ const TOOLS: ToolDef[] = [
         data: await navigate({ ...a, repository }, { allowed: ctx.readable, signal: ctx.signal }),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "code.read_file",
     group: "repo",
     description: "Read a bounded line range of one file in a readable repository (secret files are refused).",
@@ -452,8 +468,8 @@ const TOOLS: ToolDef[] = [
         data: await readRepositoryFile(repository, a.path, a.start_line, a.end_line),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "code.list_files",
     group: "repo",
     description:
@@ -474,8 +490,8 @@ const TOOLS: ToolDef[] = [
         data: await listRepositoryFiles(repository, a.filter, a.limit ?? 200),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "work.delegate",
     group: "platform",
     description:
@@ -509,8 +525,8 @@ const TOOLS: ToolDef[] = [
         },
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "documents.read",
     group: "knowledge",
     description:
@@ -527,8 +543,8 @@ const TOOLS: ToolDef[] = [
       const doc = await readDocument(ctx.binding, a.attachment_id, a.section, a.offset ?? 0, ctx.signal);
       return { label: `document ${cut(doc.filename || String(doc.attachment_id), 60)}`, data: doc };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "documents.candidates",
     group: "knowledge",
     description:
@@ -545,8 +561,8 @@ const TOOLS: ToolDef[] = [
         },
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "knowledge.propose_import",
     group: "knowledge",
     description:
@@ -575,8 +591,8 @@ const TOOLS: ToolDef[] = [
       const r = await proposeImport(ctx.binding, a.scope, a.items, ctx.signal);
       return { label: `knowledge import proposals (${r.proposals.length})`, data: r };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "knowledge.search",
     group: "knowledge",
     description:
@@ -595,8 +611,8 @@ const TOOLS: ToolDef[] = [
         data: await searchKnowledge(knowledgeScope(ctx, a.query), a.query, a.category, a.limit ?? 8),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "knowledge.get",
     group: "knowledge",
     description:
@@ -608,8 +624,8 @@ const TOOLS: ToolDef[] = [
       if (!item) throw new ChatToolDenied(`knowledge "${a.key}" not found`);
       return { label: "version" in item ? `knowledge ${a.key} v${item.version}` : `knowledge ${a.key}`, data: item };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "work_items.search",
     group: "platform",
     description:
@@ -639,8 +655,8 @@ const TOOLS: ToolDef[] = [
         }),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "runs.list",
     group: "platform",
     description:
@@ -669,8 +685,8 @@ const TOOLS: ToolDef[] = [
         }),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "activity.timeline",
     group: "platform",
     description:
@@ -690,8 +706,8 @@ const TOOLS: ToolDef[] = [
         }),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "runs.get",
     group: "platform",
     description: "Status and steps of one of your workflow runs.",
@@ -707,8 +723,8 @@ const TOOLS: ToolDef[] = [
         data: { ...run, steps: await chatRepository.runSteps(run.id), delegation: await delegationsOf(run.id) },
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "incidents.search",
     group: "platform",
     description: "Production error groups detected by the platform scan (signature, service, severity, counts).",
@@ -722,8 +738,8 @@ const TOOLS: ToolDef[] = [
         data: await chatRepository.searchIncidents((a.query ?? "").trim(), a.limit ?? 10),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "splunk.search",
     group: "observability",
     description:
@@ -741,8 +757,8 @@ const TOOLS: ToolDef[] = [
       const r = await investigationSearch({ ...a, max_results: a.max_results ?? 50, page_size: 50 }, {});
       return { label: `splunk "${cut(a.query, 60)}"`, data: r };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "signoz.logs",
     group: "observability",
     description: "Read-only SigNoz log search with your own SigNoz credentials.",
@@ -762,8 +778,8 @@ const TOOLS: ToolDef[] = [
       const r = await searchLogs({ ...a, limit: a.limit ?? 50 }, {});
       return { label: "signoz logs", data: r };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "database.list",
     group: "database",
     description: "Read-only project databases available for the repositories in scope.",
@@ -776,8 +792,8 @@ const TOOLS: ToolDef[] = [
         data: dbs.map((d) => ({ key: d.key, project: d.project, engine: d.engine, max_rows: d.max_rows })),
       };
     },
-  },
-  {
+  }),
+  defineChatTool({
     name: "database.query",
     group: "database",
     description:
@@ -805,7 +821,7 @@ const TOOLS: ToolDef[] = [
         data: r,
       };
     },
-  },
+  }),
 ];
 
 const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
@@ -831,7 +847,7 @@ function composableChatTools(binding: ChatBinding): CodeActCapability[] {
       call: async (args, signal) => {
         const r = await executeChatTool(binding, t.name, args, signal);
         if (r.status === "ok") return { ok: true, result: r.result };
-        const error = String((r.result as { error?: unknown } | null)?.error ?? r.status);
+        const { error } = r.result;
         return {
           ok: false,
           error,
@@ -866,7 +882,7 @@ export function nativeToolDefs(mode: ManualChatMode) {
   return toolsForMode(mode).map((t) => ({
     name: t.name,
     description: `${t.description} Example arguments: ${t.usage}`,
-    shape: (t.args as z.ZodObject<Record<string, z.ZodType>>).shape,
+    shape: t.args.shape,
   }));
 }
 
@@ -932,19 +948,20 @@ export async function assertBinding(b: ChatBinding) {
     throw new ChatToolDenied("turn does not belong to this conversation");
   if (turn.status !== "running") throw new ChatToolDenied(`turn is ${turn.status}`);
   // Effective mode is frozen on the turn (AUTO resolves once); conversation.mode may stay AUTO.
-  const effective = (turn.effective_mode || turn.mode) as ManualChatMode;
+  const effective = turn.effective_mode || turn.mode;
   if (effective !== b.mode && conversation.mode !== "AUTO")
     throw new ChatToolDenied("conversation mode changed during the turn");
   if (effective !== b.mode && conversation.mode === "AUTO" && turn.effective_mode && turn.effective_mode !== b.mode)
     throw new ChatToolDenied("effective mode changed during the turn");
 }
 
-export interface ToolOutcome {
-  status: "ok" | "error" | "denied" | "timeout";
-  result: unknown;
+export type ToolOutcome = {
   repositories: string[];
   label: string;
-}
+} & (
+  | { status: "ok"; result: unknown }
+  | { status: "error" | "denied" | "timeout"; result: { error: string } }
+);
 
 /** Validate the binding, mode, arguments and repository scope, then run one tool with a deadline. */
 export async function executeChatTool(
@@ -964,11 +981,11 @@ export async function executeChatTool(
     };
   try {
     await assertBinding(binding);
-    const args = def.args.safeParse(rawArgs ?? {});
-    if (!args.success)
+    const prepared = def.prepare(rawArgs ?? {});
+    if (!prepared.ok)
       return {
         status: "error",
-        result: { error: `invalid arguments: ${args.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}` },
+        result: { error: `invalid arguments: ${prepared.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}` },
         repositories: [],
         label: name,
       };
@@ -977,7 +994,7 @@ export async function executeChatTool(
     const deadline = AbortSignal.timeout(LIMITS.toolTimeoutMs);
     const both = AbortSignal.any([signal, deadline]);
     const run = execution.run({ userId: binding.userId, kind: "user" }, () =>
-      def.run(args.data, { binding, readable, scoped, signal: both }),
+      prepared.run({ binding, readable, scoped, signal: both }),
     );
     const aborted = new Promise<never>((_, reject) => {
       both.addEventListener("abort", () => reject(both.reason ?? new Error("aborted")), { once: true });

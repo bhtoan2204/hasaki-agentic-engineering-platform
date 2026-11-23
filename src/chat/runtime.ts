@@ -100,18 +100,17 @@ export function parseToolCalls(text: string): Array<{ tool: string; arguments: u
   const raw = fenced ? fenced[1] : /^\s*\{\s*"calls"\s*:/.test(text) ? text : null;
   if (raw == null) return null;
   try {
-    const parsed = JSON.parse(raw.trim());
-    const calls: unknown[] = Array.isArray(parsed?.calls)
-      ? parsed.calls
+    const parsed: unknown = JSON.parse(raw.trim());
+    const envelope = parsed && typeof parsed === "object" && "calls" in parsed ? parsed.calls : null;
+    const calls: readonly unknown[] = Array.isArray(envelope)
+      ? envelope
       : Array.isArray(parsed)
         ? parsed
         : [parsed];
     const out: Array<{ tool: string; arguments: unknown }> = [];
     for (const c of calls) {
-      if (!c || typeof c !== "object") continue;
-      const row = c as { tool?: unknown; arguments?: unknown };
-      if (typeof row.tool !== "string") continue;
-      out.push({ tool: row.tool, arguments: row.arguments ?? {} });
+      if (!c || typeof c !== "object" || !("tool" in c) || typeof c.tool !== "string") continue;
+      out.push({ tool: c.tool, arguments: ("arguments" in c ? c.arguments : undefined) ?? {} });
     }
     return out.length ? out : null;
   } catch {
@@ -319,6 +318,12 @@ async function resumeBrief(ownerId: number, cont: Continuation, readable: string
   return continuationBrief(cont, refreshed, evidence);
 }
 
+function toolResultError(result: unknown) {
+  return result && typeof result === "object" && "error" in result && typeof result.error === "string"
+    ? result.error
+    : null;
+}
+
 /**
  * At the end of every turn (before it becomes terminal): derive the unfinished-request state from what the platform
  * recorded — tool calls, operations, failure, budget — never from the model.
@@ -359,7 +364,7 @@ async function recordContinuation(
           arguments: c.arguments,
           status: c.status,
           label: c.tool,
-          error: (c.result as { error?: string } | null)?.error ?? null,
+          error: toolResultError(c.result),
           evidence_ref: c.evidence_ref,
         })),
         operations: ops.filter((o) => o.turn_id === turn.id || tracked.has(o.id)),

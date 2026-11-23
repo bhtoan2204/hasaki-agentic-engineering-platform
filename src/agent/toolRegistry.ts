@@ -108,7 +108,7 @@ export interface IntegrationTool<S extends z.ZodObject = z.ZodObject> {
   /** For a `confirm` tool: calls that are pre-authorized low-risk QC operations run without a per-call confirmation. */
   preauthorized?: (args: z.infer<S>) => boolean;
   /** Deterministic authorization of the target before a confirmation is requested (allowlists, environment). */
-  preflight?: (args: z.infer<S>) => Promise<unknown> | unknown;
+  preflight?: (args: z.infer<S>) => Promise<Record<string, unknown>> | Record<string, unknown>;
   /** true when usable; otherwise the reason (e.g. missing credentials). */
   available: () => true | string;
   /** false = not advertised or callable at all for this actor (e.g. an integration they disabled). Default: shown. */
@@ -116,7 +116,20 @@ export interface IntegrationTool<S extends z.ZodObject = z.ZodObject> {
   handler: (args: z.infer<S>, ctx: ToolCallContext) => Promise<unknown>;
 }
 
-const registry = new Map<string, IntegrationTool>();
+type PreparedIntegrationCall = {
+  args: Record<string, unknown>;
+  run: (ctx: ToolCallContext) => Promise<unknown>;
+  preauthorized?: () => boolean;
+  preflight?: () => Promise<Record<string, unknown>> | Record<string, unknown>;
+};
+
+type RegisteredIntegrationTool = Omit<IntegrationTool, "handler" | "preflight" | "preauthorized"> & {
+  prepare: (raw: unknown) =>
+    | { ok: true; call: PreparedIntegrationCall }
+    | { ok: false; error: z.ZodError };
+};
+
+const registry = new Map<string, RegisteredIntegrationTool>();
 
 interface WorkTask {
   id?: unknown;
@@ -133,7 +146,24 @@ interface WorkTask {
   task_ai?: { ai_suggest?: { reasoning?: unknown } | null } | null;
 }
 export function registerIntegrationTool<S extends z.ZodObject>(t: IntegrationTool<S>) {
-  registry.set(t.name, t as unknown as IntegrationTool);
+  const { handler, preflight, preauthorized, ...metadata } = t;
+  registry.set(t.name, {
+    ...metadata,
+    prepare(raw) {
+      const parsed = t.input.safeParse(raw);
+      if (!parsed.success) return { ok: false, error: parsed.error };
+      const args = parsed.data;
+      return {
+        ok: true,
+        call: {
+          args,
+          run: (ctx) => handler(args, ctx),
+          ...(preflight && { preflight: () => preflight(args) }),
+          ...(preauthorized && { preauthorized: () => preauthorized(args) }),
+        },
+      };
+    },
+  });
 }
 export const integrationTools = () => [...registry.values()].filter((t) => t.enabled?.() ?? true);
 const visibleTool = (name: string) => {
@@ -274,11 +304,15 @@ export function describeTool(name: string) {
   };
 }
 
+export type IntegrationToolResult =
+  | { ok: true; result: unknown; error?: never; ms: number }
+  | { ok: false; error: string; result?: never; ms: number };
+
 export async function callTool(
   name: string,
   args: unknown,
   ctx: ToolCallContext,
-): Promise<{ ok: boolean; result?: unknown; error?: string; ms: number }> {
+): Promise<IntegrationToolResult> {
   const t0 = Date.now();
   const t = visibleTool(name);
   if (!t) return { ok: false, error: `unknown tool "${name}" — use list_tools`, ms: 0 };
@@ -296,18 +330,18 @@ export async function callTool(
     };
   const avail = t.available();
   if (avail !== true) return { ok: false, error: `${name} is unavailable: ${avail}`, ms: 0 };
-  const parsed = t.input.safeParse(args ?? {});
-  if (!parsed.success)
+  const prepared = t.prepare(args ?? {});
+  if (!prepared.ok)
     return {
       ok: false,
-      error: `invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+      error: `invalid arguments: ${prepared.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
       ms: 0,
     };
   if (ctx.signal?.aborted) return { ok: false, error: "canceled", ms: 0 };
   const signal = ctx.signal;
   let onAbort: (() => void) | undefined;
   try {
-    const work = t.handler(parsed.data, ctx);
+    const work = prepared.call.run(ctx);
     const result = signal
       ? await Promise.race([
           work,
@@ -321,7 +355,7 @@ export async function callTool(
     return { ok: true, result, ms: Date.now() - t0 };
   } catch (e) {
     if (signal?.aborted) return { ok: false, error: "canceled", ms: Date.now() - t0 };
-    return { ok: false, error: (e as Error).message, ms: Date.now() - t0 };
+    return { ok: false, error: e instanceof Error ? e.message : String(e), ms: Date.now() - t0 };
   } finally {
     if (onAbort) signal?.removeEventListener("abort", onAbort);
   }

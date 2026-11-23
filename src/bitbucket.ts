@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { config } from "./config.ts";
 import { currentUserId } from "./auth/execution.ts";
 import { getUserSecret } from "./auth/secrets.ts";
@@ -35,15 +36,31 @@ export async function resolveBitbucket() {
 
 type BitbucketCredentials = NonNullable<Awaited<ReturnType<typeof resolveBitbucket>>>;
 
-interface BitbucketPullRequest {
-  id?: number;
-  title?: string;
-  state?: string;
-  source?: { branch?: { name?: string } };
-  destination?: { branch?: { name?: string } };
-  author?: { display_name?: string };
-  links?: { html?: { href?: string } };
-  updated_on?: string;
+const pullRequestLink = z.object({
+  links: z.object({ html: z.object({ href: z.url({ protocol: /^https?$/ }) }) }),
+});
+const branch = z.object({ branch: z.object({ name: z.string().nullish() }).nullish() });
+const listedPullRequest = z.object({
+  id: z.number().int().positive().nullish(),
+  title: z.string().nullish(),
+  state: z.string().nullish(),
+  source: branch.nullish(),
+  destination: branch.nullish(),
+  author: z.object({ display_name: z.string().nullish() }).nullish(),
+  links: z.object({ html: z.object({ href: z.string().nullish() }).nullish() }).nullish(),
+  updated_on: z.string().nullish(),
+});
+const pullRequestStateResponse = z.object({
+  state: z.string().min(1),
+  updated_on: z.string().nullish(),
+  merge_commit: z.object({ hash: z.string().nullish() }).nullish(),
+});
+
+async function responseBody<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+  const body: unknown = await response.json().catch(() => undefined);
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new Error("Bitbucket returned an invalid pull request response");
+  return parsed.data;
 }
 
 async function call(creds: BitbucketCredentials, path: string, init: RequestInit = {}) {
@@ -58,18 +75,19 @@ async function call(creds: BitbucketCredentials, path: string, init: RequestInit
       Accept: "application/json",
     },
   });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok)
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
     throw new Error(
       `Bitbucket ${res.status}: check credentials and repository permissions in Integrations`,
     );
-  return body;
+  }
+  return res;
 }
 
 function repositoryReference(repo: string, workspace: string) {
   const parts = repo.split("/");
   const ws = parts.length === 2 ? parts[0] : workspace;
-  const slug = parts.at(-1)!;
+  const slug = parts.at(-1) ?? "";
   if (![ws, slug].every((x) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(x)))
     throw new Error("Invalid Bitbucket repository reference");
   return { ws, slug };
@@ -101,7 +119,10 @@ export async function openPullRequest(
   const q = encodeURIComponent(
     `source.branch.name="${branch}" AND destination.branch.name="${dest}" AND state="OPEN"`,
   );
-  const existing = await call(creds, `/repositories/${ws}/${slug}/pullrequests?q=${q}`);
+  const existing = await responseBody(
+    await call(creds, `/repositories/${ws}/${slug}/pullrequests?q=${q}`),
+    z.object({ values: z.array(pullRequestLink.extend({ id: z.number().int().positive() })) }),
+  );
   const body = JSON.stringify({
     title,
     description,
@@ -112,16 +133,20 @@ export async function openPullRequest(
     reviewers: creds.reviewers.map((uuid) => ({ uuid })),
   });
 
-  if (existing.values?.length) {
-    const pr = existing.values[0];
-    await call(creds, `/repositories/${ws}/${slug}/pullrequests/${pr.id}`, { method: "PUT", body });
-    return { url: pr.links.html.href as string, created: false, note: "Existing PR updated." };
+  const [pr] = existing.values;
+  if (pr) {
+    const updated = await call(creds, `/repositories/${ws}/${slug}/pullrequests/${pr.id}`, {
+      method: "PUT",
+      body,
+    });
+    await updated.body?.cancel().catch(() => {});
+    return { url: pr.links.html.href, created: false, note: "Existing PR updated." };
   }
-  const pr = await call(creds, `/repositories/${ws}/${slug}/pullrequests`, {
-    method: "POST",
-    body,
-  });
-  return { url: pr.links.html.href as string, created: true, note: "PR created." };
+  const created = await responseBody(
+    await call(creds, `/repositories/${ws}/${slug}/pullrequests`, { method: "POST", body }),
+    pullRequestLink,
+  );
+  return { url: created.links.html.href, created: true, note: "PR created." };
 }
 
 /** Read-only: lifecycle state of one PR (OPEN / MERGED / DECLINED / SUPERSEDED) from its URL — the proof of a merge. */
@@ -134,8 +159,11 @@ export async function pullRequestState(
   const creds = await resolveBitbucket();
   if (!creds) throw new Error("No Bitbucket credentials for this account");
   const { ws, slug } = repositoryReference(repo, creds.workspace);
-  const pr = await call(creds, `/repositories/${ws}/${slug}/pullrequests/${id}`);
-  const state = String(pr.state ?? "").toUpperCase();
+  const pr = await responseBody(
+    await call(creds, `/repositories/${ws}/${slug}/pullrequests/${id}`),
+    pullRequestStateResponse,
+  );
+  const state = pr.state.toUpperCase();
   return {
     state,
     merged_at: state === "MERGED" ? (pr.updated_on ?? null) : null,
@@ -155,11 +183,14 @@ export async function listPullRequests(
     `state="${(opts.state ?? "OPEN").toUpperCase()}"`,
     ...(opts.branch ? [`source.branch.name="${opts.branch.replace(/"/g, "")}"`] : []),
   ];
-  const body = await call(
-    creds,
-    `/repositories/${ws}/${slug}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`,
+  const body = await responseBody(
+    await call(
+      creds,
+      `/repositories/${ws}/${slug}/pullrequests?pagelen=20&q=${encodeURIComponent(filters.join(" AND "))}`,
+    ),
+    z.object({ values: z.array(listedPullRequest) }),
   );
-  return ((body.values ?? []) as BitbucketPullRequest[]).map((p) => ({
+  return body.values.map((p) => ({
     id: p.id,
     title: p.title,
     state: p.state,

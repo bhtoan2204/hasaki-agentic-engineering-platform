@@ -71,23 +71,21 @@ const mutatingTool = (name: string) =>
 async function validate(ownerId: number, tool: string, rawArgs: unknown) {
   const t = mutatingTool(tool);
   if (!t?.confirm) throw new Error(`${tool} is not an operation chat can run`);
-  const parsed = t.input.safeParse(rawArgs ?? {});
-  if (!parsed.success)
+  const prepared = t.prepare(rawArgs ?? {});
+  if (!prepared.ok)
     throw new Error(
-      `invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+      `invalid arguments: ${prepared.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
     );
   const avail = await execution.run({ userId: ownerId, kind: "user" }, async () => {
     await loadPersonalIntegrations();
     return t.available();
   });
   if (avail !== true) throw new Error(`${tool} is unavailable: ${avail}`);
-  const target = t.preflight
-    ? await execution.run({ userId: ownerId, kind: "user" }, async () => t.preflight!(parsed.data))
+  const { args, preflight, preauthorized } = prepared.call;
+  const target = preflight
+    ? await execution.run({ userId: ownerId, kind: "user" }, preflight)
     : {};
-  return {
-    args: parsed.data as Record<string, unknown>,
-    target: (target ?? {}) as Record<string, unknown>,
-  };
+  return { args, target, preauthorized };
 }
 
 const SOURCE_ROWS = 200;
@@ -155,7 +153,7 @@ export async function proposeOperation(
   tool: string,
   rawArgs: unknown,
 ) {
-  const { args, target } = await validate(binding.userId, tool, rawArgs);
+  const { args, target, preauthorized: mayExecute } = await validate(binding.userId, tool, rawArgs);
   // Runtime provenance (ADR 0010): an observation can never choose the target, nor skip the owner's confirmation.
   const provenance = await operationProvenance(binding, tool, args);
   await audit(
@@ -218,25 +216,27 @@ export async function proposeOperation(
       }),
     ],
   );
-  if (row!.inserted)
-    await audit(binding.userId, "chat.operation.propose", "chat_operation", String(row!.id), {
+  if (!row) throw new Error("Operation insert returned no row");
+  if (row.inserted)
+    await audit(binding.userId, "chat.operation.propose", "chat_operation", String(row.id), {
       conversation_id: binding.conversationId,
       tool,
       target,
       idempotency_key: key,
     });
   const preauthorized =
-    row!.inserted &&
+    row.inserted &&
     provenance.decision === "allow" &&
-    !!mutatingTool(tool)?.preauthorized?.(args as never);
+    mutatingTool(tool) !== undefined &&
+    mayExecute?.() === true;
   // Chat autonomy policy (chat/autonomy.ts): only allowlisted run actions, only with untainted values, recorded.
   const autonomy =
-    !preauthorized && row!.inserted && provenance.decision === "allow" && tool in AUTONOMOUS_ACTIONS
-      ? await autonomyFor(binding, tool, args, row!.id)
+    !preauthorized && row.inserted && provenance.decision === "allow" && tool in AUTONOMOUS_ACTIONS
+      ? await autonomyFor(binding, tool, args, row.id)
       : null;
   if (autonomy?.allowed) {
-    await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row!.id]);
-    const done = await decideOperation({ id: binding.userId }, row!.id, "confirm");
+    await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row.id]);
+    const done = await decideOperation({ id: binding.userId }, row.id, "confirm");
     // Timeout, budget and emergency stop belong to runs the policy STARTED — not to runs it paused, resumed, cancelled
     // or retried for the owner. Awaited: a started run is never left without them.
     const runId = Number(done.arguments.run_id);
@@ -262,12 +262,12 @@ export async function proposeOperation(
     };
   }
   if (preauthorized) {
-    await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row!.id]);
-    await audit(binding.userId, "chat.operation.preauthorized", "chat_operation", String(row!.id), {
+    await q(pool, "UPDATE chat_operations SET auto = true WHERE id = $1", [row.id]);
+    await audit(binding.userId, "chat.operation.preauthorized", "chat_operation", String(row.id), {
       tool,
       target,
     });
-    const done = await decideOperation({ id: binding.userId }, row!.id, "confirm");
+    const done = await decideOperation({ id: binding.userId }, row.id, "confirm");
     return {
       status: done.status,
       operation_id: done.id,
@@ -287,11 +287,11 @@ export async function proposeOperation(
     ownerId: binding.userId,
     turnId: binding.turnId,
     kind: "operation.updated",
-    data: { operation_id: row!.id, status: "pending" },
+    data: { operation_id: row.id, status: "pending" },
   });
   return {
     status: "confirmation_required",
-    operation_id: row!.id,
+    operation_id: row.id,
     tool,
     target,
     ...(provenance.reasons.length ? { needs_confirmation_because: provenance.reasons } : {}),

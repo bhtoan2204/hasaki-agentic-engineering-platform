@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { runEvents } from "./events.ts";
 import { observe } from "../runtimeMetrics.ts";
 import { recordDecision, savingsFrom } from "./decisions.ts";
@@ -48,21 +49,36 @@ type CheckpointSource = Pick<
   verification: unknown;
 };
 
-type ExecutionCheckpoint = {
-  version: 1;
-  milestone: string;
-  data_digest: string;
-  binding: ReturnType<typeof bindingOf>;
-  workspace_fingerprint: string | null;
-  workspace_unavailable: boolean;
-  workspace_artifact_id: number | null;
-  workspace_artifact_digest: string | null;
-  artifact_ids: number[];
-  completed_actions: string[];
-  remaining_actions: string[];
-  verification: { digest: string; artifact_ids: number[] } | null;
-  result: Extract<ExecResult, { kind: "completed" }> | null;
-};
+const completedResult = z.object({ kind: z.literal("completed"), output: z.unknown() });
+const id = z.number().int().positive();
+const executionCheckpoint = z.object({
+  version: z.literal(1),
+  milestone: z.string(),
+  data_digest: z.string(),
+  binding: z.strictObject({
+    run_id: id,
+    step_id: id,
+    attempt_id: id,
+    generation: z.number().int().nonnegative(),
+    job_id: id.nullable(),
+    fencing_token: z.number().int().nonnegative().nullable(),
+    snapshot_id: id.nullable(),
+    context_hash: z.string().nullable(),
+    input_hash: z.string(),
+    provider: z.string().nullable(),
+  }),
+  workspace_fingerprint: z.string().nullable(),
+  workspace_unavailable: z.boolean(),
+  workspace_artifact_id: id.nullable(),
+  workspace_artifact_digest: z.string().nullable(),
+  artifact_ids: z.array(id),
+  completed_actions: z.array(z.string()),
+  remaining_actions: z.array(z.string()),
+  verification: z.object({ digest: z.string(), artifact_ids: z.array(id) }).nullable(),
+  result: completedResult.nullable(),
+});
+
+type ExecutionCheckpoint = z.infer<typeof executionCheckpoint>;
 
 function bindingOf(source: CheckpointSource) {
   return {
@@ -102,10 +118,9 @@ async function insertCheckpoint(
 ) {
   const normalized =
     result?.kind === "completed"
-      ? (JSON.parse(JSON.stringify({ kind: "completed", output: result.output ?? {} })) as Extract<
-          ExecResult,
-          { kind: "completed" }
-        >)
+      ? completedResult.parse(
+          JSON.parse(JSON.stringify({ kind: "completed", output: result.output ?? {} })),
+        )
       : null;
   const proof =
     normalized?.output &&
@@ -329,24 +344,26 @@ type CheckpointData = Record<string, unknown> & {
 };
 type CheckpointRow = {
   data: CheckpointData;
-  execution: ExecutionCheckpoint | null;
+  execution: unknown;
   execution_digest: string | null;
   workspace_artifact_id: number | null;
 };
 
 async function validate(db: Db, row: CheckpointRow, attemptId: number, milestone: string) {
+  const parsed = executionCheckpoint.safeParse(row.execution);
+  if (!parsed.success) return;
+  const execution = parsed.data;
   if (
-    row.execution?.version !== 1 ||
-    row.execution.milestone !== milestone ||
+    execution.milestone !== milestone ||
     checkpointHash(row.execution) !== row.execution_digest ||
-    checkpointHash(row.data) !== row.execution.data_digest ||
-    row.workspace_artifact_id !== row.execution.workspace_artifact_id
+    checkpointHash(row.data) !== execution.data_digest ||
+    row.workspace_artifact_id !== execution.workspace_artifact_id
   )
     return;
   const source = await sourceOf(db, attemptId);
   if (
     !source?.context_hash ||
-    checkpointHash(row.execution.binding) !== checkpointHash(bindingOf(source))
+    checkpointHash(execution.binding) !== checkpointHash(bindingOf(source))
   )
     return;
   if (row.workspace_artifact_id != null) {
@@ -361,10 +378,10 @@ async function validate(db: Db, row: CheckpointRow, attemptId: number, milestone
         EXECUTION_WORKSPACE_ARTIFACT,
       ],
     );
-    if (!artifact || checkpointHash(artifact.content) !== row.execution.workspace_artifact_digest)
+    if (!artifact || checkpointHash(artifact.content) !== execution.workspace_artifact_digest)
       return;
   }
-  return row.execution;
+  return execution;
 }
 
 export async function readExecutionCheckpoint(db: Db, attemptId: number) {
@@ -439,7 +456,7 @@ export async function latestWaitCheckpoint(db: Db, attemptId: number | null) {
       WHERE attempt_id=$1 AND reason IN ('waiting_input','waiting_approval') ORDER BY id DESC LIMIT 1`,
     [attemptId],
   );
-  if (!row?.execution) return row;
+  if (row?.execution == null) return row;
   const execution = await validate(db, row, attemptId, row.reason);
   if (!execution) throw new HttpError(409, "Execution checkpoint failed integrity validation");
   if (row.data.recovery && !row.data.execution)
