@@ -82,9 +82,7 @@ async function validate(ownerId: number, tool: string, rawArgs: unknown) {
   });
   if (avail !== true) throw new Error(`${tool} is unavailable: ${avail}`);
   const { args, preflight, preauthorized } = prepared.call;
-  const target = preflight
-    ? await execution.run({ userId: ownerId, kind: "user" }, preflight)
-    : {};
+  const target = preflight ? await execution.run({ userId: ownerId, kind: "user" }, preflight) : {};
   return { args, target, preauthorized };
 }
 

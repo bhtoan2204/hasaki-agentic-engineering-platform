@@ -73,7 +73,12 @@ export function childSummary(children: ChildWorkflow[]) {
   return by;
 }
 
-type ChildNodeData = { child: ChildWorkflow; parentRunId: number; onChanged: () => void; showStep: boolean };
+type ChildNodeData = {
+  child: ChildWorkflow;
+  parentRunId: number;
+  onChanged: () => void;
+  showStep: boolean;
+};
 type LaneNodeData = { label: string; count: number; width: number; height: number };
 
 function ChildRunNodeImpl({ data }: NodeProps<Node<ChildNodeData>>) {
@@ -256,7 +261,10 @@ export function childGraph(
     nodes.push({
       id,
       type: "child",
-      position: { x: left0 + (i % cols) * (CARD_W + GAP), y: top + LANE_PAD + 14 + Math.floor(i / cols) * ROW_H },
+      position: {
+        x: left0 + (i % cols) * (CARD_W + GAP),
+        y: top + LANE_PAD + 14 + Math.floor(i / cols) * ROW_H,
+      },
       data: { child: c, parentRunId, onChanged, showStep: delegating.length > 1 },
       draggable: false,
       selectable: false,
@@ -281,7 +289,11 @@ export function childGraph(
       type: "smoothstep",
       animated: st === "RUNNING",
       markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
-      style: { stroke: STATUS_COLORS[st] ?? "var(--line-strong)", strokeWidth: 1.8, strokeDasharray: "6 5" },
+      style: {
+        stroke: STATUS_COLORS[st] ?? "var(--line-strong)",
+        strokeWidth: 1.8,
+        strokeDasharray: "6 5",
+      },
     });
   }
   const rows = Math.ceil(ordered.length / cols);

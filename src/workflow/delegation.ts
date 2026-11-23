@@ -88,7 +88,8 @@ async function lineage(c: Db, run: RunRow) {
   let depth = 0;
   let cur: number | null = run.id;
   for (let i = 0; i <= LIMITS.depth + 1 && cur != null; i++) {
-    const up: { parent_run_id: number; root_run_id: number; definition_key: string } | null | undefined =
+    const up:
+      { parent_run_id: number; root_run_id: number; definition_key: string } | null | undefined =
       await one(
         c,
         `SELECT d.parent_run_id, d.root_run_id, r.definition_key FROM workflow_delegations d
@@ -127,7 +128,13 @@ export async function planChildWorkflows(
   if (!cfg || !Array.isArray(cfg.workflows) || !cfg.workflows.length) {
     await note("child_workflows ignored: this step is not configured to delegate");
     return {
-      output: { ...(output as object), child_workflows: { accepted: [], refused: [{ workflow: "*", reason: "delegation not enabled for this step" }] } },
+      output: {
+        ...(output as object),
+        child_workflows: {
+          accepted: [],
+          refused: [{ workflow: "*", reason: "delegation not enabled for this step" }],
+        },
+      },
       waitFor: null,
     };
   }
@@ -146,7 +153,9 @@ export async function planChildWorkflows(
       mode: (MODES as readonly string[]).includes(String(r.mode))
         ? (r.mode as DelegationMode)
         : (cfg.default_mode ?? "blocking"),
-      repositories: Array.isArray(r.repositories) ? [...new Set(r.repositories.map(String))].slice(0, 5) : [],
+      repositories: Array.isArray(r.repositories)
+        ? [...new Set(r.repositories.map(String))].slice(0, 5)
+        : [],
     };
     const refuse = (reason: string) => refused.push({ workflow: req.workflow || "?", reason });
     if (accepted.length >= maxChildren) {
@@ -163,7 +172,9 @@ export async function planChildWorkflows(
       continue;
     }
     if (!cfg.workflows.includes(req.workflow)) {
-      refuse(`workflow "${req.workflow}" is not allowed for this step (allowed: ${cfg.workflows.join(", ")})`);
+      refuse(
+        `workflow "${req.workflow}" is not allowed for this step (allowed: ${cfg.workflows.join(", ")})`,
+      );
       continue;
     }
     if (!modes.includes(req.mode)) {
@@ -195,7 +206,8 @@ export async function planChildWorkflows(
     }
     // Repositories never widen: the child sees at most what the parent was allowed.
     const allowed = run.allowed_repositories ?? [];
-    if (!req.repositories.length) req.repositories = (run.selected_repositories ?? []).filter((x) => allowed.includes(x));
+    if (!req.repositories.length)
+      req.repositories = (run.selected_repositories ?? []).filter((x) => allowed.includes(x));
     const outside = req.repositories.filter((x) => !allowed.includes(x));
     if (outside.length) {
       refuse(`repositories outside this run's scope: ${outside.join(", ")}`);
@@ -211,7 +223,13 @@ export async function planChildWorkflows(
     // The same work already requested anywhere in this tree (a re-executed step, a sibling): reuse it, never duplicate.
     const id = inserted
       ? Number(inserted.id)
-      : Number((await one<{ id: number }>(c, "SELECT id FROM workflow_delegations WHERE root_run_id=$1 AND dedupe_key=$2", [root, key]))!.id);
+      : Number(
+          (await one<{ id: number }>(
+            c,
+            "SELECT id FROM workflow_delegations WHERE root_run_id=$1 AND dedupe_key=$2",
+            [root, key],
+          ))!.id,
+        );
     accepted.push({ id, workflow: req.workflow, mode: req.mode, reused: !inserted });
     if (req.mode === "blocking") waitFor.push(id);
   }
@@ -226,7 +244,12 @@ export async function planChildWorkflows(
 }
 
 /** Put the completing step on hold until its blocking children finish (same transaction as the completion). */
-export async function holdForChildren(c: Db, step: StepRow, ids: number[], afterCommit: AfterCommit) {
+export async function holdForChildren(
+  c: Db,
+  step: StepRow,
+  ids: number[],
+  afterCommit: AfterCommit,
+) {
   await setStepStatus(
     c,
     step,

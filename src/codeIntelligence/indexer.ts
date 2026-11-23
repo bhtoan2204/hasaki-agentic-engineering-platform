@@ -38,7 +38,14 @@ export async function enqueue(repoName: string, runId?: number) {
       requested_by=COALESCE(excluded.requested_by, code_intelligence.runs.requested_by),
       delegated=CASE WHEN excluded.requested_by IS NULL THEN code_intelligence.runs.delegated ELSE excluded.delegated END
     RETURNING id,status`,
-    [repo.id, config.instanceId, runId ?? null, runId ? `run:${runId}` : "base", requester, delegated],
+    [
+      repo.id,
+      config.instanceId,
+      runId ?? null,
+      runId ? `run:${runId}` : "base",
+      requester,
+      delegated,
+    ],
   );
 }
 export async function localScope(
@@ -98,7 +105,15 @@ export async function indexRepository(
   const base = await baseCommit(scope.primary, scope.repo.default_branch || config.baseBranch);
   // Extraction, snapshots and publication run in platform-go (go/internal/codeintelligence); the lease, heartbeat,
   // authorization and checkout stay here, and the fence travels with the request.
-  const out = await indexWithGo(scope.repo.id, scope.primary, scope.root, base, runId, signal, fence);
+  const out = await indexWithGo(
+    scope.repo.id,
+    scope.primary,
+    scope.root,
+    base,
+    runId,
+    signal,
+    fence,
+  );
   return { ...out, metrics: { ...metrics, ...out.metrics, index_duration: Date.now() - start } };
 }
 

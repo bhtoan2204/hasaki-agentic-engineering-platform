@@ -284,7 +284,11 @@ test("gate: a justified observability correction passes", () => {
 
 test("gate: the reviewer's accepted signal may name the file by its short name with line and kind (run 167)", () => {
   // Recorded on run 167: the platform signal and the reviewer's acceptance text, verbatim.
-  const signal = { file: "app/usecases/invoice.go", line: 719, kind: "observability_removed" as const };
+  const signal = {
+    file: "app/usecases/invoice.go",
+    line: 719,
+    kind: "observability_removed" as const,
+  };
   const reviewer = [{ signal: "observability_removed: log.Errorf tại invoice.go:719 bị gỡ" }];
   assert.equal(
     signalAccepted(signal, reviewer),
