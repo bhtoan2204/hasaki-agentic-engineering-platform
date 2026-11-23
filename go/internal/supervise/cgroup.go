@@ -55,7 +55,7 @@ func ownScope() (string, error) {
 	return dir, nil
 }
 
-// SetupCgroup moves the launcher to <scope>/supervisor, delegates memory, pids and cpu to the scope's children and
+// SetupCgroup moves the launcher to <scope>/supervisor, delegates memory, pids and (if available) cpu to the scope's children and
 // creates <scope>/workload with the limits. Any failure leaves the scope unchanged enough for the caller to fall
 // back (cgroup=auto) or refuse to run (cgroup=require).
 func SetupCgroup(l Limits) (*Cgroup, error) {
@@ -70,7 +70,18 @@ func SetupCgroup(l Limits) (*Cgroup, error) {
 	if err := os.WriteFile(filepath.Join(sup, "cgroup.procs"), []byte(strconv.Itoa(os.Getpid())), 0); err != nil {
 		return nil, fmt.Errorf("move launcher: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(scope, "cgroup.subtree_control"), []byte("+memory +pids +cpu"), 0); err != nil {
+	avail, err := os.ReadFile(filepath.Join(scope, "cgroup.controllers"))
+	if err != nil {
+		return nil, err
+	}
+	have := strings.Fields(string(avail))
+	var enable []string
+	for _, c := range []string{"memory", "pids", "cpu"} {
+		if slices.Contains(have, c) {
+			enable = append(enable, "+"+c)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(scope, "cgroup.subtree_control"), []byte(strings.Join(enable, " ")), 0); err != nil {
 		return nil, fmt.Errorf("delegate controllers: %w", err)
 	}
 	dir := filepath.Join(scope, "workload")
@@ -96,7 +107,8 @@ func SetupCgroup(l Limits) (*Cgroup, error) {
 			return nil, err
 		}
 	}
-	if l.CPUPercent > 0 {
+	// user@.service often delegates only memory and pids (WSL2); the CPU quota is then skipped, cpu-seconds still applies.
+	if l.CPUPercent > 0 && slices.Contains(have, "cpu") {
 		// cpu.max: quota per 100 ms period; 100% = one CPU.
 		if err := set("cpu.max", fmt.Sprintf("%d 100000", l.CPUPercent*1000)); err != nil {
 			return nil, err
