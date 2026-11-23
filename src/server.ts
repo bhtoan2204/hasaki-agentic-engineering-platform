@@ -101,18 +101,18 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 // Policy-controlled intake rides the scheduler's reconcile tick: re-triage and start eligible items (no-op without a policy).
-registerReconcileTask(() => dispatchIntake());
+registerReconcileTask("intake", () => dispatchIntake());
 // PR delivery lifecycle (no-op while prLifecycle.mode is "off"): bounded polling with per-PR backoff.
-registerReconcileTask(() => syncPullRequestLifecycles());
+registerReconcileTask("pull_request_lifecycle", syncPullRequestLifecycles);
 // Chat autonomy: runs started by an autonomy policy that outlive its timeout are paused for the owner.
-registerReconcileTask(() => enforceAutonomyTimeouts());
+registerReconcileTask("chat_autonomy", enforceAutonomyTimeouts);
 // Engineering Radar: interval-gated deterministic detection over stored signals → findings → Intake Queue.
-registerReconcileTask(() => radarTick());
+registerReconcileTask("engineering_radar", radarTick);
 // Workflow-to-workflow delegation: spawn queued children, record finished ones, resume waiting parents, cascade cancels.
-registerReconcileTask(() => dispatchDelegations());
+registerReconcileTask("workflow_delegation", dispatchDelegations);
 // Causal memory: records whose cited files changed on the base become "outdated" (bounded, every 30 minutes).
 let causalCheckedAt = 0;
-registerReconcileTask(async () => {
+registerReconcileTask("causal_memory", async () => {
   if (Date.now() - causalCheckedAt < 30 * 60_000) return;
   causalCheckedAt = Date.now();
   await invalidateCausalMemories();

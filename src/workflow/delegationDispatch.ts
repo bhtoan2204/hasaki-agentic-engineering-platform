@@ -15,27 +15,27 @@ import type { AttemptRow, RunRow, StepRow } from "./types.ts";
 
 const TERMINAL_RUN = ["COMPLETED", "FAILED", "CANCELED"];
 
+type FinishedChild = {
+  id: number;
+  child_run_id: number;
+  child_status: string;
+  title: string;
+  error: string | null;
+  final_step: string | null;
+  output: Record<string, unknown> | null;
+};
+
 /** Child run → compact, bounded result (status, link and the final step's summary when it has one). */
-async function resultOf(childId: number) {
-  const run = await one<{ id: number; status: string; title: string; error: string | null }>(
-    pool,
-    "SELECT id, status, title, error FROM workflow_runs WHERE id=$1",
-    [childId],
-  );
-  const last = await one<{ key: string; output: Record<string, unknown> | null }>(
-    pool,
-    "SELECT key, output FROM workflow_steps WHERE run_id=$1 AND status='COMPLETED' AND output IS NOT NULL ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1",
-    [childId],
-  );
-  const o = last?.output ?? {};
+function resultOf(child: FinishedChild) {
+  const o = child.output ?? {};
   const summary =
     typeof o.summary === "string" ? o.summary : typeof o.business_summary === "string" ? o.business_summary : JSON.stringify(o);
   return {
-    run_id: Number(childId),
-    run_status: run?.status ?? "UNKNOWN",
-    title: run?.title ?? "",
-    error: run?.error ? String(run.error).slice(0, 500) : null,
-    final_step: last?.key ?? null,
+    run_id: child.child_run_id,
+    run_status: child.child_status,
+    title: child.title,
+    error: child.error ? child.error.slice(0, 500) : null,
+    final_step: child.final_step,
     summary: summary.slice(0, 2000),
   };
 }
@@ -121,13 +121,23 @@ async function pass() {
   }
 
   // 3. Record finished children (their result is read once, then kept on the row).
-  const done = await q<Row & { child_status: string }>(
+  const done = await q<FinishedChild>(
     pool,
-    `SELECT d.*, r.status AS child_status FROM workflow_delegations d JOIN workflow_runs r ON r.id = d.child_run_id
-      WHERE d.status IN ('started','proposed') AND r.status IN ('COMPLETED','FAILED','CANCELED') LIMIT 100`,
+    `SELECT child.*, last.key AS final_step, last.output
+       FROM (
+         SELECT d.id, r.id AS child_run_id, r.status AS child_status, r.title, r.error
+           FROM workflow_delegations d JOIN workflow_runs r ON r.id = d.child_run_id
+          WHERE d.status IN ('started','proposed') AND r.status IN ('COMPLETED','FAILED','CANCELED')
+          LIMIT 100
+       ) child
+       LEFT JOIN LATERAL (
+         SELECT s.key, s.output FROM workflow_steps s
+          WHERE s.run_id = child.child_run_id AND s.status='COMPLETED' AND s.output IS NOT NULL
+          ORDER BY s.finished_at DESC NULLS LAST, s.id DESC LIMIT 1
+       ) last ON true`,
   );
   for (const d of done) {
-    const result = await resultOf(Number(d.child_run_id));
+    const result = resultOf(d);
     await q(
       pool,
       "UPDATE workflow_delegations SET status=$2, result=$3, updated_at=now() WHERE id=$1 AND status IN ('started','proposed')",

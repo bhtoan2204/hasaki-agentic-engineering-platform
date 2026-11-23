@@ -1,11 +1,63 @@
 package platform
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
+
+func TestObserveAccessLog(t *testing.T) {
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	for _, tc := range []struct {
+		method string
+		path   string
+		status int
+		logged bool
+	}{
+		{http.MethodGet, "/healthz", http.StatusOK, false},
+		{http.MethodHead, "/readyz", http.StatusOK, false},
+		{http.MethodGet, "/readyz", http.StatusServiceUnavailable, true},
+		{http.MethodPost, "/healthz", http.StatusMethodNotAllowed, true},
+		{http.MethodGet, "/internal/v1/retrieval/status", http.StatusOK, true},
+	} {
+		t.Run(tc.method+" "+tc.path+" "+http.StatusText(tc.status), func(t *testing.T) {
+			var buf bytes.Buffer
+			h := Observe(slog.New(slog.NewJSONHandler(&buf, nil)), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := trace.SpanContextFromContext(r.Context()).TraceID().String(); got != traceID {
+					t.Errorf("request trace ID = %s, want %s", got, traceID)
+				}
+				w.WriteHeader(tc.status)
+			}))
+			r := httptest.NewRequest(tc.method, tc.path+"?token=private", nil)
+			r.Header.Set("traceparent", "00-"+traceID+"-00f067aa0ba902b7-01")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, want %d", w.Code, tc.status)
+			}
+			if !tc.logged {
+				if buf.Len() != 0 {
+					t.Fatalf("unexpected probe log: %s", buf.String())
+				}
+				return
+			}
+			var entry map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+				t.Fatalf("expected one JSON access log: %v", err)
+			}
+			if entry["event"] != "http.request_completed" || entry["method"] != tc.method || entry["path"] != tc.path ||
+				entry["status"] != float64(tc.status) || entry["trace_id"] != traceID || entry["span_id"] == nil {
+				t.Fatalf("unexpected access log fields: %v", entry)
+			}
+		})
+	}
+}
 
 func TestRequireBearer(t *testing.T) {
 	h := RequireBearer(testToken, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))

@@ -5,6 +5,7 @@ import { pool, q, one, withTx } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { seedTemplates } from "../src/workflow/definitions.ts";
 import { handle } from "../src/http/app.ts";
+import { HttpError } from "../src/http/error.ts";
 import { createUser, setActive } from "../src/auth/users.ts";
 import { runEvents } from "../src/workflow/events.ts";
 import { runDetail, startRun } from "../src/workflow/engine.ts";
@@ -75,6 +76,30 @@ after(async () => {
 
 const workItemCount = async (title: string) =>
   (await one(pool, "SELECT count(*)::int AS n FROM work_items WHERE title = $1", [title])).n;
+
+test("HTTP failures log request and correlation IDs without the query string", async (t) => {
+  t.mock.method(pool, "query", async () => {
+    throw new HttpError(503, "auth status database unavailable");
+  });
+  const logged = t.mock.method(console, "error", () => {});
+  const response = await fetch(`${base}/api/auth/status?token=private-value`, {
+    headers: { "x-request-id": "request-123", "x-correlation-id": "correlation-456" },
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "auth status database unavailable" });
+  assert.equal(logged.mock.callCount(), 1);
+  const line = String(logged.mock.calls[0].arguments[0]);
+  const { event, method, path, status, request_id, correlation_id } = JSON.parse(line);
+  assert.deepEqual([event, method, path, status, request_id, correlation_id], [
+    "http.request_failed",
+    "GET",
+    "/api/auth/status",
+    503,
+    "request-123",
+    "correlation-456",
+  ]);
+  assert.ok(!line.includes("private-value"));
+});
 
 test("Idempotency-Key: a repeated create replays the first response; no key keeps the old behaviour", async () => {
   const c = client();

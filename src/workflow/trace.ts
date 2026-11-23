@@ -2,6 +2,7 @@ import { pool, q, type Db } from "../db/pool.ts";
 import { redactSecrets } from "../integrations/redact.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { runEvents } from "./events.ts";
+import { logError } from "../logging.ts";
 
 /**
  * Execution tracing on top of the existing workflow_events / workflow_step_attempts tables.
@@ -142,7 +143,14 @@ export async function traceLog(
     );
     return true;
   } catch (e) {
-    console.error(`trace: could not record ${ev.event} (run ${ev.runId}): ${(e as Error).message}`);
+    logError("workflow.trace_write_failed", "Could not record workflow trace", e, {
+      run_id: ev.runId,
+      step_id: ev.stepId,
+      attempt_id: ev.attemptId,
+      span_id: ev.spanId,
+      parent_span_id: ev.parentSpanId,
+      trace_event: ev.event,
+    });
     return false;
   }
 }

@@ -368,8 +368,11 @@ const must = <T>(v: T | undefined | null, what: string): T => {
   return v;
 };
 
-async function workItemWithAttachments(id: number) {
-  const w = must(await workItems.detail(id), "work item");
+async function workItemWithAttachments(c: Ctx, id: number) {
+  const w = await workItems.detail(id, (item) =>
+    requireOwner(c.actor, item.owner_id, support(c), "work_item", String(id)),
+  );
+  if (!w) throw new HttpError(404, "not found");
   const files =
     w.payload && typeof w.payload === "object" && "note_files" in w.payload
       ? w.payload.note_files
@@ -583,13 +586,11 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/work-items\/(\d+)$/,
-    async (c) => (
-      await requireWorkItem(c.actor, num(c.p[0]), support(c)),
-      {
-        ...(await workItemWithAttachments(num(c.p[0]))),
-        prod_errors: await groupsForWorkItem(num(c.p[0])),
-      }
-    ),
+    async (c) => {
+      const id = num(c.p[0]);
+      const item = await workItemWithAttachments(c, id);
+      return { ...item, prod_errors: await groupsForWorkItem(id) };
+    },
   ],
   [
     "POST",

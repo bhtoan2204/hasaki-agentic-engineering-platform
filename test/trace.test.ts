@@ -251,22 +251,41 @@ describe("redaction and best-effort", () => {
     );
   });
 
-  test("persistence failure never throws", async () => {
+  test("persistence failure logs correlation fields and never throws", async (t) => {
     const db = {
       query: async () => {
-        throw new Error("db down");
+        throw new Error("db down password=secret-value");
       },
     } as unknown as Db;
-    const orig = console.error;
-    console.error = () => {};
-    try {
-      assert.equal(
-        await traceLog({ runId: 1, level: "ERROR", event: "x", message: "m" }, db, "INFO"),
-        false,
-      );
-    } finally {
-      console.error = orig;
-    }
+    const logged = t.mock.method(console, "error", () => {});
+    assert.equal(
+      await traceLog(
+        {
+          runId: 1,
+          stepId: 2,
+          attemptId: 3,
+          spanId: "span",
+          parentSpanId: "parent",
+          level: "ERROR",
+          event: "x",
+          message: "m",
+        },
+        db,
+        "INFO",
+      ),
+      false,
+    );
+    assert.equal(logged.mock.callCount(), 1);
+    const line = String(logged.mock.calls[0].arguments[0]);
+    const entry = JSON.parse(line);
+    assert.equal(entry.level, "ERROR");
+    assert.equal(entry.event, "workflow.trace_write_failed");
+    assert.deepEqual(
+      [entry.run_id, entry.step_id, entry.attempt_id, entry.span_id, entry.parent_span_id, entry.trace_event],
+      [1, 2, 3, "span", "parent", "x"],
+    );
+    assert.equal(entry.error, "db down password=***");
+    assert.ok(!line.includes("secret-value"));
   });
 });
 

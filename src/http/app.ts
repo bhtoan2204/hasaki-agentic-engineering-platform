@@ -28,6 +28,7 @@ import { artifactResponseHeaders } from "./artifactResponse.ts";
 import { compress, compressedStatic, COMPRESS_MIN_BYTES, pickEncoding } from "./compression.ts";
 import { count, observe } from "../runtimeMetrics.ts";
 import { config } from "../config.ts";
+import { logError } from "../logging.ts";
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 const TYPES: Record<string, string> = {
@@ -150,6 +151,10 @@ async function sendResult(req: IncomingMessage, res: ServerResponse, body: unkno
 
 /** Identical concurrent GETs share one execution, and its cancellation (src/http/sharedAbort.ts). */
 const getFlights = new SharedAbort();
+
+function correlationHeader(value: string | string[] | undefined) {
+  return typeof value === "string" && /^[\w.:-]{1,128}$/.test(value) ? value : undefined;
+}
 
 export async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
@@ -369,7 +374,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
   } catch (e) {
     if (res.headersSent) return;
     const status = errorStatus(e);
-    if (status >= 500) console.error(e);
+    if (status >= 500) {
+      logError("http.request_failed", "HTTP request failed", e, {
+        method,
+        path: url.pathname,
+        status,
+        request_id: correlationHeader(req.headers["x-request-id"]),
+        correlation_id: correlationHeader(req.headers["x-correlation-id"]),
+      });
+    }
     return send(res, status, {
       error: (e as Error).message,
       details: (e as { errors?: unknown }).errors,

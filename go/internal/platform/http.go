@@ -61,7 +61,8 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
-// Observe extracts W3C trace context, opens a server span and logs one line per request.
+// Observe extracts W3C trace context and opens a server span for every request.
+// Successful health probes are omitted from access logs.
 func Observe(log *slog.Logger, next http.Handler) http.Handler {
 	tracer := otel.Tracer("platform-go/http")
 	prop := propagation.TraceContext{}
@@ -73,11 +74,21 @@ func Observe(log *slog.Logger, next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r.WithContext(ctx))
 		span.SetAttributes(attribute.Int("http.response.status_code", rec.status))
-		log.LogAttrs(ctx, slog.LevelInfo, "http",
+		if rec.status == http.StatusOK && (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+			(r.URL.Path == "/healthz" || r.URL.Path == "/readyz") {
+			return
+		}
+		attrs := []slog.Attr{
+			slog.String("event", "http.request_completed"),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", rec.status),
-			slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000))
+			slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
+		}
+		if sc := span.SpanContext(); sc.IsValid() {
+			attrs = append(attrs, slog.String("trace_id", sc.TraceID().String()), slog.String("span_id", sc.SpanID().String()))
+		}
+		log.LogAttrs(ctx, slog.LevelInfo, "http", attrs...)
 	})
 }
 

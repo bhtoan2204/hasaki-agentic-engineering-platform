@@ -16,6 +16,7 @@ import { workItems } from "../src/workitems/service.ts";
 import { startRun } from "../src/workflow/engine.ts";
 import { putUserSecret, getUserSecret } from "../src/auth/secrets.ts";
 import { sessionFromRequest } from "../src/auth/sessions.ts";
+import { runtimeMetricsSnapshot } from "../src/runtimeMetrics.ts";
 
 let server: Server;
 let base = "";
@@ -102,6 +103,26 @@ test("anonymous callers cannot use protected APIs, downloads or the event stream
     (await anon.call("/api/auth/login", { username: "nobody", password: "wrong-password" })).status,
     401,
   );
+});
+
+test("work item detail authorizes from its fetched row and audits explicit admin support", async () => {
+  const owner = client();
+  const admin = client();
+  assert.equal((await owner.login("membera", "member-a-password")).status, 200);
+  assert.equal((await admin.login("admin", "admin-password")).status, 200);
+  const item = (await owner.call("/api/work-items", { title: "Detail query budget" })).body;
+  const path = `/api/work-items/${item.id}`;
+  assert.equal((await admin.call(path)).status, 404);
+  assert.equal((await admin.call(`${path}?scope=all`)).status, 200);
+  assert.ok(await one(pool, "SELECT id FROM audit_log WHERE action='support.access' AND resource_type='work_item' AND resource_id=$1", [String(item.id)]));
+  const before = runtimeMetricsSnapshot().counters["db.statements"] ?? 0;
+  const detail = await owner.call(path);
+  const statements = (runtimeMetricsSnapshot().counters["db.statements"] ?? 0) - before;
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.id, item.id);
+  for (const key of ["runs", "pull_requests", "attachments", "prod_errors"])
+    assert.deepEqual(detail.body[key], []);
+  assert.equal(statements, 4, "item, runs, pull requests, and production-error groups");
 });
 
 test("member A cannot read or mutate member B by id, and a mixed answer batch writes nothing", async () => {

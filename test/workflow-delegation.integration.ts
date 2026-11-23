@@ -16,6 +16,7 @@ import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { dispatchDelegations } from "../src/workflow/delegationDispatch.ts";
 import { LIMITS } from "../src/workflow/delegation.ts";
+import { runtimeMetricsSnapshot } from "../src/runtimeMetrics.ts";
 
 let ownerId = 0;
 /** What each parent "plan" step submits, by run title. */
@@ -122,6 +123,40 @@ const step = (runId: number, key: string) =>
     "SELECT status, output, error FROM workflow_steps WHERE run_id=$1 AND key=$2",
     [runId, key],
   ).then((s) => s!);
+
+test("collects three finished children in one read with one guarded update per child", async () => {
+  const parent = await startRun({ definitionKey: "deleg-parent", ownerId, start: false });
+  runs.push(parent.id);
+  const states = ["COMPLETED", "FAILED", "CANCELED"] as const;
+  for (const status of states) {
+    const child = await startRun({ definitionKey: "deleg-child", title: status, ownerId, start: false });
+    await q(pool, "UPDATE workflow_runs SET status=$2 WHERE id=$1", [child.id, status]);
+    if (status === "COMPLETED") {
+      await q(pool, "UPDATE workflow_steps SET status='COMPLETED', output=$2 WHERE run_id=$1", [
+        child.id,
+        JSON.stringify({ summary: "finished work" }),
+      ]);
+    }
+    await q(
+      pool,
+      `INSERT INTO workflow_delegations
+        (parent_run_id, parent_step_id, root_run_id, depth, dedupe_key, workflow_key, mode, request, status, child_run_id)
+       SELECT $1, id, $1, 1, $3, 'deleg-child', 'detached', '{}', 'started', $2
+         FROM workflow_steps WHERE run_id=$1 AND key='plan'`,
+      [parent.id, child.id, status],
+    );
+  }
+  await settleBackground();
+  const before = runtimeMetricsSnapshot().counters["db.statements"] ?? 0;
+  assert.equal((await dispatchDelegations()).finished, 3);
+  const statements = (runtimeMetricsSnapshot().counters["db.statements"] ?? 0) - before;
+  const rows = await rowsOf(parent.id);
+  assert.deepEqual(rows.map((row) => row.status), ["completed", "failed", "canceled"]);
+  assert.deepEqual(rows.map((row) => row.result?.run_status), states);
+  assert.deepEqual(rows.map((row) => row.result?.final_step), ["work", null, null]);
+  assert.equal(rows[0].result?.summary, "finished work");
+  assert.equal(statements, 8, "five dispatcher reads and three guarded updates");
+});
 
 test("blocking: the step waits, the child runs as an ordinary run, the result is aggregated into the step output", async () => {
   const id = await parent("blocking", [ask()]);
