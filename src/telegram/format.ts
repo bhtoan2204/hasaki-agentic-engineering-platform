@@ -52,15 +52,61 @@ const LEVEL_MIN = { all: 0, important: 1, critical: 2 } as const;
 export const severityAllowed = (level: string, severity: Severity) =>
   SEVERITY_RANK[severity] >= (LEVEL_MIN[level as keyof typeof LEVEL_MIN] ?? 1);
 
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
+const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+const cells = (row: string) =>
+  row
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, "|"));
+
 /**
- * A chat answer as Telegram plain text: credentials redacted, code blocks replaced by a pointer to the web
- * conversation (private source stays on the platform), markdown emphasis and headings flattened.
+ * Markdown tables do not exist in Telegram and wrap into unreadable pipes on a phone: each row becomes a bullet. Two
+ * columns: "• first — second". More: "• first" then one indented "Header: value" line per other column.
+ */
+function tablesToLists(text: string) {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!(TABLE_ROW.test(lines[i]) && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1]))) {
+      out.push(lines[i]);
+      continue;
+    }
+    const header = cells(lines[i]);
+    i += 2;
+    const rows: string[][] = [];
+    for (; i < lines.length && TABLE_ROW.test(lines[i]); i++) rows.push(cells(lines[i]));
+    i--;
+    for (const r of rows) {
+      const [first, ...rest] = r;
+      if (header.length <= 2) out.push(`• ${first}${rest[0] ? ` — ${rest[0]}` : ""}`);
+      else {
+        out.push(`• ${first}`);
+        rest.forEach((v, k) => v && out.push(`   ${header[k + 1] || "–"}: ${v}`));
+      }
+    }
+  }
+  return out.join("\n");
+}
+
+/**
+ * A chat answer as Telegram plain text (no parse mode: a long answer is split into parts, which would break HTML/
+ * MarkdownV2 entities): credentials redacted, code blocks replaced by a pointer to the web conversation (private
+ * source stays on the platform), tables turned into lists, headings, emphasis, inline code, bullets, quotes and rules
+ * rendered as readable text.
  */
 export function telegramAnswer(markdown: string) {
-  return safeTelegramText(markdown)
-    .replace(/^#{1,6}\s+/gm, "")
+  return tablesToLists(safeTelegramText(markdown))
+    .replace(/^#{1,6}\s+(.+?)\s*#*\s*$/gm, "▍$1")
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/__(.+?)__/g, "$1")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/^(\s*)[-*+]\s+(?=\S)/gm, "$1• ")
+    .replace(/^\s*>\s?/gm, "│ ")
+    .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, "")
+    .replace(/(^|[\s(])\*([^*\s][^*\n]*?)\*(?=[\s).,:;!?]|$)/gm, "$1$2")
     .replace(/\[([^\]\n]{1,200})\]\((https?:\/\/[^)\s]+)\)/g, "$1 ($2)")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

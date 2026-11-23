@@ -117,9 +117,43 @@ test("format: answers redact credentials and keep code on the platform", () => {
   );
   assert.doesNotMatch(out, /readKey|hunter2/);
   assert.match(out, /Code available in platform/);
-  assert.match(out, /^Result/);
+  assert.match(out, /^▍Result/);
   assert.match(out, /Root cause: timeout/);
   assert.match(out, /logs \(https:\/\/x\.example\/l\)/);
+});
+
+test("format: markdown that Telegram cannot render becomes readable plain text (tables, inline code, bullets)", () => {
+  const out = telegramAnswer(
+    [
+      "### 4. Ảnh hưởng đến các bộ phận khác",
+      "| Bộ phận | Ảnh hưởng |",
+      "|---|---|",
+      "| Kho / vận chuyển | Nhận event `New` cho 2 shipment mới và `Cancel` cho shipment cũ. |",
+      "| CSKH | Khách thấy shipment cũ bị hủy. |",
+      "",
+      "- Shipment Delay có `ShipmentFee = 0`.",
+      "* bullet sao",
+      "> trích dẫn",
+      "---",
+      "| Bước | Trạng thái | Ghi chú |",
+      "|:--|:-:|--:|",
+      "| Tách | **OK** | giữ `sold_stock_id` |",
+      "| Hoàn tiền | lỗi \\| chưa rõ |  |",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(out, /\|---|^\|/m, "no table syntax left");
+  assert.doesNotMatch(out, /`|\*\*|^###/m, "no inline-code, bold or heading markers left");
+  assert.match(out, /^▍4\. Ảnh hưởng đến các bộ phận khác$/m);
+  assert.match(out, /^• Kho \/ vận chuyển — Nhận event New cho 2 shipment mới và Cancel cho shipment cũ\.$/m);
+  assert.match(out, /^• CSKH — Khách thấy shipment cũ bị hủy\.$/m);
+  assert.match(out, /^• Shipment Delay có ShipmentFee = 0\.$/m);
+  assert.match(out, /^• bullet sao$/m);
+  assert.match(out, /^│ trích dẫn$/m);
+  // 3+ columns: one bullet per row, then "Header: value" lines; empty cells are dropped, escaped pipes kept.
+  assert.match(out, /^• Tách\n {3}Trạng thái: OK\n {3}Ghi chú: giữ sold_stock_id$/m);
+  assert.match(out, /^• Hoàn tiền\n {3}Trạng thái: lỗi \| chưa rõ$/m);
+  // Arithmetic and snake_case are not mistaken for emphasis.
+  assert.equal(telegramAnswer("2 * 3 * 4 = 24, my_var_name"), "2 * 3 * 4 = 24, my_var_name");
 });
 
 test("format: quiet hours wrap midnight in the user's time zone; levels filter severities", () => {

@@ -28,7 +28,7 @@ import { environmentUnavailable, testEvidence } from "../../agent/verify.ts";
 import { executeBenchmarkCase } from "../../eval/runner.ts";
 import { hybridRank } from "../../codeIntelligence/search.ts";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
@@ -443,7 +443,14 @@ export async function runCommand(
   if (useBwrap) {
     childEnv.TMPDIR = "/tmp";
     if (!childEnv.GOCACHE?.startsWith("/tmp/")) {
-      verificationGoCache ??= await mkdtemp("/tmp/ctp-verification-cache-");
+      if (!verificationGoCache) {
+        // One Go build cache per process (bwrap binds /tmp), removed when the process exits; the owner pid lets a
+        // test run's sweeper recognise caches orphaned by killed processes.
+        const dir = await mkdtemp("/tmp/ctp-verification-cache-");
+        writeFileSync(join(dir, ".owner-pid"), String(process.pid));
+        process.once("exit", () => rmSync(dir, { recursive: true, force: true }));
+        verificationGoCache = dir;
+      }
       childEnv.GOCACHE = join(verificationGoCache, "go-build");
       await mkdir(childEnv.GOCACHE, { recursive: true });
     }

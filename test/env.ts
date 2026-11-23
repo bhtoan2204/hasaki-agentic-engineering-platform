@@ -3,12 +3,84 @@
  * temporary root and strips developer credentials BEFORE any platform module is imported (config and pool are
  * created at import time). DATABASE_URL names a socket that does not exist: unit tests never reach a database.
  */
-import { accessSync, constants, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  accessSync,
+  constants,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const root = mkdtempSync(join(tmpdir(), "ctp-test-"));
+// The real system temp directory, fixed once for the whole run (nested test processes inherit it): the PostgreSQL test
+// cluster lives there (test/pg-cluster.ts) and the orphan sweep scans it, whatever TMPDIR is redirected to below.
+process.env.CTP_SYSTEM_TMPDIR ||= tmpdir();
+const systemTmp = process.env.CTP_SYSTEM_TMPDIR;
+export const root = mkdtempSync(join(systemTmp, "ctp-test-"));
 mkdirSync(join(root, "repos"));
+writeFileSync(join(root, ".owner-pid"), String(process.pid));
+
+// /tmp is often a small tmpfs. Everything a test (or a process it starts) puts in os.tmpdir() lands inside this root,
+// and the root is removed when the process exits (KEEP_TEST_ROOT=1 keeps it for debugging).
+mkdirSync(join(root, "tmp"));
+process.env.TMPDIR = join(root, "tmp");
+const removeTree = (dir: string) => {
+  // Go's module cache is read-only: make it writable first, or removal stops half-way.
+  spawnSync("chmod", ["-R", "u+w", dir], { stdio: "ignore" });
+  rmSync(dir, { recursive: true, force: true, maxRetries: 2 });
+};
+if (process.env.KEEP_TEST_ROOT !== "1")
+  process.once("exit", () => {
+    try {
+      removeTree(root);
+    } catch {
+      /* best effort: the next run's sweep removes it */
+    }
+  });
+
+/**
+ * Once per test run (the orchestrating `node --test` process, not each test file's process): remove temporary
+ * directories left by killed test processes. Only this user's platform-owned prefixes; a directory is removed only when
+ * the process that owns it (.owner-pid) is gone, or — unmarked, from older versions — when untouched for 24 h.
+ */
+function sweepOrphans() {
+  const PREFIX = /^(?:ctp-test-|ctp-verification-cache-|ctp-mask-)/;
+  const uid = process.getuid?.();
+  for (const name of readdirSync(systemTmp)) {
+    if (!PREFIX.test(name)) continue;
+    const dir = join(systemTmp, name);
+    if (dir === root) continue;
+    try {
+      const st = statSync(dir);
+      if (!st.isDirectory() || (uid != null && st.uid !== uid)) continue;
+      let owner: number | null = null;
+      try {
+        owner = Number(readFileSync(join(dir, ".owner-pid"), "utf8")) || null;
+      } catch {
+        owner = null;
+      }
+      let alive = false;
+      if (owner)
+        try {
+          process.kill(owner, 0);
+          alive = true;
+        } catch (e) {
+          alive = (e as NodeJS.ErrnoException).code === "EPERM";
+        }
+      const stale = owner ? !alive : Date.now() - st.mtimeMs > 24 * 3_600_000;
+      if (stale) removeTree(dir);
+    } catch {
+      /* another run removed it, or it is not ours */
+    }
+  }
+}
+if (!process.env.NODE_TEST_CONTEXT && process.env.KEEP_TEST_ROOT !== "1") sweepOrphans();
 export const cfgPath = join(root, "config.json");
 writeFileSync(
   cfgPath,
