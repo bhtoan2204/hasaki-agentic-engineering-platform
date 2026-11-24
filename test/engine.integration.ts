@@ -1420,7 +1420,8 @@ test("server shutdown kills detached command process groups (no orphaned go test
     execSync(`ps -eo args | grep -c "^bash .*[s]leep 30; echo ${marker}" || true`)
       .toString()
       .trim();
-  for (let i = 0; i < 25 && alive() === "0"; i++) await new Promise((r) => setTimeout(r, 200));
+  // While the login profile is sourced, its command substitutions fork copies of that bash (same args): wait them out.
+  for (let i = 0; i < 50 && alive() !== "1"; i++) await new Promise((r) => setTimeout(r, 200));
   assert.equal(alive(), "1", "command is running");
   childGroups.killAll(); // what the SIGINT/SIGTERM handler and process exit do
   await worker;
