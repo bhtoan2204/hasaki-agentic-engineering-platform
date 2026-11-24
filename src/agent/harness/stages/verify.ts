@@ -41,6 +41,7 @@ import {
   beforeAfterProof,
   diffAgainstBase,
   diffTestsAgainstBase,
+  fixRegressionTest,
   repairPrompt,
   restoreConflictSkips,
   sourceUnchangedSince,
@@ -282,6 +283,8 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
+    // prepare_branch creates the worktrees during the turn: the list preflight captured predates them.
+    s.ws = trees;
     const assessMicroScope = async (): Promise<
       { escalate: false } | { escalate: true; result: ExecResult }
     > => {
@@ -427,6 +430,20 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
           }),
     };
     let accepted = output;
+    const depth = rootCauseDepth(ctx.run, ctx.step);
+    const contractTests = vcfg.requiredTests ?? [];
+    const requireFixTest = async (submitted: unknown) => {
+      const remediation =
+        depth === "light"
+          ? null
+          : normalizeRemediation(
+              (submitted as { remediation?: unknown } | null)?.remediation,
+              depth,
+            );
+      const id = await fixRegressionTest(trees, remediation);
+      vcfg.requiredTests = [...new Set([...contractTests, ...(id ? [id] : [])])];
+    };
+    await requireFixTest(accepted);
     const loop = await verificationLoop<ExecResult>({
       cfg: vcfg,
       prior: [...rounds], // rounds keeps the full history (prior + new) for the pause checkpoint
@@ -516,7 +533,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
           ];
           const state = sessionStateBlock({
             reason: pressure.reason,
-            worktree: await worktreeState(ws),
+            worktree: await worktreeState(s.ws),
             verification: failed.repos.map((x) => ({
               repo: x.repo,
               status: x.status,
@@ -557,7 +574,10 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         if (await openQuestions()) return pause(r.text);
         const terminalRepair = terminalCodingFailure(s.submitted);
         if (terminalRepair) return terminalRepair;
-        if (s.submitted) accepted = withoutPlatformEvidence(s.submitted);
+        if (s.submitted) {
+          accepted = withoutPlatformEvidence(s.submitted);
+          await requireFixTest(accepted);
+        }
         if (ctx.run.profile === "MICRO") {
           const check = await assessMicroScope();
           if (check.escalate) return check.result;
@@ -615,7 +635,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
                       ", ",
                     )}${x.slop.blocking.length > 8 ? ` (+${x.slop.blocking.length - 8} more)` : ""}; `
                 : ""
-            }${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
+            }${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.note?.startsWith("Required test") ? x.note : x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
         );
       const why =
         loop.outcome === "no_progress"

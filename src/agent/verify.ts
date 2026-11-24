@@ -400,7 +400,8 @@ export function failureSignature(repos: RepoVerification[]): string {
             .sort()
             .join(",")}`
         : "";
-      return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}${slop}}`;
+      const required = r.note?.startsWith("Required test") ? `|${r.note}` : "";
+      return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}${slop}${required}}`;
     })
     .sort();
   return parts.join(" ");
@@ -458,7 +459,11 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
     }
     const minus = line.match(/^--- a\/(.+)$/);
     if (minus) oldFile = minus[1];
-    if (line === "+++ /dev/null" && WEAKENABLE_TEST_FILE.test(oldFile) && !THIRD_PARTY.test(oldFile))
+    if (
+      line === "+++ /dev/null" &&
+      WEAKENABLE_TEST_FILE.test(oldFile) &&
+      !THIRD_PARTY.test(oldFile)
+    )
       hard.push(`${oldFile}: test file deleted`);
     const plus = line.match(/^\+\+\+ b\/(.+)$/);
     if (plus) file = plus[1];
@@ -473,7 +478,8 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
     if (/^\+\s*if\s+false\s*\{/.test(line)) soft.push(`${file}: "if false" block added`);
     if (!/_test\.go$/.test(file) && WEAKENABLE_TEST_FILE.test(file) && !THIRD_PARTY.test(file)) {
       for (const [re, what] of DISABLE_MARKERS) if (re.test(line)) hard.push(`${file}: ${what}`);
-      for (const [re, what] of CONDITIONAL_MARKERS) if (re.test(line)) soft.push(`${file}: ${what}`);
+      for (const [re, what] of CONDITIONAL_MARKERS)
+        if (re.test(line)) soft.push(`${file}: ${what}`);
       // By name across files: a test moved to another file is not removed; a renamed one is for a human to judge.
       const rn =
         line.match(/^-\s*(?:it|test)\(\s*(["'`])(.+?)\1/) ??
@@ -570,6 +576,24 @@ async function plannedPath(path: string, allowMissing: boolean): Promise<string 
 }
 
 /** Resolve ownership before execution. Ambiguous IDs need an explicit repository:: selector. */
+const FOREIGN_RUNNER = "repository runner is incompatible with the Node structured test runner";
+
+/**
+ * The regression test a fix remediation names, as a required test: a malformed id then fails verification and goes
+ * through the repair loop instead of leaving the proof "unmeasured". Null when no fix is claimed, or when only a foreign
+ * test runner could execute the test (that stays a documented verification limitation).
+ */
+export async function fixRegressionTest(
+  workspaces: Array<{ repo: string; path: string }>,
+  remediation: Pick<import("./rootCause.ts").Remediation, "kind" | "regression_test"> | null,
+): Promise<string | null> {
+  const name = remediation?.regression_test?.name;
+  if (!name || (remediation.kind !== "ROOT_CAUSE_FIX" && remediation.kind !== "PARTIAL_FIX"))
+    return null;
+  const { targets, problems } = await requiredTestTargets(workspaces, [name]);
+  return !targets.size && problems.some((p) => p.endsWith(FOREIGN_RUNNER)) ? null : name;
+}
+
 export async function requiredTestTargets(
   workspaces: Array<{ repo: string; path: string }>,
   ids: string[],
@@ -598,9 +622,7 @@ export async function requiredTestTargets(
           await readFile(resolve(workspace.path, "package.json"), "utf8").catch(() => "{}"),
         );
         if (/\b(jest|vitest|mocha|ava)\b/.test(String(manifest.scripts?.test ?? ""))) {
-          problems.push(
-            `${id}: repository runner is incompatible with the Node structured test runner`,
-          );
+          problems.push(`${id}: ${FOREIGN_RUNNER}`);
           continue;
         }
         if (
@@ -707,12 +729,12 @@ function requiredTestStatus(
           Number(event.errored) > 0
             ? "not_executed"
             : event.failed > 0
-            ? "failed"
-            : event.skipped > 0
-              ? "skipped"
-              : event.passed > 0
-                ? "passed"
-                : null;
+              ? "failed"
+              : event.skipped > 0
+                ? "skipped"
+                : event.passed > 0
+                  ? "passed"
+                  : null;
       if (next && status !== "failed" && status !== "skipped") status = next;
     } catch {
       /* Logs, including test stdout, are never passing evidence. */
@@ -765,7 +787,9 @@ export async function beforeAfterProof(
   const linkDependencies = async (into: string) => {
     const modules = resolve(w.path, "node_modules");
     if (
-      (await stat(modules).then((x) => x.isDirectory()).catch(() => false)) &&
+      (await stat(modules)
+        .then((x) => x.isDirectory())
+        .catch(() => false)) &&
       !(await stat(resolve(into, "node_modules")).catch(() => null))
     )
       await symlink(modules, resolve(into, "node_modules"), "dir");
@@ -787,13 +811,14 @@ export async function beforeAfterProof(
       w.repo,
     )?.[0];
     if (!before) return unmeasured("the test cannot be resolved on the pre-fix source");
-    const fixedTarget = (await requiredTestTargets([{ repo: w.repo, path: fixed }], [id])).targets.get(
-      w.repo,
-    )?.[0];
+    const fixedTarget = (
+      await requiredTestTargets([{ repo: w.repo, path: fixed }], [id])
+    ).targets.get(w.repo)?.[0];
     if (!fixedTarget) return unmeasured("the test cannot be resolved on the fixed commit");
     const b = requiredTestStatus((await run(before.command, tmp)).output, before);
     // Attribution: the failure must reproduce. A second pre-fix run only when the first one failed.
-    const b2 = b === "failed" ? requiredTestStatus((await run(before.command, tmp)).output, before) : null;
+    const b2 =
+      b === "failed" ? requiredTestStatus((await run(before.command, tmp)).output, before) : null;
     const a = requiredTestStatus((await run(fixedTarget.command, fixed)).output, fixedTarget);
     const proof = {
       repo: w.repo,
@@ -1461,6 +1486,10 @@ export function repairPrompt(
                 `- ${g.package}: ${[...g.tests, ...g.build_errors].slice(0, 12).join("; ") || "(package fails)"}`,
             )
             .join("\n"),
+      );
+    if (x.note?.startsWith("Required test"))
+      parts.push(
+        `${x.note}\nRequired tests are executable test ids (Go \`<module>/<package>/TestName\`, Node \`<repo>::path/file.test.js\`) and must pass with structured evidence. For a regression test named in remediation.regression_test.name, correct the id there and call submit_result again.`,
       );
     if (x.weakened.length)
       parts.push(

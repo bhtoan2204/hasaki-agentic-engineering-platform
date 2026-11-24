@@ -32,7 +32,7 @@ import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { config, codeIntelligenceEnabled } from "../../config.ts";
-import { pool, q } from "../../db/pool.ts";
+import { one, pool, q } from "../../db/pool.ts";
 import {
   allWorkspacesOf,
   prepareWorkspace,
@@ -94,6 +94,7 @@ import {
   samePatch,
   worktreeFingerprint,
 } from "../../agent/scopeGuard.ts";
+import { proofProblem, type RegressionProof, type Remediation } from "../../agent/rootCause.ts";
 import { feedbackSignals } from "../replan.ts";
 import { recheckBeforePublish } from "../autonomy.ts";
 import { gitMounts, removeSandboxState } from "../../agent/isolation.ts";
@@ -1411,31 +1412,72 @@ interface VerificationSummary {
   review_reasons?: string[] | null;
 }
 
+/** A claimed fix whose regression proof the platform did not verify: what passing checks and review do not establish. */
+function unprovenFixLines(
+  remediation: Partial<Remediation> | null,
+  proof: RegressionProof | null,
+  tested: Record<string, string> | null,
+  reviewerLimitation: string,
+) {
+  if (remediation?.kind !== "ROOT_CAUSE_FIX" && remediation?.kind !== "PARTIAL_FIX") return [];
+  const problem = proofProblem(proof, tested ?? {});
+  if (!problem) return [];
+  return [
+    `${remediation.kind} without a platform-verified regression proof (${problem}): passing checks and review do not establish that the root cause is fixed`,
+    ...[
+      ["implementer", remediation.verification_limitations],
+      ["reviewer", reviewerLimitation],
+    ].flatMap(([who, text]) => (text ? [`limitation documented by the ${who}: ${text}`] : [])),
+  ];
+}
+
 export async function verificationNotesOf(runId: number) {
-  const rows = await q<{ key: string; v: VerificationSummary | null }>(
+  const rows = await q<{
+    key: string;
+    v: VerificationSummary | null;
+    remediation: Partial<Remediation> | null;
+    proof: RegressionProof | null;
+    tested: Record<string, string> | null;
+  }>(
     pool,
-    "SELECT key, output->'verification' AS v FROM workflow_steps WHERE run_id = $1 AND type = 'coding_agent' AND output ? 'verification' ORDER BY position",
+    `SELECT key, output->'verification' AS v, output->'remediation' AS remediation,
+            output->'regression_proof' AS proof, output->'tested_heads' AS tested
+       FROM workflow_steps WHERE run_id = $1 AND type = 'coding_agent' AND output ? 'verification' ORDER BY position`,
     [runId],
   );
-  return rows
-    .filter(
-      (r): r is { key: string; v: VerificationSummary } =>
-        !!r.v &&
-        (r.v.status === "accepted_with_preexisting" ||
-          !!r.v.needs_review ||
-          r.v.status === "disabled"),
-    )
-    .map((r) => ({
-      step: r.key,
-      status: String(r.v.status),
-      lines: [
-        ...(r.v.status === "disabled" ? ["verification disabled by the workflow definition"] : []),
-        ...(r.v.last ?? [])
-          .filter((x) => x.status === "accepted_preexisting")
-          .map((x) => `${x.repo}: ${x.note ?? "pre-existing failures accepted"}`),
-        ...(r.v.review_reasons ?? []),
-      ],
-    }));
+  const reviewerLimitation = (
+    (
+      await one<{ limitation: string | null }>(
+        pool,
+        `SELECT output->'root_cause_check'->>'limitations' AS limitation FROM workflow_steps
+          WHERE run_id = $1 AND status = 'COMPLETED' AND config->>'independent' = 'true'
+            AND output->'root_cause_check'->>'limitations' IS NOT NULL ORDER BY position DESC LIMIT 1`,
+        [runId],
+      )
+    )?.limitation ?? ""
+  )
+    .trim()
+    .slice(0, 400);
+  return rows.flatMap((r) => {
+    if (!r.v) return [];
+    const flagged =
+      r.v.status === "accepted_with_preexisting" || !!r.v.needs_review || r.v.status === "disabled";
+    const lines = [
+      ...(flagged
+        ? [
+            ...(r.v.status === "disabled"
+              ? ["verification disabled by the workflow definition"]
+              : []),
+            ...(r.v.last ?? [])
+              .filter((x) => x.status === "accepted_preexisting")
+              .map((x) => `${x.repo}: ${x.note ?? "pre-existing failures accepted"}`),
+            ...(r.v.review_reasons ?? []),
+          ]
+        : []),
+      ...unprovenFixLines(r.remediation, r.proof, r.tested, reviewerLimitation),
+    ];
+    return flagged || lines.length ? [{ step: r.key, status: String(r.v.status), lines }] : [];
+  });
 }
 
 const revParse = (path: string, ref: string) =>
