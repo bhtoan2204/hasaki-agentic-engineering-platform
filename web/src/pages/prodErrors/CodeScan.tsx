@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, ExternalLink, Hand, Play, ScanSearch, Wrench } from "lucide-react";
+import { Bot, ChevronRight, ExternalLink, Hand, Play, ScanSearch, Wrench } from "lucide-react";
 import { api, useApi, useLive } from "../../api.ts";
 import { dialog } from "../../dialog/index.ts";
 import { useI18n } from "../../i18n/index.tsx";
-import { act, ago, EmptyState, ErrorBox, SkeletonRows, navigate, toast } from "../../ui.tsx";
+import {
+  act,
+  ago,
+  EmptyState,
+  ErrorBox,
+  FilterField,
+  FilterToolbar,
+  SearchInput,
+  SkeletonRows,
+  navigate,
+  toast,
+} from "../../ui.tsx";
 import { AssessProgressCard, type AssessProgress } from "../ScanProgress.tsx";
 import "./code-scan.css";
 
@@ -19,6 +30,7 @@ type Finding = {
   implementable?: boolean;
   why_not?: string;
   code_evidence?: { status: "verified" | "missing"; reason?: string };
+  related_repos?: string[];
 };
 type Fix = {
   finding_id: string;
@@ -161,7 +173,7 @@ export function CodeScan() {
       });
       if (!ok) return;
     }
-    const repoName = f.repo || scan.selected_repositories[0];
+    const repoName = repoOf(f, scan.selected_repositories) || scan.selected_repositories[0];
     const where = f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : "";
     const run = await act(() =>
       api<{ id: number }>("/api/runs", {
@@ -294,7 +306,6 @@ function ScanCard({ scan, onFix }: { scan: Scan; onFix: (f: Finding) => void }) 
     SEVERITY_ORDER.map((s) => [s, findings.filter((f) => f.severity === s).length]),
   );
   const assessing = ASSESSING.includes(scan.assess_status);
-  const fixOf = (id: string) => scan.fixes?.find((x) => x.finding_id === id);
   const progress = progressOf(scan);
   return (
     <section className="card cs-scan" data-testid="code-scan">
@@ -329,58 +340,252 @@ function ScanCard({ scan, onFix }: { scan: Scan; onFix: (f: Finding) => void }) 
       </header>
       {progress && <AssessProgressCard progress={progress} typicalSeconds={scan.typical_seconds} />}
       {scan.summary && <p className="cs-summary">{scan.summary}</p>}
-      {findings.length > 0 && (
-        <ul className="cs-findings">
-          {findings.map((f) => {
-            const fix = fixOf(f.id);
-            return (
-              <li key={f.id} className={`cs-finding sev-${f.severity}`}>
-                <div className="cs-finding-main">
-                  <div className="cs-finding-top">
-                    <span className={`cs-chip sev-${f.severity}`}>{t(`cs.sev.${f.severity}`)}</span>
+      {findings.length > 0 && <FindingsTable scan={scan} findings={findings} onFix={onFix} />}
+    </section>
+  );
+}
+
+type Status = "needs_look" | "in_progress" | "fixed" | "report_only" | "unverified";
+const STATUSES: Status[] = ["needs_look", "in_progress", "fixed", "report_only", "unverified"];
+
+function statusOf(f: Finding, fix: Fix | undefined): Status {
+  if (fix) return fix.status === "COMPLETED" ? "fixed" : "in_progress";
+  if (f.code_evidence?.status === "missing") return "unverified";
+  return f.implementable ? "needs_look" : "report_only";
+}
+
+const escaped = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const mentions = (text: string, repo: string) =>
+  new RegExp(`(^|[^\\w.-])${escaped(repo)}([^\\w-]|$)`).test(text);
+
+/**
+ * The repository a finding's code is in: the agent's `repo`, else the selected repository its evidence names
+ * (`repo@commit` or plain), else the only selected one. Older scans did not ask for `repo`.
+ */
+export function repoOf(f: Finding, selected: string[]): string {
+  if (f.repo) return f.repo;
+  const text = `${f.evidence ?? ""} ${f.issue} ${f.file ?? ""}`;
+  return selected.find((r) => mentions(text, r)) ?? (selected.length === 1 ? selected[0] : "");
+}
+
+/** The other selected repositories the finding names or the agent listed as affected by the same defect. */
+export function relatedReposOf(f: Finding, own: string, selected: string[]): string[] {
+  const text = `${f.issue} ${f.evidence ?? ""} ${f.why_not ?? ""}`;
+  const named = selected.filter((r) => mentions(text, r));
+  return [...new Set([...(f.related_repos ?? []), ...named])].filter((r) => r && r !== own);
+}
+
+function FindingsTable({
+  scan,
+  findings,
+  onFix,
+}: {
+  scan: Scan;
+  findings: Finding[];
+  onFix: (f: Finding) => void;
+}) {
+  const { t } = useI18n();
+  const [repo, setRepo] = useState("");
+  const [sev, setSev] = useState("");
+  const [kind, setKind] = useState("");
+  const [status, setStatus] = useState("");
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const rows = useMemo(
+    () =>
+      findings.map((f) => {
+        const fix = scan.fixes?.find((x) => x.finding_id === f.id);
+        const own = repoOf(f, scan.selected_repositories);
+        return {
+          f,
+          fix,
+          repo: own,
+          related: relatedReposOf(f, own, scan.selected_repositories),
+          status: statusOf(f, fix),
+        };
+      }),
+    [findings, scan.fixes, scan.selected_repositories],
+  );
+  const repos = [...new Set(rows.flatMap((r) => [r.repo, ...r.related]).filter(Boolean))].sort();
+  const kinds = [...new Set(rows.map((r) => r.f.kind))];
+  const q = query.trim().toLowerCase();
+  const shown = rows.filter(
+    (r) =>
+      (!repo || r.repo === repo || r.related.includes(repo)) &&
+      (!sev || r.f.severity === sev) &&
+      (!kind || r.f.kind === kind) &&
+      (!status || r.status === status) &&
+      (!q ||
+        [r.f.issue, r.f.evidence, r.f.file, r.repo, r.f.id]
+          .filter(Boolean)
+          .some((x) => String(x).toLowerCase().includes(q))),
+  );
+  const count = (s: Status) => rows.filter((r) => r.status === s).length;
+  return (
+    <div className="cs-table-wrap">
+      <FilterToolbar
+        className="cs-filters"
+        secondary={
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder={t("cs.searchFindings")}
+            width="100%"
+          />
+        }
+      >
+        <FilterField label={t("cs.col.repo")}>
+          <select
+            aria-label={t("cs.col.repo")}
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+          >
+            <option value="">{t("an.all")}</option>
+            {repos.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label={t("cs.col.severity")}>
+          <select
+            aria-label={t("cs.col.severity")}
+            value={sev}
+            onChange={(e) => setSev(e.target.value)}
+          >
+            <option value="">{t("an.all")}</option>
+            {SEVERITY_ORDER.map((s) => (
+              <option key={s} value={s}>
+                {t(`cs.sev.${s}`)}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label={t("cs.col.kind")}>
+          <select
+            aria-label={t("cs.col.kind")}
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+          >
+            <option value="">{t("an.all")}</option>
+            {kinds.map((k) => (
+              <option key={k} value={k}>
+                {t(`cs.kind.${k}`)}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label={t("cs.col.status")}>
+          <select
+            aria-label={t("cs.col.status")}
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="">{t("an.all")}</option>
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {t(`cs.status.${s}`)} ({count(s)})
+              </option>
+            ))}
+          </select>
+        </FilterField>
+      </FilterToolbar>
+      <div className="cs-list" role="table">
+        <div className="cs-cols muted small" role="row">
+          <span />
+          <span>{t("cs.col.severity")}</span>
+          <span>{t("cs.col.repo")}</span>
+          <span>{t("cs.col.issue")}</span>
+          <span>{t("cs.col.related")}</span>
+          <span>{t("cs.col.status")}</span>
+          <span />
+        </div>
+        {shown.length === 0 && <div className="cs-none muted small">{t("cs.noMatch")}</div>}
+        {shown.map(({ f, fix, repo: own, related, status: st }) => {
+          const isOpen = open === f.id;
+          return (
+            <div
+              key={f.id}
+              className={`cs-row sev-${f.severity}${isOpen ? " is-open" : ""}`}
+              role="row"
+            >
+              <button
+                className="cs-head"
+                aria-expanded={isOpen}
+                onClick={() => setOpen(isOpen ? null : f.id)}
+              >
+                <ChevronRight size={14} className="cs-chev" />
+                <span className={`cs-chip sev-${f.severity}`}>{t(`cs.sev.${f.severity}`)}</span>
+                <span className="mono small cs-repo" title={own}>
+                  {own || "—"}
+                </span>
+                <span className="cs-what">
+                  <span className="cs-issue">{f.issue}</span>
+                  <span className="cs-sub">
                     <span className="cs-chip">{t(`cs.kind.${f.kind}`)}</span>
-                    {f.code_evidence?.status === "missing" && (
-                      <span className="cs-chip is-err" title={f.code_evidence.reason}>
-                        {t("cs.unverified")}
-                      </span>
-                    )}
                     {f.file && (
                       <span className="mono small cs-loc">
                         {f.file}
                         {f.line ? `:${f.line}` : ""}
                       </span>
                     )}
-                  </div>
-                  <div className="cs-issue">{f.issue}</div>
-                  {f.evidence && <div className="muted small cs-evidence">{f.evidence}</div>}
-                  {!f.implementable && (
-                    <div className="muted small">
-                      {f.why_not ? t("cs.notFixable", { why: f.why_not }) : t("cs.reportOnly")}
-                    </div>
-                  )}
-                </div>
-                <div className="cs-finding-act">
-                  {fix ? (
-                    <FixState fix={fix} />
-                  ) : f.code_evidence?.status === "missing" ? (
-                    <span className="muted small" title={f.code_evidence.reason}>
-                      {t("cs.unverifiedNoFix")}
-                    </span>
-                  ) : f.implementable ? (
-                    <button className="xs" onClick={() => onFix(f)}>
-                      <Wrench size={12} /> {t("cs.fix")}
-                    </button>
+                  </span>
+                </span>
+                <span className="cs-related">
+                  {related.length ? (
+                    related.map((r) => (
+                      <span key={r} className="cs-chip mono">
+                        {r}
+                      </span>
+                    ))
                   ) : (
-                    <button className="xs ghost" onClick={() => onFix(f)} title={f.why_not}>
-                      <Wrench size={12} /> {t("cs.fixWithDecision")}
-                    </button>
+                    <span className="muted small">—</span>
                   )}
+                </span>
+                <span className={`cs-status is-${st}`}>{t(`cs.status.${st}`)}</span>
+              </button>
+              <div className="cs-act">
+                {fix ? (
+                  <FixState fix={fix} />
+                ) : f.code_evidence?.status === "missing" ? (
+                  <span className="muted small" title={f.code_evidence.reason}>
+                    {t("cs.unverifiedNoFix")}
+                  </span>
+                ) : f.implementable ? (
+                  <button className="xs" onClick={() => onFix(f)}>
+                    <Wrench size={12} /> {t("cs.fix")}
+                  </button>
+                ) : (
+                  <button className="xs ghost" onClick={() => onFix(f)} title={f.why_not}>
+                    <Wrench size={12} /> {t("cs.fixWithDecision")}
+                  </button>
+                )}
+              </div>
+              {isOpen && (
+                <div className="cs-detail small">
+                  {f.evidence && (
+                    <p>
+                      <b>{t("cs.evidence")}</b> <span className="cs-evidence">{f.evidence}</span>
+                    </p>
+                  )}
+                  {!f.implementable && (
+                    <p className="muted">
+                      {f.why_not ? t("cs.notFixable", { why: f.why_not }) : t("cs.reportOnly")}
+                    </p>
+                  )}
+                  {f.code_evidence?.status === "missing" && (
+                    <p className="cs-unverified">
+                      {t("cs.unverified")}: {f.code_evidence.reason}
+                    </p>
+                  )}
+                  <p className="muted mono">{f.id}</p>
                 </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
