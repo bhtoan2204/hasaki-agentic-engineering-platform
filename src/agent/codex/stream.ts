@@ -95,6 +95,21 @@ export class JsonlStream {
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
 
+/**
+ * Codex reports input_tokens INCLUDING the cached part; the platform's tokens.input is the uncached input (Claude's
+ * convention), so every total adding input + cache_read would count cached tokens twice. A missing value, or a cached
+ * count above the input (not a subset: the convention differs), leaves the input as reported.
+ */
+export function codexMetricUsage(u: CodexUsage) {
+  const { input_tokens: input, cached_input_tokens: cached } = u;
+  return {
+    ...u,
+    input_tokens: input !== null && cached !== null && cached <= input ? input - cached : input,
+    cache_read_input_tokens: cached,
+    cache_creation_input_tokens: u.cache_write_input_tokens,
+  };
+}
+
 function errorText(v: unknown): string {
   if (typeof v === "string") return v;
   if (v && typeof v === "object") {

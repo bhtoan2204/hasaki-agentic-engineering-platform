@@ -17,6 +17,7 @@ import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import { startBroker, type Broker } from "../broker/server.ts";
 import {
   classifyCodexError,
+  codexMetricUsage,
   codexProgress,
   failureMessage,
   JsonlStream,
@@ -699,11 +700,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
         completed = true;
         metrics.turns++;
         if (ev.usage) {
-          addUsage(metrics, {
-            ...ev.usage,
-            cache_read_input_tokens: ev.usage.cached_input_tokens,
-            cache_creation_input_tokens: ev.usage.cache_write_input_tokens,
-          });
+          addUsage(metrics, codexMetricUsage(ev.usage));
         }
         await input.onTelemetry?.();
         break;
@@ -930,11 +927,7 @@ export async function codexComplete(
     else if (ev.type === "turn.completed") {
       done = true;
       if (ev.usage) {
-        addUsage(usageMetrics, {
-          ...ev.usage,
-          cache_read_input_tokens: ev.usage.cached_input_tokens,
-          cache_creation_input_tokens: ev.usage.cache_write_input_tokens,
-        });
+        addUsage(usageMetrics, codexMetricUsage(ev.usage));
       }
     } else if (ev.type === "turn.failed") fail = ev.message;
     else if (ev.type === "error") lastError = ev.message;

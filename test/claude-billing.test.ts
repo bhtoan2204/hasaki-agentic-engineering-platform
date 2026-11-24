@@ -25,3 +25,18 @@ test("cloud and gateway billing switches never reach any provider", () => {
   );
   assert.deepEqual(env, { PATH: "/bin", CLAUDE_CODE_OAUTH_TOKEN: "subscription" });
 });
+
+test("the prompt-cache TTL switches reach the Claude CLI while API billing keys do not", () => {
+  const env = agentEnvironment(
+    {
+      PATH: "/bin",
+      FORCE_PROMPT_CACHING_5M: "1",
+      CLAUDE_CODE_PROMPT_CACHE_TTL: "5m",
+      ANTHROPIC_API_KEY: "sk-test",
+    },
+    "claude",
+  );
+  assert.equal(env.FORCE_PROMPT_CACHING_5M, "1");
+  assert.equal(env.CLAUDE_CODE_PROMPT_CACHE_TTL, "5m");
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+});
