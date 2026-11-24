@@ -281,6 +281,13 @@ import {
 } from "../workflow/autonomy.ts";
 import { runEvents } from "../workflow/events.ts";
 import { currentBaseCommits, reusableScan } from "../workflow/codeScans.ts";
+import {
+  DISPLAY_STATUSES,
+  findingDetail,
+  ingestPendingScans,
+  listFindings as listCodeFindings,
+  setFindingStatus as setCodeFindingStatus,
+} from "../workflow/codeFindings.ts";
 import { buildTrace, isTraceLevel, searchLogs } from "../workflow/trace.ts";
 import { diagnoseTrace } from "../workflow/traceDiagnosis.ts";
 import {
@@ -1005,6 +1012,64 @@ export const routes: Route[] = [
     async (c) => {
       if (support(c)) await audit(c.actor.id, "support.list", "run", "code-scans");
       return listCodeScans(mine(c));
+    },
+  ],
+  // Findings of every assessment, deduplicated across scans; completed assessments are ingested on read.
+  [
+    "GET",
+    /^\/api\/code-findings$/,
+    async (c) => {
+      const scope = mine(c);
+      if (scope.all) await audit(c.actor.id, "support.list", "code_finding", "*");
+      await ingestPendingScans(scope.all ? undefined : scope.ownerId);
+      const p = (k: string) => (c.url.searchParams.get(k) ?? "").trim().slice(0, 200);
+      const status = p("status");
+      if (status && !(DISPLAY_STATUSES as readonly string[]).includes(status))
+        throw new HttpError(400, "status: unknown finding status");
+      return listCodeFindings({
+        ...scope,
+        project: p("project"),
+        repo: p("repo"),
+        severity: p("severity"),
+        kind: p("kind"),
+        status,
+        q: p("q"),
+        scan: p("scan") ? num(p("scan")) : undefined,
+        page: Number(p("page")) || 1,
+        pageSize: Number(p("page_size")) || 25,
+      });
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/code-findings\/(\d+)$/,
+    async (c) => {
+      if (support(c)) await audit(c.actor.id, "support.read", "code_finding", c.p[0]);
+      return must(await findingDetail(num(c.p[0]), mine(c)), "finding");
+    },
+  ],
+  // The owner's lifecycle decision on a finding: resolved, dismissed (with why), or open again.
+  [
+    "POST",
+    /^\/api\/code-findings\/(\d+)\/status$/,
+    async ({ p, body, actor }) => {
+      const status = String(body.status ?? "");
+      if (!["open", "resolved", "dismissed"].includes(status))
+        throw new HttpError(400, "status: open, resolved or dismissed");
+      const note = typeof body.note === "string" ? body.note.trim().slice(0, 1000) : "";
+      if (status === "dismissed" && !note)
+        throw new HttpError(400, "note: say why it is dismissed");
+      const row = must(
+        await setCodeFindingStatus(
+          num(p[0]),
+          actor,
+          status as "open" | "resolved" | "dismissed",
+          note,
+        ),
+        "finding",
+      );
+      await audit(actor.id, "code_finding.status", "code_finding", p[0], { status, note });
+      return row;
     },
   ],
   // Start an assessment unless an equivalent one is running or already analysed every repository's current base

@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, ChevronRight, ExternalLink, Hand, Play, ScanSearch, Wrench } from "lucide-react";
+import {
+  Bot,
+  Check,
+  ChevronRight,
+  ExternalLink,
+  Hand,
+  History,
+  ListFilter,
+  Play,
+  RotateCcw,
+  ScanSearch,
+  Wrench,
+  X,
+} from "lucide-react";
 import { api, useApi, useLive } from "../../api.ts";
 import { dialog } from "../../dialog/index.ts";
 import { useI18n } from "../../i18n/index.tsx";
@@ -10,34 +23,83 @@ import {
   ErrorBox,
   FilterField,
   FilterToolbar,
+  Pager,
   SearchInput,
   SkeletonRows,
+  Tabs,
   navigate,
   toast,
 } from "../../ui.tsx";
 import { AssessProgressCard, type AssessProgress } from "../ScanProgress.tsx";
 import "./code-scan.css";
 
-type Finding = {
-  id: string;
+/** A finding as the scan output lists it (history view counts severities from it). */
+type ScanFinding = { id: string; severity: string };
+type Status =
+  "needs_look" | "in_progress" | "fixed" | "report_only" | "unverified" | "resolved" | "dismissed";
+const STATUSES: Status[] = [
+  "needs_look",
+  "in_progress",
+  "fixed",
+  "report_only",
+  "unverified",
+  "resolved",
+  "dismissed",
+];
+/** A finding managed across scans (GET /api/code-findings): one row per fingerprint. */
+type FindingRow = {
+  id: number;
+  fingerprint: string;
+  repo: string;
+  related_repos: string[];
   kind: string;
   severity: string;
-  repo?: string;
-  file?: string;
-  line?: number;
+  title: string;
+  file: string;
+  line: number | null;
+  symbol: string;
+  implementable: boolean;
+  status: "open" | "resolved" | "dismissed";
+  display_status: Status;
+  occurrences: number;
+  reopened_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_scan_run_id: number | null;
+  fix_run_id: number | null;
+};
+type FindingPage = {
+  items: FindingRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  facets: { repos: string[]; kinds: string[]; statuses: Partial<Record<Status, number>> };
+};
+type FindingDetail = FindingRow & {
   issue: string;
-  evidence?: string;
-  implementable?: boolean;
-  why_not?: string;
-  code_evidence?: { status: "verified" | "missing"; reason?: string };
-  related_repos?: string[];
+  evidence: string;
+  why_not: string;
+  code_evidence: { status: "verified" | "missing"; reason?: string } | null;
+  status_note: string;
+  sightings: Array<{
+    scan_run_id: number;
+    finding_key: string;
+    seen_at: string;
+    severity: string;
+    issue: string;
+    evidence: string;
+    line: number | null;
+    selected_repositories: string[];
+  }>;
+  fixes: Array<{
+    id: number;
+    status: string;
+    created_at: string;
+    decision: string | null;
+    steps: Array<{ key: string; status: string }> | null;
+  }>;
 };
-type Fix = {
-  finding_id: string;
-  run_id: number;
-  status: string;
-  steps: Array<{ key: string; status: string }> | null;
-};
+type Fix = { run_id: number; status: string; steps: Array<{ key: string; status: string }> | null };
 type Scan = {
   id: number;
   title: string;
@@ -48,8 +110,7 @@ type Scan = {
   assess_status: string;
   decision: string | null;
   summary: string | null;
-  findings: Finding[] | null;
-  fixes: Fix[] | null;
+  findings: ScanFinding[] | null;
   steps: Array<{ key: string; status: string }> | null;
   activity: (Omit<AssessProgress, "phase" | "startedAt"> & { started_at: string | null }) | null;
   typical_seconds: number | null;
@@ -85,9 +146,9 @@ function progressOf(scan: Scan): AssessProgress | null {
 }
 
 /**
- * Agent code assessment: a read-only codebase-assessment run lists what the agent found in the code (severity,
- * location, evidence); a person picks a finding and starts a codebase-improvement run on exactly that finding
- * (blast radius, approval, before/after test, independent review).
+ * Agent code assessment: read-only codebase-assessment runs report findings; findings are managed across scans (one
+ * per fingerprint, with every scan's evidence). A person filters them, opens one and starts a codebase-improvement run
+ * on exactly that finding, or resolves or dismisses it. Each scan's own result is in Scan history.
  */
 export function CodeScan() {
   const { t } = useI18n();
@@ -96,14 +157,20 @@ export function CodeScan() {
       "/api/repositories",
     );
   const scans = useApi<Scan[]>("/api/code-scans");
+  const [view, setView] = useState<"findings" | "history">("findings");
+  const [scanFilter, setScanFilter] = useState<number | null>(null);
+  const [findingsVersion, setFindingsVersion] = useState(0);
   useLive(null, (p) => (!p || p.kind === "status") && scans.reload());
-  const running = (scans.data ?? []).some((x) => !TERMINAL.includes(x.status));
+  const running = (scans.data ?? []).filter((x) => !TERMINAL.includes(x.status));
   const reloadScans = scans.reload;
   useEffect(() => {
-    if (!running) return;
+    if (!running.length) return;
     const id = setInterval(() => reloadScans(), 4000);
     return () => clearInterval(id);
-  }, [running, reloadScans]);
+  }, [running.length, reloadScans]);
+  // A scan that just completed is ingested on the next findings read.
+  const done = (scans.data ?? []).filter((x) => TERMINAL.includes(x.status)).length;
+  useEffect(() => setFindingsVersion((v) => v + 1), [done]);
   const [project, setProject] = useState("");
   const [repo, setRepo] = useState("");
   const [focus, setFocus] = useState("");
@@ -150,45 +217,6 @@ export function CodeScan() {
       cancelLabel: t("cs.keepResult"),
     });
     if (again) await assess(true);
-  };
-  const fix = async (scan: Scan, f: Finding) => {
-    // A report-only finding waits for a person's decision (e.g. which errors are unrecoverable): ask for it.
-    let decision: string | null = null;
-    if (!f.implementable) {
-      decision = await dialog.prompt({
-        title: t("cs.decideTitle"),
-        description: f.why_not ? t("cs.decideBody", { why: f.why_not }) : t("cs.decideBodyNoWhy"),
-        label: t("cs.decision"),
-        placeholder: t("cs.decisionPh"),
-        required: true,
-        confirmLabel: t("cs.fix"),
-        validate: (v) => (v.trim().length < 10 ? t("cs.decisionTooShort") : null),
-      });
-      if (decision === null) return;
-    } else {
-      const ok = await dialog.confirm({
-        title: t("cs.fixTitle"),
-        description: t("cs.fixBody", { issue: f.issue }),
-        confirmLabel: t("cs.fix"),
-      });
-      if (!ok) return;
-    }
-    const repoName = repoOf(f, scan.selected_repositories) || scan.selected_repositories[0];
-    const where = f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : "";
-    const run = await act(() =>
-      api<{ id: number }>("/api/runs", {
-        workflow: FIX,
-        repositories: [repoName],
-        inputs: {
-          repositories: [repoName],
-          finding: { ...f, scan_run_id: scan.id },
-          ...(decision ? { decision: decision.trim() } : {}),
-          focus: `${t("cs.fixFocus")} ${f.id}: ${f.issue}${where}`,
-        },
-        title: `${t("cs.fixFocus")} ${f.id} — ${f.issue.slice(0, 80)}`,
-      }),
-    );
-    if (run) navigate(`/runs/${run.id}`);
   };
 
   return (
@@ -252,16 +280,56 @@ export function CodeScan() {
         </div>
       </section>
 
-      {scans.error && <ErrorBox error={scans.error} onRetry={scans.reload} />}
-      {scans.loading && !scans.data && <SkeletonRows rows={3} />}
-      {scans.data && scans.data.length === 0 && (
-        <EmptyState icon={ScanSearch} title={t("cs.empty")}>
-          {t("cs.emptyBody")}
-        </EmptyState>
+      {view === "findings" && running.map((scan) => <ScanCard key={scan.id} scan={scan} />)}
+
+      <Tabs
+        tabs={[
+          [
+            "findings",
+            <>
+              <ListFilter size={14} /> {t("cs.tab.findings")}
+            </>,
+          ],
+          [
+            "history",
+            <>
+              <History size={14} /> {t("cs.tab.history")}
+              {scans.data ? ` (${scans.data.length})` : ""}
+            </>,
+          ],
+        ]}
+        value={view}
+        onChange={setView}
+      />
+
+      {view === "findings" ? (
+        <FindingsView
+          projects={projects}
+          version={findingsVersion}
+          scan={scanFilter}
+          onClearScan={() => setScanFilter(null)}
+        />
+      ) : (
+        <>
+          {scans.error && <ErrorBox error={scans.error} onRetry={scans.reload} />}
+          {scans.loading && !scans.data && <SkeletonRows rows={3} />}
+          {scans.data && scans.data.length === 0 && (
+            <EmptyState icon={ScanSearch} title={t("cs.empty")}>
+              {t("cs.emptyBody")}
+            </EmptyState>
+          )}
+          {(scans.data ?? []).map((scan) => (
+            <ScanCard
+              key={scan.id}
+              scan={scan}
+              onShowFindings={() => {
+                setScanFilter(scan.id);
+                setView("findings");
+              }}
+            />
+          ))}
+        </>
       )}
-      {(scans.data ?? []).map((scan) => (
-        <ScanCard key={scan.id} scan={scan} onFix={(f) => fix(scan, f)} />
-      ))}
     </div>
   );
 }
@@ -297,7 +365,7 @@ function FixState({ fix }: { fix: Fix }) {
   );
 }
 
-function ScanCard({ scan, onFix }: { scan: Scan; onFix: (f: Finding) => void }) {
+function ScanCard({ scan, onShowFindings }: { scan: Scan; onShowFindings?: () => void }) {
   const { t } = useI18n();
   const findings = [...(scan.findings ?? [])].sort(
     (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity),
@@ -340,252 +408,375 @@ function ScanCard({ scan, onFix }: { scan: Scan; onFix: (f: Finding) => void }) 
       </header>
       {progress && <AssessProgressCard progress={progress} typicalSeconds={scan.typical_seconds} />}
       {scan.summary && <p className="cs-summary">{scan.summary}</p>}
-      {findings.length > 0 && <FindingsTable scan={scan} findings={findings} onFix={onFix} />}
+      {findings.length > 0 && onShowFindings && (
+        <button className="xs ghost cs-scan-findings" onClick={onShowFindings}>
+          <ListFilter size={12} /> {t("cs.showScanFindings", { n: findings.length })}
+        </button>
+      )}
     </section>
   );
 }
 
-type Status = "needs_look" | "in_progress" | "fixed" | "report_only" | "unverified";
-const STATUSES: Status[] = ["needs_look", "in_progress", "fixed", "report_only", "unverified"];
+const PAGE_SIZE = 25;
 
-function statusOf(f: Finding, fix: Fix | undefined): Status {
-  if (fix) return fix.status === "COMPLETED" ? "fixed" : "in_progress";
-  if (f.code_evidence?.status === "missing") return "unverified";
-  return f.implementable ? "needs_look" : "report_only";
-}
-
-const escaped = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const mentions = (text: string, repo: string) =>
-  new RegExp(`(^|[^\\w.-])${escaped(repo)}([^\\w-]|$)`).test(text);
-
-/**
- * The repository a finding's code is in: the agent's `repo`, else the selected repository its evidence names
- * (`repo@commit` or plain), else the only selected one. Older scans did not ask for `repo`.
- */
-export function repoOf(f: Finding, selected: string[]): string {
-  if (f.repo) return f.repo;
-  const text = `${f.evidence ?? ""} ${f.issue} ${f.file ?? ""}`;
-  return selected.find((r) => mentions(text, r)) ?? (selected.length === 1 ? selected[0] : "");
-}
-
-/** The other selected repositories the finding names or the agent listed as affected by the same defect. */
-export function relatedReposOf(f: Finding, own: string, selected: string[]): string[] {
-  const text = `${f.issue} ${f.evidence ?? ""} ${f.why_not ?? ""}`;
-  const named = selected.filter((r) => mentions(text, r));
-  return [...new Set([...(f.related_repos ?? []), ...named])].filter((r) => r && r !== own);
-}
-
-function FindingsTable({
+/** Every finding of every scan, one row per finding, with global filters and pages; a row opens its detail. */
+function FindingsView({
+  projects,
+  version,
   scan,
-  findings,
-  onFix,
+  onClearScan,
 }: {
-  scan: Scan;
-  findings: Finding[];
-  onFix: (f: Finding) => void;
+  projects: string[];
+  version: number;
+  scan: number | null;
+  onClearScan: () => void;
 }) {
   const { t } = useI18n();
+  const [project, setProject] = useState("");
   const [repo, setRepo] = useState("");
   const [sev, setSev] = useState("");
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
-  const rows = useMemo(
-    () =>
-      findings.map((f) => {
-        const fix = scan.fixes?.find((x) => x.finding_id === f.id);
-        const own = repoOf(f, scan.selected_repositories);
-        return {
-          f,
-          fix,
-          repo: own,
-          related: relatedReposOf(f, own, scan.selected_repositories),
-          status: statusOf(f, fix),
-        };
-      }),
-    [findings, scan.fixes, scan.selected_repositories],
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState<number | null>(null);
+  useEffect(() => {
+    const id = setTimeout(() => setQ(query.trim()), 300);
+    return () => clearTimeout(id);
+  }, [query]);
+  useEffect(() => setPage(1), [project, repo, sev, kind, status, q, scan]);
+  const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
+  for (const [k, v] of Object.entries({ project, repo, severity: sev, kind, status, q }))
+    if (v) params.set(k, v);
+  if (scan) params.set("scan", String(scan));
+  const filtered = !!(project || repo || sev || kind || status || q || scan);
+  const data = useApi<FindingPage>(`/api/code-findings?${params}`);
+  const reload = data.reload;
+  useEffect(() => {
+    if (version > 1) reload();
+  }, [version, reload]);
+  const facets = data.data?.facets;
+  const pages = data.data ? Math.ceil(data.data.total / data.data.page_size) : 0;
+  const select = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    options: Array<[string, string]>,
+  ) => (
+    <FilterField label={label}>
+      <select aria-label={label} value={value} onChange={(e) => set(e.target.value)}>
+        <option value="">{t("an.all")}</option>
+        {options.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
+    </FilterField>
   );
-  const repos = [...new Set(rows.flatMap((r) => [r.repo, ...r.related]).filter(Boolean))].sort();
-  const kinds = [...new Set(rows.map((r) => r.f.kind))];
-  const q = query.trim().toLowerCase();
-  const shown = rows.filter(
-    (r) =>
-      (!repo || r.repo === repo || r.related.includes(repo)) &&
-      (!sev || r.f.severity === sev) &&
-      (!kind || r.f.kind === kind) &&
-      (!status || r.status === status) &&
-      (!q ||
-        [r.f.issue, r.f.evidence, r.f.file, r.repo, r.f.id]
-          .filter(Boolean)
-          .some((x) => String(x).toLowerCase().includes(q))),
-  );
-  const count = (s: Status) => rows.filter((r) => r.status === s).length;
   return (
-    <div className="cs-table-wrap">
+    <div className="cs-table-wrap" data-testid="code-findings">
       <FilterToolbar
         className="cs-filters"
         secondary={
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            placeholder={t("cs.searchFindings")}
-            width="100%"
-          />
+          <>
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder={t("cs.searchFindings")}
+              width="100%"
+            />
+            {scan && (
+              <button className="xs ghost" onClick={onClearScan}>
+                <X size={12} /> {t("cs.scanFilter", { id: scan })}
+              </button>
+            )}
+          </>
         }
       >
-        <FilterField label={t("cs.col.repo")}>
-          <select
-            aria-label={t("cs.col.repo")}
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-          >
-            <option value="">{t("an.all")}</option>
-            {repos.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </FilterField>
-        <FilterField label={t("cs.col.severity")}>
-          <select
-            aria-label={t("cs.col.severity")}
-            value={sev}
-            onChange={(e) => setSev(e.target.value)}
-          >
-            <option value="">{t("an.all")}</option>
-            {SEVERITY_ORDER.map((s) => (
-              <option key={s} value={s}>
-                {t(`cs.sev.${s}`)}
-              </option>
-            ))}
-          </select>
-        </FilterField>
-        <FilterField label={t("cs.col.kind")}>
-          <select
-            aria-label={t("cs.col.kind")}
-            value={kind}
-            onChange={(e) => setKind(e.target.value)}
-          >
-            <option value="">{t("an.all")}</option>
-            {kinds.map((k) => (
-              <option key={k} value={k}>
-                {t(`cs.kind.${k}`)}
-              </option>
-            ))}
-          </select>
-        </FilterField>
-        <FilterField label={t("cs.col.status")}>
-          <select
-            aria-label={t("cs.col.status")}
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="">{t("an.all")}</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {t(`cs.status.${s}`)} ({count(s)})
-              </option>
-            ))}
-          </select>
-        </FilterField>
+        {select(
+          t("cs.project"),
+          project,
+          setProject,
+          projects.map((p) => [p, p]),
+        )}
+        {select(
+          t("cs.col.repo"),
+          repo,
+          setRepo,
+          (facets?.repos ?? []).map((r) => [r, r]),
+        )}
+        {select(
+          t("cs.col.severity"),
+          sev,
+          setSev,
+          SEVERITY_ORDER.map((s) => [s, t(`cs.sev.${s}`)]),
+        )}
+        {select(
+          t("cs.col.kind"),
+          kind,
+          setKind,
+          (facets?.kinds ?? []).map((k) => [k, t(`cs.kind.${k}`)]),
+        )}
+        {select(
+          t("cs.col.status"),
+          status,
+          setStatus,
+          STATUSES.map((s) => [s, `${t(`cs.status.${s}`)} (${facets?.statuses[s] ?? 0})`]),
+        )}
       </FilterToolbar>
-      <div className="cs-list" role="table">
-        <div className="cs-cols muted small" role="row">
-          <span />
-          <span>{t("cs.col.severity")}</span>
-          <span>{t("cs.col.repo")}</span>
-          <span>{t("cs.col.issue")}</span>
-          <span>{t("cs.col.related")}</span>
-          <span>{t("cs.col.status")}</span>
-          <span />
-        </div>
-        {shown.length === 0 && <div className="cs-none muted small">{t("cs.noMatch")}</div>}
-        {shown.map(({ f, fix, repo: own, related, status: st }) => {
-          const isOpen = open === f.id;
-          return (
-            <div
-              key={f.id}
-              className={`cs-row sev-${f.severity}${isOpen ? " is-open" : ""}`}
-              role="row"
-            >
-              <button
-                className="cs-head"
-                aria-expanded={isOpen}
-                onClick={() => setOpen(isOpen ? null : f.id)}
-              >
-                <ChevronRight size={14} className="cs-chev" />
-                <span className={`cs-chip sev-${f.severity}`}>{t(`cs.sev.${f.severity}`)}</span>
-                <span className="mono small cs-repo" title={own}>
-                  {own || "—"}
-                </span>
-                <span className="cs-what">
-                  <span className="cs-issue">{f.issue}</span>
-                  <span className="cs-sub">
-                    <span className="cs-chip">{t(`cs.kind.${f.kind}`)}</span>
-                    {f.file && (
-                      <span className="mono small cs-loc">
-                        {f.file}
-                        {f.line ? `:${f.line}` : ""}
-                      </span>
-                    )}
-                  </span>
-                </span>
-                <span className="cs-related">
-                  {related.length ? (
-                    related.map((r) => (
-                      <span key={r} className="cs-chip mono">
-                        {r}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="muted small">—</span>
-                  )}
-                </span>
-                <span className={`cs-status is-${st}`}>{t(`cs.status.${st}`)}</span>
-              </button>
-              <div className="cs-act">
-                {fix ? (
-                  <FixState fix={fix} />
-                ) : f.code_evidence?.status === "missing" ? (
-                  <span className="muted small" title={f.code_evidence.reason}>
-                    {t("cs.unverifiedNoFix")}
-                  </span>
-                ) : f.implementable ? (
-                  <button className="xs" onClick={() => onFix(f)}>
-                    <Wrench size={12} /> {t("cs.fix")}
-                  </button>
-                ) : (
-                  <button className="xs ghost" onClick={() => onFix(f)} title={f.why_not}>
-                    <Wrench size={12} /> {t("cs.fixWithDecision")}
-                  </button>
-                )}
-              </div>
-              {isOpen && (
-                <div className="cs-detail small">
-                  {f.evidence && (
-                    <p>
-                      <b>{t("cs.evidence")}</b> <span className="cs-evidence">{f.evidence}</span>
-                    </p>
-                  )}
-                  {!f.implementable && (
-                    <p className="muted">
-                      {f.why_not ? t("cs.notFixable", { why: f.why_not }) : t("cs.reportOnly")}
-                    </p>
-                  )}
-                  {f.code_evidence?.status === "missing" && (
-                    <p className="cs-unverified">
-                      {t("cs.unverified")}: {f.code_evidence.reason}
-                    </p>
-                  )}
-                  <p className="muted mono">{f.id}</p>
-                </div>
-              )}
+      {data.error && <ErrorBox error={data.error} onRetry={data.reload} />}
+      {data.loading && !data.data && <SkeletonRows rows={4} />}
+      {data.data && (
+        <div className="cs-list" role="table">
+          <div className="cs-cols muted small" role="row">
+            <span />
+            <span>{t("cs.col.severity")}</span>
+            <span>{t("cs.col.repo")}</span>
+            <span>{t("cs.col.issue")}</span>
+            <span>{t("cs.col.seen")}</span>
+            <span>{t("cs.col.status")}</span>
+          </div>
+          {data.data.items.length === 0 && (
+            <div className="cs-none muted small">
+              {filtered ? t("cs.noMatch") : t("cs.emptyFindings")}
             </div>
-          );
-        })}
+          )}
+          {data.data.items.map((f) => {
+            const isOpen = open === f.id;
+            return (
+              <div
+                key={f.id}
+                className={`cs-row sev-${f.severity}${isOpen ? " is-open" : ""}`}
+                role="row"
+              >
+                <button
+                  className="cs-head"
+                  aria-expanded={isOpen}
+                  onClick={() => setOpen(isOpen ? null : f.id)}
+                >
+                  <ChevronRight size={14} className="cs-chev" />
+                  <span className={`cs-chip sev-${f.severity}`}>{t(`cs.sev.${f.severity}`)}</span>
+                  <span className="mono small cs-repo" title={f.repo}>
+                    {f.repo || "—"}
+                  </span>
+                  <span className="cs-what">
+                    <span className="cs-issue">{f.title}</span>
+                    <span className="cs-sub">
+                      <span className="cs-chip">{t(`cs.kind.${f.kind}`)}</span>
+                      {f.file && (
+                        <span className="mono small cs-loc">
+                          {f.file}
+                          {f.line ? `:${f.line}` : ""}
+                        </span>
+                      )}
+                      {f.related_repos.length > 0 && (
+                        <span className="muted small">
+                          {t("cs.alsoIn", { repos: f.related_repos.join(", ") })}
+                        </span>
+                      )}
+                    </span>
+                  </span>
+                  <span className="muted small cs-seen">
+                    {t("cs.seenTimes", { n: f.occurrences })} · {ago(f.last_seen_at)}
+                  </span>
+                  <span className={`cs-status is-${f.display_status}`}>
+                    {t(`cs.status.${f.display_status}`)}
+                  </span>
+                </button>
+                {isOpen && <FindingPanel id={f.id} onChanged={data.reload} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {data.data && <Pager page={page} pages={pages} total={data.data.total} onPage={setPage} />}
+    </div>
+  );
+}
+
+/** A finding's description, evidence, related repositories, scan history, fix runs and the actions on it. */
+function FindingPanel({ id, onChanged }: { id: number; onChanged: () => void }) {
+  const { t } = useI18n();
+  const d = useApi<FindingDetail>(`/api/code-findings/${id}`);
+  const f = d.data;
+  if (d.error) return <ErrorBox error={d.error} onRetry={d.reload} />;
+  if (!f) return <SkeletonRows rows={2} />;
+  const changed = () => {
+    d.reload();
+    onChanged();
+  };
+  const setStatus = async (status: "open" | "resolved" | "dismissed") => {
+    let note = "";
+    if (status === "dismissed") {
+      const why = await dialog.prompt({
+        title: t("cs.dismissTitle"),
+        label: t("cs.dismissWhy"),
+        required: true,
+        confirmLabel: t("cs.dismiss"),
+      });
+      if (why === null) return;
+      note = why.trim();
+    }
+    const ok = await act(() => api(`/api/code-findings/${id}/status`, { status, note }));
+    if (ok) changed();
+  };
+  const fix = async () => {
+    // A report-only finding waits for a person's decision (e.g. which errors are unrecoverable): ask for it.
+    let decision: string | null = null;
+    if (!f.implementable) {
+      decision = await dialog.prompt({
+        title: t("cs.decideTitle"),
+        description: f.why_not ? t("cs.decideBody", { why: f.why_not }) : t("cs.decideBodyNoWhy"),
+        label: t("cs.decision"),
+        placeholder: t("cs.decisionPh"),
+        required: true,
+        confirmLabel: t("cs.fix"),
+        validate: (v) => (v.trim().length < 10 ? t("cs.decisionTooShort") : null),
+      });
+      if (decision === null) return;
+    } else {
+      const ok = await dialog.confirm({
+        title: t("cs.fixTitle"),
+        description: t("cs.fixBody", { issue: f.issue }),
+        confirmLabel: t("cs.fix"),
+      });
+      if (!ok) return;
+    }
+    const latest = f.sightings[0];
+    const repoName = f.repo || latest?.selected_repositories[0] || "";
+    const where = f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : "";
+    const run = await act(() =>
+      api<{ id: number }>("/api/runs", {
+        workflow: FIX,
+        repositories: [repoName],
+        inputs: {
+          repositories: [repoName],
+          finding: {
+            id: latest?.finding_key ?? String(f.id),
+            fingerprint: f.fingerprint,
+            scan_run_id: f.last_scan_run_id,
+            kind: f.kind,
+            severity: f.severity,
+            title: f.title,
+            repo: f.repo,
+            related_repos: f.related_repos,
+            file: f.file,
+            line: f.line,
+            symbol: f.symbol,
+            issue: f.issue,
+            evidence: f.evidence,
+            implementable: f.implementable,
+            why_not: f.why_not,
+            code_evidence: f.code_evidence,
+          },
+          ...(decision ? { decision: decision.trim() } : {}),
+          focus: `${t("cs.fixFocus")}: ${f.title}${where}`,
+        },
+        title: `${t("cs.fixFocus")} — ${f.title.slice(0, 80)}`,
+      }),
+    );
+    if (run) navigate(`/runs/${run.id}`);
+  };
+  const active = f.fixes.find((x) => !TERMINAL.includes(x.status));
+  const unverified = f.code_evidence?.status === "missing";
+  return (
+    <div className="cs-detail small">
+      <p className="cs-desc">{f.issue}</p>
+      {f.evidence && (
+        <p>
+          <b>{t("cs.evidence")}</b> <span className="cs-evidence">{f.evidence}</span>
+        </p>
+      )}
+      {f.related_repos.length > 0 && (
+        <p>
+          <b>{t("cs.col.related")}:</b>{" "}
+          {f.related_repos.map((r) => (
+            <span key={r} className="cs-chip mono">
+              {r}
+            </span>
+          ))}
+        </p>
+      )}
+      {!f.implementable && (
+        <p className="muted">
+          {f.why_not ? t("cs.notFixable", { why: f.why_not }) : t("cs.reportOnly")}
+        </p>
+      )}
+      {unverified && (
+        <p className="cs-unverified">
+          {t("cs.unverified")}: {f.code_evidence?.reason}
+        </p>
+      )}
+      {f.status !== "open" && f.status_note && (
+        <p className="muted">{t(`cs.note.${f.status}`, { note: f.status_note })}</p>
+      )}
+      {f.status === "open" && f.reopened_count > 0 && (
+        <p className="cs-unverified">{t("cs.reopened", { note: f.status_note })}</p>
+      )}
+
+      <div className="cs-actions">
+        {f.status === "open" &&
+          !active &&
+          (unverified ? (
+            <span className="muted small" title={f.code_evidence?.reason}>
+              {t("cs.unverifiedNoFix")}
+            </span>
+          ) : (
+            <button className={f.implementable ? "xs" : "xs ghost"} onClick={fix} title={f.why_not}>
+              <Wrench size={12} /> {f.implementable ? t("cs.fix") : t("cs.fixWithDecision")}
+            </button>
+          ))}
+        {f.status === "open" ? (
+          <>
+            <button className="xs ghost" onClick={() => setStatus("resolved")}>
+              <Check size={12} /> {t("cs.resolve")}
+            </button>
+            <button className="xs ghost" onClick={() => setStatus("dismissed")}>
+              <X size={12} /> {t("cs.dismiss")}
+            </button>
+          </>
+        ) : (
+          <button className="xs ghost" onClick={() => setStatus("open")}>
+            <RotateCcw size={12} /> {t("cs.reopen")}
+          </button>
+        )}
       </div>
+
+      {f.fixes.length > 0 && (
+        <section className="cs-sub-list">
+          <h4>{t("cs.fixRuns")}</h4>
+          <ul>
+            {f.fixes.map((x) => (
+              <li key={x.id}>
+                <FixState fix={{ run_id: x.id, status: x.status, steps: x.steps }} />
+                <span className="muted">
+                  #{x.id} · {ago(x.created_at)}
+                  {x.decision ? ` · ${t("cs.decision")}: ${x.decision}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="cs-sub-list">
+        <h4>{t("cs.scanHistory", { n: f.sightings.length })}</h4>
+        <ul>
+          {f.sightings.map((s) => (
+            <li key={s.scan_run_id}>
+              <a href={`#/runs/${s.scan_run_id}`} className="mono">
+                #{s.scan_run_id}
+              </a>
+              <span className={`cs-chip sev-${s.severity}`}>{t(`cs.sev.${s.severity}`)}</span>
+              <span className="muted">{ago(s.seen_at)}</span>
+              {s.evidence && <span className="cs-evidence muted">{s.evidence}</span>}
+            </li>
+          ))}
+        </ul>
+      </section>
+      <p className="muted mono">{f.fingerprint}</p>
     </div>
   );
 }

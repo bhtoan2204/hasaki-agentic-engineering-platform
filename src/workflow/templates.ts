@@ -512,13 +512,14 @@ const ASSESS_SIGNALS =
   "Use the read-only analysers when they fit: go vet, go test -race, staticcheck, golangci-lint run, govulncheck, deadcode, benchmarks with -benchmem, and go tool pprof -top/-list on a profile written to /tmp. " +
   "Load the verification-recipes skill: it says, per kind, which test demonstrates the finding. " +
   "Give each finding the repository its code is in (`repo`) and, in `related_repos`, the other selected repositories with the same defect or affected by it. " +
+  "Give each finding a `title` of at most 80 characters naming the defect, and the `symbol` (function, method or type) its code is in: findings are tracked across scans by repo, category, file and symbol. " +
   "Confirm every finding with the code index yourself (platform search_code, get_symbol, find_dependencies or navigate_code) before reporting it: the platform marks a finding as unverified unless one of YOUR code-intelligence calls in this step returned its file, and an unverified finding cannot be fixed. ";
 const FINDING_KINDS =
   "'CONCURRENCY'|'MEMORY'|'RESOURCE'|'DATABASE'|'PERFORMANCE'|'CODE_QUALITY'|'RELIABILITY'|'DATA_INTEGRITY'|'SECURITY'|'BUSINESS_LOGIC'|'DISTRIBUTED'";
 const FINDINGS_CONTRACT =
   "findings: [{ id, kind: " +
   FINDING_KINDS +
-  ", severity: 'high'|'medium'|'low', repo, file, line, issue, evidence, implementable: boolean, why_not?, related_repos?: string[] }]";
+  ", severity: 'high'|'medium'|'low', title?, repo, file, line, symbol?, issue, evidence, implementable: boolean, why_not?, related_repos?: string[] }]";
 const IMPROVE_ASSESS = {
   evidence: "root_cause",
   code_evidence: "required",

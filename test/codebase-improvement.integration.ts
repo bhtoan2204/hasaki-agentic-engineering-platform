@@ -15,6 +15,7 @@ import { repositories } from "../src/repos/service.ts";
 import { createUser } from "../src/auth/users.ts";
 import { startRun, approveStep, cancelRun, listCodeScans } from "../src/workflow/engine.ts";
 import { currentBaseCommits, reusableScan } from "../src/workflow/codeScans.ts";
+import { findingDetail, ingestPendingScans, listFindings } from "../src/workflow/codeFindings.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type StepExecutor } from "../src/workflow/executors/registry.ts";
 import { agentExecutor } from "../src/agent/harness/executor.ts";
@@ -583,7 +584,7 @@ test("assessment then choice: a read-only run lists findings with severity, a fi
     0,
     "read-only: no worktree",
   );
-  let listed = (await listCodeScans({ ownerId })).find((s) => s.id === scan.id)!;
+  const listed = (await listCodeScans({ ownerId })).find((s) => s.id === scan.id)!;
   assert.equal(listed.decision, "FINDINGS");
   assert.deepEqual(
     (listed.findings as Array<{ id: string; severity: string }>).map((f) => [f.id, f.severity]),
@@ -592,7 +593,13 @@ test("assessment then choice: a read-only run lists findings with severity, a fi
       ["M2", "low"],
     ],
   );
-  assert.equal(listed.fixes, null, "nothing is fixed before a person chooses");
+  await ingestPendingScans(ownerId);
+  const managed = await listFindings({ ownerId, scan: scan.id });
+  assert.equal(managed.total, 2, "the scan's findings are managed findings");
+  const p1 = (
+    managed.items as Array<{ id: number; severity: string; fix_run_id: number | null }>
+  ).find((f) => f.severity === "medium")!;
+  assert.equal(p1.fix_run_id, null, "nothing is fixed before a person chooses");
   assert.deepEqual(
     (listed.findings as Array<{ code_evidence: { status: string } }>).map(
       (f) => f.code_evidence.status,
@@ -615,10 +622,11 @@ test("assessment then choice: a read-only run lists findings with severity, a fi
     start: false,
   });
   runs.push(fix.id);
-  listed = (await listCodeScans({ ownerId })).find((s) => s.id === scan.id)!;
+  const detail = (await findingDetail(Number(p1.id), { ownerId }))!;
   assert.deepEqual(
-    listed.fixes?.map((f) => [f.finding_id, f.run_id]),
-    [["P1", fix.id]],
+    (detail.fixes as Array<{ id: number }>).map((f) => Number(f.id)),
+    [fix.id],
+    "a fix run started from the scan's finding is attached to the managed finding",
   );
   assert.ok(
     !(await listCodeScans({ ownerId })).some((s) => s.id === fix.id),

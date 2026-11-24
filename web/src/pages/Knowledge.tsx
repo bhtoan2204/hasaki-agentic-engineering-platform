@@ -41,6 +41,7 @@ import {
   JsonBlock,
   Markdown,
   navigate,
+  Pager,
   PageHeader,
   SearchInput,
   SkeletonRows,
@@ -424,54 +425,6 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
         </section>
       </div>
     </div>
-  );
-}
-
-function pageWindow(page: number, pages: number): Array<number | "…"> {
-  const keep = new Set([1, pages, page - 1, page, page + 1]);
-  const out: Array<number | "…"> = [];
-  let prev = 0;
-  for (const n of [...keep].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b)) {
-    if (n - prev > 1) out.push("…");
-    out.push(n);
-    prev = n;
-  }
-  return out;
-}
-
-function Pager({
-  page,
-  pages,
-  total,
-  onPage,
-}: {
-  page: number;
-  pages: number;
-  total: number;
-  onPage: (n: number) => void;
-}) {
-  if (pages <= 1) return null;
-  return (
-    <nav className="kn-pager" aria-label="Pagination">
-      <span className="kn-pager-total">{total}</span>
-      {pageWindow(page, pages).map((n, i) =>
-        n === "…" ? (
-          <span key={`gap${i}`} className="kn-pager-gap">
-            …
-          </span>
-        ) : (
-          <button
-            key={n}
-            type="button"
-            className={`sm${n === page ? "" : " ghost"}`}
-            aria-current={n === page ? "page" : undefined}
-            onClick={() => onPage(n)}
-          >
-            {n}
-          </button>
-        ),
-      )}
-    </nav>
   );
 }
 

@@ -142,12 +142,6 @@ export function listCodeScans(filter: { ownerId?: number; all?: boolean } = {}, 
     decision: string | null;
     summary: string | null;
     findings: unknown[] | null;
-    fixes: Array<{
-      finding_id: string;
-      run_id: number;
-      status: string;
-      steps: Array<{ key: string; status: string }>;
-    }> | null;
     steps: Array<{ key: string; status: string }>;
     activity: {
       started_at: string | null;
@@ -162,12 +156,6 @@ export function listCodeScans(filter: { ownerId?: number; all?: boolean } = {}, 
     `SELECT r.id, r.title, r.status, r.selected_repositories, r.inputs->>'focus' AS focus, r.created_at,
             a.status AS assess_status, a.output->>'decision' AS decision, a.output->>'summary' AS summary,
             a.output->'findings' AS findings,
-            (SELECT json_agg(json_build_object('finding_id', f.inputs->'finding'->>'id', 'run_id', f.id, 'status', f.status,
-                    'steps', (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position)
-                                FROM workflow_steps s WHERE s.run_id = f.id)) ORDER BY f.id DESC)
-               FROM workflow_runs f
-              WHERE f.definition_key = 'codebase-improvement' AND f.owner_id = r.owner_id
-                AND f.inputs->'finding'->>'scan_run_id' = r.id::text) AS fixes,
             (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position)
                FROM workflow_steps s WHERE s.run_id = r.id) AS steps,
             -- Live progress of a running assessment: the agent's tool calls in its current attempt.
