@@ -11,7 +11,62 @@ const MAX_UNTRACKED = 50;
 /** The part of the executor context the deterministic impact step needs (structural: no executor import cycle). */
 interface ImpactContext {
   run: { id: number; owner_id?: number | null };
+  step?: { config?: Record<string, unknown> | null };
+  input?: { upstream: Record<string, { output?: unknown } | undefined> };
   log(kind: "system", content: string, data?: unknown): Promise<void>;
+}
+
+type Target = { repo: string; files: string[]; symbols: string[] };
+const strings = (v: unknown, n: number) =>
+  (Array.isArray(v) ? v : []).filter((x): x is string => typeof x === "string" && !!x).slice(0, n);
+
+/** The files and symbols a step's output says it will change: `target` (one or a list) or proposal `changes`. */
+export function proposedTargets(output: unknown): Target[] {
+  const o = (output && typeof output === "object" ? output : {}) as Record<string, unknown>;
+  const items = [o.target, o.changes].flatMap((v) => (Array.isArray(v) ? v : v ? [v] : []));
+  const byRepo = new Map<string, Target>();
+  for (const item of items) {
+    const t = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    if (typeof t.repo !== "string" || !t.repo) continue;
+    const cur = byRepo.get(t.repo) ?? { repo: t.repo, files: [], symbols: [] };
+    const files = typeof t.files === "string" ? [t.files] : strings(t.files, 200);
+    cur.files = [...new Set([...cur.files, ...files])].slice(0, 200);
+    cur.symbols = [...new Set([...cur.symbols, ...strings(t.symbols, 20)])].slice(0, 20);
+    byRepo.set(t.repo, cur);
+  }
+  return [...byRepo.values()];
+}
+
+/**
+ * Whether the blast radius of a proposed change is established from the platform's indexes: every target repository
+ * analysed, with no limitation other than the inherent one of a change that does not exist yet (only file names).
+ */
+export function blastRadiusOf(results: Array<Record<string, unknown>>) {
+  const reasons: string[] = [];
+  if (!results.length) reasons.push("no target files or symbols were named");
+  const confirmed: unknown[] = [];
+  const uncertain: unknown[] = [];
+  for (const r of results) {
+    if (r.error) {
+      reasons.push(`${r.repository}: ${r.error}`);
+      continue;
+    }
+    const analysis = (r.analysis ?? {}) as { status?: string; limitations?: string[] };
+    if (analysis.status === "stale" || analysis.status === "unsupported")
+      reasons.push(`${r.repository}: analysis ${analysis.status}`);
+    for (const l of analysis.limitations ?? [])
+      if (!l.startsWith("only file names were given")) reasons.push(`${r.repository}: ${l}`);
+    for (const i of Array.isArray(r.impacts) ? (r.impacts as Array<Record<string, unknown>>) : []) {
+      const entry = { repo: i.repo, kind: i.kind, key: i.key, relation: i.relation };
+      (i.confidence === "static" ? confirmed : uncertain).push(entry);
+    }
+  }
+  return {
+    established: reasons.length === 0,
+    reasons: reasons.slice(0, 20),
+    confirmed: confirmed.slice(0, 50),
+    uncertain: uncertain.slice(0, 50),
+  };
 }
 
 /**
@@ -58,6 +113,8 @@ async function worktreeDiff(path: string, base: string) {
  */
 export async function impactAnalysisStep(ctx: ImpactContext): Promise<ExecResult> {
   try {
+    const from = ctx.step?.config?.from;
+    if (typeof from === "string") return await proposedImpact(ctx, from);
     const owner = Number(ctx.run.owner_id);
     if (!Number.isSafeInteger(owner) || owner <= 0)
       return { kind: "completed", output: { skipped: "run has no owner", repositories: [] } };
@@ -151,4 +208,60 @@ export async function impactAnalysisStep(ctx: ImpactContext): Promise<ExecResult
       },
     };
   }
+}
+
+/**
+ * Proposal mode (`config.from`): the cross-repository blast radius of a change that does not exist yet, from the files
+ * and symbols the named step targets. Read-only and deterministic like the diff mode; never fails the run.
+ */
+async function proposedImpact(ctx: ImpactContext, from: string): Promise<ExecResult> {
+  const owner = Number(ctx.run.owner_id);
+  if (!Number.isSafeInteger(owner) || owner <= 0)
+    return {
+      kind: "completed",
+      output: {
+        mode: "proposal",
+        repositories: [],
+        blast_radius: blastRadiusOf([{ repository: "(run)", error: "run has no owner" }]),
+      },
+    };
+  const run = await one<{ allowed_repositories: string[]; selected_repositories: string[] }>(
+    pool,
+    "SELECT allowed_repositories, selected_repositories FROM workflow_runs WHERE id=$1",
+    [ctx.run.id],
+  );
+  const scope = [
+    ...new Set([...(run?.allowed_repositories ?? []), ...(run?.selected_repositories ?? [])]),
+  ];
+  const results: Array<Record<string, unknown>> = [];
+  for (const t of proposedTargets(ctx.input?.upstream[from]?.output)) {
+    if (scope.length && !scope.includes(t.repo)) {
+      results.push({ repository: t.repo, error: "repository outside this run's scope" });
+      continue;
+    }
+    results.push(
+      await analyzeImpact(owner, {
+        repository: t.repo,
+        files: t.files,
+        symbols: t.symbols,
+        allowedRepositories: scope.length ? scope : undefined,
+      }).then(
+        (r) => r as unknown as Record<string, unknown>,
+        (e: Error) => ({
+          repository: t.repo,
+          error: e.message.replace(/\/[^\s'"]+/g, "<path>").slice(0, 300),
+        }),
+      ),
+    );
+  }
+  const blast = blastRadiusOf(results);
+  await ctx.log(
+    "system",
+    `blast radius (proposal from ${from}): ${blast.confirmed.length} confirmed and ${blast.uncertain.length} uncertain cross-repository dependency(ies) — ${blast.established ? "established" : `NOT established: ${blast.reasons.slice(0, 3).join("; ")}`}`,
+    { blast_radius: { established: blast.established, reasons: blast.reasons.length } },
+  );
+  return {
+    kind: "completed",
+    output: { mode: "proposal", from, repositories: results, blast_radius: blast },
+  };
 }
