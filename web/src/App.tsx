@@ -575,7 +575,7 @@ export function App() {
           className={full ? "page full" : "page"}
           key={`${me.id}:${support}`}
         >
-          <PageBoundary key={pathPart}>
+          <PageBoundary key={section === "knowledge" ? section : pathPart}>
             <Suspense fallback={<Loading />}>{page}</Suspense>
           </PageBoundary>
         </main>

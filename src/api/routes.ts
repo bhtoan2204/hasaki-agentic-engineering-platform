@@ -1874,13 +1874,14 @@ export const routes: Route[] = [
       const paged = sp.has("page");
       const rows = await visibleKnowledge(
         c.actor.id,
-        await knowledge.list({
-          category: paged ? undefined : category,
-          scope: paged ? sp.get("scope") || undefined : undefined,
-          search: paged ? sp.get("q")?.trim() || undefined : undefined,
-          summary: true,
-          ...mine(c),
-        }),
+        paged
+          ? knowledge.listPageSummaries({
+              scope: sp.get("scope") || undefined,
+              search: sp.get("q")?.trim() || undefined,
+              updatedAtOrder: sp.get("sort") === "oldest" ? "oldest" : "newest",
+              ...mine(c),
+            })
+          : knowledge.list({ category, summary: true, ...mine(c) }),
       );
       if (!paged) return rows;
       const counts: Record<string, number> = { "": rows.length };

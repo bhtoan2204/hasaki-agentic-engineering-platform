@@ -827,13 +827,13 @@ export function Pager({
 }: {
   page: number;
   pages: number;
-  total: number;
+  total?: number;
   onPage: (n: number) => void;
 }) {
   if (pages <= 1) return null;
   return (
     <nav className="kn-pager" aria-label="Pagination">
-      <span className="kn-pager-total">{total}</span>
+      {total !== undefined && <span className="kn-pager-total">{total}</span>}
       {pageWindow(page, pages).map((n, i) =>
         n === "…" ? (
           <span key={`gap${i}`} className="kn-pager-gap">

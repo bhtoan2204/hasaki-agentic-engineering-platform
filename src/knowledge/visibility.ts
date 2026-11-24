@@ -44,8 +44,8 @@ export async function readableRepositoryNames(
 
 export async function visibleKnowledge<T extends Item>(
   userId: number | null | undefined,
-  items: T[],
+  items: T[] | Promise<T[]>,
 ): Promise<T[]> {
-  const readable = await readableRepositoryNames(userId);
-  return items.filter((k) => !knowledgeRestricted(k, readable));
+  const [rows, readable] = await Promise.all([items, readableRepositoryNames(userId)]);
+  return rows.filter((k) => !knowledgeRestricted(k, readable));
 }

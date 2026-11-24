@@ -17,6 +17,7 @@ import { startRun } from "../src/workflow/engine.ts";
 import { putUserSecret, getUserSecret } from "../src/auth/secrets.ts";
 import { sessionFromRequest } from "../src/auth/sessions.ts";
 import { runtimeMetricsSnapshot } from "../src/runtimeMetrics.ts";
+import { cacheStats } from "../src/cache/index.ts";
 
 let server: Server;
 let base = "";
@@ -89,6 +90,47 @@ after(async () => {
   platformGo?.stop();
   server?.close();
   await pool.end();
+});
+
+test("Knowledge sorts visible filtered results by update date before pagination", async () => {
+  const member = client();
+  assert.equal((await member.login("membera", "member-a-password")).status, 200);
+  const other = await one<{ id: number }>(pool, "SELECT id FROM users WHERE username = 'memberb'");
+  for (const [suffix, date, category, ownerId] of [
+    ["a", "2026-10-03", "domain_knowledge", null],
+    ["b", "2026-10-01", "domain_knowledge", null],
+    ["c", "2026-10-03", "domain_knowledge", null],
+    ["d", "2026-10-05", "business_rule", null],
+    ["e", "2026-10-06", "domain_knowledge", other!.id],
+  ] as const) {
+    const key = `kn-date-order-${suffix}`;
+    const item = await knowledge.create({
+      key,
+      title: key,
+      category,
+      scope_type: "GLOBAL",
+      content: key,
+      ownerId,
+    });
+    await q(pool, "UPDATE knowledge_items SET updated_at = $1 WHERE id = $2", [date, item!.id]);
+  }
+  const list = async (options: string) => {
+    const result = await member.call(
+      `/api/knowledge?category=domain_knowledge&scope=GLOBAL&q=kn-date-order&page_size=2&${options}`,
+    );
+    assert.equal(result.status, 200);
+    assert.equal(result.body.total, 3);
+    assert.equal(result.body.counts[""], 4);
+    return result.body.items.map((item: { key: string }) => item.key);
+  };
+  assert.deepEqual(await list("page=1"), ["kn-date-order-c", "kn-date-order-a"]);
+  const hits = cacheStats["knowledge.list-page"]?.hits ?? 0;
+  assert.deepEqual(await list("page=2"), ["kn-date-order-b"]);
+  assert.equal(cacheStats["knowledge.list-page"]?.hits, hits + 1);
+  assert.deepEqual(await list("page=1&sort=oldest"), ["kn-date-order-b", "kn-date-order-a"]);
+  assert.deepEqual(await list("page=2&sort=oldest"), ["kn-date-order-c"]);
+  await knowledge.update("kn-date-order-b", { content: "Updated" });
+  assert.deepEqual(await list("page=1"), ["kn-date-order-b", "kn-date-order-c"]);
 });
 
 test("anonymous callers cannot use protected APIs, downloads or the event stream", async () => {

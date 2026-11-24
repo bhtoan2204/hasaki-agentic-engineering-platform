@@ -54,20 +54,44 @@ function check(x: Partial<KnowledgeInput>) {
     throw new Error(`scope ${x.scope_type} needs scope_ref`);
 }
 
+type KnowledgeListFilter = {
+  category?: string;
+  scope?: string;
+  search?: string;
+  ownerId?: number;
+  all?: boolean;
+  summary?: boolean;
+  updatedAtOrder?: "newest" | "oldest";
+};
+
+type KnowledgePageFilter = Pick<
+  KnowledgeListFilter,
+  "scope" | "search" | "ownerId" | "all" | "updatedAtOrder"
+>;
+const listPageCache = new CacheAside<Awaited<ReturnType<typeof q>>>(
+  "knowledge.list-page",
+  ["knowledge_items", "knowledge_versions"],
+  60_000,
+  32,
+);
+
 export const knowledge = {
+  /** Reuse summaries across pagination and category changes. Repository permissions are checked per request. */
+  listPageSummaries(filter: KnowledgePageFilter) {
+    const { ownerId, all, scope, search, updatedAtOrder } = filter;
+    return listPageCache.get(
+      JSON.stringify([all ? null : ownerId, !!all, scope, search, updatedAtOrder]),
+      () => knowledge.list({ ...filter, summary: true }),
+    );
+  },
+
   /** `summary`: without the version content and applicability (list views; the item route has them). */
-  list(
-    filter: {
-      category?: string;
-      scope?: string;
-      search?: string;
-      ownerId?: number;
-      all?: boolean;
-      summary?: boolean;
-    } = {},
-    db: Db = pool,
-  ) {
+  list(filter: KnowledgeListFilter = {}, db: Db = pool) {
     const scoped = filter.ownerId != null || filter.all === true;
+    const order = {
+      newest: "i.updated_at DESC, i.id DESC",
+      oldest: "i.updated_at ASC, i.id ASC",
+    };
     return q(
       db,
       `SELECT i.*, ${filter.summary ? "" : "v.content, v.applicability, "}v.metadata, v.effective_from, v.created_at AS version_created_at
@@ -81,7 +105,7 @@ export const knowledge = {
           AND ($6::text IS NULL OR i.scope_type = $6)
           AND ($7::text IS NULL OR i.title ILIKE $7 OR i.key ILIKE $7 OR i.scope_ref ILIKE $7
                OR v.metadata->>'description' ILIKE $7)
-        ORDER BY i.category, i.scope_type, i.owner_id NULLS FIRST, i.key`,
+        ORDER BY ${filter.updatedAtOrder ? order[filter.updatedAtOrder] : "i.category, i.scope_type, i.owner_id NULLS FIRST, i.key"}`,
       [
         filter.category ?? null,
         !scoped,
