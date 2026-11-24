@@ -5,6 +5,7 @@ import { workspacesOf } from "../../../git/provider.ts";
 import { missingContractKeys, validateOutputContract } from "../../contract.ts";
 import { evidenceRole, normalizeInvestigationOutput, unavailableSources } from "../../evidence.ts";
 import { runProvenanceEnv, withProvenance } from "../../provenance.ts";
+import { requireCodeEvidence } from "../../codeEvidence.ts";
 
 /** Errors of the attempt's latest submit_result when that latest one was rejected (none, or accepted: null). */
 async function lastRejection(attemptId: number): Promise<string[] | null> {
@@ -155,5 +156,7 @@ export async function outputStage(s: LifecycleState): Promise<ExecResult | void>
     };
     await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
   }
+  if (!independent && ctx.step.config.code_evidence === "required")
+    output = await requireCodeEvidence(output, ctx.attempt.id);
   Object.assign(s, { output, terminalCodingFailure });
 }

@@ -18,6 +18,7 @@ type Finding = {
   evidence?: string;
   implementable?: boolean;
   why_not?: string;
+  code_evidence?: { status: "verified" | "missing"; reason?: string };
 };
 type Fix = {
   finding_id: string;
@@ -129,12 +130,27 @@ export function CodeScan() {
     }
   };
   const fix = async (scan: Scan, f: Finding) => {
-    const ok = await dialog.confirm({
-      title: t("cs.fixTitle"),
-      description: t("cs.fixBody", { issue: f.issue }),
-      confirmLabel: t("cs.fix"),
-    });
-    if (!ok) return;
+    // A report-only finding waits for a person's decision (e.g. which errors are unrecoverable): ask for it.
+    let decision: string | null = null;
+    if (!f.implementable) {
+      decision = await dialog.prompt({
+        title: t("cs.decideTitle"),
+        description: f.why_not ? t("cs.decideBody", { why: f.why_not }) : t("cs.decideBodyNoWhy"),
+        label: t("cs.decision"),
+        placeholder: t("cs.decisionPh"),
+        required: true,
+        confirmLabel: t("cs.fix"),
+        validate: (v) => (v.trim().length < 10 ? t("cs.decisionTooShort") : null),
+      });
+      if (decision === null) return;
+    } else {
+      const ok = await dialog.confirm({
+        title: t("cs.fixTitle"),
+        description: t("cs.fixBody", { issue: f.issue }),
+        confirmLabel: t("cs.fix"),
+      });
+      if (!ok) return;
+    }
     const repoName = f.repo || scan.selected_repositories[0];
     const where = f.file ? ` (${f.file}${f.line ? `:${f.line}` : ""})` : "";
     const run = await act(() =>
@@ -144,6 +160,7 @@ export function CodeScan() {
         inputs: {
           repositories: [repoName],
           finding: { ...f, scan_run_id: scan.id },
+          ...(decision ? { decision: decision.trim() } : {}),
           focus: `${t("cs.fixFocus")} ${f.id}: ${f.issue}${where}`,
         },
         title: `${t("cs.fixFocus")} ${f.id} — ${f.issue.slice(0, 80)}`,
@@ -242,12 +259,15 @@ function FixState({ fix }: { fix: Fix }) {
         <ExternalLink size={12} /> {t("cs.prReady")}
       </button>
     );
+  const changed = step("implement") === "COMPLETED";
   const label =
-    fix.status === "COMPLETED"
-      ? t("cs.fixDone")
-      : ["FAILED", "CANCELED"].includes(fix.status)
-        ? t("cs.fixFailed")
-        : t("cs.inRun");
+    fix.status === "COMPLETED" && !changed
+      ? t("cs.fixNoChange")
+      : fix.status === "COMPLETED"
+        ? t("cs.fixDone")
+        : ["FAILED", "CANCELED"].includes(fix.status)
+          ? t("cs.fixFailed")
+          : t("cs.inRun");
   return (
     <button className="xs ghost" onClick={() => navigate(`/runs/${fix.run_id}`)}>
       <Play size={12} /> {label}
@@ -309,6 +329,11 @@ function ScanCard({ scan, onFix }: { scan: Scan; onFix: (f: Finding) => void }) 
                   <div className="cs-finding-top">
                     <span className={`cs-chip sev-${f.severity}`}>{t(`cs.sev.${f.severity}`)}</span>
                     <span className="cs-chip">{t(`cs.kind.${f.kind}`)}</span>
+                    {f.code_evidence?.status === "missing" && (
+                      <span className="cs-chip is-err" title={f.code_evidence.reason}>
+                        {t("cs.unverified")}
+                      </span>
+                    )}
                     {f.file && (
                       <span className="mono small cs-loc">
                         {f.file}
@@ -327,11 +352,19 @@ function ScanCard({ scan, onFix }: { scan: Scan; onFix: (f: Finding) => void }) 
                 <div className="cs-finding-act">
                   {fix ? (
                     <FixState fix={fix} />
+                  ) : f.code_evidence?.status === "missing" ? (
+                    <span className="muted small" title={f.code_evidence.reason}>
+                      {t("cs.unverifiedNoFix")}
+                    </span>
                   ) : f.implementable ? (
                     <button className="xs" onClick={() => onFix(f)}>
                       <Wrench size={12} /> {t("cs.fix")}
                     </button>
-                  ) : null}
+                  ) : (
+                    <button className="xs ghost" onClick={() => onFix(f)} title={f.why_not}>
+                      <Wrench size={12} /> {t("cs.fixWithDecision")}
+                    </button>
+                  )}
                 </div>
               </li>
             );

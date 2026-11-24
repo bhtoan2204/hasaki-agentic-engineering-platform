@@ -505,20 +505,23 @@ const ASSESS_SIGNALS =
   "(2) Collect deterministic signals before reading code: production errors and latencies, failing or skipped tests, lint or vet output you can run read-only, code_intelligence searches. " +
   "(3) Read only the hotspots those signals point to (search_code, get_symbol, find_dependencies, targeted Read). This is a repository-wide assessment from signals, not a file-by-file review: say what you did not inspect. " +
   "Report only findings backed by evidence: a confirmed defect, a measured bottleneck, a security risk, or a maintainability issue with a concrete consequence. Never invent improvements or propose speculative refactoring. " +
-  "A finding is implementable only when a platform-runnable test can demonstrate it: it fails on the current code and passes once the finding is fixed (for performance, the test asserts the measured budget: allocations, query count, complexity bound or a time budget with margin). ";
+  "A finding is implementable only when a platform-runnable test can demonstrate it: it fails on the current code and passes once the finding is fixed (for performance, the test asserts the measured budget: allocations, query count, complexity bound or a time budget with margin). " +
+  "Confirm every finding with the code index yourself (platform search_code, get_symbol, find_dependencies or navigate_code) before reporting it: the platform marks a finding as unverified unless one of YOUR code-intelligence calls in this step returned its file, and an unverified finding cannot be fixed. ";
 const FINDINGS_CONTRACT =
   "findings: [{ id, kind: 'DEFECT'|'PERFORMANCE'|'SECURITY'|'MAINTAINABILITY', severity: 'high'|'medium'|'low', repo, file, line, issue, evidence, implementable: boolean, why_not? }]";
 const IMPROVE_ASSESS = {
   evidence: "root_cause",
+  code_evidence: "required",
   instructions:
     "Assess the selected repositories for ONE improvement worth making, in stages, and stop as soon as the evidence decides. " +
     ASSESS_SIGNALS +
     "When inputs.finding is set (a person chose it from an assessment), work on exactly that finding: re-check it against the current code, and select it if it still holds or answer NO_CHANGES_NEEDED with why; never switch to another finding. " +
+    "When inputs.decision is also set, a person has decided what the correct behaviour is (it was report-only because that decision was missing): treat it as a requirement, so the finding is implementable when a test can demonstrate the decided behaviour. " +
     "Otherwise select at most one implementable finding. Give the selected finding as `selected` with its `target` (repo, files, symbols) and set decision IMPROVE; keep the other findings listed for separate runs. " +
     "When nothing qualifies, set decision NO_CHANGES_NEEDED: that is a valid result. root_cause_assessment rates the selected finding (CONFIRMED only on verified facts). " +
     EVIDENCE_RULES,
   output_contract:
-    "{ decision: 'IMPROVE'|'NO_CHANGES_NEEDED', summary, " +
+    "{ decision: 'IMPROVE'|'NO_CHANGES_NEEDED'|'UNVERIFIED', summary, " +
     FINDINGS_CONTRACT +
     ", selected?: { finding_id, kind, expected_benefit }, target?: { repo, files: string[], symbols: string[] }, coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
     ROOT_CAUSE_CONTRACT +
@@ -529,6 +532,7 @@ const IMPROVE_ASSESS = {
 /** The read-only assessment a person picks findings from: every evidence-backed finding, none selected or changed. */
 const IMPROVE_SCAN = {
   evidence: "analysis",
+  code_evidence: "required",
   instructions:
     "Assess the selected repositories in stages and list every evidence-backed finding (at most 20, most severe first). Nothing is changed and nothing is selected here: a person picks the findings to fix. " +
     ASSESS_SIGNALS +
@@ -549,6 +553,7 @@ const IMPROVE_PROPOSAL = {
     "blast_radius.status is ESTABLISHED only when every affected caller and consumer is known; otherwise PARTIAL or UNKNOWN with what is uncertain. An unestablished blast radius is not a failure, but a human must acknowledge it before anything is implemented. " +
     "State the expected benefit as a measurable quantity with its current value, and the verification plan. required_tests names the ONE executable test that fails on the current code and passes after the change (it is run by the platform on both). " +
     "Changes must preserve business behaviour, public contracts and architectural boundaries unless the finding is exactly that defect. " +
+    "When inputs.decision is set, the change implements exactly that decision of a person, nothing broader. " +
     BUG_FIX_PROPOSAL.instructions,
   output_contract: BUG_FIX_PROPOSAL.output_contract.replace(
     "{ summary,",

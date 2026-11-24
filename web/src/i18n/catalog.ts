@@ -365,6 +365,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.kind.PERFORMANCE": "Hiệu năng",
     "cs.kind.SECURITY": "Bảo mật",
     "cs.kind.MAINTAINABILITY": "Bảo trì",
+    "cs.fixWithDecision": "Sửa với quyết định của bạn",
+    "cs.decideTitle": "Vấn đề này cần bạn quyết định trước khi sửa",
+    "cs.decideBody":
+      "Agent chưa tự sửa vì: {why}. Ghi quyết định của bạn; agent sẽ kiểm tra lại vấn đề theo quyết định đó, đề xuất thay đổi để bạn duyệt, rồi sửa kèm test chứng minh.",
+    "cs.decideBodyNoWhy":
+      "Ghi quyết định của bạn; agent sẽ kiểm tra lại vấn đề theo quyết định đó, đề xuất thay đổi để bạn duyệt, rồi sửa kèm test chứng minh.",
+    "cs.decision": "Quyết định",
+    "cs.decisionPh":
+      "vd: lỗi validate như warrantyDays=0 là unrecoverable; DLQ retry tối đa 5 lần rồi bỏ qua và log",
+    "cs.decisionTooShort": "Ghi rõ quyết định (ít nhất 10 ký tự)",
     "cs.fix": "Sửa",
     "cs.fixTitle": "Sửa vấn đề này?",
     "cs.fixBody":
@@ -373,6 +383,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.approve": "Duyệt đề xuất sửa",
     "cs.prReady": "PR chờ duyệt",
     "cs.inRun": "Đang xử lý",
+    "cs.fixNoChange": "Đã kiểm tra, không sửa",
+    "cs.unverified": "Chưa xác minh bằng chỉ mục code",
+    "cs.unverifiedNoFix": "Không sửa được khi chưa xác minh",
     "cs.fixDone": "Đã sửa xong",
     "cs.fixFailed": "Lần sửa không thành",
     "cs.notFixable": "Chỉ báo cáo: {why}",
@@ -3781,6 +3794,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.kind.PERFORMANCE": "Performance",
     "cs.kind.SECURITY": "Security",
     "cs.kind.MAINTAINABILITY": "Maintainability",
+    "cs.fixWithDecision": "Fix with your decision",
+    "cs.decideTitle": "This issue needs your decision before it is fixed",
+    "cs.decideBody":
+      "The agent did not fix it on its own because: {why}. Write your decision; the agent re-checks the issue under it, proposes a change for your approval, then fixes it with a demonstrating test.",
+    "cs.decideBodyNoWhy":
+      "Write your decision; the agent re-checks the issue under it, proposes a change for your approval, then fixes it with a demonstrating test.",
+    "cs.decision": "Decision",
+    "cs.decisionPh":
+      "e.g. validation errors such as warrantyDays=0 are unrecoverable; retry the DLQ at most 5 times, then skip and log",
+    "cs.decisionTooShort": "State the decision (at least 10 characters)",
     "cs.fix": "Fix",
     "cs.fixTitle": "Fix this issue?",
     "cs.fixBody":
@@ -3789,6 +3812,9 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.approve": "Approve the fix proposal",
     "cs.prReady": "PR awaiting approval",
     "cs.inRun": "In progress",
+    "cs.fixNoChange": "Checked, not changed",
+    "cs.unverified": "Not confirmed by the code index",
+    "cs.unverifiedNoFix": "Cannot be fixed until confirmed",
     "cs.fixDone": "Fixed",
     "cs.fixFailed": "Fix did not finish",
     "cs.notFixable": "Report only: {why}",

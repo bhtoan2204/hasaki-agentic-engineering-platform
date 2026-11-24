@@ -17,6 +17,7 @@ import { startRun, approveStep, cancelRun, listCodeScans } from "../src/workflow
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type StepExecutor } from "../src/workflow/executors/registry.ts";
 import { agentExecutor } from "../src/agent/harness/executor.ts";
+import { indexRepository } from "../src/codeIntelligence/indexer.ts";
 import {
   commandExecutor,
   humanApprovalExecutor,
@@ -115,6 +116,8 @@ before(async () => {
   git(primary, "push", "-u", "origin", "main");
   baseSha = git(primary, "rev-parse", "HEAD");
   await repositories.upsert(repo, { projects: ["Improve"], default_branch: "main" });
+  config.codeIntelligence.enabled = true;
+  await indexRepository(repo);
   Object.assign(process.env, {
     CODEX_BIN: join(import.meta.dirname, "fixtures", "fake-codex.mjs"),
     FAKE_CODEX_MODE: "script",
@@ -166,11 +169,17 @@ const ROOT = {
   supporting_claims: ["R1", "F1"],
 };
 const returns = (output: unknown) => `export default async () => (${JSON.stringify(output)});`;
+/** An agent that confirms its finding in the code index first (as the assessment requires), then submits. */
+const searchesThenReturns = (output: unknown) =>
+  `export default async ({ call }) => {
+  await call("search_code", { query: "strings.Join", operation: "exact", repositories: [${JSON.stringify(repo)}] });
+  return ${JSON.stringify(output)};
+};`;
 
-function assessAgent(decision: "IMPROVE" | "NO_CHANGES_NEEDED") {
+function assessAgent(decision: "IMPROVE" | "NO_CHANGES_NEEDED", grounded = true) {
   scripts.assess = script(
     "assess",
-    returns(
+    (grounded ? searchesThenReturns : returns)(
       decision === "IMPROVE"
         ? {
             decision,
@@ -523,7 +532,7 @@ test("an evidence file committed to the source repository stops the run for rene
 test("assessment then choice: a read-only run lists findings with severity, a fix starts only from the chosen finding", async () => {
   scripts.assess = script(
     "scan",
-    returns({
+    searchesThenReturns({
       decision: "FINDINGS",
       summary: "Two evidence-backed findings",
       findings: [
@@ -583,6 +592,13 @@ test("assessment then choice: a read-only run lists findings with severity, a fi
     ],
   );
   assert.equal(listed.fixes, null, "nothing is fixed before a person chooses");
+  assert.deepEqual(
+    (listed.findings as Array<{ code_evidence: { status: string } }>).map(
+      (f) => f.code_evidence.status,
+    ),
+    ["verified", "verified"],
+    "the agent's own code-index search returned ids.go",
+  );
 
   const fix = await startRun({
     definitionKey: "codebase-improvement",
@@ -608,4 +624,24 @@ test("assessment then choice: a read-only run lists findings with severity, a fi
     "fix runs are not listed as assessments",
   );
   assert.equal((await listCodeScans({ ownerId: ownerId + 1000 })).length, 0);
+});
+
+test("strict code evidence: findings the agent never confirmed in the code index are unverified and cannot reach a change", async () => {
+  assessAgent("IMPROVE", false);
+  proposalAgent("ESTABLISHED");
+  const { run, st } = await improvementRun();
+  assert.equal(st.assess, "COMPLETED");
+  const assess = (await out(run.id, "assess")) as Record<string, unknown> & {
+    findings: Array<{ code_evidence: { status: string; reason: string } }>;
+  };
+  assert.equal(assess.decision, "UNVERIFIED");
+  assert.match(String(assess.unverified_reason), /no code-intelligence call/);
+  assert.equal(assess.findings[0].code_evidence.status, "missing");
+  for (const key of ["blast_radius", "proposal", "approve", "implement", "pr"])
+    assert.equal(st[key], "SKIPPED", key);
+  assert.equal(
+    (await q(pool, "SELECT 1 FROM execution_workspaces WHERE run_id=$1", [run.id])).length,
+    0,
+    "nothing was changed",
+  );
 });

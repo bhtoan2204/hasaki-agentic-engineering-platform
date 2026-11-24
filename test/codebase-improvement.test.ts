@@ -174,3 +174,16 @@ test("codebase-assessment is read-only and stops at the findings list: nothing i
     /inputs\.finding is set .* never switch to another finding/,
   );
 });
+
+test("a person's decision makes a report-only finding fixable, and the proposal implements exactly that decision", () => {
+  const steps = TEMPLATES.find((x) => x.key === "codebase-improvement")!.spec.steps as Array<{
+    key: string;
+    config: { instructions?: string };
+  }>;
+  const text = (key: string) => String(steps.find((s) => s.key === key)!.config.instructions);
+  assert.match(text("assess"), /inputs\.decision is also set.*treat it as a requirement/);
+  assert.match(
+    text("proposal"),
+    /inputs\.decision is set, the change implements exactly that decision/,
+  );
+});
