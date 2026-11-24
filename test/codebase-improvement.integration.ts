@@ -13,7 +13,7 @@ import { settleBackground } from "../src/workflow/background.ts";
 import { seedTemplates } from "../src/workflow/definitions.ts";
 import { repositories } from "../src/repos/service.ts";
 import { createUser } from "../src/auth/users.ts";
-import { startRun, approveStep, cancelRun } from "../src/workflow/engine.ts";
+import { startRun, approveStep, cancelRun, listCodeScans } from "../src/workflow/engine.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type StepExecutor } from "../src/workflow/executors/registry.ts";
 import { agentExecutor } from "../src/agent/harness/executor.ts";
@@ -518,4 +518,20 @@ test("an evidence file committed to the source repository stops the run for rene
   );
   assert.match(String(question?.question), /IMPROVEMENT_REPORT\.md|out-of-scope/);
   assert.notEqual(st.pr, "WAITING_APPROVAL");
+});
+
+test("the code assessment view lists each run's decision and the agent's findings, newest first, for its owner only", async () => {
+  const scans = await listCodeScans({ ownerId });
+  assert.ok(scans.length >= 6, String(scans.length));
+  assert.deepEqual(
+    scans.map((s) => s.id),
+    [...scans.map((s) => s.id)].sort((a, b) => b - a),
+  );
+  const improved = scans.find((s) => s.decision === "IMPROVE")!;
+  assert.equal(improved.selected?.finding_id, "P1");
+  assert.equal((improved.findings as Array<{ kind: string }>)[0].kind, "PERFORMANCE");
+  assert.ok(
+    scans.some((s) => s.decision === "NO_CHANGES_NEEDED" && s.assess_status === "COMPLETED"),
+  );
+  assert.equal((await listCodeScans({ ownerId: ownerId + 1000 })).length, 0);
 });

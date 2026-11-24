@@ -289,6 +289,7 @@ import {
   expandSubtasks,
   cancelRun,
   EngineError,
+  listCodeScans,
   listRuns,
   openQuestions,
   openApprovals,
@@ -991,6 +992,14 @@ export const routes: Route[] = [
         }),
         "run",
       );
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/code-scans$/,
+    async (c) => {
+      if (support(c)) await audit(c.actor.id, "support.list", "run", "code-scans");
+      return listCodeScans(mine(c));
     },
   ],
   [

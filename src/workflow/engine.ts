@@ -16,7 +16,7 @@ import {
   loadOpenApprovals,
   type OwnerScope,
 } from "./runRepository.ts";
-export { listRuns, openQuestions, answeredQuestions } from "./runRepository.ts";
+export { listCodeScans, listRuns, openQuestions, answeredQuestions } from "./runRepository.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import type { AgentConfiguration } from "../agent/configuration.ts";
 const frozenProviderFlags = (snapshot: AgentConfiguration | null | undefined) =>

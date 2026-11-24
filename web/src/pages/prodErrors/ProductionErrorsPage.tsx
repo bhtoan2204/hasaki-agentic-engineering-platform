@@ -8,11 +8,12 @@ import { ProdErrorsPage } from "../ProdErrors.tsx";
 import { ProductionOverview } from "./ProductionOverview.tsx";
 import { ServiceDetails } from "./ServiceDetails.tsx";
 import { ProductionIncident } from "./ProductionIncident.tsx";
+import { CodeScan } from "./CodeScan.tsx";
 import "../Insights.css";
 import "../analytics/analytics.css";
 import "./production-errors.css";
 
-const TABS = ["overview", "incidents", "services", "settings"] as const;
+const TABS = ["overview", "incidents", "services", "code-scan", "settings"] as const;
 type Tab = (typeof TABS)[number];
 function ProductionAnalytics({
   query,
@@ -149,6 +150,8 @@ export function ProductionErrorsPage({
         />
       ) : detail ? (
         <ServiceDetails query={query} />
+      ) : tab === "code-scan" ? (
+        <CodeScan />
       ) : tab === "incidents" || tab === "settings" ? (
         <ProdErrorsPage
           focus={params.get("list_focus") ?? undefined}

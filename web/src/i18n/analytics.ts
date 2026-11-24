@@ -9,6 +9,7 @@ const copy: Record<string, [string, string]> = {
   "productionTab.overview": ["Tổng quan", "Overview"],
   "productionTab.incidents": ["Danh sách lỗi", "Incidents"],
   "productionTab.services": ["Theo dịch vụ", "Services"],
+  "productionTab.code-scan": ["Đánh giá code", "Code assessment"],
   "productionTab.settings": ["Quét & Cấu hình", "Scan & Settings"],
   incident_status: ["Trạng thái sự cố", "Incident status"],
   productionWorkspace: [

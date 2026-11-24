@@ -126,6 +126,36 @@ export function listRuns(
   );
 }
 
+/** Code scans: codebase-improvement runs with what their assessment found (findings, decision, selected finding). */
+export function listCodeScans(filter: { ownerId?: number; all?: boolean } = {}, db: Db = pool) {
+  return q<{
+    id: number;
+    title: string;
+    status: string;
+    selected_repositories: string[];
+    focus: string | null;
+    created_at: string;
+    updated_at: string;
+    assess_status: string;
+    decision: string | null;
+    summary: string | null;
+    findings: unknown[] | null;
+    selected: { finding_id?: string } | null;
+    steps: Array<{ key: string; status: string }>;
+  }>(
+    db,
+    `SELECT r.id, r.title, r.status, r.selected_repositories, r.inputs->>'focus' AS focus, r.created_at, r.updated_at,
+            a.status AS assess_status, a.output->>'decision' AS decision, a.output->>'summary' AS summary,
+            a.output->'findings' AS findings, a.output->'selected' AS selected,
+            (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position) FROM workflow_steps s WHERE s.run_id = r.id) AS steps
+       FROM workflow_runs r JOIN workflow_steps a ON a.run_id = r.id AND a.key = 'assess'
+      WHERE r.definition_key = 'codebase-improvement'
+        AND (CASE WHEN $1::bool THEN r.owner_id IS NOT NULL WHEN $2::bigint IS NOT NULL THEN r.owner_id = $2 ELSE true END)
+      ORDER BY r.id DESC LIMIT 30`,
+    [!!filter.all, filter.ownerId || null],
+  );
+}
+
 /** Independent reads are issued together on the pool. */
 /** A harness verification without the per-repo slop findings (the bulk of it), for list views; `$v` is the JSON expression. */
 export const VERIFICATION_SUMMARY = `CASE WHEN jsonb_typeof($v->'last') = 'array'

@@ -1,4 +1,21 @@
 /* Intake queue: state tabs, item cards, decision callouts. Tokens only (dark theme follows). */
+/* Its own header layout: the queue also renders outside Settings, where .set-section-head is not loaded. */
+.in-queue>header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--brand);
+}
+
+.in-queue>header h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+}
+
 .in-total {
   margin-right: auto;
   padding: 1px 8px;
