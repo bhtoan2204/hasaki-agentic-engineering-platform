@@ -1028,3 +1028,31 @@ test("reuse-first-development is seeded as a managed skill and applies to analys
     assert.ok((await forStep(k, t)).includes("reuse-first-development"), `${k} gets it`);
   assert.ok(!(await forStep("discover", "integration")).includes("reuse-first-development"));
 });
+
+test("minimal-comments is seeded as a GLOBAL coding standard and reaches implementation and review steps", async () => {
+  const { seedKnowledge } = await import("../src/knowledge/service.ts");
+  await seedKnowledge();
+  const item = await knowledge.get("minimal-comments");
+  assert.equal(item?.category, "coding_standard");
+  assert.equal(item?.scope_type, "GLOBAL");
+  const at = new Date();
+  const forStep = async (stepKey: string, stepType: string) =>
+    resolveKnowledge(await knowledge.candidates(pool, null, at), {
+      organization: "hasaki",
+      project: "OMS",
+      repositories: ["oms-api"],
+      workflowKey: "refactoring",
+      stepKey,
+      stepType,
+      text: "clean up slop in return shipment",
+      explicit: [],
+      now: at,
+    }).applied.map((k) => k.key);
+  for (const [k, t] of [
+    ["implement", "coding_agent"],
+    ["refactor", "coding_agent"],
+    ["review", "agent"],
+  ])
+    assert.ok((await forStep(k, t)).includes("minimal-comments"), `${k} gets it`);
+  assert.ok(!(await forStep("analyze", "agent")).includes("minimal-comments"));
+});
