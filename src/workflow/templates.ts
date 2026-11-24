@@ -500,24 +500,45 @@ const BUG_REVIEW = {
  * Root Cause First at strict depth, so a change ships only with a platform-run test that fails before and passes after.
  */
 const IMPROVE_WHEN = { step: "assess", path: "decision", equals: "IMPROVE" };
+const ASSESS_SIGNALS =
+  "(1) Orient from what the platform already knows: repository metadata, the codebase map and knowledge in your context, platform.get_production_errors for the services, and inputs.focus if given. " +
+  "(2) Collect deterministic signals before reading code: production errors and latencies, failing or skipped tests, lint or vet output you can run read-only, code_intelligence searches. " +
+  "(3) Read only the hotspots those signals point to (search_code, get_symbol, find_dependencies, targeted Read). This is a repository-wide assessment from signals, not a file-by-file review: say what you did not inspect. " +
+  "Report only findings backed by evidence: a confirmed defect, a measured bottleneck, a security risk, or a maintainability issue with a concrete consequence. Never invent improvements or propose speculative refactoring. " +
+  "A finding is implementable only when a platform-runnable test can demonstrate it: it fails on the current code and passes once the finding is fixed (for performance, the test asserts the measured budget: allocations, query count, complexity bound or a time budget with margin). ";
+const FINDINGS_CONTRACT =
+  "findings: [{ id, kind: 'DEFECT'|'PERFORMANCE'|'SECURITY'|'MAINTAINABILITY', severity: 'high'|'medium'|'low', repo, file, line, issue, evidence, implementable: boolean, why_not? }]";
 const IMPROVE_ASSESS = {
   evidence: "root_cause",
   instructions:
     "Assess the selected repositories for ONE improvement worth making, in stages, and stop as soon as the evidence decides. " +
-    "(1) Orient from what the platform already knows: repository metadata, the codebase map and knowledge in your context, platform.get_production_errors for the services, and inputs.focus if given. " +
-    "(2) Collect deterministic signals before reading code: production errors and latencies, failing or skipped tests, lint or vet output you can run read-only, code_intelligence searches. " +
-    "(3) Read only the hotspots those signals point to (search_code, get_symbol, find_dependencies, targeted Read). This is a repository-wide assessment from signals, not a file-by-file review: say what you did not inspect. " +
-    "Report only findings backed by evidence: a confirmed defect, a measured bottleneck, a security risk, or a maintainability issue with a concrete consequence. Never invent improvements or propose speculative refactoring. " +
-    "A finding is implementable only when a platform-runnable test can demonstrate it: it fails on the current code and passes once the finding is fixed (for performance, the test asserts the measured budget: allocations, query count, complexity bound or a time budget with margin). " +
-    "Select at most one implementable finding as `selected` with its `target` (repo, files, symbols) and set decision IMPROVE; keep the other findings listed for separate runs. " +
+    ASSESS_SIGNALS +
+    "When inputs.finding is set (a person chose it from an assessment), work on exactly that finding: re-check it against the current code, and select it if it still holds or answer NO_CHANGES_NEEDED with why; never switch to another finding. " +
+    "Otherwise select at most one implementable finding. Give the selected finding as `selected` with its `target` (repo, files, symbols) and set decision IMPROVE; keep the other findings listed for separate runs. " +
     "When nothing qualifies, set decision NO_CHANGES_NEEDED: that is a valid result. root_cause_assessment rates the selected finding (CONFIRMED only on verified facts). " +
     EVIDENCE_RULES,
   output_contract:
-    "{ decision: 'IMPROVE'|'NO_CHANGES_NEEDED', summary, findings: [{ id, kind: 'DEFECT'|'PERFORMANCE'|'SECURITY'|'MAINTAINABILITY', severity: 'high'|'medium'|'low', repo, file, line, issue, evidence, implementable: boolean, why_not? }], " +
-    "selected?: { finding_id, kind, expected_benefit }, target?: { repo, files: string[], symbols: string[] }, coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
+    "{ decision: 'IMPROVE'|'NO_CHANGES_NEEDED', summary, " +
+    FINDINGS_CONTRACT +
+    ", selected?: { finding_id, kind, expected_benefit }, target?: { repo, files: string[], symbols: string[] }, coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
     ROOT_CAUSE_CONTRACT +
     ", " +
     CLAIMS_CONTRACT +
+    " }",
+};
+/** The read-only assessment a person picks findings from: every evidence-backed finding, none selected or changed. */
+const IMPROVE_SCAN = {
+  evidence: "analysis",
+  instructions:
+    "Assess the selected repositories in stages and list every evidence-backed finding (at most 20, most severe first). Nothing is changed and nothing is selected here: a person picks the findings to fix. " +
+    ASSESS_SIGNALS +
+    "Set decision FINDINGS when you report at least one finding, NO_CHANGES_NEEDED when nothing qualifies (a valid result). " +
+    EVIDENCE_RULES,
+  output_contract:
+    "{ decision: 'FINDINGS'|'NO_CHANGES_NEEDED', summary, " +
+    FINDINGS_CONTRACT +
+    ", coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
+    CLAIMS_CONTRACT.replace("claims:", "claims?:") +
     " }",
 };
 const IMPROVE_PROPOSAL = {
@@ -1467,6 +1488,41 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
         },
         qcMerge("pr"),
         cleanup("qc_merge"),
+      ],
+    },
+  },
+  {
+    key: "codebase-assessment",
+    spec: {
+      name: "Codebase Assessment",
+      description:
+        "Read-only: an agent assesses the repository and lists evidence-backed findings with their severity; a person picks the ones to fix (codebase-improvement)",
+      execution_mode: "read_only",
+      inputs: {
+        repositories: { description: "repositories to assess", required: true },
+        focus: { description: "area or signal to start from (optional)", required: false },
+      },
+      steps: [
+        {
+          key: "select",
+          type: "integration",
+          name: "Select Repository",
+          config: { action: "select_repositories" },
+        },
+        {
+          key: "assess",
+          type: "agent",
+          name: "Repository Assessment",
+          depends_on: ["select"],
+          config: IMPROVE_SCAN,
+        },
+        {
+          key: "report",
+          type: "integration",
+          name: "Assessment Report",
+          depends_on: ["assess"],
+          config: { action: "publish_report", from: ["assess"], title: "Codebase assessment" },
+        },
       ],
     },
   },

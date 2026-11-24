@@ -520,18 +520,92 @@ test("an evidence file committed to the source repository stops the run for rene
   assert.notEqual(st.pr, "WAITING_APPROVAL");
 });
 
-test("the code assessment view lists each run's decision and the agent's findings, newest first, for its owner only", async () => {
-  const scans = await listCodeScans({ ownerId });
-  assert.ok(scans.length >= 6, String(scans.length));
-  assert.deepEqual(
-    scans.map((s) => s.id),
-    [...scans.map((s) => s.id)].sort((a, b) => b - a),
+test("assessment then choice: a read-only run lists findings with severity, a fix starts only from the chosen finding", async () => {
+  scripts.assess = script(
+    "scan",
+    returns({
+      decision: "FINDINGS",
+      summary: "Two evidence-backed findings",
+      findings: [
+        {
+          id: "P1",
+          kind: "PERFORMANCE",
+          severity: "medium",
+          repo,
+          file: "ids.go",
+          line: 7,
+          issue: "a heap allocation per membership check",
+          evidence: "F1",
+          implementable: true,
+        },
+        {
+          id: "M2",
+          kind: "MAINTAINABILITY",
+          severity: "low",
+          repo,
+          file: "ids.go",
+          line: 5,
+          issue: "doc comment restates the name",
+          evidence: "ids.go:5",
+          implementable: false,
+          why_not: "no behaviour a test can demonstrate",
+        },
+      ],
+      coverage: { inspected: ["ids.go"], signals: ["tests"], not_inspected: [] },
+      claims: CLAIMS(),
+    }),
   );
-  const improved = scans.find((s) => s.decision === "IMPROVE")!;
-  assert.equal(improved.selected?.finding_id, "P1");
-  assert.equal((improved.findings as Array<{ kind: string }>)[0].kind, "PERFORMANCE");
+  const scan = await startRun({
+    definitionKey: "codebase-assessment",
+    title: "Assess codebase-improve",
+    profile: "STANDARD",
+    ownerId,
+    repositories: [repo],
+    inputs: { repositories: [repo] },
+    agentProvider: "codex",
+  });
+  runs.push(scan.id);
+  for (let i = 0; i < 6; i++) await drain();
+  const st = await statuses(scan.id);
+  assert.deepEqual(st, { select: "COMPLETED", assess: "COMPLETED", report: "COMPLETED" });
+  assert.equal(
+    (await q(pool, "SELECT 1 FROM execution_workspaces WHERE run_id=$1", [scan.id])).length,
+    0,
+    "read-only: no worktree",
+  );
+  let listed = (await listCodeScans({ ownerId })).find((s) => s.id === scan.id)!;
+  assert.equal(listed.decision, "FINDINGS");
+  assert.deepEqual(
+    (listed.findings as Array<{ id: string; severity: string }>).map((f) => [f.id, f.severity]),
+    [
+      ["P1", "medium"],
+      ["M2", "low"],
+    ],
+  );
+  assert.equal(listed.fixes, null, "nothing is fixed before a person chooses");
+
+  const fix = await startRun({
+    definitionKey: "codebase-improvement",
+    title: "Fix P1",
+    profile: "STANDARD",
+    ownerId,
+    repositories: [repo],
+    inputs: {
+      repositories: [repo],
+      finding: { id: "P1", issue: "a heap allocation per membership check", scan_run_id: scan.id },
+    },
+    agentProvider: "codex",
+    start: false,
+  });
+  runs.push(fix.id);
+  listed = (await listCodeScans({ ownerId })).find((s) => s.id === scan.id)!;
+  assert.deepEqual(
+    listed.fixes?.map((f) => [f.finding_id, f.run_id]),
+    [["P1", fix.id]],
+  );
   assert.ok(
-    scans.some((s) => s.decision === "NO_CHANGES_NEEDED" && s.assess_status === "COMPLETED"),
+    !(await listCodeScans({ ownerId })).some((s) => s.id === fix.id),
+    "fix runs are not listed as assessments",
   );
   assert.equal((await listCodeScans({ ownerId: ownerId + 1000 })).length, 0);
 });

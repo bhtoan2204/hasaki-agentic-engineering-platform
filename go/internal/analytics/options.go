@@ -10,7 +10,7 @@ import (
 // options lists the filter choices visible in the scope (TypeScript optionsAnalytics), as one statement instead of
 // two: run dimensions and production services come back together.
 func (s *Service) options(ctx context.Context, r *Request) (Object, error) {
-	rows, err := s.one(ctx, `WITH dims AS (
+	rows, err := s.oneIn(ctx, s.light, `WITH dims AS (
   SELECT r.owner_id,u.username,r.definition_key,r.selected_repositories,
     COALESCE(NULLIF(w.project,''),NULLIF(r.inputs->>'project',''),'unknown') AS project FROM workflow_runs r
   JOIN users u ON u.id=r.owner_id LEFT JOIN work_items w ON w.id=r.work_item_id

@@ -90,8 +90,8 @@ func run(log *slog.Logger) error {
 	mux.Handle("/internal/v1/knowledge/", platform.RequireBearer(cfg.Token, scansMux))
 	// Dashboards outlast the short retrieval deadline but are bounded by their own. They run on a separate read-only
 	// pool of ANALYTICS_MAX_CONCURRENT connections, so expensive dashboards never take a connection from retrieval
-	// or indexing (the shared pool keeps DATABASE_POOL_MAX).
-	analyticsDB, err := platform.OpenReadOnlyPool(ctx, cfg.DatabaseURL, int32(cfg.AnalyticsMaxConcurrent), cfg.AnalyticsTimeout)
+	// or indexing (the shared pool keeps DATABASE_POOL_MAX). One more connection serves the options lane.
+	analyticsDB, err := platform.OpenReadOnlyPool(ctx, cfg.DatabaseURL, int32(cfg.AnalyticsMaxConcurrent)+1, cfg.AnalyticsTimeout)
 	if err != nil {
 		return err
 	}

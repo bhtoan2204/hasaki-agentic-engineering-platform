@@ -904,6 +904,29 @@ describe("Bash policy: loops in analysis steps", () => {
     assert.match(reason(`for f in a b; do rg x "$f"; done > out.txt`)!, /output redirection/);
   });
 
+  test("( … ) and { …; } groups and the time prefix are judged by the commands inside them", () => {
+    for (const c of [
+      "cd /x && git log -1 --format=%H && ls && (GOTOOLCHAIN=local time go vet ./... 2>&1 | head -50)",
+      "(cd app && rg -n Foo) ; { git status; ls; }",
+      'for f in a b; do (cd "$f" && git log --oneline -1); done',
+      "time rg -n x app",
+    ])
+      assert.deepEqual(decideBash(c, A), { allow: true }, c);
+    for (const c of ["(cd app && touch x)", "{ ls; rm -rf src; }", "(time sed -i s/a/b/ f)"])
+      assert.equal(decideBash(c, A).allow, false, c);
+    for (const c of ["( ls", "ls )", "{ ls"]) assert.match(reason(c) ?? "", /unbalanced/, c);
+  });
+
+  test("a Go module mode that may rewrite go.mod is not read-only (run 16:36: GOFLAGS=-mod=mod)", () => {
+    for (const c of [
+      "(GOTOOLCHAIN=local GOFLAGS=-mod=mod time go vet ./... 2>&1 | head -50)",
+      "go list -mod=mod ./...",
+      "go test -modfile=x.mod ./...",
+    ])
+      assert.match(reason(c) ?? "", /may rewrite go\.mod/, c);
+    assert.deepEqual(decideBash("go vet -mod=readonly ./...", A), { allow: true });
+  });
+
   test("loop syntax the policy cannot fully analyse is denied with a clear message", () => {
     for (const c of [
       `for ((i=0; i<3; i++)); do echo $i; done`,
@@ -978,7 +1001,7 @@ describe("Bash policy: command substitution and assignments", () => {
   });
 });
 
-test("git symbolic-ref (read form) and [ ] tests are read-only; subshells stay unsupported", () => {
+test("git symbolic-ref (read form) and [ ] tests are read-only; a read-only subshell in a loop is allowed", () => {
   const A: PolicyContext = { mode: "analysis", workspaces: [], baseBranch: "release/prod" };
   for (const c of [
     `git -C payment symbolic-ref refs/remotes/origin/HEAD`,
@@ -988,9 +1011,9 @@ test("git symbolic-ref (read form) and [ ] tests are read-only; subshells stay u
   ])
     assert.deepEqual(decideBash(c, A), { allow: true }, c);
   assert.equal(decideBash(`git symbolic-ref HEAD refs/heads/x`, A).allow, false);
-  assert.match(
-    denyReason(decideBash(`for r in a b; do [ -d $r ] && (cd $r && git log -1); done`, A))!,
-    /chưa được hỗ trợ/,
+  assert.deepEqual(
+    decideBash(`for r in a b; do [ -d $r ] && (cd $r && git log -1); done`, A),
+    { allow: true },
   );
 });
 

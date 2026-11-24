@@ -206,7 +206,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "Khi chạm ngân sách: run tạm dừng trước attempt hoặc lượt kế tiếp, chờ bạn tiếp tục (tạm dừng mềm của nền tảng; provider không áp hạn mức cứng). Cảnh báo từ {pct}%.",
     "cost.policyWarn":
       "Khi chạm ngân sách: chỉ cảnh báo, run vẫn chạy tiếp (COST_BUDGET_ACTION=warn). Cảnh báo từ {pct}%.",
-    "cost.policyAcknowledged": "Bạn đã cho phép vượt ngân sách này nên run không tạm dừng lại vì nó.",
+    "cost.policyAcknowledged":
+      "Bạn đã cho phép vượt ngân sách này nên run không tạm dừng lại vì nó.",
     "cost.budgetPlaceholder": "USD, vd 5",
     "cost.setBudget": "Đặt ngân sách",
     "cost.clearBudget": "Bỏ",
@@ -334,7 +335,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "iso.analysis": "Phân tích",
     "iso.checked": "Kiểm tra lúc {at}",
     "cs.title": "Agent đánh giá code",
-    "cs.intro": "Agent đọc và đánh giá code của repository (dựa trên chỉ mục code, test, lint, Knowledge và lỗi production), chỉ báo vấn đề có bằng chứng, hoặc kết luận không cần thay đổi. Bấm Sửa để chuyển một vấn đề sang workflow sửa: đề xuất có phạm vi ảnh hưởng, bạn duyệt, rồi sửa kèm test chứng minh trước/sau và review độc lập.",
+    "cs.intro":
+      "Agent đọc và đánh giá code của repository (dựa trên chỉ mục code, test, lint, Knowledge và lỗi production) rồi liệt kê các vấn đề có bằng chứng kèm mức độ. Lượt đánh giá không sửa gì. Bạn chọn vấn đề muốn sửa và bấm Sửa: agent kiểm tra lại đúng vấn đề đó, đề xuất kèm phạm vi ảnh hưởng, bạn duyệt, rồi sửa kèm test chứng minh trước/sau và review độc lập.",
+    "cs.project": "Dự án",
+    "cs.pickProject": "Chọn dự án",
+    "cs.allRepos": "Tất cả {n} repo trong dự án",
+    "cs.progressTitle": "Agent đang đánh giá code",
+    "cs.activity": "{reads} file đã đọc · {commands} lệnh",
+    "cs.phase.prepare": "Chuẩn bị repo và ngữ cảnh",
+    "cs.phase.assess": "Agent đọc và đánh giá code",
+    "cs.phase.report": "Tổng hợp kết quả",
     "cs.repo": "Repository",
     "cs.pickRepo": "Chọn repository",
     "cs.focus": "Tập trung vào (tùy chọn)",
@@ -345,6 +355,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.empty": "Chưa có lượt đánh giá nào",
     "cs.emptyBody": "Chọn repository và bấm Đánh giá code.",
     "cs.scanning": "Agent đang đánh giá…",
+    "cs.waitingInput": "Agent cần bạn trả lời",
     "cs.failed": "Đánh giá thất bại",
     "cs.noChanges": "Không cần thay đổi",
     "cs.sev.high": "Cao",
@@ -356,11 +367,14 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.kind.MAINTAINABILITY": "Bảo trì",
     "cs.fix": "Sửa",
     "cs.fixTitle": "Sửa vấn đề này?",
-    "cs.fixBody": "Tạo một lượt chạy tập trung vào: {issue}. Không có thay đổi nào trước khi bạn duyệt đề xuất.",
+    "cs.fixBody":
+      "Tạo một lượt chạy tập trung vào: {issue}. Không có thay đổi nào trước khi bạn duyệt đề xuất.",
     "cs.fixFocus": "Sửa vấn đề",
     "cs.approve": "Duyệt đề xuất sửa",
     "cs.prReady": "PR chờ duyệt",
     "cs.inRun": "Đang xử lý",
+    "cs.fixDone": "Đã sửa xong",
+    "cs.fixFailed": "Lần sửa không thành",
     "cs.notFixable": "Chỉ báo cáo: {why}",
     "cs.reportOnly": "Chỉ báo cáo: chưa có test chứng minh được để sửa tự động",
     "in.queue": "Hàng đợi intake",
@@ -371,7 +385,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "in.staleRevision": "nguồn đã đổi khi đang chạy",
     "in.retriage": "Đánh giá lại",
     "in.policies": "Intake tự động",
-    "in.hint": "Mặc định chỉ import. SHADOW: đánh giá và ghi quyết định, không chạy. AUTOPILOT: được tự chạy workflow trong giới hạn; sự cố production chỉ được điều tra chỉ-đọc; code không giám sát cần autonomy AUTOPILOT và sandbox.",
+    "in.hint":
+      "Mặc định chỉ import. SHADOW: đánh giá và ghi quyết định, không chạy. AUTOPILOT: được tự chạy workflow trong giới hạn; sự cố production chỉ được điều tra chỉ-đọc; code không giám sát cần autonomy AUTOPILOT và sandbox.",
     "in.noPolicy": "Chưa có policy: mọi nguồn chỉ import",
     "in.paused": "tạm dừng",
     "in.pause": "Tạm dừng",
@@ -414,7 +429,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "in.modeHint.SHADOW": "Chỉ đánh giá và ghi lại việc sẽ làm, không chạy gì.",
     "in.modeHint.AUTOPILOT": "Được tự chạy workflow trong giới hạn đã đặt.",
     "in.autopilotTitle": "Bật AUTOPILOT?",
-    "in.autopilotBody": "Nguồn {source} sẽ được tự chạy workflow trong giới hạn của policy, không cần ai bấm. Sự cố production chỉ được điều tra chỉ-đọc.",
+    "in.autopilotBody":
+      "Nguồn {source} sẽ được tự chạy workflow trong giới hạn của policy, không cần ai bấm. Sự cố production chỉ được điều tra chỉ-đọc.",
     "in.autopilotConfirm": "Bật AUTOPILOT",
     "dl.title": "Giao hàng PR",
     "dl.agg.READY": "sẵn sàng chờ bạn merge",
@@ -431,7 +447,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "dl.pause": "Tạm dừng tự động",
     "dl.resume": "Tiếp tục tự động",
     "ln.title": "Học từ kết quả",
-    "ln.hint": "Quan sát kết quả (append-only, có nguồn gốc) và bài học không có thẩm quyền rút ra từ chúng. Merge là người chấp nhận, không phải bằng chứng đúng. Gợi ý routing chỉ ở chế độ shadow.",
+    "ln.hint":
+      "Quan sát kết quả (append-only, có nguồn gốc) và bài học không có thẩm quyền rút ra từ chúng. Merge là người chấp nhận, không phải bằng chứng đúng. Gợi ý routing chỉ ở chế độ shadow.",
     "ln.observations": "Quan sát kết quả",
     "ln.lessons": "Bài học theo loại và trạng thái",
     "ln.topNegative": "Cách làm thất bại lặp lại nhiều nhất",
@@ -441,7 +458,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ln.corroborated": "{n} được xác nhận lại",
     "ln.keepDefault": "giữ mặc định",
     "ae.title": "Mức độ tự chủ (dữ liệu thật)",
-    "ae.hint": "Tính từ bản ghi gốc (run, duyệt, câu hỏi, quan sát kết quả), không từ thông báo. Mỗi work item là một episode qua mọi lần chạy lại. Không có oracle production: kết quả chưa biết được để trống.",
+    "ae.hint":
+      "Tính từ bản ghi gốc (run, duyệt, câu hỏi, quan sát kết quả), không từ thông báo. Mỗi work item là một episode qua mọi lần chạy lại. Không có oracle production: kết quả chưa biết được để trống.",
     "ae.window": "Khoảng thời gian",
     "ae.days": "{n} ngày",
     "ae.empty": "Chưa có episode nào trong khoảng này",
@@ -491,7 +509,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "au.why": "Platform không tự duyệt bước này:",
     "au.required": "Cần thêm bằng chứng: {list}",
     "au.policies": "Autonomy policies",
-    "au.policiesHint": "Mặc định MANUAL. Policy mới bật ở shadow; quyền thực tế của run là mức hẹp nhất giữa global, user và repository.",
+    "au.policiesHint":
+      "Mặc định MANUAL. Policy mới bật ở shadow; quyền thực tế của run là mức hẹp nhất giữa global, user và repository.",
     "au.empty": "Chưa có policy: mọi run chạy MANUAL",
     "au.scope": "Phạm vi",
     "au.scopeRef": "User id / repository",
@@ -934,7 +953,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.gl.instance": "Instance GitLab",
     "repo.gl.instanceHint":
       "Base URL lấy từ host của URL repository; chỉ các instance được cấu hình",
-    "repo.gl.instanceNotAllowed": "{host} chưa có trong danh sách instance GitLab — admin thêm ở Integrations → GitLab",
+    "repo.gl.instanceNotAllowed":
+      "{host} chưa có trong danh sách instance GitLab — admin thêm ở Integrations → GitLab",
     "repo.gl.noToken": "chưa có token",
     "repo.gl.deleteSource": "Xoá source branch khi merge",
     "repo.gl.deleteSourceHint": "Chỉ áp dụng khi người dùng merge MR qua nền tảng",
@@ -1180,7 +1200,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.waitingYou": "Đang chờ bạn:",
     "rv.childOf": "Workflow con của",
     "graph.waitingChildren": "Chờ workflow con",
-    "graph.childWorkflows": "{total} workflow con: {done} xong, {active} đang chạy, {failed} lỗi/huỷ",
+    "graph.childWorkflows":
+      "{total} workflow con: {done} xong, {active} đang chạy, {failed} lỗi/huỷ",
     "child.lane": "Workflow con ({n})",
     "child.progress": "{done}/{total} bước",
     "child.queued": "Đang xếp hàng",
@@ -1188,11 +1209,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "child.start": "Bắt đầu",
     "child.started": "Đã bắt đầu workflow con",
     "child.startTitle": "Bắt đầu workflow con?",
-    "child.startBody": "Workflow được đề xuất: {workflow} — \"{title}\". Nó chạy như một run thường, với cổng duyệt và review riêng.",
+    "child.startBody":
+      'Workflow được đề xuất: {workflow} — "{title}". Nó chạy như một run thường, với cổng duyệt và review riêng.',
     "child.cancel": "Huỷ",
     "child.canceled": "Đã huỷ workflow con",
     "child.cancelTitle": "Huỷ workflow con?",
-    "child.cancelBody": "Huỷ \"{title}\". Nếu bước cha đang chờ nó (blocking), bước đó sẽ thất bại.",
+    "child.cancelBody": 'Huỷ "{title}". Nếu bước cha đang chờ nó (blocking), bước đó sẽ thất bại.',
     "child.needsApproval": "Cần duyệt: {step}",
     "child.grandchildren": "Có {n} workflow con riêng",
     "child.fromStep": "Được tạo bởi bước {step}",
@@ -1356,9 +1378,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "common.created": "Tạo lúc",
     "common.loading": "Đang tải…",
     "page.failed.title": "Trang này gặp lỗi khi hiển thị",
-    "page.failed.body": "Lỗi đã được ghi lại trong console của trình duyệt. Tải lại trang để thử lại.",
+    "page.failed.body":
+      "Lỗi đã được ghi lại trong console của trình duyệt. Tải lại trang để thử lại.",
     "page.failed.staleTitle": "Giao diện vừa được cập nhật",
-    "page.failed.staleBody": "Tab này đang dùng bản cũ nên không tải được trang. Tải lại để dùng bản mới.",
+    "page.failed.staleBody":
+      "Tab này đang dùng bản cũ nên không tải được trang. Tải lại để dùng bản mới.",
     "page.failed.reload": "Tải lại trang",
     "wfe.cycle": "Nối {from} → {to} sẽ tạo vòng lặp",
     "wfe.keyChars": "Key chỉ gồm a-z, 0-9, _ và -",
@@ -1640,7 +1664,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ins.slopCache": "Tỉ lệ cache hit",
     "ins.slopTokens": "Token LLM",
     "ins.slopNone": "Chưa có lượt quét slop",
-    "ins.slopNoneBody": "Kết quả xuất hiện sau khi một step coding chạy verification với slop detection bật.",
+    "ins.slopNoneBody":
+      "Kết quả xuất hiện sau khi một step coding chạy verification với slop detection bật.",
     "chg.slop": "Phát hiện slop",
     "chg.slopNone": "Không có finding",
     "chg.slopUnsupported": "Rule chưa hỗ trợ",
@@ -1648,7 +1673,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "chg.slopSkipped": "File bỏ qua",
     "chg.slopBlocking": "đang chặn",
     "si.slop": "Slop",
-    "si.slopLine": "{mode} · {status} · mới {new}, nặng hơn {worsened}, có sẵn {existing}, đã sửa {resolved} · chặn {blocking} · {ms} ms",
+    "si.slopLine":
+      "{mode} · {status} · mới {new}, nặng hơn {worsened}, có sẵn {existing}, đã sửa {resolved} · chặn {blocking} · {ms} ms",
     "ins.repeatedSub": "Chữ ký lỗi xuất hiện nhiều hơn một lần",
     "ins.noneRepeated": "Không có lỗi lặp lại",
     "ins.noneRepeatedBody": "Chưa có chữ ký lỗi nào lặp lại trong khoảng thời gian này.",
@@ -1713,12 +1739,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.kafka.cleared": "Đã xoá cookie",
     "ig.splunk.summaryOff": "Log production (SIEM)",
     "ig.signoz.summaryOff": "chưa kết nối",
-    "ig.signoz.body": "Agent đọc log, trace và metric production qua SigNoz Query API v5 bằng API key của chính bạn (chỉ đọc). Key được mã hoá và không bao giờ gửi về trình duyệt, prompt hay log.",
-    "ig.signoz.s1": "Trong SigNoz: Settings → Service Accounts → New Service Account, gán role chỉ đọc (vd. signoz-viewer).",
+    "ig.signoz.body":
+      "Agent đọc log, trace và metric production qua SigNoz Query API v5 bằng API key của chính bạn (chỉ đọc). Key được mã hoá và không bao giờ gửi về trình duyệt, prompt hay log.",
+    "ig.signoz.s1":
+      "Trong SigNoz: Settings → Service Accounts → New Service Account, gán role chỉ đọc (vd. signoz-viewer).",
     "ig.signoz.s2": "Tab Keys → Add Key, sao chép key (chỉ hiện một lần).",
     "ig.signoz.s3": "Nhập domain SigNoz (Cloud hoặc self-hosted) và key bên dưới, rồi bật.",
     "ig.signoz.domain": "Domain SigNoz",
-    "ig.signoz.domainHint": "Chỉ https. Host nội bộ (self-hosted trong mạng riêng) cần admin duyệt trong Settings.",
+    "ig.signoz.domainHint":
+      "Chỉ https. Host nội bộ (self-hosted trong mạng riêng) cần admin duyệt trong Settings.",
     "ig.signoz.token": "API key",
     "ig.signoz.tokenKeep": "Để trống để giữ key đã lưu.",
     "ig.signoz.auth": "Cách xác thực",
@@ -1895,13 +1924,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.gl.body":
       "Personal access token hoặc project access token cho từng instance GitLab. Scope tối thiểu: api (merge request, comment, merge), hoặc read_api + read_repository + write_repository nếu chỉ đọc và push. Role Developer để push và tạo MR. Token không cấp quyền trên nền tảng; admin vẫn phải cấp repository cho từng người.",
     "ig.gl.instance": "Instance",
-    "ig.gl.instanceHint": "Chỉ repo trên các instance trong danh sách này mới được đăng ký và nhận token.",
+    "ig.gl.instanceHint":
+      "Chỉ repo trên các instance trong danh sách này mới được đăng ký và nhận token.",
     "ig.gl.instanceAdd": "Thêm instance (admin)",
-    "ig.gl.instanceAddHint": "Dán host hoặc URL, ví dụ http://gitlab.hasaki.work/ → gitlab.hasaki.work. Git và API luôn chạy qua HTTPS.",
+    "ig.gl.instanceAddHint":
+      "Dán host hoặc URL, ví dụ http://gitlab.hasaki.work/ → gitlab.hasaki.work. Git và API luôn chạy qua HTTPS.",
     "ig.gl.instanceAddButton": "Thêm",
     "ig.gl.instanceAdded": "Đã thêm instance",
     "ig.gl.instanceRemove": "Xoá instance này khỏi danh sách",
-    "ig.gl.instanceRemoveConfirm": "Xoá {host} khỏi danh sách instance GitLab? Repo trên host này sẽ không dùng được cho tới khi thêm lại.",
+    "ig.gl.instanceRemoveConfirm":
+      "Xoá {host} khỏi danh sách instance GitLab? Repo trên host này sẽ không dùng được cho tới khi thêm lại.",
     "ig.gl.token": "Token",
     "ig.gl.saved": "Đã lưu GitLab",
     "ig.gl.test": "Kiểm tra kết nối",
@@ -2851,13 +2883,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "chat.search": "Tìm hội thoại…",
     "chat.loading": "Đang tải chat…",
     "chat.emptyList": "Chưa có hội thoại",
-    "chat.emptyListHint": "Bắt đầu chat mới để hỏi agent — không tạo workflow trừ khi bạn uỷ quyền.",
+    "chat.emptyListHint":
+      "Bắt đầu chat mới để hỏi agent — không tạo workflow trừ khi bạn uỷ quyền.",
     "chat.untitled": "Hội thoại mới",
     "chat.noMessages": "Chưa có tin nhắn",
     "chat.welcome": "Chat với agent kỹ thuật",
     "chat.welcomeHint":
       "Hỏi nhanh (ASK), điều tra production (INVESTIGATE), lập kế hoạch (PLAN) hoặc chuẩn bị uỷ thác workflow (DELEGATE).",
-    "chat.startHint": "Gõ câu hỏi. Dùng @repo: / @file: / @task: / @run: / @knowledge: để gắn ngữ cảnh.",
+    "chat.startHint":
+      "Gõ câu hỏi. Dùng @repo: / @file: / @task: / @run: / @knowledge: để gắn ngữ cảnh.",
     "chat.mode": "Chế độ",
     "chat.mode.AUTO": "AUTO — thông minh",
     "chat.mode.ASK": "ASK — hỏi đáp",
@@ -2928,7 +2962,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "chat.usage": "Chi phí {cost} · token {tokens}",
     "chat.send": "Gửi",
     "ig.bg.title": "Đồng bộ Git chạy nền",
-    "ig.bg.explain": "Khi bật, các việc chạy nền không do ai bấm (index code, đồng bộ workspace) dùng tài khoản Git bạn đã kết nối ở trên, chỉ cho các repository bạn có quyền đọc. Token vẫn lưu riêng cho tài khoản của bạn; tắt là dừng ngay ở lần chạy sau.",
+    "ig.bg.explain":
+      "Khi bật, các việc chạy nền không do ai bấm (index code, đồng bộ workspace) dùng tài khoản Git bạn đã kết nối ở trên, chỉ cho các repository bạn có quyền đọc. Token vẫn lưu riêng cho tài khoản của bạn; tắt là dừng ngay ở lần chạy sau.",
     "ig.bg.allow": "Cho phép việc chạy nền dùng tài khoản Git của tôi",
     "ig.bg.saved": "Đã lưu",
     "ig.bg.offSummary": "Tắt — việc chạy nền không có tài khoản Git",
@@ -2939,7 +2974,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.ci.state.failed": "Lỗi",
     "repo.ci.state.canceled": "Đã huỷ",
     "repo.ws.title": "Platform workspace",
-    "repo.ws.explain": "Bản checkout riêng của platform trên instance này (không đụng vào source bạn đang làm). Sync clone hoặc fetch bằng tài khoản Git của bạn rồi index.",
+    "repo.ws.explain":
+      "Bản checkout riêng của platform trên instance này (không đụng vào source bạn đang làm). Sync clone hoặc fetch bằng tài khoản Git của bạn rồi index.",
     "repo.ws.enableBackground": "Bật đồng bộ chạy nền",
     "repo.ws.repo": "Repository",
     "repo.ws.checkout": "Checkout",
@@ -3010,7 +3046,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "chat.op.status.expired": "hết hạn",
     "chat.op.status.duplicate": "trùng, không chạy lại",
     "chat.memory": "Bộ nhớ",
-    "chat.memory.hint": "Những gì agent nhớ từ các cuộc chat của bạn (chỉ bạn thấy). Quy tắc nghiệp vụ được gửi thành đề xuất knowledge để duyệt.",
+    "chat.memory.hint":
+      "Những gì agent nhớ từ các cuộc chat của bạn (chỉ bạn thấy). Quy tắc nghiệp vụ được gửi thành đề xuất knowledge để duyệt.",
     "chat.memory.empty": "Chưa có gì.",
     "chat.memory.disable": "Tắt",
     "chat.memory.enable": "Bật",
@@ -3062,7 +3099,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.exactCategory": "Nhãn loại nhiệm vụ chính xác",
     "an.eval.execution": "Thực thi",
     "an.eval.experiments": "Thử nghiệm provider có kiểm soát",
-    "an.eval.experimentsHint": "Khởi động benchmark trực tiếp hoặc thử nghiệm A/B để so sánh các provider và chiến lược ngữ cảnh.",
+    "an.eval.experimentsHint":
+      "Khởi động benchmark trực tiếp hoặc thử nghiệm A/B để so sánh các provider và chiến lược ngữ cảnh.",
     "an.eval.fixtureControls": "Điều khiển fixture",
     "an.eval.generate": "Tạo khuyến nghị",
     "an.eval.improvementsRegressions": "Cải thiện / hồi quy chất lượng",
@@ -3072,7 +3110,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.noEvidence": "Chưa có bằng chứng phù hợp",
     "an.eval.packTools": "Gói + công cụ",
     "an.eval.pairedStudy": "Nghiên cứu theo cặp A/B/C",
-    "an.eval.pairedStudyHint": "So sánh trực tiếp giữa các lần đánh giá kiểm soát để đo lường giá trị của gói ngữ cảnh.",
+    "an.eval.pairedStudyHint":
+      "So sánh trực tiếp giữa các lần đánh giá kiểm soát để đo lường giá trị của gói ngữ cảnh.",
     "an.eval.pairedTasks": "Nhiệm vụ theo cặp",
     "an.eval.providerRoute": "Chuỗi agent",
     "an.eval.providerSequence": "Chuỗi provider",
@@ -3083,7 +3122,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.rationale": "Lý do",
     "an.eval.recCategoryAria": "Loại nhiệm vụ khuyến nghị",
     "an.eval.recommendations": "Khuyến nghị dựa trên bằng chứng",
-    "an.eval.recommendationsHint": "Chỉ dùng benchmark thật hoàn tất có kiểm soát; fixture và quan sát production không chứng minh model vượt trội.",
+    "an.eval.recommendationsHint":
+      "Chỉ dùng benchmark thật hoàn tất có kiểm soát; fixture và quan sát production không chứng minh model vượt trội.",
     "an.eval.repetitions": "Số lần lặp",
     "an.eval.reported": "Báo cáo: ",
     "an.eval.reportedCostCoverage": "Chi phí báo cáo / độ đầy đủ",
@@ -3121,14 +3161,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "bench.compareResults": "So sánh kết quả theo cặp",
     "bench.disabledLocally": "Đã tắt ở môi trường này: evaluation.enabled",
     "bench.evalDetail": "Đánh giá #{id} · {status}",
-    "bench.lead": "Cổng cứng đi trước điểm chất lượng. Lượng token không xác định trừ khi provider thật báo cáo. Fixture kiểm soát không đo chất lượng model.",
+    "bench.lead":
+      "Cổng cứng đi trước điểm chất lượng. Lượng token không xác định trừ khi provider thật báo cáo. Fixture kiểm soát không đo chất lượng model.",
     "bench.openWorkflow": "Mở workflow / câu hỏi / artifact hiện có",
     "bench.pinnedCommit": "Commit cố định: {commit}",
     "bench.publishBundled": "Công bố bộ chuẩn đi kèm (admin)",
     "bench.repetitions": "Số lần lặp",
     "bench.runSafe": "Chạy fixture an toàn",
     "bench.subtitle": "Fixture tổng hợp · không chạy model trực tiếp",
-    "bench.summaryLine": "Thành công {successes}/{graded} · Trung vị {median} ms · p95 {p95} ms · Chi phí mỗi lần thành công ${cost}",
+    "bench.summaryLine":
+      "Thành công {successes}/{graded} · Trung vị {median} ms · p95 {p95} ms · Chi phí mỗi lần thành công ${cost}",
     "bench.title": "Đánh giá benchmark có phiên bản",
     "bench.toast.canceled": "Đã huỷ đánh giá",
     "bench.toast.compared": "Đã tải so sánh",
@@ -3141,7 +3183,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "graph.parallelSubtask": "subtask song song",
     "graph.subtaskOf": "subtask của {parent}",
     "handoff.accountDefault": "Mặc định tài khoản",
-    "handoff.blockedDetail": "Cursor và các agent khác vẫn không chạy được cho đến khi checkpoint sẵn sàng. Xử lý vấn đề workspace bên dưới, bấm Kiểm tra lại, rồi chọn agent và xác nhận.",
+    "handoff.blockedDetail":
+      "Cursor và các agent khác vẫn không chạy được cho đến khi checkpoint sẵn sàng. Xử lý vấn đề workspace bên dưới, bấm Kiểm tra lại, rồi chọn agent và xác nhận.",
     "handoff.checkingAgents": "Đang kiểm tra agent…",
     "handoff.checkingProvider": "Đang kiểm tra khả dụng…",
     "handoff.confirmResume": "Xác nhận tiếp tục",
@@ -3151,7 +3194,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "handoff.retryCheck": "Kiểm tra lại khả dụng",
     "handoff.reviewCheckpointHint": "Tick ô đã xem checkpoint để bật nút Xác nhận tiếp tục.",
     "handoff.reviewedCheckpoint": "Đã xem checkpoint và file đã lưu",
-    "handoff.stopping": "Đã yêu cầu huỷ. Đang chờ tiến trình kết thúc và kiểm tra Git ổn định. Chưa thể chạy agent tiếp theo.",
+    "handoff.stopping":
+      "Đã yêu cầu huỷ. Đang chờ tiến trình kết thúc và kiểm tra Git ổn định. Chưa thể chạy agent tiếp theo.",
     "handoff.switchBtn": "Chuyển agent",
     "handoff.targetModel": "Model tiếp theo",
     "handoff.targetProvider": "Provider tiếp theo",
@@ -3172,12 +3216,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "hop.rounds": "Số vòng thử",
     "hop.sourceAttempt": "Lần thử nguồn",
     "ig.cli.available": "Khả dụng trên worker này",
-    "ig.cli.copilotHint": "Xác thực bằng {cmd} trên worker được giao. Nền tảng không chuyển sang tài khoản khác.",
+    "ig.cli.copilotHint":
+      "Xác thực bằng {cmd} trên worker được giao. Nền tảng không chuyển sang tài khoản khác.",
     "ig.cli.none": "Không có tài khoản CLI của agent nào được cấu hình",
-    "ig.cli.lead": "CLI của agent sử dụng tài khoản đã xác thực trên worker được giao. Thông tin đăng nhập nằm tại CLI; cấu hình trong Cài đặt không đổi tài khoản. Hãy xác thực trên worker đó, sau đó làm mới trạng thái.",
+    "ig.cli.lead":
+      "CLI của agent sử dụng tài khoản đã xác thực trên worker được giao. Thông tin đăng nhập nằm tại CLI; cấu hình trong Cài đặt không đổi tài khoản. Hãy xác thực trên worker đó, sau đó làm mới trạng thái.",
     "ig.cli.title": "Tài khoản CLI của Agent",
     "ig.cli.unavailable": "Không khả dụng trên worker này",
-    "kn.audit.lead": "Kiểm tra chỉ đọc. Phát hiện riêng tư chỉ hiển thị dưới dạng số lượng tổng hợp.",
+    "kn.audit.lead":
+      "Kiểm tra chỉ đọc. Phát hiện riêng tư chỉ hiển thị dưới dạng số lượng tổng hợp.",
     "kn.audit.refresh": "Làm mới kiểm định",
     "kn.audit.summary": "{count} mục · khoảng thời gian {days} ngày",
     "kn.audit.noFindings": "Không có phát hiện kiểm định",
@@ -3215,7 +3262,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "sao.save": "Lưu ghi đè",
     "sao.title": "Cấu hình agent cho lần thử tiếp theo",
     "set.agentConfiguration": "Cấu hình provider",
-    "set.agentSubtitle": "Giá trị đã lưu áp dụng cho run mới. Run đang chạy giữ nguyên snapshot cấu hình. Quản lý xác thực tài khoản trong {link}.",
+    "set.agentSubtitle":
+      "Giá trị đã lưu áp dụng cho run mới. Run đang chạy giữ nguyên snapshot cấu hình. Quản lý xác thực tài khoản trong {link}.",
     "set.cliDefaultOnly": "Chỉ mặc định CLI",
     "set.customLabel": "Tuỳ chỉnh: {value}",
     "set.effortUnavailable": "{effort} (đã lưu; không khả dụng cho model này)",
@@ -3229,7 +3277,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "set.flagUnsaved": "Chưa lưu",
     "set.inheritUnsupported": "Kế thừa (không hỗ trợ)",
     "set.modelDiscovery": "Khám phá model:",
-    "set.modelRoutingLead": "Ô trống sẽ kế thừa từ cấp cấu hình tiếp theo (Profile → Mọi profile → Mặc định provider → Mặc định tài khoản/CLI). Rê chuột lên hàng hoặc nhãn để xem nguồn đã phân giải.",
+    "set.modelRoutingLead":
+      "Ô trống sẽ kế thừa từ cấp cấu hình tiếp theo (Profile → Mọi profile → Mặc định provider → Mặc định tài khoản/CLI). Rê chuột lên hàng hoặc nhãn để xem nguồn đã phân giải.",
     "set.modelUnsupported": "CLI này không hỗ trợ chọn model. Model {model} đã lưu vẫn được giữ.",
     "set.providerDefaults": "Mặc định của provider",
     "set.providerDefaultsHint": "Cấu hình cơ bản khi profile hoặc bước không chỉ định ghi đè.",
@@ -3251,10 +3300,12 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "set.inheritingAll": "đang kế thừa mọi cài đặt",
     "set.overridesCount": "{n} mục ghi đè đã cấu hình",
     "set.unsupportedByCli": "CLI không hỗ trợ (đã lưu: {model})",
-    "set.modelDiscoveryHint": "Tìm thấy {count} model từ CLI local. Lựa chọn đã lưu vẫn khả dụng khi khám phá model thất bại.",
+    "set.modelDiscoveryHint":
+      "Tìm thấy {count} model từ CLI local. Lựa chọn đã lưu vẫn khả dụng khi khám phá model thất bại.",
     "set.comboNextLevel": "Cấp cấu hình tiếp theo",
     "set.comboExternalDefault": "Mặc định CLI bên ngoài",
-    "set.comboCustomWarn": "Model tuỳ chỉnh (không có trong catalog hiện tại); được xác thực khi thực thi.",
+    "set.comboCustomWarn":
+      "Model tuỳ chỉnh (không có trong catalog hiện tại); được xác thực khi thực thi.",
     "set.selectModel": "Chọn model",
     "set.timeoutMs": "Thời gian chờ (ms)",
     "si.skillActivation": "Kích hoạt skill",
@@ -3268,7 +3319,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.confidence": "Độ tin cậy",
     "an.eval.configuredModelLabel": "model cấu hình",
     "an.eval.contextEffectiveness": "Hiệu quả ngữ cảnh (A/B/C)",
-    "an.eval.contextEffectivenessHint": "Chỉ mô tả nhóm được đo. Dùng so sánh cặp trước khi kết luận lợi ích. Độ chính xác truy xuất chưa rõ nếu thiếu nhãn bằng chứng.",
+    "an.eval.contextEffectivenessHint":
+      "Chỉ mô tả nhóm được đo. Dùng so sánh cặp trước khi kết luận lợi ích. Độ chính xác truy xuất chưa rõ nếu thiếu nhãn bằng chứng.",
     "an.eval.costAvailability": "Độ đầy đủ chi phí",
     "an.eval.costCoverage": "Chi phí / độ đầy đủ",
     "an.eval.disable": "Tắt",
@@ -3279,8 +3331,10 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.evidenceResult": "Bằng chứng / kết quả",
     "an.eval.existingRunnerBtn": "Benchmark và so sánh cặp hiện có",
     "an.eval.failureDist": "Phân bố lỗi",
-    "an.eval.fixtureControlsNotice": "Fixture kiểm tra workflow và bộ xác minh, không đo chất lượng model. Lượt gọi thật bị chặn trên worker chưa xác minh giới hạn chi phí và cô lập.",
-    "an.eval.fixtureControlsRankingNotice": "Fixture không xếp hạng model. Chỉ so sánh cùng nhóm, loại nhiệm vụ và chính sách ngữ cảnh. Chi phí/token chưa báo cáo vẫn chưa rõ; ước tính không phải hóa đơn API. Quan sát production không phải kết luận nhân quả.",
+    "an.eval.fixtureControlsNotice":
+      "Fixture kiểm tra workflow và bộ xác minh, không đo chất lượng model. Lượt gọi thật bị chặn trên worker chưa xác minh giới hạn chi phí và cô lập.",
+    "an.eval.fixtureControlsRankingNotice":
+      "Fixture không xếp hạng model. Chỉ so sánh cùng nhóm, loại nhiệm vụ và chính sách ngữ cảnh. Chi phí/token chưa báo cáo vẫn chưa rõ; ước tính không phải hóa đơn API. Quan sát production không phải kết luận nhân quả.",
     "an.eval.handoffRuntimeTitle": "Hiệu quả bàn giao và thời gian thực thi",
     "an.eval.humanInterventions": "Can thiệp con người",
     "an.eval.immutableSnapshot": "Bản chụp bằng chứng bất biến",
@@ -3292,8 +3346,10 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.median": "Trung vị",
     "an.eval.medianCompletionTime": "Thời gian hoàn tất trung vị",
     "an.eval.noMeasuredCoords": "Chưa có số đo đủ độ đầy đủ",
-    "an.eval.optInFutureCoding": "Áp dụng cho bước lập trình chưa cấu hình trong tương lai. Không đổi workflow đang chạy.",
-    "an.eval.pairedValueHint": "Giữ nguyên nhiệm vụ, fixture, chuỗi provider/model và ngân sách. Fixture chỉ kiểm tra bộ đo. Bằng chứng thật cần lượt lặp hoàn tất trước khi kết luận lợi ích đo được.",
+    "an.eval.optInFutureCoding":
+      "Áp dụng cho bước lập trình chưa cấu hình trong tương lai. Không đổi workflow đang chạy.",
+    "an.eval.pairedValueHint":
+      "Giữ nguyên nhiệm vụ, fixture, chuỗi provider/model và ngân sách. Fixture chỉ kiểm tra bộ đo. Bằng chứng thật cần lượt lặp hoàn tất trước khi kết luận lợi ích đo được.",
     "an.eval.pairedValueTitle": "Đánh giá giá trị ngữ cảnh theo cặp",
     "an.eval.plannedSwitches": "Chuyển theo kế hoạch",
     "an.eval.prodObservations": "Quan sát production — tách biệt, không nhân quả",
@@ -3305,7 +3361,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.qualityVsLatencyAria": "Chất lượng đã xác minh theo độ trễ",
     "an.eval.queueHumanTool": "Hàng đợi / con người / công cụ",
     "an.eval.recommended": "Khuyến nghị",
-    "an.eval.recordAdminApproval": "Ghi nhận phê duyệt quản trị; không bỏ qua yêu cầu sandbox hoặc ngân sách.",
+    "an.eval.recordAdminApproval":
+      "Ghi nhận phê duyệt quản trị; không bỏ qua yêu cầu sandbox hoặc ngân sách.",
     "an.eval.recoveryHandoffs": "Bàn giao phục hồi",
     "an.eval.regressionFailures": "Lỗi hồi quy",
     "an.eval.reportedCostPerSuccess": "Chi phí báo cáo mỗi thành công đã xác minh",
@@ -3324,11 +3381,14 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.taskDifficultyTitle": "Độ khó nhiệm vụ và chất lượng khách quan",
     "an.eval.taskRepetition": "Nhiệm vụ / lần lặp",
     "an.eval.toolsRetries": "Công cụ / thử lại",
-    "an.eval.unnecessaryModHint": "Thay đổi không cần thiết chưa rõ nếu thiếu bộ xác minh có nhãn. Kiểm tra cấu trúc SQL/proto không phải biên dịch ngữ nghĩa.",
+    "an.eval.unnecessaryModHint":
+      "Thay đổi không cần thiết chưa rõ nếu thiếu bộ xác minh có nhãn. Kiểm tra cấu trúc SQL/proto không phải biên dịch ngữ nghĩa.",
     "an.eval.verificationArtifact": "Tài liệu xác minh",
     "an.eval.verifiedCoverage": "Độ phủ xác minh",
-    "handoff.cliReady": "CLI đã sẵn sàng. Chưa biết hạn mức còn lại và chi phí; trạng thái sẵn sàng không bảo đảm yêu cầu sẽ thành công.",
-    "handoff.confirmCheckbox": "Tôi đã xem checkpoint và thay đổi được giữ lại, đồng ý tiếp tục với agent này, bao gồm chi phí/sử dụng chưa được báo cáo.",
+    "handoff.cliReady":
+      "CLI đã sẵn sàng. Chưa biết hạn mức còn lại và chi phí; trạng thái sẵn sàng không bảo đảm yêu cầu sẽ thành công.",
+    "handoff.confirmCheckbox":
+      "Tôi đã xem checkpoint và thay đổi được giữ lại, đồng ý tiếp tục với agent này, bao gồm chi phí/sử dụng chưa được báo cáo.",
     "handoff.historyTimeline": "Lịch sử bàn giao và dòng thời gian agent",
     "handoff.holdLoading": "Nút tắt trong lúc đang kiểm tra agent nào chạy được.",
     "handoff.holdNotReady": "Nút tắt cho đến khi checkpoint ở trạng thái READY.",
@@ -3338,16 +3398,23 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "hop.decisionsAndPending": "Quyết định và công việc chưa hoàn tất",
     "hop.detailedReferences": "Tham chiếu checkpoint chi tiết",
     "hop.noTrackedChanges": "Không có thay đổi được theo dõi",
-    "hop.noWorktree": "Chưa có worktree được ghi nhận. Ngữ cảnh và tham chiếu nhiệm vụ được giữ lại.",
-    "hop.progressHistorical": "Tiến độ là bằng chứng lịch sử. Agent báo hoàn tất không đồng nghĩa đã xác minh; lần thử tiếp theo phải kiểm tra tiêu chí chấp nhận còn lại.",
-    "hop.scratchOmitted": "{count} file cache .repair-tmp chưa theo dõi vẫn nằm trên đĩa và không được đưa vào checkpoint. Agent tiếp theo vẫn thấy chúng. Đó không phải phần thay đổi được bàn giao.",
+    "hop.noWorktree":
+      "Chưa có worktree được ghi nhận. Ngữ cảnh và tham chiếu nhiệm vụ được giữ lại.",
+    "hop.progressHistorical":
+      "Tiến độ là bằng chứng lịch sử. Agent báo hoàn tất không đồng nghĩa đã xác minh; lần thử tiếp theo phải kiểm tra tiêu chí chấp nhận còn lại.",
+    "hop.scratchOmitted":
+      "{count} file cache .repair-tmp chưa theo dõi vẫn nằm trên đĩa và không được đưa vào checkpoint. Agent tiếp theo vẫn thấy chúng. Đó không phải phần thay đổi được bàn giao.",
     "saf.allowBudgetFailure": "Cho phép tự động tiếp tục sau lỗi ngân sách/thanh toán",
     "saf.allowUnknownCost": "Cho phép tự động tiếp tục khi chưa rõ chi phí",
     "saf.skipUnhealthy": "Bỏ agent mất kết nối hoặc hết hạn mức và dùng agent khỏe kế tiếp",
-    "saf.toolsCursorHint": "Cursor chưa hỗ trợ danh sách công cụ tùy chỉnh; áp dụng quyền nền tảng hiện có.",
-    "saf.toolsDefaultHint": "Phân cách dấu phẩy: Read, Bash, platform.search_code, integration:name. Để trống dùng quyền cơ sở. Luôn có công cụ hoàn tất và yêu cầu làm rõ.",
-    "saf.verifyCommandHint": "Lệnh của workflow đáng tin cậy; để trống dùng chính sách xác minh hiện có.",
-    "sao.desc": "Thay đổi áp dụng cho lần thử tiếp theo. Các lần thử trước giữ nguyên provider và model. Thử lại hoặc tiếp tục bước bằng thao tác riêng.",
+    "saf.toolsCursorHint":
+      "Cursor chưa hỗ trợ danh sách công cụ tùy chỉnh; áp dụng quyền nền tảng hiện có.",
+    "saf.toolsDefaultHint":
+      "Phân cách dấu phẩy: Read, Bash, platform.search_code, integration:name. Để trống dùng quyền cơ sở. Luôn có công cụ hoàn tất và yêu cầu làm rõ.",
+    "saf.verifyCommandHint":
+      "Lệnh của workflow đáng tin cậy; để trống dùng chính sách xác minh hiện có.",
+    "sao.desc":
+      "Thay đổi áp dụng cho lần thử tiếp theo. Các lần thử trước giữ nguyên provider và model. Thử lại hoặc tiếp tục bước bằng thao tác riêng.",
   },
   en: {
     "common.ago": "{when} ago",
@@ -3555,7 +3622,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
       "At the budget: the run pauses before its next attempt or turn until you resume (platform soft pause; no provider-enforced cap). Warning from {pct}%.",
     "cost.policyWarn":
       "At the budget: warning only, the run continues (COST_BUDGET_ACTION=warn). Warning from {pct}%.",
-    "cost.policyAcknowledged": "You resumed past this budget, so the run is not paused again for it.",
+    "cost.policyAcknowledged":
+      "You resumed past this budget, so the run is not paused again for it.",
     "cost.budgetPlaceholder": "USD, e.g. 5",
     "cost.setBudget": "Set budget",
     "cost.clearBudget": "Clear",
@@ -3683,7 +3751,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "iso.analysis": "Analysis",
     "iso.checked": "Checked {at}",
     "cs.title": "Agent code assessment",
-    "cs.intro": "An agent reads and evaluates the repository's code (from code indexes, tests, lint, Knowledge and production errors) and reports only evidence-backed issues, or concludes no changes are needed. Press Fix to hand one issue to the fix workflow: a proposal with its blast radius, your approval, then the fix with a before/after test and an independent review.",
+    "cs.intro":
+      "An agent reads and evaluates the repository's code (from code indexes, tests, lint, Knowledge and production errors) and lists the evidence-backed issues with their severity. The assessment changes nothing. Choose an issue and press Fix: the agent re-checks exactly that issue, proposes a change with its blast radius, you approve it, then it is fixed with a before/after test and an independent review.",
+    "cs.project": "Project",
+    "cs.pickProject": "Choose a project",
+    "cs.allRepos": "All {n} repositories in the project",
+    "cs.progressTitle": "Agent is assessing the code",
+    "cs.activity": "{reads} files read · {commands} commands",
+    "cs.phase.prepare": "Prepare repositories and context",
+    "cs.phase.assess": "Agent reads and evaluates the code",
+    "cs.phase.report": "Summarize the results",
     "cs.repo": "Repository",
     "cs.pickRepo": "Choose a repository",
     "cs.focus": "Focus (optional)",
@@ -3694,6 +3771,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.empty": "No assessments yet",
     "cs.emptyBody": "Choose a repository and press Assess code.",
     "cs.scanning": "Agent is assessing…",
+    "cs.waitingInput": "The agent needs your answer",
     "cs.failed": "Assessment failed",
     "cs.noChanges": "No changes needed",
     "cs.sev.high": "High",
@@ -3705,11 +3783,14 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.kind.MAINTAINABILITY": "Maintainability",
     "cs.fix": "Fix",
     "cs.fixTitle": "Fix this issue?",
-    "cs.fixBody": "Starts a run focused on: {issue}. Nothing changes before you approve the proposal.",
+    "cs.fixBody":
+      "Starts a run focused on: {issue}. Nothing changes before you approve the proposal.",
     "cs.fixFocus": "Fix finding",
     "cs.approve": "Approve the fix proposal",
     "cs.prReady": "PR awaiting approval",
     "cs.inRun": "In progress",
+    "cs.fixDone": "Fixed",
+    "cs.fixFailed": "Fix did not finish",
     "cs.notFixable": "Report only: {why}",
     "cs.reportOnly": "Report only: no test can demonstrate it, so it is not fixed automatically",
     "in.queue": "Intake queue",
@@ -3720,7 +3801,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "in.staleRevision": "source changed while running",
     "in.retriage": "Re-triage",
     "in.policies": "Automatic intake",
-    "in.hint": "Import-only by default. SHADOW: triage and record decisions, start nothing. AUTOPILOT: may start workflows within the caps; production incidents get read-only investigation only; unattended coding needs autonomy AUTOPILOT and the sandbox.",
+    "in.hint":
+      "Import-only by default. SHADOW: triage and record decisions, start nothing. AUTOPILOT: may start workflows within the caps; production incidents get read-only investigation only; unattended coding needs autonomy AUTOPILOT and the sandbox.",
     "in.noPolicy": "No policy: every source is import-only",
     "in.paused": "paused",
     "in.pause": "Pause",
@@ -3763,7 +3845,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "in.modeHint.SHADOW": "Triage and record what would start; start nothing.",
     "in.modeHint.AUTOPILOT": "May start workflows within the configured limits.",
     "in.autopilotTitle": "Enable AUTOPILOT?",
-    "in.autopilotBody": "{source} will start workflows within the policy limits without anyone pressing a button. Production incidents still get read-only investigation only.",
+    "in.autopilotBody":
+      "{source} will start workflows within the policy limits without anyone pressing a button. Production incidents still get read-only investigation only.",
     "in.autopilotConfirm": "Enable AUTOPILOT",
     "dl.title": "PR delivery",
     "dl.agg.READY": "ready for your merge",
@@ -3780,7 +3863,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "dl.pause": "Pause automation",
     "dl.resume": "Resume automation",
     "ln.title": "Outcome learning",
-    "ln.hint": "Outcome observations (append-only, with provenance) and the non-authoritative lessons drawn from them. A merge is human acceptance, not proof of correctness. Routing advice is shadow only.",
+    "ln.hint":
+      "Outcome observations (append-only, with provenance) and the non-authoritative lessons drawn from them. A merge is human acceptance, not proof of correctness. Routing advice is shadow only.",
     "ln.observations": "Outcome observations",
     "ln.lessons": "Lessons by purpose and status",
     "ln.topNegative": "Most recurring failed approaches",
@@ -3790,7 +3874,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ln.corroborated": "{n} corroborated",
     "ln.keepDefault": "keep default",
     "ae.title": "Autonomy (real records)",
-    "ae.hint": "Derived from canonical records (runs, approvals, questions, outcome observations), never from notifications. One work item is one episode across every re-run. Production has no oracle: unknown outcomes stay empty.",
+    "ae.hint":
+      "Derived from canonical records (runs, approvals, questions, outcome observations), never from notifications. One work item is one episode across every re-run. Production has no oracle: unknown outcomes stay empty.",
     "ae.window": "Window",
     "ae.days": "{n} days",
     "ae.empty": "No episode in this window",
@@ -3840,7 +3925,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "au.why": "The platform does not approve this step itself:",
     "au.required": "Evidence needed: {list}",
     "au.policies": "Autonomy policies",
-    "au.policiesHint": "MANUAL by default. A new policy starts in shadow; a run gets the narrowest of the global, user and repository policies.",
+    "au.policiesHint":
+      "MANUAL by default. A new policy starts in shadow; a run gets the narrowest of the global, user and repository policies.",
     "au.empty": "No policy: every run is MANUAL",
     "au.scope": "Scope",
     "au.scopeRef": "User id / repository",
@@ -4286,7 +4372,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.gl.instance": "GitLab instance",
     "repo.gl.instanceHint":
       "The base URL comes from the repository URL host; only configured instances",
-    "repo.gl.instanceNotAllowed": "{host} is not an allowed GitLab instance — an admin can add it on Integrations → GitLab",
+    "repo.gl.instanceNotAllowed":
+      "{host} is not an allowed GitLab instance — an admin can add it on Integrations → GitLab",
     "repo.gl.noToken": "no token",
     "repo.gl.deleteSource": "Delete source branch on merge",
     "repo.gl.deleteSourceHint": "Applies only when a person merges the MR through the platform",
@@ -4534,7 +4621,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "rv.waitingYou": "Waiting for you:",
     "rv.childOf": "Child workflow of",
     "graph.waitingChildren": "Waiting for child workflows",
-    "graph.childWorkflows": "{total} child workflows: {done} done, {active} active, {failed} failed/canceled",
+    "graph.childWorkflows":
+      "{total} child workflows: {done} done, {active} active, {failed} failed/canceled",
     "child.lane": "Child workflows ({n})",
     "child.progress": "{done}/{total} steps",
     "child.queued": "Queued",
@@ -4542,11 +4630,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "child.start": "Start",
     "child.started": "Child workflow started",
     "child.startTitle": "Start the child workflow?",
-    "child.startBody": "Proposed workflow: {workflow} — \"{title}\". It runs as an ordinary run, with its own approval gates and review.",
+    "child.startBody":
+      'Proposed workflow: {workflow} — "{title}". It runs as an ordinary run, with its own approval gates and review.',
     "child.cancel": "Cancel",
     "child.canceled": "Child workflow canceled",
     "child.cancelTitle": "Cancel the child workflow?",
-    "child.cancelBody": "Cancel \"{title}\". If the parent step is waiting for it (blocking), that step will fail.",
+    "child.cancelBody":
+      'Cancel "{title}". If the parent step is waiting for it (blocking), that step will fail.',
     "child.needsApproval": "Needs approval: {step}",
     "child.grandchildren": "Has {n} child workflows of its own",
     "child.fromStep": "Started by step {step}",
@@ -4710,9 +4800,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "common.created": "Created",
     "common.loading": "Loading…",
     "page.failed.title": "This page failed to render",
-    "page.failed.body": "The error was logged in the browser console. Reload the page to try again.",
+    "page.failed.body":
+      "The error was logged in the browser console. Reload the page to try again.",
     "page.failed.staleTitle": "The UI was just updated",
-    "page.failed.staleBody": "This tab still runs the previous version and could not load the page. Reload to use the new one.",
+    "page.failed.staleBody":
+      "This tab still runs the previous version and could not load the page. Reload to use the new one.",
     "page.failed.reload": "Reload page",
     "wfe.cycle": "Connecting {from} → {to} would create a cycle",
     "wfe.keyChars": "A key may only use a-z, 0-9, _ and -",
@@ -4992,7 +5084,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ins.slopCache": "Cache hit rate",
     "ins.slopTokens": "LLM tokens",
     "ins.slopNone": "No slop scans yet",
-    "ins.slopNoneBody": "Results appear after a coding step runs verification with slop detection enabled.",
+    "ins.slopNoneBody":
+      "Results appear after a coding step runs verification with slop detection enabled.",
     "chg.slop": "Slop detection",
     "chg.slopNone": "No findings",
     "chg.slopUnsupported": "Unsupported rules",
@@ -5000,7 +5093,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "chg.slopSkipped": "Skipped files",
     "chg.slopBlocking": "blocking",
     "si.slop": "Slop",
-    "si.slopLine": "{mode} · {status} · new {new}, worsened {worsened}, existing {existing}, resolved {resolved} · blocking {blocking} · {ms} ms",
+    "si.slopLine":
+      "{mode} · {status} · new {new}, worsened {worsened}, existing {existing}, resolved {resolved} · blocking {blocking} · {ms} ms",
     "ins.repeatedSub": "A failure signature that appeared more than once",
     "ins.noneRepeated": "No repeated failures",
     "ins.noneRepeatedBody": "No failure signature repeated in this time range.",
@@ -5066,12 +5160,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.kafka.cleared": "Cookie removed",
     "ig.splunk.summaryOff": "Production logs (SIEM)",
     "ig.signoz.summaryOff": "not connected",
-    "ig.signoz.body": "Agents read production logs, traces and metrics through the SigNoz v5 Query API with your own API key (read-only). The key is encrypted and never sent back to the browser, prompts or logs.",
-    "ig.signoz.s1": "In SigNoz: Settings → Service Accounts → New Service Account, assign a read-only role (e.g. signoz-viewer).",
+    "ig.signoz.body":
+      "Agents read production logs, traces and metrics through the SigNoz v5 Query API with your own API key (read-only). The key is encrypted and never sent back to the browser, prompts or logs.",
+    "ig.signoz.s1":
+      "In SigNoz: Settings → Service Accounts → New Service Account, assign a read-only role (e.g. signoz-viewer).",
     "ig.signoz.s2": "Keys tab → Add Key, copy the key (shown only once).",
-    "ig.signoz.s3": "Enter your SigNoz domain (Cloud or self-hosted) and the key below, then enable.",
+    "ig.signoz.s3":
+      "Enter your SigNoz domain (Cloud or self-hosted) and the key below, then enable.",
     "ig.signoz.domain": "SigNoz domain",
-    "ig.signoz.domainHint": "https only. Internal hosts (self-hosted on a private network) must be approved by an admin in Settings.",
+    "ig.signoz.domainHint":
+      "https only. Internal hosts (self-hosted on a private network) must be approved by an admin in Settings.",
     "ig.signoz.token": "API key",
     "ig.signoz.tokenKeep": "Leave empty to keep the stored key.",
     "ig.signoz.auth": "Authentication",
@@ -5251,13 +5349,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "ig.gl.body":
       "Personal or project access token per GitLab instance. Minimum scopes: api (merge requests, comments, merge), or read_api + read_repository + write_repository for read and push only. Developer role to push and open MRs. The token is not a platform grant; an admin still grants each repository.",
     "ig.gl.instance": "Instance",
-    "ig.gl.instanceHint": "Only repositories on the instances in this list can be registered and receive tokens.",
+    "ig.gl.instanceHint":
+      "Only repositories on the instances in this list can be registered and receive tokens.",
     "ig.gl.instanceAdd": "Add instance (admin)",
-    "ig.gl.instanceAddHint": "Paste a host or URL, e.g. http://gitlab.hasaki.work/ → gitlab.hasaki.work. Git and the API always use HTTPS.",
+    "ig.gl.instanceAddHint":
+      "Paste a host or URL, e.g. http://gitlab.hasaki.work/ → gitlab.hasaki.work. Git and the API always use HTTPS.",
     "ig.gl.instanceAddButton": "Add",
     "ig.gl.instanceAdded": "Instance added",
     "ig.gl.instanceRemove": "Remove this instance from the list",
-    "ig.gl.instanceRemoveConfirm": "Remove {host} from the GitLab instances? Repositories on this host stop working until it is added again.",
+    "ig.gl.instanceRemoveConfirm":
+      "Remove {host} from the GitLab instances? Repositories on this host stop working until it is added again.",
     "ig.gl.token": "Token",
     "ig.gl.saved": "GitLab saved",
     "ig.gl.test": "Test connection",
@@ -6282,7 +6383,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "chat.usage": "Cost {cost} · tokens {tokens}",
     "chat.send": "Send",
     "ig.bg.title": "Background Git sync",
-    "ig.bg.explain": "When on, background work nobody started in person (code indexing, workspace sync) uses the Git accounts you connected above, only for repositories you can read. Your tokens stay with your account; turning it off stops it at the next job.",
+    "ig.bg.explain":
+      "When on, background work nobody started in person (code indexing, workspace sync) uses the Git accounts you connected above, only for repositories you can read. Your tokens stay with your account; turning it off stops it at the next job.",
     "ig.bg.allow": "Allow background work to use my Git accounts",
     "ig.bg.saved": "Saved",
     "ig.bg.offSummary": "Off — background work has no Git account",
@@ -6293,7 +6395,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "repo.ci.state.failed": "Failed",
     "repo.ci.state.canceled": "Canceled",
     "repo.ws.title": "Platform workspace",
-    "repo.ws.explain": "The platform's own checkouts on this instance (never your working copies). Sync clones or fetches with your Git account, then indexes.",
+    "repo.ws.explain":
+      "The platform's own checkouts on this instance (never your working copies). Sync clones or fetches with your Git account, then indexes.",
     "repo.ws.enableBackground": "Enable background sync",
     "repo.ws.repo": "Repository",
     "repo.ws.checkout": "Checkout",
@@ -6364,7 +6467,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "chat.op.status.expired": "expired",
     "chat.op.status.duplicate": "duplicate, not repeated",
     "chat.memory": "Memory",
-    "chat.memory.hint": "What the agent remembers from your chats (only you see it). Business rules are sent as knowledge proposals for review.",
+    "chat.memory.hint":
+      "What the agent remembers from your chats (only you see it). Business rules are sent as knowledge proposals for review.",
     "chat.memory.empty": "Nothing yet.",
     "chat.memory.disable": "Disable",
     "chat.memory.enable": "Enable",
@@ -6416,7 +6520,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.exactCategory": "Exact labeled category",
     "an.eval.execution": "Execution",
     "an.eval.experiments": "Controlled provider experiments",
-    "an.eval.experimentsHint": "Launch live benchmarks or A/B experiments to compare providers and context strategies.",
+    "an.eval.experimentsHint":
+      "Launch live benchmarks or A/B experiments to compare providers and context strategies.",
     "an.eval.fixtureControls": "Fixture controls",
     "an.eval.generate": "Generate recommendation",
     "an.eval.improvementsRegressions": "Quality improvements / regressions",
@@ -6426,7 +6531,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.noEvidence": "No matching evidence",
     "an.eval.packTools": "Pack + tools",
     "an.eval.pairedStudy": "Context-paired study",
-    "an.eval.pairedStudyHint": "Direct comparisons across controlled evaluations to measure context pack value.",
+    "an.eval.pairedStudyHint":
+      "Direct comparisons across controlled evaluations to measure context pack value.",
     "an.eval.pairedTasks": "Paired tasks",
     "an.eval.providerRoute": "Provider route",
     "an.eval.providerSequence": "Provider sequence",
@@ -6437,7 +6543,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.rationale": "Rationale",
     "an.eval.recCategoryAria": "Recommendation task category",
     "an.eval.recommendations": "Evidence-backed recommendations",
-    "an.eval.recommendationsHint": "Controlled, completed live benchmarks only; fixture controls and production observations never establish model superiority.",
+    "an.eval.recommendationsHint":
+      "Controlled, completed live benchmarks only; fixture controls and production observations never establish model superiority.",
     "an.eval.repetitions": "Repetitions",
     "an.eval.reported": "Reported: ",
     "an.eval.reportedCostCoverage": "Reported cost / coverage",
@@ -6475,14 +6582,16 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "bench.compareResults": "Compare paired results",
     "bench.disabledLocally": "Disabled locally: evaluation.enabled",
     "bench.evalDetail": "Evaluation #{id} · {status}",
-    "bench.lead": "Hard gates precede quality scores. Token usage is unknown unless a real provider reports it. Fixture controls do not measure model quality.",
+    "bench.lead":
+      "Hard gates precede quality scores. Token usage is unknown unless a real provider reports it. Fixture controls do not measure model quality.",
     "bench.openWorkflow": "Open existing workflow / questions / artifacts",
     "bench.pinnedCommit": "Pinned commit: {commit}",
     "bench.publishBundled": "Publish bundled suite (admin)",
     "bench.repetitions": "Repetitions",
     "bench.runSafe": "Run safe fixtures",
     "bench.subtitle": "Synthetic fixtures · no live model execution",
-    "bench.summaryLine": "Success {successes}/{graded} · Median {median} ms · p95 {p95} ms · Cost per success ${cost}",
+    "bench.summaryLine":
+      "Success {successes}/{graded} · Median {median} ms · p95 {p95} ms · Cost per success ${cost}",
     "bench.title": "Versioned benchmark evaluations",
     "bench.toast.canceled": "Evaluation canceled",
     "bench.toast.compared": "Comparison loaded",
@@ -6495,7 +6604,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "graph.parallelSubtask": "parallel subtask",
     "graph.subtaskOf": "subtask of {parent}",
     "handoff.accountDefault": "Account default",
-    "handoff.blockedDetail": "Cursor and the other agents stay unavailable until this checkpoint is ready. Reinspect after the workspace issue below is resolved, then choose the agent and confirm.",
+    "handoff.blockedDetail":
+      "Cursor and the other agents stay unavailable until this checkpoint is ready. Reinspect after the workspace issue below is resolved, then choose the agent and confirm.",
     "handoff.checkingAgents": "Checking agents…",
     "handoff.checkingProvider": "Checking provider availability…",
     "handoff.confirmResume": "Confirm resume",
@@ -6505,7 +6615,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "handoff.retryCheck": "Retry availability check",
     "handoff.reviewCheckpointHint": "Tick the checkpoint review box to enable Confirm resume.",
     "handoff.reviewedCheckpoint": "Reviewed preserved checkpoint and files",
-    "handoff.stopping": "Cancellation requested. Waiting for executor termination and stable Git inspection. No continuation can start yet.",
+    "handoff.stopping":
+      "Cancellation requested. Waiting for executor termination and stable Git inspection. No continuation can start yet.",
     "handoff.switchBtn": "Switch Agent",
     "handoff.targetModel": "Target model",
     "handoff.targetProvider": "Target provider",
@@ -6526,9 +6637,11 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "hop.rounds": "Rounds",
     "hop.sourceAttempt": "Source attempt",
     "ig.cli.available": "Available on this worker",
-    "ig.cli.copilotHint": "Authenticate with {cmd} on the assigned worker. The platform does not fall back to another account.",
+    "ig.cli.copilotHint":
+      "Authenticate with {cmd} on the assigned worker. The platform does not fall back to another account.",
     "ig.cli.none": "No agent CLI accounts configured",
-    "ig.cli.lead": "Agent CLIs use the account authenticated on the assigned worker. Credentials stay with the CLI; configuration in Settings never changes the account. Authenticate on that worker, then refresh status.",
+    "ig.cli.lead":
+      "Agent CLIs use the account authenticated on the assigned worker. Credentials stay with the CLI; configuration in Settings never changes the account. Authenticate on that worker, then refresh status.",
     "ig.cli.title": "Agent CLI accounts",
     "ig.cli.unavailable": "Unavailable on this worker",
     "kn.audit.lead": "Read-only checks. Private findings appear only as aggregate counts.",
@@ -6569,7 +6682,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "sao.save": "Save override",
     "sao.title": "Agent settings for the next attempt",
     "set.agentConfiguration": "Provider configuration",
-    "set.agentSubtitle": "Saved values apply to new runs. Active runs retain their configuration snapshot. Manage account authentication in {link}.",
+    "set.agentSubtitle":
+      "Saved values apply to new runs. Active runs retain their configuration snapshot. Manage account authentication in {link}.",
     "set.cliDefaultOnly": "CLI default only",
     "set.customLabel": "Custom: {value}",
     "set.effortUnavailable": "{effort} (saved; unavailable for this model)",
@@ -6583,10 +6697,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "set.flagUnsaved": "Unsaved",
     "set.inheritUnsupported": "Inherit (unsupported)",
     "set.modelDiscovery": "Model discovery:",
-    "set.modelRoutingLead": "Empty fields inherit from the next configuration level (Profile → Any Profile → Provider Default → Account/CLI Default). Hover any row or pill to inspect resolved sources.",
-    "set.modelUnsupported": "Model selection is unsupported by this CLI. Saved model {model} is retained.",
+    "set.modelRoutingLead":
+      "Empty fields inherit from the next configuration level (Profile → Any Profile → Provider Default → Account/CLI Default). Hover any row or pill to inspect resolved sources.",
+    "set.modelUnsupported":
+      "Model selection is unsupported by this CLI. Saved model {model} is retained.",
     "set.providerDefaults": "Provider defaults",
-    "set.providerDefaultsHint": "Base configuration when a profile or step does not specify an override.",
+    "set.providerDefaultsHint":
+      "Base configuration when a profile or step does not specify an override.",
     "set.reset": "Reset",
     "set.resetInherit": "Reset to Inherit",
     "set.resetRoleInherit": "Reset role to Inherit",
@@ -6605,7 +6722,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "set.inheritingAll": "inheriting all settings",
     "set.overridesCount": "{n} override(s) configured",
     "set.unsupportedByCli": "Unsupported by CLI (saved: {model})",
-    "set.modelDiscoveryHint": "{count} model(s) discovered from the local CLI. Saved selections remain available when discovery fails.",
+    "set.modelDiscoveryHint":
+      "{count} model(s) discovered from the local CLI. Saved selections remain available when discovery fails.",
     "set.comboNextLevel": "Next configuration level",
     "set.comboExternalDefault": "External CLI default",
     "set.comboCustomWarn": "Custom model (not in current catalog); validated at execution.",
@@ -6622,7 +6740,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.confidence": "Confidence",
     "an.eval.configuredModelLabel": "configured model",
     "an.eval.contextEffectiveness": "Context effectiveness (A/B/C)",
-    "an.eval.contextEffectivenessHint": "Descriptive measured cohorts only. Use the paired comparison runner before concluding measurable benefit. Retrieval accuracy is unknown without labeled retrieved evidence.",
+    "an.eval.contextEffectivenessHint":
+      "Descriptive measured cohorts only. Use the paired comparison runner before concluding measurable benefit. Retrieval accuracy is unknown without labeled retrieved evidence.",
     "an.eval.costAvailability": "Cost availability",
     "an.eval.costCoverage": "Cost / coverage",
     "an.eval.disable": "Disable",
@@ -6633,21 +6752,26 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.evidenceResult": "Evidence / result",
     "an.eval.existingRunnerBtn": "Existing benchmark runner & paired comparisons",
     "an.eval.failureDist": "Failure distribution",
-    "an.eval.fixtureControlsNotice": "Fixture controls exercise the workflow and validators, not model quality. Live calls remain blocked on workers without verified budget/isolation support.",
-    "an.eval.fixtureControlsRankingNotice": "Fixture controls are not model rankings. Compare only the same cohort, category and context policy. Unknown usage/cost stays unknown; estimates are not API bills. Production observations are not causal benchmark conclusions.",
+    "an.eval.fixtureControlsNotice":
+      "Fixture controls exercise the workflow and validators, not model quality. Live calls remain blocked on workers without verified budget/isolation support.",
+    "an.eval.fixtureControlsRankingNotice":
+      "Fixture controls are not model rankings. Compare only the same cohort, category and context policy. Unknown usage/cost stays unknown; estimates are not API bills. Production observations are not causal benchmark conclusions.",
     "an.eval.handoffRuntimeTitle": "Handoff and runtime effectiveness",
     "an.eval.humanInterventions": "Human interventions",
     "an.eval.immutableSnapshot": "Immutable evidence snapshot",
     "an.eval.inspect": "Inspect",
-    "an.eval.insufficientEvidence": "Insufficient evidence. Create a snapshot to inspect the supporting samples.",
+    "an.eval.insufficientEvidence":
+      "Insufficient evidence. Create a snapshot to inspect the supporting samples.",
     "an.eval.insufficientOrUnavailable": "Insufficient evidence / unavailable",
     "an.eval.invalidChangesSecurity": "Invalid changes / security",
     "an.eval.liveCapabilityCheck": "Live capability check (may be blocked)",
     "an.eval.median": "Median",
     "an.eval.medianCompletionTime": "Median completion time",
     "an.eval.noMeasuredCoords": "No measured coordinates with sufficient coverage",
-    "an.eval.optInFutureCoding": "Opt in for future unconfigured coding steps only. Running workflows are unchanged.",
-    "an.eval.pairedValueHint": "Hold task, fixture, provider/model route and budgets fixed. Fixture results test the harness only. Live evidence needs repeated, completed trials before measurable benefit can be concluded.",
+    "an.eval.optInFutureCoding":
+      "Opt in for future unconfigured coding steps only. Running workflows are unchanged.",
+    "an.eval.pairedValueHint":
+      "Hold task, fixture, provider/model route and budgets fixed. Fixture results test the harness only. Live evidence needs repeated, completed trials before measurable benefit can be concluded.",
     "an.eval.pairedValueTitle": "Paired context value assessment",
     "an.eval.plannedSwitches": "Planned switches",
     "an.eval.prodObservations": "Production observations — separate, non-causal",
@@ -6659,7 +6783,8 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.qualityVsLatencyAria": "Verified quality versus latency",
     "an.eval.queueHumanTool": "Queue / human / tool",
     "an.eval.recommended": "Recommended",
-    "an.eval.recordAdminApproval": "Record administrator approval; this does not bypass sandbox or budget requirements.",
+    "an.eval.recordAdminApproval":
+      "Record administrator approval; this does not bypass sandbox or budget requirements.",
     "an.eval.recoveryHandoffs": "Recovery handoffs",
     "an.eval.regressionFailures": "Regression failures",
     "an.eval.reportedCostPerSuccess": "Reported cost per verified success",
@@ -6678,11 +6803,14 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "an.eval.taskDifficultyTitle": "Task difficulty and objective quality",
     "an.eval.taskRepetition": "Task / repetition",
     "an.eval.toolsRetries": "Tools / retries",
-    "an.eval.unnecessaryModHint": "Unnecessary modifications remain unknown without a labeled necessity oracle. Structural SQL/proto checks are not semantic compilation.",
+    "an.eval.unnecessaryModHint":
+      "Unnecessary modifications remain unknown without a labeled necessity oracle. Structural SQL/proto checks are not semantic compilation.",
     "an.eval.verificationArtifact": "Verification artifact",
     "an.eval.verifiedCoverage": "Verified coverage",
-    "handoff.cliReady": "CLI readiness confirmed. Remaining quota and billing are unknown; readiness does not guarantee a successful request.",
-    "handoff.confirmCheckbox": "I reviewed the checkpoint and preserved changes, and authorize continuation with this provider, including unreported usage/cost.",
+    "handoff.cliReady":
+      "CLI readiness confirmed. Remaining quota and billing are unknown; readiness does not guarantee a successful request.",
+    "handoff.confirmCheckbox":
+      "I reviewed the checkpoint and preserved changes, and authorize continuation with this provider, including unreported usage/cost.",
     "handoff.historyTimeline": "Handoff history & provider timeline",
     "handoff.holdLoading": "The button stays off while agent availability is still loading.",
     "handoff.holdNotReady": "The button stays off until the checkpoint status is READY.",
@@ -6693,14 +6821,21 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "hop.detailedReferences": "Detailed checkpoint references",
     "hop.noTrackedChanges": "No tracked changes",
     "hop.noWorktree": "No worktree had been registered. Context and task references are preserved.",
-    "hop.progressHistorical": "Progress is historical evidence. Agent completion does not establish verification; the next attempt must check the remaining acceptance criteria.",
-    "hop.scratchOmitted": "{count} untracked .repair-tmp cache files were left on disk and left out of this checkpoint. The next agent still sees them. They are not the change being handed off.",
+    "hop.progressHistorical":
+      "Progress is historical evidence. Agent completion does not establish verification; the next attempt must check the remaining acceptance criteria.",
+    "hop.scratchOmitted":
+      "{count} untracked .repair-tmp cache files were left on disk and left out of this checkpoint. The next agent still sees them. They are not the change being handed off.",
     "saf.allowBudgetFailure": "Allow automatic continuation after a budget/billing failure",
     "saf.allowUnknownCost": "Allow automatic continuation when cost is unknown",
-    "saf.skipUnhealthy": "Skip an agent that is disconnected or out of quota and use the next healthy one",
-    "saf.toolsCursorHint": "Cursor cannot enforce custom native allowlists; platform baseline applies.",
-    "saf.toolsDefaultHint": "Comma separated: Read, Bash, platform.search_code, integration:name. Empty inherits baseline. Completion and clarification controls remain available.",
-    "saf.verifyCommandHint": "Trusted workflow command; empty uses the existing verification policy.",
-    "sao.desc": "Saved changes apply to the next attempt. Previous attempts retain their original provider and model. Retry or continue the step separately.",
+    "saf.skipUnhealthy":
+      "Skip an agent that is disconnected or out of quota and use the next healthy one",
+    "saf.toolsCursorHint":
+      "Cursor cannot enforce custom native allowlists; platform baseline applies.",
+    "saf.toolsDefaultHint":
+      "Comma separated: Read, Bash, platform.search_code, integration:name. Empty inherits baseline. Completion and clarification controls remain available.",
+    "saf.verifyCommandHint":
+      "Trusted workflow command; empty uses the existing verification policy.",
+    "sao.desc":
+      "Saved changes apply to the next attempt. Previous attempts retain their original provider and model. Retry or continue the step separately.",
   },
 };

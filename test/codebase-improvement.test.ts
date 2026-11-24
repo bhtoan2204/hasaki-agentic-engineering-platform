@@ -153,3 +153,24 @@ test("codebase-improvement: valid graph, everything after the assessment is cond
   assert.deepEqual(step("proof").config.block_on, ["FAILED", "INCONCLUSIVE", "PARTIAL"]);
   assert.equal(step("pr").config.mode, "approval");
 });
+
+test("codebase-assessment is read-only and stops at the findings list: nothing is selected or changed", () => {
+  const t = TEMPLATES.find((x) => x.key === "codebase-assessment")!;
+  const spec = validateSpec(t.spec);
+  assert.equal(spec.execution_mode, "read_only");
+  assert.deepEqual(
+    spec.steps.map((s) => s.key),
+    ["select", "assess", "report"],
+  );
+  const assess = spec.steps.find((s) => s.key === "assess")!.config;
+  assert.match(String(assess.instructions), /a person picks the findings to fix/);
+  assert.doesNotMatch(String(assess.instructions), /select at most one/i);
+  const fixAssess = TEMPLATES.find((x) => x.key === "codebase-improvement")!.spec.steps as Array<{
+    key: string;
+    config: { instructions?: string };
+  }>;
+  assert.match(
+    String(fixAssess.find((s) => s.key === "assess")!.config.instructions),
+    /inputs\.finding is set .* never switch to another finding/,
+  );
+});

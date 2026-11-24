@@ -210,3 +210,107 @@ export function ScanProgressCard({
     </div>
   );
 }
+
+export interface AssessProgress {
+  phase: "prepare" | "assess" | "report";
+  startedAt: string | null;
+  tools: number;
+  reads: number;
+  commands: number;
+  last: string | null;
+}
+const ASSESS_STEPS: Array<[AssessProgress["phase"], string]> = [
+  ["prepare", "cs.phase.prepare"],
+  ["assess", "cs.phase.assess"],
+  ["report", "cs.phase.report"],
+];
+
+/** The agent's latest action, readable: `Read ids.go`, `Bash rg -n Foo app`, `search_code Contains`. */
+function lastAction(raw: string | null): string | null {
+  if (!raw) return null;
+  const space = raw.indexOf(" ");
+  const tool = (space < 0 ? raw : raw.slice(0, space)).replace(/^mcp__platform__/, "");
+  let detail = "";
+  try {
+    const args = JSON.parse(raw.slice(space + 1)) as Record<string, unknown>;
+    const v = args.file_path ?? args.command ?? args.pattern ?? args.query ?? args.name ?? "";
+    detail = String(v).split("/").slice(-2).join("/");
+  } catch {
+    detail = "";
+  }
+  return `${tool}${detail ? ` ${detail}` : ""}`.slice(0, 90);
+}
+
+/** Progress of an agent code assessment, in the look of the production scan: phases, elapsed vs typical time, activity. */
+export function AssessProgressCard({
+  progress,
+  typicalSeconds,
+}: {
+  progress: AssessProgress;
+  typicalSeconds: number | null;
+}) {
+  const { t } = useI18n();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const elapsed = progress.startedAt
+    ? Math.max(0, (now - new Date(progress.startedAt).getTime()) / 1000)
+    : 0;
+  const current = ASSESS_STEPS.findIndex(([k]) => k === progress.phase);
+  // Time-based estimate inside the agent phase (never 100% before it is done): 5% → 90%.
+  const share = typicalSeconds ? Math.min(1, elapsed / typicalSeconds) : Math.min(1, elapsed / 600);
+  const pct = Math.round(
+    progress.phase === "prepare" ? 3 : progress.phase === "report" ? 95 : 5 + share * 85,
+  );
+  const remaining =
+    typicalSeconds && elapsed < typicalSeconds ? Math.round(typicalSeconds - elapsed) : null;
+  const action = lastAction(progress.last);
+  return (
+    <div className="sp-card" role="status" aria-live="polite" data-testid="assess-progress">
+      <div className="sp-top">
+        <div>
+          <div className="sp-title">{t("cs.progressTitle")}</div>
+          <div className="muted small">
+            {t("cs.activity", { reads: progress.reads, commands: progress.commands })}
+            {action ? <> · {action}</> : null}
+          </div>
+        </div>
+        <div className="sp-pct">
+          <b>{pct}%</b>
+          <span className="muted small">
+            {clock(elapsed)}
+            {remaining != null
+              ? ` · ${t("scan.left", { t: clock(remaining) })}`
+              : typicalSeconds
+                ? ` · ${t("scan.almost")}`
+                : ""}
+          </span>
+        </div>
+      </div>
+      <div className="sp-track-wrap">
+        <div className="sp-runner" style={{ left: `${pct}%` }}>
+          <Chibi />
+          <span className="sp-dust" />
+        </div>
+        <div className="sp-track">
+          <div className="sp-fill" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+      <ol className="sp-steps">
+        {ASSESS_STEPS.map(([key, label], i) => {
+          const state = current > i ? "done" : current === i ? "now" : "todo";
+          return (
+            <li key={key} className={`sp-step is-${state}`}>
+              <span className="sp-dot">
+                {state === "done" ? <Check size={12} strokeWidth={3} /> : i + 1}
+              </span>
+              <span>{t(label)}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}

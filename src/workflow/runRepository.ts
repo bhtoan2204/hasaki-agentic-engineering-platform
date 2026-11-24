@@ -126,7 +126,10 @@ export function listRuns(
   );
 }
 
-/** Code scans: codebase-improvement runs with what their assessment found (findings, decision, selected finding). */
+/**
+ * Code assessments (read-only codebase-assessment runs) with the agent's findings, and the codebase-improvement runs a
+ * person started from those findings (linked by inputs.finding.scan_run_id), for the same owner scope.
+ */
 export function listCodeScans(filter: { ownerId?: number; all?: boolean } = {}, db: Db = pool) {
   return q<{
     id: number;
@@ -135,21 +138,54 @@ export function listCodeScans(filter: { ownerId?: number; all?: boolean } = {}, 
     selected_repositories: string[];
     focus: string | null;
     created_at: string;
-    updated_at: string;
     assess_status: string;
     decision: string | null;
     summary: string | null;
     findings: unknown[] | null;
-    selected: { finding_id?: string } | null;
+    fixes: Array<{
+      finding_id: string;
+      run_id: number;
+      status: string;
+      steps: Array<{ key: string; status: string }>;
+    }> | null;
     steps: Array<{ key: string; status: string }>;
+    activity: {
+      started_at: string | null;
+      tools: number;
+      reads: number;
+      commands: number;
+      last: string | null;
+    } | null;
+    typical_seconds: number | null;
   }>(
     db,
-    `SELECT r.id, r.title, r.status, r.selected_repositories, r.inputs->>'focus' AS focus, r.created_at, r.updated_at,
+    `SELECT r.id, r.title, r.status, r.selected_repositories, r.inputs->>'focus' AS focus, r.created_at,
             a.status AS assess_status, a.output->>'decision' AS decision, a.output->>'summary' AS summary,
-            a.output->'findings' AS findings, a.output->'selected' AS selected,
-            (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position) FROM workflow_steps s WHERE s.run_id = r.id) AS steps
+            a.output->'findings' AS findings,
+            (SELECT json_agg(json_build_object('finding_id', f.inputs->'finding'->>'id', 'run_id', f.id, 'status', f.status,
+                    'steps', (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position)
+                                FROM workflow_steps s WHERE s.run_id = f.id)) ORDER BY f.id DESC)
+               FROM workflow_runs f
+              WHERE f.definition_key = 'codebase-improvement' AND f.owner_id = r.owner_id
+                AND f.inputs->'finding'->>'scan_run_id' = r.id::text) AS fixes,
+            (SELECT json_agg(json_build_object('key', s.key, 'status', s.status) ORDER BY s.position)
+               FROM workflow_steps s WHERE s.run_id = r.id) AS steps,
+            -- Live progress of a running assessment: the agent's tool calls in its current attempt.
+            (SELECT json_build_object('started_at', at.started_at, 'tools', count(e.id),
+                    'reads', count(e.id) FILTER (WHERE e.content LIKE 'Read %'),
+                    'commands', count(e.id) FILTER (WHERE e.content LIKE 'Bash %'),
+                    'last', (SELECT left(e2.content, 200) FROM workflow_events e2
+                              WHERE e2.attempt_id = at.id AND e2.kind = 'tool' ORDER BY e2.id DESC LIMIT 1))
+               FROM workflow_step_attempts at LEFT JOIN workflow_events e ON e.attempt_id = at.id AND e.kind = 'tool'
+              WHERE at.id = a.current_attempt_id AND r.status NOT IN ('COMPLETED','FAILED','CANCELED')
+              GROUP BY at.id, at.started_at) AS activity,
+            (SELECT round(percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM x.finished_at - x.started_at)))::int
+               FROM workflow_steps s2 JOIN workflow_runs r2 ON r2.id = s2.run_id
+               JOIN workflow_step_attempts x ON x.id = s2.current_attempt_id
+              WHERE r2.definition_key = 'codebase-assessment' AND r2.owner_id = r.owner_id AND s2.key = 'assess'
+                AND s2.status = 'COMPLETED' AND x.finished_at IS NOT NULL) AS typical_seconds
        FROM workflow_runs r JOIN workflow_steps a ON a.run_id = r.id AND a.key = 'assess'
-      WHERE r.definition_key = 'codebase-improvement'
+      WHERE r.definition_key = 'codebase-assessment'
         AND (CASE WHEN $1::bool THEN r.owner_id IS NOT NULL WHEN $2::bigint IS NOT NULL THEN r.owner_id = $2 ELSE true END)
       ORDER BY r.id DESC LIMIT 30`,
     [!!filter.all, filter.ownerId || null],

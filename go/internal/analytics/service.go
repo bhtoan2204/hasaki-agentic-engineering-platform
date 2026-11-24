@@ -24,6 +24,9 @@ var ErrBusy = errors.New("analytics capacity exhausted")
 type Service struct {
 	db    *pgxpool.Pool
 	slots chan struct{}
+	// light is a lane of its own for the filter options: a cheap read every dashboard page needs first, which would
+	// otherwise wait behind slow dashboards for a slot. The pool has one connection more than `slots` for it.
+	light chan struct{}
 	now   func() time.Time
 
 	statements  atomic.Int64
@@ -35,7 +38,7 @@ type Service struct {
 }
 
 func NewService(db *pgxpool.Pool, maxConcurrent int) *Service {
-	return &Service{db: db, slots: make(chan struct{}, max(1, maxConcurrent)), now: time.Now}
+	return &Service{db: db, slots: make(chan struct{}, max(1, maxConcurrent)), light: make(chan struct{}, 1), now: time.Now}
 }
 
 // Stats are cumulative counters since start, plus the pool's current state (GET /internal/v1/analytics/stats).
@@ -71,11 +74,11 @@ func (s *Service) Stats() Stats {
 	return st
 }
 
-func (s *Service) acquire(ctx context.Context) error {
+func (s *Service) acquire(ctx context.Context, lane chan struct{}) error {
 	start := time.Now()
 	defer func() { s.slotWaitNs.Add(int64(time.Since(start))) }()
 	select {
-	case s.slots <- struct{}{}:
+	case lane <- struct{}{}:
 		return nil
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -91,10 +94,14 @@ var numericText = pgx.QueryResultFormatsByOID{pgtype.NumericOID: pgx.TextFormatC
 
 // query runs one read-only statement under an analytics slot and converts rows the way node-postgres does.
 func (s *Service) query(ctx context.Context, sql string, args ...any) ([]Row, error) {
-	if err := s.acquire(ctx); err != nil {
+	return s.queryIn(ctx, s.slots, sql, args...)
+}
+
+func (s *Service) queryIn(ctx context.Context, lane chan struct{}, sql string, args ...any) ([]Row, error) {
+	if err := s.acquire(ctx, lane); err != nil {
 		return nil, err
 	}
-	defer func() { <-s.slots }()
+	defer func() { <-lane }()
 	s.statements.Add(1)
 	start := time.Now()
 	defer func() { s.statementNs.Add(int64(time.Since(start))) }()
@@ -122,7 +129,11 @@ func (s *Service) query(ctx context.Context, sql string, args ...any) ([]Row, er
 }
 
 func (s *Service) one(ctx context.Context, sql string, args ...any) (Row, error) {
-	rows, err := s.query(ctx, sql, args...)
+	return s.oneIn(ctx, s.slots, sql, args...)
+}
+
+func (s *Service) oneIn(ctx context.Context, lane chan struct{}, sql string, args ...any) (Row, error) {
+	rows, err := s.queryIn(ctx, lane, sql, args...)
 	if err != nil {
 		return Row{}, err
 	}
