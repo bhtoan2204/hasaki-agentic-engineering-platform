@@ -127,14 +127,18 @@ test("streaming: provider text arrives as coalesced deltas, reasoning and activi
     turn.trace.map((i) => i.k),
     ["reasoning", "activity"],
   );
-  const after = await events(msg.turn.id);
+  // The turn becomes terminal in one transaction; its turn.completed event is written right after, not inside it.
+  const after = await waitFor(
+    () => events(msg.turn.id),
+    (rows) => rows.some((e) => e.kind === "turn.completed"),
+    "turn.completed event",
+  );
   assert.equal(
     after.filter((e) => ["response.delta", "reasoning.delta", "provider.activity"].includes(e.kind))
       .length,
     0,
     "live deltas are dropped once the answer is stored",
   );
-  assert.ok(after.some((e) => e.kind === "turn.completed"));
 });
 
 test("streaming: a tool-call request is never streamed as answer text; tool steps join the trace", async () => {
