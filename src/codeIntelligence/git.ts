@@ -30,9 +30,7 @@ export const languageOf = (p: string) =>
     cjs: "javascript",
     proto: "proto",
     sql: "sql",
-  })[
-    p.split(".").pop() ?? ""
-  ];
+  })[p.split(".").pop() ?? ""];
 export function eligible(p: string) {
   const parts = p.split("/");
   return (
@@ -102,7 +100,7 @@ export interface Change {
 export async function changes(
   root: string,
   base: string,
-): Promise<{ head: string; generation: string; files: Change[] }> {
+): Promise<{ head: string; generation: string; files: Change[]; untracked: string[] }> {
   const head = (await git(root, ["rev-parse", "HEAD"])).trim();
   // Two endpoints include committed changes; diff without --cached includes staged and unstaged state against base.
   const names = new Set(
@@ -121,10 +119,10 @@ export async function changes(
       .split("\0")
       .filter(Boolean),
   );
-  for (const p of (await git(root, ["ls-files", "--others", "--exclude-standard", "-z"]))
+  const untracked = (await git(root, ["ls-files", "--others", "--exclude-standard", "-z"]))
     .split("\0")
-    .filter(Boolean))
-    names.add(p);
+    .filter(Boolean);
+  for (const p of untracked) names.add(p);
   const paths = [...names].filter(eligible).sort();
   if (paths.length > config.codeIntelligence.maxFiles)
     throw new Error("Overlay file limit exceeded");
@@ -157,6 +155,7 @@ export async function changes(
       JSON.stringify([head, marker.ino, marker.mtimeMs, files.map((f) => [f.path, f.hash])]),
     ),
     files,
+    untracked,
   };
 }
 

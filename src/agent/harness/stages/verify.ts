@@ -5,7 +5,7 @@ import { config } from "../../../config.ts";
 import { one, pool, q } from "../../../db/pool.ts";
 import { workspaceBase } from "../../../git/provider.ts";
 import { repositoryBaseBranch, workspaceBaseBranch } from "../../../repos/service.ts";
-import { resolveSlopSettings, blocking as slopBlocking } from "../../../slop/policy.ts";
+import { resolveSlopSettings } from "../../../slop/policy.ts";
 import { scanWorkspace } from "../../../slop/scan.ts";
 import { goBaseline, knownBaseFailures } from "../../../workflow/executors/baseline.ts";
 import { runVerificationCommand as runCommand } from "../../../workflow/executors/builtin.ts";
@@ -425,7 +425,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
           profile: ctx.run.profile,
           signal: ctx.signal,
         });
-        return { ...report, mode: settings.mode, blocking: slopBlocking(report, settings) };
+        return { ...report, mode: settings.mode };
       },
       artifact: (name, content, data) =>
         ctx.artifact("log", name, content, { ...data, verification: true }),
