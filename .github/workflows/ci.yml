@@ -241,7 +241,9 @@ jobs:
         run: >-
           node --disable-warning=ExperimentalWarning --import ./test/env.ts --test
           --test-shard=${{ matrix.shard }}/3 test/*.test.ts
+      # Every file has its own database on the shared cluster. On 4 CPUs one shard measured 227 s at concurrency 1,
+      # 121 s at 2 and 75 s at 4 (same 435 tests); 2 keeps headroom for a 2-vCPU runner.
       - name: npm run test:integration (shard ${{ matrix.shard }}/3)
         run: >-
-          node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=1
+          node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=4
           --test-shard=${{ matrix.shard }}/3 test/*.integration.ts

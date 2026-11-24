@@ -866,7 +866,7 @@ test("a repair that changes nothing stops the verify loop without re-running the
     assert.deepEqual([v.rounds, v.repairs, v.stop_reason], [1, 1, "unchanged_source"]);
     const decision = await one<{ action: string; reason: string }>(
       pool,
-      "SELECT action, reason FROM execution_decisions WHERE run_id = $1 AND kind = 'recovery' AND action = 'STOP'",
+      "SELECT action, reason FROM execution_decisions WHERE run_id = $1 AND kind = 'recovery' AND action = 'STOP' ORDER BY id LIMIT 1",
       [run.id],
     );
     assert.match(String(decision?.reason), /changed no source/);
