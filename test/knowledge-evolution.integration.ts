@@ -1029,12 +1029,14 @@ test("reuse-first-development is seeded as a managed skill and applies to analys
   assert.ok(!(await forStep("discover", "integration")).includes("reuse-first-development"));
 });
 
-test("minimal-comments is seeded as a GLOBAL coding standard and reaches implementation and review steps", async () => {
+test("minimal-comments and codebase-gardening are seeded as GLOBAL coding standards and reaches implementation and review steps", async () => {
   const { seedKnowledge } = await import("../src/knowledge/service.ts");
   await seedKnowledge();
-  const item = await knowledge.get("minimal-comments");
-  assert.equal(item?.category, "coding_standard");
-  assert.equal(item?.scope_type, "GLOBAL");
+  for (const key of ["minimal-comments", "codebase-gardening"]) {
+    const item = await knowledge.get(key);
+    assert.equal(item?.category, "coding_standard", key);
+    assert.equal(item?.scope_type, "GLOBAL", key);
+  }
   const at = new Date();
   const forStep = async (stepKey: string, stepType: string) =>
     resolveKnowledge(await knowledge.candidates(pool, null, at), {
@@ -1053,6 +1055,8 @@ test("minimal-comments is seeded as a GLOBAL coding standard and reaches impleme
     ["refactor", "coding_agent"],
     ["review", "agent"],
   ])
-    assert.ok((await forStep(k, t)).includes("minimal-comments"), `${k} gets it`);
-  assert.ok(!(await forStep("analyze", "agent")).includes("minimal-comments"));
+    for (const key of ["minimal-comments", "codebase-gardening"])
+      assert.ok((await forStep(k, t)).includes(key), `${k} gets ${key}`);
+  const analyze = await forStep("analyze", "agent");
+  assert.ok(!analyze.includes("minimal-comments") && !analyze.includes("codebase-gardening"));
 });

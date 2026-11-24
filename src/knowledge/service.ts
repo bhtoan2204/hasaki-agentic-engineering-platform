@@ -725,6 +725,43 @@ export const KNOWLEDGE_SEEDS: KnowledgeInput[] = [
     },
   },
   {
+    key: "codebase-gardening",
+    conflict_key: "engineering.gardening",
+    category: "coding_standard",
+    scope_type: "GLOBAL",
+    title: "Codebase gardening: leave patterns worth copying",
+    content: [
+      "The code you leave is the example the next agent copies: a workaround, a needless abstraction or a wrong pattern",
+      "spreads through later changes. Reuse is decided by reuse-first-development and comments by minimal-comments; in",
+      "addition:",
+      "- Before copying an existing pattern, check it is correct for this case (its callers, tests, known bugs). If it is",
+      "  wrong, do not replicate it: fix it at its source when the task touches it, otherwise report it with the evidence.",
+      "- Fix the root cause, not the symptom (a retry, a larger timeout, a special case at one caller).",
+      "- Within the code the task touches, remove what it made obsolete: dead code, abstractions left with one use,",
+      "  temporary workarounds whose reason is gone. Nothing outside the task: no speculative refactoring or cleanup.",
+      "- When the same harmful pattern recurs, prefer preventing it deterministically with what the repository already",
+      "  has (a type, a test, a lint rule, an architecture check) over a note or comment; propose it if it is out of scope.",
+      "- Call code technical debt or slop only with concrete evidence: file:line plus the defect, the existing helper it",
+      "  duplicates, the invariant it re-checks or the error it loses. No evidence, no finding.",
+    ].join("\n"),
+    applicability: {
+      step_keys: [
+        "implement",
+        "fix",
+        "refactor",
+        "fix_test",
+        "regression_test",
+        "review",
+        "self_review",
+      ],
+    },
+    metadata: {
+      mandatory: true,
+      description:
+        "Code is the context agents copy: validate a pattern before reusing it, fix root causes, remove obsolete code and workarounds the task touches (no unrelated cleanup), prevent recurring harm with types/tests/lint/architecture, and require file:line evidence before calling code debt or slop.",
+    },
+  },
+  {
     key: "unit-test-generation",
     category: "agent_skill",
     scope_type: "GLOBAL",
