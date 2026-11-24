@@ -14,6 +14,7 @@ import { seedTemplates } from "../src/workflow/definitions.ts";
 import { repositories } from "../src/repos/service.ts";
 import { createUser } from "../src/auth/users.ts";
 import { startRun, approveStep, cancelRun, listCodeScans } from "../src/workflow/engine.ts";
+import { currentBaseCommits, reusableScan } from "../src/workflow/codeScans.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor, type StepExecutor } from "../src/workflow/executors/registry.ts";
 import { agentExecutor } from "../src/agent/harness/executor.ts";
@@ -549,7 +550,7 @@ test("assessment then choice: a read-only run lists findings with severity, a fi
         },
         {
           id: "M2",
-          kind: "MAINTAINABILITY",
+          kind: "CODE_QUALITY",
           severity: "low",
           repo,
           file: "ids.go",
@@ -644,4 +645,64 @@ test("strict code evidence: findings the agent never confirmed in the code index
     0,
     "nothing was changed",
   );
+});
+
+test("no rescan without a new commit: a finished assessment at the current commits is reused, a new commit or force is not", async () => {
+  const scans = (await listCodeScans({ ownerId })).filter((x) => x.status === "COMPLETED");
+  const done = scans.find((x) => x.decision === "FINDINGS")!;
+  const pins = await one<{ source_revisions: Record<string, { commit: string }> }>(
+    pool,
+    "SELECT source_revisions FROM workflow_runs WHERE id=$1",
+    [done.id],
+  );
+  assert.equal(
+    pins?.source_revisions[repo].commit,
+    baseSha,
+    "the assessment pinned the commit it analysed",
+  );
+  const now = (r: string[]) => currentBaseCommits(ownerId, r);
+  assert.deepEqual(await reusableScan(ownerId, [repo], "", now), {
+    reused: "same_commits",
+    run_id: done.id,
+    commits: { [repo]: baseSha },
+  });
+  assert.equal(
+    await reusableScan(ownerId, [repo], "another focus", now),
+    null,
+    "a different focus is a different scan",
+  );
+
+  const primary = join(config.reposRoot, repo);
+  const clone = mkdtempSync(join(tmpdir(), "codebase-improve-push-"));
+  execFileSync("git", ["clone", "-q", "-b", "main", join(config.reposRoot, `${repo}.git`), clone]);
+  writeFileSync(join(clone, "NOTES.txt"), "new commit\n");
+  git(clone, "add", ".");
+  git(clone, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "new work");
+  git(clone, "push", "-q", "origin", "HEAD:main");
+  assert.equal(
+    await reusableScan(ownerId, [repo], "", now),
+    null,
+    "a new commit makes the old result stale",
+  );
+  assert.notEqual(
+    git(primary, "rev-parse", "origin/main"),
+    baseSha,
+    "the platform fetched the new base",
+  );
+
+  const pending = await startRun({
+    definitionKey: "codebase-assessment",
+    title: "Assess again",
+    profile: "STANDARD",
+    ownerId,
+    repositories: [repo],
+    inputs: { repositories: [repo] },
+    agentProvider: "codex",
+    start: false,
+  });
+  runs.push(pending.id);
+  assert.deepEqual(await reusableScan(ownerId, [repo], "", now), {
+    reused: "running",
+    run_id: pending.id,
+  });
 });

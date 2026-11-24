@@ -361,6 +361,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.sev.high": "Cao",
     "cs.sev.medium": "Trung bình",
     "cs.sev.low": "Thấp",
+    "cs.kind.CONCURRENCY": "Đồng thời",
+    "cs.kind.MEMORY": "Bộ nhớ",
+    "cs.kind.RESOURCE": "Tài nguyên",
+    "cs.kind.DATABASE": "Database",
+    "cs.kind.CODE_QUALITY": "Chất lượng code",
+    "cs.kind.RELIABILITY": "Độ tin cậy",
+    "cs.kind.DATA_INTEGRITY": "Toàn vẹn dữ liệu",
+    "cs.kind.BUSINESS_LOGIC": "Nghiệp vụ",
+    "cs.kind.DISTRIBUTED": "Hệ phân tán",
     "cs.kind.DEFECT": "Lỗi",
     "cs.kind.PERFORMANCE": "Hiệu năng",
     "cs.kind.SECURITY": "Bảo mật",
@@ -375,6 +384,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.decisionPh":
       "vd: lỗi validate như warrantyDays=0 là unrecoverable; DLQ retry tối đa 5 lần rồi bỏ qua và log",
     "cs.decisionTooShort": "Ghi rõ quyết định (ít nhất 10 ký tự)",
+    "cs.alreadyRunning":
+      "Đang có một lượt đánh giá cho đúng các repo này (#{id}); không chạy thêm lượt trùng.",
+    "cs.sameCommitsTitle": "Chưa có commit mới",
+    "cs.sameCommitsBody":
+      "Lượt đánh giá #{id} đã chạy trên đúng commit hiện tại của các repo này nên kết quả vẫn còn đúng. Quét lại từ đầu chỉ cần khi bạn muốn agent đánh giá lại dù code không đổi.",
+    "cs.forceRescan": "Quét lại từ đầu",
+    "cs.keepResult": "Dùng kết quả cũ",
     "cs.fix": "Sửa",
     "cs.fixTitle": "Sửa vấn đề này?",
     "cs.fixBody":
@@ -3790,6 +3806,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.sev.high": "High",
     "cs.sev.medium": "Medium",
     "cs.sev.low": "Low",
+    "cs.kind.CONCURRENCY": "Concurrency",
+    "cs.kind.MEMORY": "Memory",
+    "cs.kind.RESOURCE": "Resource",
+    "cs.kind.DATABASE": "Database",
+    "cs.kind.CODE_QUALITY": "Code quality",
+    "cs.kind.RELIABILITY": "Reliability",
+    "cs.kind.DATA_INTEGRITY": "Data integrity",
+    "cs.kind.BUSINESS_LOGIC": "Business logic",
+    "cs.kind.DISTRIBUTED": "Distributed",
     "cs.kind.DEFECT": "Defect",
     "cs.kind.PERFORMANCE": "Performance",
     "cs.kind.SECURITY": "Security",
@@ -3804,6 +3829,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "cs.decisionPh":
       "e.g. validation errors such as warrantyDays=0 are unrecoverable; retry the DLQ at most 5 times, then skip and log",
     "cs.decisionTooShort": "State the decision (at least 10 characters)",
+    "cs.alreadyRunning":
+      "An assessment of exactly these repositories is already running (#{id}); no duplicate was started.",
+    "cs.sameCommitsTitle": "No new commits",
+    "cs.sameCommitsBody":
+      "Assessment #{id} ran on the current commit of these repositories, so its result still holds. Rescan from scratch only if you want the agent to assess again although the code did not change.",
+    "cs.forceRescan": "Rescan from scratch",
+    "cs.keepResult": "Keep the result",
     "cs.fix": "Fix",
     "cs.fixTitle": "Fix this issue?",
     "cs.fixBody":

@@ -296,6 +296,14 @@ const READ_ONLY = [
   // -outputdir. Those stay refused unless they point at /tmp or /dev/null.
   /^go\s+test\b(?!.*\s-c(\s|$))(?!.*\s-(o|coverprofile|cpuprofile|memprofile|blockprofile|mutexprofile|trace|outputdir)(=|\s+)(?!\/tmp\/|\/dev\/null))/,
   /^(node|npm)\s+(-v|--version|ls)\b/,
+  // Static analysers that only report. Anything that writes is refused: fixes, output files, profiles, servers.
+  /^staticcheck\b(?!.*\s-debug\.)/,
+  /^golangci-lint\s+run\b(?!.*\s--fix\b)(?!.*\s--(out|output)[-.\w]*(=|\s+)(?!(stdout|stderr)\b))/,
+  /^golangci-lint\s+(version|--version|linters|help)\b/,
+  /^govulncheck\b(?!.*\s-(o|output)(=|\s))/,
+  /^deadcode\b(?!.*\s-(o|output|cpuprofile|memprofile)\b)/,
+  // pprof reads a profile in /tmp as text (top, list, peek, traces); no web UI, no rendered files.
+  /^go\s+tool\s+pprof\s+(-(top|list|peek|traces|text|nodecount|cum|lines|functions|files|unit|sample_index)\b(=\S+|\s+(?!\/)\S+)?\s+)+\/tmp\/\S+\s*$/,
 ];
 
 export interface ShellParse {

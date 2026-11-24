@@ -61,6 +61,18 @@ import {
   symptomFixSignals,
 } from "../../rootCause.ts";
 
+/** Finding categories whose regression test must run under the Go race detector to demonstrate the fix. */
+const RACE_CATEGORIES = ["CONCURRENCY", "DATA_INTEGRITY"];
+
+/** The category of the finding a codebase-improvement run fixes: chosen by a person, else selected by the assessment. */
+function raceRequired(s: Pick<LifecycleState, "ctx">) {
+  const chosen = (s.ctx.run.inputs as { finding?: { kind?: unknown } } | null)?.finding?.kind;
+  const selected = Object.values(s.ctx.input.upstream)
+    .map((u) => (u.output as { selected?: { kind?: unknown } } | null)?.selected?.kind)
+    .find(Boolean);
+  return RACE_CATEGORIES.includes(String(chosen ?? selected ?? "").toUpperCase());
+}
+
 /** Keys only the platform may write on a coding step's output (see rootCause.ts codingEvidence, proofOfFix.ts). */
 export const PLATFORM_EVIDENCE_KEYS = [
   "regression_proof",
@@ -442,6 +454,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
             );
       const id = await fixRegressionTest(trees, remediation);
       vcfg.requiredTests = [...new Set([...contractTests, ...(id ? [id] : [])])];
+      vcfg.raceTests = id && raceRequired(s) ? [id] : [];
     };
     await requireFixTest(accepted);
     const loop = await verificationLoop<ExecResult>({
@@ -715,6 +728,7 @@ async function rootCauseEvidence(s: LifecycleState, accepted: unknown) {
             verifyConfig(s.ctx.step.config, TEST_COMMAND)?.timeoutMs ?? 600_000,
             s.ctx.signal,
           ),
+        raceRequired(s),
       );
       if (regression_proof.status !== "unmeasured" || scoped) break;
     }

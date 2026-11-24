@@ -3,7 +3,7 @@ import { Bot, ExternalLink, Hand, Play, ScanSearch, Wrench } from "lucide-react"
 import { api, useApi, useLive } from "../../api.ts";
 import { dialog } from "../../dialog/index.ts";
 import { useI18n } from "../../i18n/index.tsx";
-import { act, ago, EmptyState, ErrorBox, SkeletonRows, navigate } from "../../ui.tsx";
+import { act, ago, EmptyState, ErrorBox, SkeletonRows, navigate, toast } from "../../ui.tsx";
 import { AssessProgressCard, type AssessProgress } from "../ScanProgress.tsx";
 import "./code-scan.css";
 
@@ -43,7 +43,6 @@ type Scan = {
   typical_seconds: number | null;
 };
 
-const ASSESS = "codebase-assessment";
 const FIX = "codebase-improvement";
 const SEVERITY_ORDER = ["high", "medium", "low"];
 const ASSESSING = ["PENDING", "READY", "RUNNING", "RETRYING"];
@@ -107,27 +106,38 @@ export function CodeScan() {
   const inProject = available.filter((r) => !project || (r.projects ?? []).includes(project));
   const targets = repo ? [repo] : project ? inProject.map((r) => r.name) : [];
 
-  const assess = async () => {
+  const assess = async (force = false): Promise<void> => {
     const text = focus.trim();
     const subject = repo || project;
-    const run = await act(
-      () =>
-        api<{ id: number }>("/api/runs", {
-          workflow: ASSESS,
-          repositories: targets,
-          inputs: {
-            repositories: targets,
-            ...(project ? { project } : {}),
-            ...(text ? { focus: text } : {}),
-          },
-          title: `${t("cs.runTitle")} ${subject}${text ? ` — ${text.slice(0, 80)}` : ""}`,
-        }),
-      t("cs.started"),
+    const res = await act(() =>
+      api<
+        { started: true; run_id: number } | { reused: "running" | "same_commits"; run_id: number }
+      >("/api/code-scans", {
+        repositories: targets,
+        ...(project ? { project } : {}),
+        ...(text ? { focus: text } : {}),
+        title: `${t("cs.runTitle")} ${subject}${text ? ` — ${text.slice(0, 80)}` : ""}`,
+        ...(force ? { force: true } : {}),
+      }),
     );
-    if (run) {
+    if (!res) return;
+    scans.reload();
+    if ("started" in res) {
       setFocus("");
-      scans.reload();
+      toast.success(t("cs.started"));
+      return;
     }
+    if (res.reused === "running") {
+      toast.info(t("cs.alreadyRunning", { id: res.run_id }));
+      return;
+    }
+    const again = await dialog.confirm({
+      title: t("cs.sameCommitsTitle"),
+      description: t("cs.sameCommitsBody", { id: res.run_id }),
+      confirmLabel: t("cs.forceRescan"),
+      cancelLabel: t("cs.keepResult"),
+    });
+    if (again) await assess(true);
   };
   const fix = async (scan: Scan, f: Finding) => {
     // A report-only finding waits for a person's decision (e.g. which errors are unrecoverable): ask for it.
@@ -223,7 +233,7 @@ export function CodeScan() {
               onChange={(e) => setFocus(e.target.value)}
             />
           </label>
-          <button disabled={!targets.length} onClick={assess}>
+          <button disabled={!targets.length} onClick={() => assess()}>
             <ScanSearch size={15} strokeWidth={2} />
             {t("cs.scan")}
           </button>

@@ -927,6 +927,33 @@ describe("Bash policy: loops in analysis steps", () => {
     assert.deepEqual(decideBash("go vet -mod=readonly ./...", A), { allow: true });
   });
 
+  test("installed analysers run in their read-only forms; anything that writes is refused", () => {
+    for (const c of [
+      "staticcheck ./...",
+      "golangci-lint run ./...",
+      "golangci-lint run --output.json.path=stdout ./...",
+      "govulncheck ./...",
+      "deadcode -test ./...",
+      "go test -bench=. -benchmem -cpuprofile /tmp/cpu.out ./pkg/x",
+      "go tool pprof -top /tmp/cpu.out",
+      "go tool pprof -list Contains /tmp/cpu.out",
+      "go tool pprof -top -nodecount 20 /tmp/mem.out",
+    ])
+      assert.deepEqual(decideBash(c, A), { allow: true }, c);
+    for (const c of [
+      "staticcheck -debug.cpuprofile=x ./...",
+      "golangci-lint run --fix ./...",
+      "golangci-lint run --output.json.path=report.json",
+      "golangci-lint run --out-format=json:out.json ./...",
+      "govulncheck -o out.json ./...",
+      "go tool pprof -http=:8080 /tmp/cpu.out",
+      "go tool pprof -top ./cpu.out",
+      "go tool pprof -png -output /tmp/x.png /tmp/cpu.out",
+      "go test -cpuprofile cpu.out ./pkg/x",
+    ])
+      assert.equal(decideBash(c, A).allow, false, c);
+  });
+
   test("loop syntax the policy cannot fully analyse is denied with a clear message", () => {
     for (const c of [
       `for ((i=0; i<3; i++)); do echo $i; done`,

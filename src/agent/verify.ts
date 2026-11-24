@@ -55,6 +55,8 @@ export interface VerifyConfig {
   /** Hard test-weakening signals (removed/skipped/disabled tests) fail verification unless explicitly allowed. */
   allowTestWeakening: boolean;
   requiredTests?: string[];
+  /** Required tests that run under the Go race detector (`go test -race`). */
+  raceTests?: string[];
   contractRevision?: string;
   /**
    * Explicit, workflow-defined policy under which a change without executable tests (docs, config) is NOT_APPLICABLE
@@ -560,7 +562,14 @@ export async function authorizeWorkspace(path: string, allowedRoots: string[]): 
 
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-type RequiredTestTarget = { id: string; selector: string; format: "go" | "node"; command: string };
+type RequiredTestTarget = {
+  id: string;
+  selector: string;
+  format: "go" | "node";
+  command: string;
+  /** Run under the Go race detector (a concurrency / data-integrity regression test). */
+  race?: boolean;
+};
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 const directGoJson = (command: string) =>
   /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(command.trim());
@@ -598,6 +607,7 @@ export async function requiredTestTargets(
   workspaces: Array<{ repo: string; path: string }>,
   ids: string[],
   beforeApproval = false,
+  race: string[] = [],
 ) {
   const targets = new Map<string, RequiredTestTarget[]>();
   const problems: string[] = [];
@@ -679,7 +689,8 @@ export async function requiredTestTargets(
             id,
             selector,
             format: "go",
-            command: `go test -json -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}`,
+            command: `go test -json${race.includes(id) ? " -race" : ""} -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}`,
+            ...(race.includes(id) ? { race: true } : {}),
           },
         });
       }
@@ -755,6 +766,7 @@ export async function beforeAfterProof(
   w: { repo: string; path: string; baseBranch: string },
   testId: string,
   run: (command: string, cwd: string) => Promise<{ code: number | null; output: string }>,
+  race = false,
 ): Promise<import("./rootCause.ts").RegressionProof> {
   const git = async (cwd: string, ...args: string[]) =>
     (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout.trim();
@@ -765,7 +777,8 @@ export async function beforeAfterProof(
     repo: w.repo,
     test_id: id,
   });
-  const after = await requiredTestTargets([w], [id]);
+  const raced = race ? [id] : [];
+  const after = await requiredTestTargets([w], [id], false, raced);
   const target = after.targets.get(w.repo)?.[0];
   if (!target) return unmeasured(after.problems.join("; ") || "not an executable test id");
   let head: string, base: string, changed: string[];
@@ -807,12 +820,12 @@ export async function beforeAfterProof(
     if (atBase.size) await git(tmp, "checkout", base, "--", ...atBase);
     const added = reverted.filter((f) => !atBase.has(f));
     if (added.length) await git(tmp, "rm", "-q", "--", ...added);
-    const before = (await requiredTestTargets([{ repo: w.repo, path: tmp }], [id])).targets.get(
-      w.repo,
-    )?.[0];
+    const before = (
+      await requiredTestTargets([{ repo: w.repo, path: tmp }], [id], false, raced)
+    ).targets.get(w.repo)?.[0];
     if (!before) return unmeasured("the test cannot be resolved on the pre-fix source");
     const fixedTarget = (
-      await requiredTestTargets([{ repo: w.repo, path: fixed }], [id])
+      await requiredTestTargets([{ repo: w.repo, path: fixed }], [id], false, raced)
     ).targets.get(w.repo)?.[0];
     if (!fixedTarget) return unmeasured("the test cannot be resolved on the fixed commit");
     const b = requiredTestStatus((await run(before.command, tmp)).output, before);
@@ -871,7 +884,12 @@ export async function verifyWorkspaces(
 ): Promise<VerificationRound> {
   const t0 = Date.now();
   const repos: RepoVerification[] = [];
-  const required = await requiredTestTargets(workspaces, cfg.requiredTests ?? []);
+  const required = await requiredTestTargets(
+    workspaces,
+    cfg.requiredTests ?? [],
+    false,
+    cfg.raceTests ?? [],
+  );
   for (const w of workspaces) {
     if (w.skip) {
       await deps.log?.(`■ verify ${w.repo}: SKIPPED (${w.skip})`, {
@@ -1198,7 +1216,7 @@ export async function verifyWorkspaces(
         const results: NonNullable<RepoVerification["required_tests"]> = {};
         for (const target of required.targets.get(w.repo) ?? []) {
           let status =
-            target.format === "go" && directGoJson(cfg.command)
+            target.format === "go" && !target.race && directGoJson(cfg.command)
               ? requiredTestStatus(r.output, target)
               : "not_executed";
           if (
@@ -1358,7 +1376,10 @@ async function evidenceParts(
     base_tip: tip,
     contract_revision: cfg.contractRevision ?? "",
     command: cfg.command,
-    selectors: [...(cfg.requiredTests ?? [])].sort().join("\n"),
+    selectors: [...(cfg.requiredTests ?? [])]
+      .map((id) => (cfg.raceTests?.includes(id) ? `${id} -race` : id))
+      .sort()
+      .join("\n"),
     policy: canonicalJson({
       allowTestWeakening: cfg.allowTestWeakening,
       notApplicable: cfg.notApplicable,

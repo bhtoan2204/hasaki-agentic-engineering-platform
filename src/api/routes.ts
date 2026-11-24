@@ -280,6 +280,7 @@ import {
   setAutonomyPaused,
 } from "../workflow/autonomy.ts";
 import { runEvents } from "../workflow/events.ts";
+import { currentBaseCommits, reusableScan } from "../workflow/codeScans.ts";
 import { buildTrace, isTraceLevel, searchLogs } from "../workflow/trace.ts";
 import { diagnoseTrace } from "../workflow/traceDiagnosis.ts";
 import {
@@ -941,7 +942,11 @@ export const routes: Route[] = [
     ),
   ],
   // What the newest radar pass actually evaluated (skipped signatures, partial/stale coverage).
-  ["GET", /^\/api\/radar\/coverage$/, async (c) => (requireAdmin(c.actor), (await latestCoverage()) ?? { coverage: null })],
+  [
+    "GET",
+    /^\/api\/radar\/coverage$/,
+    async (c) => (requireAdmin(c.actor), (await latestCoverage()) ?? { coverage: null }),
+  ],
   [
     "POST",
     /^\/api\/radar\/findings\/(\d+)\/status$/,
@@ -1000,6 +1005,43 @@ export const routes: Route[] = [
     async (c) => {
       if (support(c)) await audit(c.actor.id, "support.list", "run", "code-scans");
       return listCodeScans(mine(c));
+    },
+  ],
+  // Start an assessment unless an equivalent one is running or already analysed every repository's current base
+  // commit; `force` always starts a new one.
+  [
+    "POST",
+    /^\/api\/code-scans$/,
+    async ({ body, actor }) => {
+      const repos: string[] = [
+        ...new Set<string>(
+          (Array.isArray(body.repositories) ? (body.repositories as unknown[]) : []).map(String),
+        ),
+      ].sort();
+      if (!repos.length || repos.length > 30)
+        throw new HttpError(400, "repositories: 1 to 30 repository names");
+      const focus = typeof body.focus === "string" ? body.focus.trim().slice(0, 500) : "";
+      const project = typeof body.project === "string" ? body.project.trim().slice(0, 120) : "";
+      if (body.force !== true) {
+        const reuse = await reusableScan(actor.id, repos, focus, (r) =>
+          currentBaseCommits(actor.id, r),
+        );
+        if (reuse) return reuse;
+      }
+      const run = await startRun({
+        definitionKey: "codebase-assessment",
+        repositories: repos,
+        inputs: {
+          repositories: repos,
+          ...(project ? { project } : {}),
+          ...(focus ? { focus } : {}),
+        },
+        title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
+        outputLocale: localeOf(body),
+        agentProvider: providerOf(body),
+        ownerId: actor.id,
+      });
+      return { started: true, run_id: run.id };
     },
   ],
   [
@@ -2699,7 +2741,10 @@ export const routes: Route[] = [
     /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench$/,
     (c) => {
       const owner = c.url.searchParams.get("owner");
-      return getWorkbench(c.p[0], c.actor, { support: support(c), ownerId: owner ? num(owner) : undefined });
+      return getWorkbench(c.p[0], c.actor, {
+        support: support(c),
+        ownerId: owner ? num(owner) : undefined,
+      });
     },
   ],
   [
@@ -2707,13 +2752,32 @@ export const routes: Route[] = [
     /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/rca\/(\d+)$/,
     (c) => {
       const owner = c.url.searchParams.get("owner");
-      return rcaVersion(c.p[0], c.actor, num(c.p[1]), { support: support(c), ownerId: owner ? num(owner) : undefined });
+      return rcaVersion(c.p[0], c.actor, num(c.p[1]), {
+        support: support(c),
+        ownerId: owner ? num(owner) : undefined,
+      });
     },
   ],
-  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/runtime$/, (c) => startRuntime(c.p[0], c.actor, c.body)],
-  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/bug-hunt$/, (c) => startHunt(c.p[0], c.actor, c.body)],
-  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/both$/, (c) => startBoth(c.p[0], c.actor, c.body)],
-  ["POST", /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/fix$/, (c) => createIncidentFix(c.p[0], c.actor, c.body)],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/runtime$/,
+    (c) => startRuntime(c.p[0], c.actor, c.body),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/bug-hunt$/,
+    (c) => startHunt(c.p[0], c.actor, c.body),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/both$/,
+    (c) => startBoth(c.p[0], c.actor, c.body),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/fix$/,
+    (c) => createIncidentFix(c.p[0], c.actor, c.body),
+  ],
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/link$/,

@@ -187,3 +187,29 @@ test("a person's decision makes a report-only finding fixable, and the proposal 
     /inputs\.decision is set, the change implements exactly that decision/,
   );
 });
+
+test("verification recipes cover every finding kind and reach the steps that write or judge regression tests", async () => {
+  const { KNOWLEDGE_SEEDS } = await import("../src/knowledge/service.ts");
+  const seed = KNOWLEDGE_SEEDS.find((s) => s.key === "verification-recipes")!;
+  for (const kind of [
+    "CONCURRENCY",
+    "MEMORY",
+    "RESOURCE",
+    "DATABASE",
+    "PERFORMANCE",
+    "CODE_QUALITY",
+    "RELIABILITY",
+    "DATA_INTEGRITY",
+    "SECURITY",
+    "BUSINESS_LOGIC",
+    "DISTRIBUTED",
+  ])
+    assert.match(seed.content, new RegExp(`- ${kind}:`), kind);
+  assert.deepEqual(seed.applicability?.step_keys, [
+    "assess",
+    "proposal",
+    "implement",
+    "fix",
+    "review",
+  ]);
+});

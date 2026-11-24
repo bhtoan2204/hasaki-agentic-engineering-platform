@@ -506,9 +506,18 @@ const ASSESS_SIGNALS =
   "(3) Read only the hotspots those signals point to (search_code, get_symbol, find_dependencies, targeted Read). This is a repository-wide assessment from signals, not a file-by-file review: say what you did not inspect. " +
   "Report only findings backed by evidence: a confirmed defect, a measured bottleneck, a security risk, or a maintainability issue with a concrete consequence. Never invent improvements or propose speculative refactoring. " +
   "A finding is implementable only when a platform-runnable test can demonstrate it: it fails on the current code and passes once the finding is fixed (for performance, the test asserts the measured budget: allocations, query count, complexity bound or a time budget with margin). " +
+  "Classify each finding into one kind: CONCURRENCY (race, deadlock), MEMORY (leak, unbounded cache), RESOURCE (goroutine, connection or file descriptor leak), DATABASE (N+1, redundant query, missing transaction), " +
+  "PERFORMANCE (blocking I/O, needless serialization, excessive allocation), CODE_QUALITY (dead code, unused dependency, duplicated logic), RELIABILITY (missing timeout, retry storm, ignored cancellation), " +
+  "DATA_INTEGRITY (lost update, duplicate processing, invalid state transition), SECURITY (injection, SSRF, sensitive data exposure), BUSINESS_LOGIC (edge case, wrong condition, missing validation), DISTRIBUTED (missing idempotency, inconsistent state, message loss). " +
+  "Use the read-only analysers when they fit: go vet, go test -race, staticcheck, golangci-lint run, govulncheck, deadcode, benchmarks with -benchmem, and go tool pprof -top/-list on a profile written to /tmp. " +
+  "Load the verification-recipes skill: it says, per kind, which test demonstrates the finding. " +
   "Confirm every finding with the code index yourself (platform search_code, get_symbol, find_dependencies or navigate_code) before reporting it: the platform marks a finding as unverified unless one of YOUR code-intelligence calls in this step returned its file, and an unverified finding cannot be fixed. ";
+const FINDING_KINDS =
+  "'CONCURRENCY'|'MEMORY'|'RESOURCE'|'DATABASE'|'PERFORMANCE'|'CODE_QUALITY'|'RELIABILITY'|'DATA_INTEGRITY'|'SECURITY'|'BUSINESS_LOGIC'|'DISTRIBUTED'";
 const FINDINGS_CONTRACT =
-  "findings: [{ id, kind: 'DEFECT'|'PERFORMANCE'|'SECURITY'|'MAINTAINABILITY', severity: 'high'|'medium'|'low', repo, file, line, issue, evidence, implementable: boolean, why_not? }]";
+  "findings: [{ id, kind: " +
+  FINDING_KINDS +
+  ", severity: 'high'|'medium'|'low', repo, file, line, issue, evidence, implementable: boolean, why_not? }]";
 const IMPROVE_ASSESS = {
   evidence: "root_cause",
   code_evidence: "required",
@@ -523,7 +532,9 @@ const IMPROVE_ASSESS = {
   output_contract:
     "{ decision: 'IMPROVE'|'NO_CHANGES_NEEDED'|'UNVERIFIED', summary, " +
     FINDINGS_CONTRACT +
-    ", selected?: { finding_id, kind, expected_benefit }, target?: { repo, files: string[], symbols: string[] }, coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
+    ", selected?: { finding_id, kind: " +
+    FINDING_KINDS +
+    ", expected_benefit }, target?: { repo, files: string[], symbols: string[] }, coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
     ROOT_CAUSE_CONTRACT +
     ", " +
     CLAIMS_CONTRACT +
