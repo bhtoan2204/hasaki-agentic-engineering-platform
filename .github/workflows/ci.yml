@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       # node_modules keyed by the lockfile: an unchanged lockfile skips `npm ci` entirely.
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - id: modules
@@ -68,7 +68,7 @@ jobs:
     name: browser smoke
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       # The analytics dashboards (smoke:ui-quality) are served only by platform-go, built from go/ by the test.
@@ -151,7 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       # Pure static import-graph analysis (src/architecture/check.ts): no dependencies to install.
@@ -161,7 +161,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - id: modules
@@ -191,7 +191,7 @@ jobs:
     name: test (${{ matrix.shard }}/3)
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - id: modules
