@@ -19,6 +19,7 @@ import { indexRepository } from "../codeIntelligence/indexer.ts";
 import { recordWorkspace } from "../git/provider.ts";
 import { getExecutor, type ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 function emptyEvidence(seconds: number): Evidence {
   return {
@@ -223,8 +224,10 @@ async function executeIsolated(
           "remove",
           "--force",
           join(staleRoot, "workspaces", logical),
-        ]).catch(() => {});
-      await rm(staleRoot, { recursive: true, force: true }).catch(() => {});
+        ]).catch(ignoreError("eval.worktree_cleanup"));
+      await rm(staleRoot, { recursive: true, force: true }).catch(
+        ignoreError("eval.worktree_cleanup"),
+      );
     }
     await mkdir(workspace, { recursive: true, mode: 0o755 });
     await mkdir(validatorRoot, { recursive: true, mode: 0o755 });
@@ -506,13 +509,15 @@ async function executeIsolated(
       await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1 AND path=ANY($2::text[])", [
         ctx.run.id,
         created.map((w) => w.path),
-      ]).catch(() => {});
+      ]).catch(ignoreError("eval.workspace_rows_cleanup"));
     for (const w of created)
-      await fixtureGit(w.primary, ["worktree", "remove", "--force", w.path]).catch(() => {});
+      await fixtureGit(w.primary, ["worktree", "remove", "--force", w.path]).catch(
+        ignoreError("eval.worktree_cleanup"),
+      );
     // Only this attempt's generated directory can be removed; stale attempts never own another attempt's workspace.
     const rel = relative(join(config.dataDir, "evaluation-work"), root);
     if (rel && !rel.startsWith(".."))
-      await rm(root, { recursive: true, force: true }).catch(() => {});
+      await rm(root, { recursive: true, force: true }).catch(ignoreError("eval.worktree_cleanup"));
   }
   e.duration_ms = Date.now() - totalStart;
   e.details.timings = timings;

@@ -37,6 +37,7 @@ import {
 } from "../repos/service.ts";
 import { decide, type PolicyContext, type ToolMode } from "./toolPolicy.ts";
 import { dispatchPlatformTool, envFromExecution } from "./platformTools.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 // Retain the established imports used by integrations and regression fixtures.
 export { accumulateMetrics, newMetrics, type AgentMetrics } from "./metrics.ts";
@@ -785,7 +786,7 @@ export async function rankRepositoriesWithClaude(
     "</untrusted_input>",
   ].join("\n");
   const done = await completeForRun(ctx.run, prompt, ctx.signal);
-  await ctx.recordMetrics({ ranking: done.metrics }).catch(() => {});
+  await ctx.recordMetrics({ ranking: done.metrics }).catch(ignoreError("agent.record_metrics"));
   const out = done.text;
   const json = out.match(/\[[\s\S]*\]/)?.[0];
   if (!json) throw new Error("no JSON in ranking reply");

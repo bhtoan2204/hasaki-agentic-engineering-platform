@@ -22,6 +22,7 @@ import type { ConfigurationSchema } from "./configuration.ts";
 import { getExecutor, type ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 const exec = promisify(execFile);
 const LIVE_ALLOWED_TOOLS = [
   "Read",
@@ -141,7 +142,9 @@ export async function executeLiveProviderPhase(
           retryable: false,
           error: "Aborted while waiting for the evaluation budget lock",
         });
-      await sleep(delay, undefined, { signal: ctx.signal }).catch(() => {});
+      await sleep(delay, undefined, { signal: ctx.signal }).catch(
+        ignoreError("eval.sleep_aborted"),
+      );
     }
     return (result = await executeLiveProviderPhaseLocked(ctx, phase));
   } finally {
@@ -153,7 +156,7 @@ export async function executeLiveProviderPhase(
     if (locked)
       await connection
         .query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [group])
-        .catch(() => {});
+        .catch(ignoreError("eval.advisory_unlock"));
     connection.release();
   }
 }
@@ -308,7 +311,7 @@ async function executeLiveProviderPhaseLocked(
               },
             }),
           )
-          .catch(() => {});
+          .catch(ignoreError("eval.record_metrics"));
       },
     };
     const agent = ctx.step.config.agent ?? {};

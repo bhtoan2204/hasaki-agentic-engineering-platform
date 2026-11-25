@@ -19,6 +19,7 @@ import { withCodeActScope } from "../codeact/scope.ts";
 import type { AgentProvider } from "../agent/provider.ts";
 import type { EffectTask } from "./codeactTasks.ts";
 import { gradeRca, incidentProgram, type GroundTruth, type RcaGrade } from "./rcaIncidents.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 export interface WorkflowSample {
   task_id: string;
@@ -81,7 +82,7 @@ async function drive(runId: number, deadline: number) {
     if (["COMPLETED", "FAILED", "CANCELED"].includes(r.status)) return r.status;
     if (!(await runOnce())) await new Promise((res) => setTimeout(res, 50));
   }
-  await cancelRun(runId).catch(() => {});
+  await cancelRun(runId).catch(ignoreError("eval.cancel_run"));
   return "timeout";
 }
 

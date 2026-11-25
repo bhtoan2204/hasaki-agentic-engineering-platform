@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { existsSync, realpathSync } from "node:fs";
 import { config } from "../config.ts";
 import { randomUUID, createHash } from "node:crypto";
+import { ignoreError } from "../ignoreError.ts";
 const exec = promisify(execFile);
 export class IsolationUnavailable extends Error {}
 let closure: Promise<string[]> | undefined;
@@ -196,6 +197,6 @@ export async function containerRun(
       await exec("docker", ["rm", "--force", name], {
         timeout: 5000,
         maxBuffer: 8192,
-      }).catch(() => {});
+      }).catch(ignoreError("eval.docker_remove"));
   }
 }

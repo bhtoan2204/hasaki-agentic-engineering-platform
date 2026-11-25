@@ -6,6 +6,7 @@ import { missingContractKeys, validateOutputContract } from "../../contract.ts";
 import { evidenceRole, normalizeInvestigationOutput, unavailableSources } from "../../evidence.ts";
 import { runProvenanceEnv, withProvenance } from "../../provenance.ts";
 import { requireCodeEvidence } from "../../codeEvidence.ts";
+import { ignoreError } from "../../../ignoreError.ts";
 
 /** Errors of the attempt's latest submit_result when that latest one was rejected (none, or accepted: null). */
 async function lastRejection(attemptId: number): Promise<string[] | null> {
@@ -154,7 +155,9 @@ export async function outputStage(s: LifecycleState): Promise<ExecResult | void>
       fix_risk: ev.fix_assessment?.risk ?? null,
       gate_satisfied: ev.evidence_gate?.satisfied ?? null,
     };
-    await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+    await ctx
+      .recordMetrics(metrics as unknown as Record<string, unknown>)
+      .catch(ignoreError("agent.record_metrics"));
   }
   if (!independent && ctx.step.config.code_evidence === "required")
     output = await requireCodeEvidence(output, ctx.attempt.id);

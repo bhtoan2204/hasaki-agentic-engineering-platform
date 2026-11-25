@@ -23,6 +23,7 @@ import { CONTEXT_TOOLS, contextToolSupported } from "./contextToolSchemas.ts";
 import { runCodeForRun, type CodeActCapability, type SourceFamily } from "../codeact/surfaces.ts";
 import type { Category } from "../codeact/execute.ts";
 import { navigate, type NavOperation } from "../codeIntelligence/lsp/navigate.ts";
+import { ignoreError } from "../ignoreError.ts";
 export { CONTEXT_TOOLS, contextTool } from "./contextToolSchemas.ts";
 export const MAX_CONTEXT_RESULT_CHARS = 24000;
 export function boundedContextJson(value: unknown): string {
@@ -345,7 +346,9 @@ export async function executeContextTool(
         const ms = Date.now() - started;
         u.latency_ms_total += ms;
         u.latency_ms_max = Math.max(u.latency_ms_max, ms);
-        await env.recordMetrics?.({ code_intelligence_usage: u }).catch(() => {});
+        await env
+          .recordMetrics?.({ code_intelligence_usage: u })
+          .catch(ignoreError("agent.record_metrics"));
       };
       if (name === "search_code" && args.operation === "context") {
         const context = await buildCodeContext(args.query!, scope);

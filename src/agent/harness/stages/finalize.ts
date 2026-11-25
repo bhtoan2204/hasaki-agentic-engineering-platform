@@ -22,6 +22,7 @@ import {
   scopeRevision,
   worktreeFingerprint,
 } from "../../scopeGuard.ts";
+import { ignoreError } from "../../../ignoreError.ts";
 
 /** Approved-scope integrity, implementation evidence, final contract validation and the step result. */
 export async function finalizeStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -132,7 +133,7 @@ export async function finalizeStage(s: LifecycleState): Promise<ExecResult | voi
       metrics.first_useful_location_ms = firstUsefulLocationMs(metrics, changed);
       await ctx
         .recordMetrics({ first_useful_location_ms: metrics.first_useful_location_ms })
-        .catch(() => {});
+        .catch(ignoreError("agent.record_metrics"));
     }
     if (Object.keys(state.heads).length) {
       output = { ...output, commits: state.heads };

@@ -37,6 +37,7 @@ import {
   type StopReason,
 } from "../harness/cliTurn.ts";
 import type { HarnessFailureCode } from "../harness/failure.ts";
+import { ignoreError } from "../../ignoreError.ts";
 
 const exec = promisify(execFile);
 
@@ -762,7 +763,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
       line: b.line,
     });
   for (const ev of tail.events) await handle(ev);
-  await broker.close().catch(() => {});
+  await broker.close().catch(ignoreError("codex.broker_close"));
   rmSync(scratch, { recursive: true, force: true });
 
   metrics.duration_ms += Date.now() - started;

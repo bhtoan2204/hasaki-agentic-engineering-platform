@@ -16,6 +16,7 @@ import { bareName } from "../bugHunt/logic.ts";
 import type { PublicUser } from "../auth/users.ts";
 import type { AgentProvider } from "../agent/provider.ts";
 import { BUG_HUNT_CASES, caseFingerprint, type BugHuntCase } from "./bugHuntFixtures.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 export interface BugHuntGrade {
   case: string;
@@ -74,7 +75,7 @@ async function drive(runId: number, timeoutMs: number) {
     if (["COMPLETED", "FAILED", "CANCELED"].includes(r.status)) return r.status;
     if (!(await runOnce())) await new Promise((res) => setTimeout(res, 50));
   }
-  await cancelRun(runId).catch(() => {});
+  await cancelRun(runId).catch(ignoreError("eval.cancel_run"));
   return "timeout";
 }
 

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Alibaba OpenCodeReview (github.com/alibaba/open-code-review) in DELEGATION mode: `ocr delegate` picks the files worth
@@ -123,7 +124,7 @@ export async function reviewedBranchTargets(targets: Array<{ repo: string; branc
           `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
         ],
         { timeout: 60_000 },
-      ).catch(() => {});
+      ).catch(ignoreError("code_review.fetch_branch"));
     const has = await exec("git", [
       "-C",
       dir,

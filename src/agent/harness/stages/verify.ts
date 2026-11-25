@@ -61,6 +61,7 @@ import {
   rootCauseDepth,
   symptomFixSignals,
 } from "../../rootCause.ts";
+import { ignoreError } from "../../../ignoreError.ts";
 
 /** Finding categories whose regression test must run under the Go race detector to demonstrate the fix. */
 const RACE_CATEGORIES = ["CONCURRENCY", "DATA_INTEGRITY"];
@@ -226,7 +227,9 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       repairs_used: repairsUsed,
       max_repairs: maxRepairs,
     };
-    await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+    await ctx
+      .recordMetrics(metrics as unknown as Record<string, unknown>)
+      .catch(ignoreError("agent.record_metrics"));
     await ctx.log(
       "system",
       `independent verification: ${v.verdict}${v.findings.length ? ` (${v.findings.length} finding(s))` : ""}`,
@@ -296,7 +299,9 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       status: "disabled",
       passed: null,
     };
-    await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+    await ctx
+      .recordMetrics(metrics as unknown as Record<string, unknown>)
+      .catch(ignoreError("agent.record_metrics"));
     output = {
       ...output,
       verification: { outcome: "disabled", status: "disabled", passed: null },
@@ -382,7 +387,9 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         status: "skipped",
         passed: null,
       };
-      await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+      await ctx
+        .recordMetrics(metrics as unknown as Record<string, unknown>)
+        .catch(ignoreError("agent.record_metrics"));
       return {
         kind: "failed",
         retryable: false,
@@ -631,7 +638,9 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         savedMs: reused.saved_ms ?? null,
         details: { evidence: reused },
       });
-    await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+    await ctx
+      .recordMetrics(metrics as unknown as Record<string, unknown>)
+      .catch(ignoreError("agent.record_metrics"));
     if (loop.outcome === "canceled") throw new Error("verification canceled");
     if (loop.stop) return loop.stop;
     if (loop.outcome === "error")

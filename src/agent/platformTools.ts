@@ -65,6 +65,7 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import { traceLog } from "../workflow/trace.ts";
 import { codeActScopeValue, withCodeActScope } from "../codeact/scope.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 export interface PlatformToolEnv {
   /** Set once submit_result recorded a valid output; each provider turn gets a fresh env, so a repair turn may submit again. */
@@ -603,7 +604,7 @@ async function prepareBranch(args: ToolArgs, env: PlatformToolEnv): Promise<stri
         `UPDATE workflow_step_attempts SET metrics = COALESCE(metrics, '{}'::jsonb) || '{"workspace_conflict": true}'::jsonb
           WHERE id = $1 AND status = 'RUNNING'`,
         [env.attemptId],
-      ).catch(() => {});
+      ).catch(ignoreError("agent.workspace_conflict_metric"));
       return `ERROR: ${e.message}`;
     }
     throw e;

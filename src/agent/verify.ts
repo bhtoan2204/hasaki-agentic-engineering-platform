@@ -32,6 +32,7 @@ import {
   ENVIRONMENT_UNAVAILABLE_EXIT,
   ENVIRONMENT_UNAVAILABLE_MARKER,
 } from "../platform/postgresBinaries.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Verification-and-repair loop for coding steps (harness layer around the Claude executor).
@@ -866,9 +867,13 @@ export async function beforeAfterProof(
     return unmeasured(`proof workspace: ${(e as Error).message.slice(0, 200)}`);
   } finally {
     for (const t of [tmp, fixed])
-      await exec("git", ["-C", w.path, "worktree", "remove", "--force", t]).catch(() => {});
-    await exec("git", ["-C", w.path, "worktree", "prune"]).catch(() => {});
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
+      await exec("git", ["-C", w.path, "worktree", "remove", "--force", t]).catch(
+        ignoreError("verify.worktree_cleanup"),
+      );
+    await exec("git", ["-C", w.path, "worktree", "prune"]).catch(
+      ignoreError("verify.worktree_cleanup"),
+    );
+    await rm(dir, { recursive: true, force: true }).catch(ignoreError("verify.worktree_cleanup"));
   }
 }
 

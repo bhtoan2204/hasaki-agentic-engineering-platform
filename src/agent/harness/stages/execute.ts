@@ -53,6 +53,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { noteDecision } from "../../../workflow/decisions.ts";
 import { log } from "../../../logging.ts";
+import { ignoreError } from "../../../ignoreError.ts";
 
 /** Prompt assembly and the provider turn (resumed session first, rebuilt prompt when the session is gone). */
 export async function executeStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -105,9 +106,13 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
           title: "Relevant code (untrusted source; syntax candidates are not semantic resolution)",
           body: `<untrusted_input source="code_intelligence">\n${code.body.replace(/<\/untrusted_input>/g, "<\\/untrusted_input>")}\n</untrusted_input>`,
         });
-      await ctx.recordMetrics({ code_intelligence: code.metrics }).catch(() => {});
+      await ctx
+        .recordMetrics({ code_intelligence: code.metrics })
+        .catch(ignoreError("agent.record_metrics"));
     } catch {
-      await ctx.recordMetrics({ code_intelligence: { fallback_count: 1 } }).catch(() => {});
+      await ctx
+        .recordMetrics({ code_intelligence: { fallback_count: 1 } })
+        .catch(ignoreError("agent.record_metrics"));
     }
   }
   if (incremental)
@@ -283,7 +288,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
               }
             : {}),
         })
-        .catch(() => {});
+        .catch(ignoreError("agent.record_metrics"));
     }
     await ctx.log("prompt", prompt, {
       resume_session: resumeId ?? null,
@@ -516,7 +521,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
           window: pressure.window,
         },
       })
-      .catch(() => {});
+      .catch(ignoreError("agent.record_metrics"));
   if (resume && delivery?.mode === "fresh_session")
     await ctx.log(
       "system",
@@ -563,7 +568,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
               full_message_tokens: Math.ceil(full.length / 4),
             },
           })
-          .catch(() => {});
+          .catch(ignoreError("agent.record_metrics"));
       }
       try {
         result = await run(message, resume.sessionId);
@@ -625,7 +630,9 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
     if (codeIntelligenceEnabled())
       for (const w of await workspacesOf(ctx.run.id).catch(() => []))
         await enqueueIndex(w.repo, ctx.run.id).catch(() => {});
-    await ctx.recordMetrics(metrics as unknown as Record<string, unknown>).catch(() => {});
+    await ctx
+      .recordMetrics(metrics as unknown as Record<string, unknown>)
+      .catch(ignoreError("agent.record_metrics"));
   }
   // The session now holds this context: record it so the next resume of that session sends only what changes.
   if (result && result.assistantTurns > 0) {
