@@ -715,3 +715,7 @@
   gap: var(--sp-2);
   margin-top: var(--sp-3);
 }
+
+.repo-delete {
+  margin-inline-start: var(--sp-4);
+}

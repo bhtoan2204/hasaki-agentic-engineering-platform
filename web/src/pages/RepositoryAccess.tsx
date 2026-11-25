@@ -58,10 +58,12 @@ const PERMS = ["read", "write", "pull_request"] as const;
 function AccessChecks({
   level,
   label,
+  disabled,
   onChange,
 }: {
   level: Level;
   label: string;
+  disabled?: boolean;
   onChange: (l: Level) => void;
 }) {
   const { t } = useI18n();
@@ -79,6 +81,7 @@ function AccessChecks({
             <input
               type="checkbox"
               checked={on}
+              disabled={disabled}
               onChange={(e) =>
                 onChange(
                   e.target.checked
@@ -169,16 +172,24 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
     only ? r.name === only : !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()),
   );
   const reload = () => (matrix.reload(), audit.reload());
-  const grant = async (repo: string, userId: number, level: Level) => {
-    if (
-      await act(
+  const [saving, setSaving] = useState(false);
+  /** The checkboxes are not buttons, so act() cannot mark them busy: lock the whole matrix while one change is saved. */
+  const locked = async (job: () => Promise<unknown>) => {
+    setSaving(true);
+    try {
+      if (await job()) reload();
+    } finally {
+      setSaving(false);
+    }
+  };
+  const grant = (repo: string, userId: number, level: Level) =>
+    locked(() =>
+      act(
         () =>
           api(`/api/repositories/${encodeURIComponent(repo)}/access`, { user_id: userId, level }),
         t("repo.access.saved"),
-      )
-    )
-      reload();
-  };
+      ),
+    );
   const bulk = async (user: { id: number; username: string }, level: Level) => {
     const ok = await dialog.confirm({
       title: t("repo.access.bulk.title"),
@@ -202,15 +213,13 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
     )
       reload();
   };
-  const share = async (repo: string, level: Level) => {
-    if (
-      await act(
+  const share = (repo: string, level: Level) =>
+    locked(() =>
+      act(
         () => api(`/api/repositories/${encodeURIComponent(repo)}/shared`, { level }),
         t("repo.access.saved"),
-      )
-    )
-      reload();
-  };
+      ),
+    );
   const revalidate = async (repo?: string) => {
     if (
       await act(
@@ -259,6 +268,7 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                 <div className="repo-access-row">
                   <div className="repo-access-who">{t("repo.access.shared")}</div>
                   <AccessChecks
+                    disabled={saving}
                     level={r.shared_access}
                     label={`${r.name} · ${t("repo.access.shared")}`}
                     onChange={(l) => share(r.name, l)}
@@ -276,6 +286,7 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                       </div>
                       <div className="repo-access-grant">
                         <AccessChecks
+                          disabled={saving}
                           level={level}
                           label={`${r.name} · ${u.username}`}
                           onChange={(l) => grant(r.name, u.id, l)}
@@ -344,6 +355,7 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                     </th>
                     <td>
                       <AccessChecks
+                        disabled={saving}
                         level={r.shared_access}
                         label={`${r.name} · ${t("repo.access.shared")}`}
                         onChange={(l) => share(r.name, l)}
@@ -355,6 +367,7 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                       return (
                         <td key={u.id}>
                           <AccessChecks
+                            disabled={saving}
                             level={level}
                             label={`${r.name} · ${u.username}`}
                             onChange={(l) => grant(r.name, u.id, l)}

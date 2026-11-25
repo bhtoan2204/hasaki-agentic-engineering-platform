@@ -119,7 +119,12 @@ export function RunsTable({ runs }: { runs: RunListItem[] }) {
               className="click"
               tabIndex={0}
               onClick={() => navigate(`/runs/${r.id}`)}
-              onKeyDown={(e) => e.key === "Enter" && navigate(`/runs/${r.id}`)}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+                  e.preventDefault();
+                  navigate(`/runs/${r.id}`);
+                }
+              }}
             >
               <td className="runs-main">
                 <div className="runs-title">

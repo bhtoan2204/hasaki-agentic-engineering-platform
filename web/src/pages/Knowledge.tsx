@@ -305,7 +305,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
             {me.data?.user.role === "admin" && (
               <button type="button" className="ghost" onClick={() => navigate("/knowledge/~audit")}>
                 <ScanSearch size={15} />
-                Audit
+                {t("kn.audit")}
               </button>
             )}
             <RepoImport onDone={reloadAll} />
@@ -1141,7 +1141,7 @@ function KnowledgeEditor({
                             });
                           }}
                         >
-                          Revert to v{v.version}
+                          {t("kn.revertTo", { version: v.version })}
                         </button>
                       )}
                       <button
@@ -1225,7 +1225,7 @@ function KnowledgeEditor({
                   {usage.used.map((u, i) => (
                     <li key={i}>
                       <a href={`#/runs/${u.run_id}/${u.step_key}`}>
-                        Run #{u.run_id} · {u.step_name}
+                        {t("common.runN", { id: u.run_id })} · {u.step_name}
                       </a>{" "}
                       <span className="muted small">
                         {u.definition_key} · v{u.version} · {time(u.created_at)}

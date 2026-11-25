@@ -739,7 +739,11 @@ function FindingPanel({ id, onChanged }: { id: number; onChanged: () => void }) 
             <button type="button" className="xs ghost" onClick={() => setStatus("resolved")}>
               <Check size={12} /> {t("cs.resolve")}
             </button>
-            <button type="button" className="xs ghost" onClick={() => setStatus("dismissed")}>
+            <button
+              type="button"
+              className="xs ghost danger"
+              onClick={() => setStatus("dismissed")}
+            >
               <X size={12} /> {t("cs.dismiss")}
             </button>
           </>

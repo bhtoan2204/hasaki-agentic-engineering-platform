@@ -161,6 +161,7 @@ export function ModelCombobox({
           role="combobox"
           aria-expanded={open}
           aria-controls={open ? listId : undefined}
+          aria-activedescendant={open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
           aria-autocomplete="list"
           autoComplete="off"
           spellCheck={false}
@@ -224,6 +225,9 @@ export function ModelCombobox({
               e.preventDefault();
               selectValue(undefined);
             }}
+            onClick={(e) => {
+              if (e.detail === 0) selectValue(undefined);
+            }}
           >
             <X size={13} aria-hidden />
           </button>
@@ -242,6 +246,11 @@ export function ModelCombobox({
             setFiltering(false);
             inputRef.current?.focus();
           }}
+          onClick={(e) => {
+            if (disabled || e.detail !== 0) return;
+            setOpen((prev) => !prev);
+            setFiltering(false);
+          }}
         >
           <ChevronDown size={14} aria-hidden />
         </button>
@@ -256,7 +265,7 @@ export function ModelCombobox({
             id={listId}
             ref={menuRef}
             role="listbox"
-            aria-label={`${ariaLabel} suggestions`}
+            aria-label={`${ariaLabel} ${t("set.suggestions")}`}
             className="agent-combo-menu"
             style={{
               top: menuRect.top,
@@ -267,6 +276,7 @@ export function ModelCombobox({
             {options.map((opt, idx) => (
               <div
                 key={opt.key}
+                id={`${listId}-${idx}`}
                 role="option"
                 aria-selected={opt.active}
                 className={`agent-combo-option${opt.active ? " is-selected" : ""}${idx === activeIndex ? " is-focused" : ""}`}

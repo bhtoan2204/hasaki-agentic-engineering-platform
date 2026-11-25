@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { HardDrive, RefreshCw } from "lucide-react";
 import { api, useApi } from "../api.ts";
-import { act, ago } from "../ui.tsx";
+import { act, ago, ErrorBox, SkeletonRows } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 
 interface WorkspaceRepo {
@@ -25,7 +25,7 @@ interface WorkspaceRepo {
 export function RepositoryWorkspace() {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const { data, reload } = useApi<{
+  const { data, error, loading, reload } = useApi<{
     background: { enabled: boolean };
     repositories: WorkspaceRepo[];
   }>(open ? "/api/workspace/repositories" : null);
@@ -60,6 +60,8 @@ export function RepositoryWorkspace() {
           <a href="#/integrations">{t("repo.ws.enableBackground")}</a>
         )}
       </p>
+      {open && error && <ErrorBox error={error} onRetry={reload} />}
+      {open && loading && !data && <SkeletonRows rows={3} />}
       {data && (
         <div className="table-wrap">
           <table className="repo-ws-table">

@@ -288,10 +288,10 @@ export function WorkflowsPage() {
                 </div>
               </div>
             )}
-            <Field label="Key" hint={t("wfs.keyHint")}>
+            <Field label={t("wfs.keyLabel")} hint={t("wfs.keyHint")}>
               <input
                 autoFocus
-                placeholder="key (lowercase-dashes)"
+                placeholder={t("wfs.keyPh")}
                 value={key}
                 onChange={(e) => setKey(e.target.value.toLowerCase())}
               />
@@ -330,7 +330,7 @@ export function WorkflowsPage() {
 function WorkflowCard({ w, onDuplicate }: { w: WorkflowSummary; onDuplicate: () => void }) {
   const { t } = useI18n();
   // The list endpoint carries no step data; read the definition to show its shape (read-only GET).
-  const { data: def } = useApi<WorkflowDefinition>(
+  const { data: def, error: defError } = useApi<WorkflowDefinition>(
     `/api/workflows/${encodeURIComponent(w.key)}${w.owner_id ? `?owner=${w.owner_id}` : ""}`,
   );
   const spec = def ? (def.draft_spec ?? def.versions?.[0]?.spec) : null;
@@ -386,7 +386,11 @@ function WorkflowCard({ w, onDuplicate }: { w: WorkflowSummary; onDuplicate: () 
       </p>
 
       <div className="wfs-types">
-        {!def ? (
+        {defError ? (
+          <span className="muted small" role="alert">
+            {defError}
+          </span>
+        ) : !def ? (
           <>
             <Skeleton h={22} w={74} r={999} />
             <Skeleton h={22} w={60} r={999} />

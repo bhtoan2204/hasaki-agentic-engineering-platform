@@ -487,7 +487,7 @@ function Editor({ wfKey }: { wfKey: string }) {
     <div className="wfe">
       <header className="wfe-top">
         <div className="wfe-id">
-          <nav className="crumbs wfe-crumbs" aria-label="Breadcrumb">
+          <nav className="crumbs wfe-crumbs" aria-label={t("common.breadcrumb")}>
             <a href="#/workflows">{t("nav.workflows")}</a>
             <ChevronRight size={13} aria-hidden />
             <span>{spec.name || wfKey}</span>
@@ -517,7 +517,7 @@ function Editor({ wfKey }: { wfKey: string }) {
               onChange={(e) => void loadVersion(e.target.value)}
               aria-label={t("wfe.openVersion")}
             >
-              {def.draft_spec && <option value="draft">draft</option>}
+              {def.draft_spec && <option value="draft">{t("wfe.draftOpt")}</option>}
               {def.versions.map((v) => (
                 <option key={v.version} value={v.version}>
                   v{v.version} · {time(v.published_at)}

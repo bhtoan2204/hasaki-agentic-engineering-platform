@@ -586,17 +586,10 @@ function GroupRow({
           {g.work_item_code ? (
             <span
               className="pill chip-brand pe-wi"
-              role="link"
-              tabIndex={0}
               title={t("pe.openItem", {
                 code: g.work_item_code,
                 title: g.work_item_title ?? "",
               })}
-              onClick={(e) => (e.stopPropagation(), navigate(`/work-items/${g.work_item_id}`))}
-              onKeyDown={(e) =>
-                e.key === "Enter" &&
-                (e.stopPropagation(), navigate(`/work-items/${g.work_item_id}`))
-              }
             >
               <Bug size={11} />
               {g.work_item_code}

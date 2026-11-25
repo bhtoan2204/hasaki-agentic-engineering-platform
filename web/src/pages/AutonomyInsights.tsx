@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Gauge } from "lucide-react";
 import { api, useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { act, EmptyState, ErrorBox, Loading } from "../ui.tsx";
+import { act, EmptyState, PageHeader, ErrorBox, Loading } from "../ui.tsx";
 
 type Rate = { numerator: number; denominator: number; value: number | null };
 type View = {
@@ -48,10 +48,12 @@ export function AutonomyInsights() {
   const m = data?.metrics;
   return (
     <div className="ins">
-      <h2 style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <Gauge size={20} /> {t("ae.title")}
-      </h2>
-      <p className="small muted">{t("ae.hint")}</p>
+      <PageHeader
+        icon={Gauge}
+        title={t("ae.title")}
+        subtitle={t("ae.hint")}
+        crumbs={[[t("nav.insights"), "#/insights"], [t("ae.title")]]}
+      />
       <select
         value={days}
         onChange={(e) => setDays(Number(e.target.value))}

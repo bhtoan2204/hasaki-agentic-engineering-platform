@@ -93,7 +93,7 @@ export function OfficeToolbar({
         onClick={() => onPreview(!preview)}
         title={t("office.previewTip")}
       >
-        <Sparkles size={15} /> Preview
+        <Sparkles size={15} /> {t("office.previewBtn")}
       </button>
       <button
         type="button"
@@ -103,11 +103,11 @@ export function OfficeToolbar({
       >
         {animate ? (
           <>
-            <Pause size={15} /> Animation
+            <Pause size={15} /> {t("office.animation")}
           </>
         ) : (
           <>
-            <Play size={15} /> Animation
+            <Play size={15} /> {t("office.animation")}
           </>
         )}
       </button>

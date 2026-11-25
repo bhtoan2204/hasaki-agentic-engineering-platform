@@ -127,7 +127,8 @@ export function AgentOfficePage({ param }: { param?: string }) {
               <span className="muted">{t("office.simRun")}</span>
             ) : run ? (
               <>
-                <b>Run #{run.id}</b> <span className="office-runtitle">{run.title}</span>{" "}
+                <b>{t("common.runN", { id: run.id })}</b>{" "}
+                <span className="office-runtitle">{run.title}</span>{" "}
                 <span className={`office-runstatus s-${run.status}`}>{run.status}</span>
               </>
             ) : real.error ? (

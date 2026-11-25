@@ -387,6 +387,7 @@ export function IncidentWorkbench({
       <div className="wb-actions">
         <Button
           size="sm"
+          variant="secondary"
           icon={<Activity size={14} />}
           loading={busy}
           disabled={!!d.runtime?.active}

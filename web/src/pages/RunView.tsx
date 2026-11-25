@@ -607,13 +607,17 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
     <>
       <header className="rv-head">
         <div className="rv-headrow">
-          <nav className="rv-crumbs" aria-label="Breadcrumb">
+          <nav className="rv-crumbs" aria-label={t("common.breadcrumb")}>
             <a href="#/runs">
               <Activity size={13} /> {t("nav.runs")}
             </a>
             <ChevronRight size={13} aria-hidden />
             <span className={stepKey ? undefined : "rv-cur"}>
-              {stepKey ? <a href={`#/runs/${id}`}>Run #{run.id}</a> : `Run #${run.id}`}
+              {stepKey ? (
+                <a href={`#/runs/${id}`}>{t("common.runN", { id: run.id })}</a>
+              ) : (
+                t("common.runN", { id: run.id })
+              )}
             </span>
             {stepKey && (
               <>
@@ -1217,7 +1221,7 @@ function QueueBanner({ run, tick }: { run: RunDetail; tick: number }) {
         })}{" "}
         {others.map((j) => (
           <a key={j.job_id} href={`#/runs/${j.run_id}/${j.step_key}`} style={{ marginRight: 10 }}>
-            run #{j.run_id} · {j.step_name} ({fmt(j.running_seconds ?? 0)})
+            {t("common.runN", { id: j.run_id })} · {j.step_name} ({fmt(j.running_seconds ?? 0)})
           </a>
         ))}
         <span className="muted small">— {t("rv.queueHint")}</span>

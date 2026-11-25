@@ -1,7 +1,7 @@
 import { Brain } from "lucide-react";
 import { useApi } from "../api.ts";
 import { useI18n } from "../i18n/index.tsx";
-import { Empty, EmptyState, ErrorBox, Loading } from "../ui.tsx";
+import { Empty, EmptyState, PageHeader, ErrorBox, Loading } from "../ui.tsx";
 
 type Overview = {
   lessons: Array<{ purpose: string; status: string; n: number; corroborated: number }>;
@@ -24,10 +24,12 @@ export function LearningInsights() {
   const { data, error, loading, reload } = useApi<Overview>("/api/learning/overview");
   return (
     <div className="ins">
-      <h2 style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <Brain size={20} /> {t("ln.title")}
-      </h2>
-      <p className="small muted">{t("ln.hint")}</p>
+      <PageHeader
+        icon={Brain}
+        title={t("ln.title")}
+        subtitle={t("ln.hint")}
+        crumbs={[[t("nav.insights"), "#/insights"], [t("ln.title")]]}
+      />
       {loading && !data && <Loading />}
       {error && <ErrorBox error={error} onRetry={reload} />}
       {!data && !loading && !error && <EmptyState icon={Brain} title={t("ln.none")} />}

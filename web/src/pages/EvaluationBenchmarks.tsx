@@ -211,7 +211,7 @@ export function EvaluationBenchmarks() {
             {!runs.data.runs?.length ? (
               <tr>
                 <td colSpan={6}>
-                  <EmptyState title="No benchmark evaluations yet" />
+                  <EmptyState title={t("bench.empty")}>{t("bench.emptyHint")}</EmptyState>
                 </td>
               </tr>
             ) : (

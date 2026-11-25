@@ -75,7 +75,7 @@ export function ProviderExperimentForm({
           {admin && (
             <button
               type="button"
-              className="sm"
+              className="sm ghost"
               onClick={() =>
                 act(async () => {
                   await api("/api/benchmark-suites/publish", {});

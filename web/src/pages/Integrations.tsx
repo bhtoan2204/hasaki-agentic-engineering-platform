@@ -1683,9 +1683,15 @@ function BackgroundGit(p: { open: boolean; onToggle: (id: string) => void }) {
   const { data: st, reload } = useApi<{ enabled: boolean; hosts: string[] }>(
     "/api/integrations/background-git",
   );
+  const [toggling, setToggling] = useState(false);
   const toggle = async (enabled: boolean) => {
-    if (await act(() => api("/api/integrations/background-git", { enabled }), t("ig.bg.saved")))
-      void reload();
+    setToggling(true);
+    try {
+      if (await act(() => api("/api/integrations/background-git", { enabled }), t("ig.bg.saved")))
+        await reload();
+    } finally {
+      setToggling(false);
+    }
   };
   return (
     <Row
@@ -1701,7 +1707,7 @@ function BackgroundGit(p: { open: boolean; onToggle: (id: string) => void }) {
         <input
           type="checkbox"
           checked={!!st?.enabled}
-          disabled={!st}
+          disabled={!st || toggling}
           onChange={(e) => void toggle(e.target.checked)}
         />{" "}
         {t("ig.bg.allow")}
@@ -2037,6 +2043,11 @@ function AgentAccounts() {
         <div key={provider.id} className="card">
           <strong>{provider.id}</strong> ·{" "}
           {provider.ok ? t("ig.cli.available") : t("ig.cli.unavailable")}
+          {!provider.ok && provider.error && (
+            <p className="small muted" role="alert">
+              {provider.error}
+            </p>
+          )}
           {provider.id === "copilot" && (
             <p className="small">
               {slot(t("ig.cli.copilotHint"), { cmd: <code>copilot auth login</code> })}

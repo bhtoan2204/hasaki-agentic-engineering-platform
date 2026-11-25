@@ -110,7 +110,7 @@ export function BugHunterInline({
           {!form && (
             <Button
               size="sm"
-              variant={huntId ? "secondary" : "primary"}
+              variant="secondary"
               icon={<Bug size={14} />}
               onClick={() => setForm(true)}
             >

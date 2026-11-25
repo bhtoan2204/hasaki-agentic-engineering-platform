@@ -420,14 +420,22 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
       title={t("ins.title")}
       subtitle={t("ins.subtitle")}
       actions={
-        <Segmented
-          label={t("ins.range")}
-          options={[1, 7, 30, 90].map(
-            (d) => [String(d), t("ins.days", { n: d })] as [string, string],
-          )}
-          value={String(days)}
-          onChange={(v) => setDays(Number(v))}
-        />
+        <>
+          <a className="btn ghost sm" href="#/insights/learning">
+            {t("ln.title")}
+          </a>
+          <a className="btn ghost sm" href="#/insights/autonomy">
+            {t("ae.title")}
+          </a>
+          <Segmented
+            label={t("ins.range")}
+            options={[1, 7, 30, 90].map(
+              (d) => [String(d), t("ins.days", { n: d })] as [string, string],
+            )}
+            value={String(days)}
+            onChange={(v) => setDays(Number(v))}
+          />
+        </>
       }
     />
   );

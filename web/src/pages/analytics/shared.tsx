@@ -36,12 +36,12 @@ export function Panel({
     <section className="card ins-panel an-panel">
       <div className="ins-panel-head">
         <h3>{title}</h3>
-        {hint && (
-          <span className="an-info" tabIndex={0} title={hint} aria-label={hint}>
-            <Info size={16} />
-          </span>
-        )}
       </div>
+      {hint && (
+        <p className="an-panel-hint muted small">
+          <Info size={14} aria-hidden /> {hint}
+        </p>
+      )}
       {children}
     </section>
   );

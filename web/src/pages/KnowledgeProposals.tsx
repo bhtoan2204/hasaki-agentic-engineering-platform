@@ -333,7 +333,9 @@ export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () =
                           <span className="kn-tag kp-warn">{t("kp.validationFailed")}</span>
                         )}
                         {p.source_run_id && (
-                          <span className="muted small">Run #{p.source_run_id}</span>
+                          <span className="muted small">
+                            {t("common.runN", { id: p.source_run_id })}
+                          </span>
                         )}
                         <span className="muted small">{time(p.created_at)}</span>
                       </span>
@@ -472,7 +474,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             )}
             {p.source_run_id && (
               <a className="kn-tag" href={`#/runs/${p.source_run_id}`}>
-                Run #{p.source_run_id}
+                {t("common.runN", { id: p.source_run_id })}
               </a>
             )}
           </div>
@@ -559,7 +561,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                         {" "}
                         ·{" "}
                         <a href={`#/runs/${e.ref.run_id}${e.ref.step ? `/${e.ref.step}` : ""}`}>
-                          Run #{e.ref.run_id}
+                          {t("common.runN", { id: e.ref.run_id })}
                           {e.ref.step ? ` / ${e.ref.step}` : ""}
                         </a>
                       </>

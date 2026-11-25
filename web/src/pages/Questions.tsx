@@ -95,7 +95,7 @@ function StepQuestionsCard({ qs, onDone }: { qs: OpenQuestion[]; onDone: () => v
         </div>
         <div className="qx-ctx">
           <div className="qx-run">
-            <span className="qx-runid">Run #{head.run_id}</span>
+            <span className="qx-runid">{t("common.runN", { id: head.run_id })}</span>
             {head.work_item_code && <span className="mono muted">{head.work_item_code}</span>}
             <Badge s={head.run_status} label />
           </div>
@@ -210,7 +210,7 @@ function ApprovalCard({ a, onDone }: { a: PendingApproval; onDone: () => void })
         </div>
         <div className="qx-ctx">
           <div className="qx-run">
-            <span className="qx-runid">Run #{a.run_id}</span>
+            <span className="qx-runid">{t("common.runN", { id: a.run_id })}</span>
             {a.work_item_code && <span className="mono muted">{a.work_item_code}</span>}
             <Badge s={a.run_status} label />
             {a.risk && <span className="kn-tag">{t("qx.ap.risk", { risk: a.risk })}</span>}
@@ -386,7 +386,7 @@ export function QuestionsPage() {
           <table className="qx-history">
             <thead>
               <tr>
-                <th>Run</th>
+                <th>{t("qx.col.run")}</th>
                 <th>{t("qx.step")}</th>
                 <th>{t("qx.col.question")}</th>
                 <th>{t("qx.col.answer")}</th>
@@ -401,9 +401,12 @@ export function QuestionsPage() {
                   className="click"
                   tabIndex={0}
                   onClick={() => navigate(`/runs/${q.run_id}/${q.step_key}`)}
-                  onKeyDown={(e) =>
-                    e.key === "Enter" && navigate(`/runs/${q.run_id}/${q.step_key}`)
-                  }
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+                      e.preventDefault();
+                      navigate(`/runs/${q.run_id}/${q.step_key}`);
+                    }
+                  }}
                 >
                   <td className="mono">#{q.run_id}</td>
                   <td>{q.step_name}</td>

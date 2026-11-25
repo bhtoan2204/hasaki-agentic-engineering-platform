@@ -226,7 +226,7 @@ export function AgentSettings() {
         [provider]: structuredClone(next.document.providers[provider]),
       }));
       setEditedDefaults((old) => ({ ...old, [provider]: [] }));
-      setNote({ text: "Provider saved", ok: true });
+      setNote({ text: t("set.providerSaved"), ok: true });
     } catch (err) {
       setNote({ text: (err as Error).message, ok: false });
     } finally {

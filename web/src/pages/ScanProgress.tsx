@@ -148,11 +148,11 @@ export function ScanProgressCard({
     typicalSeconds && elapsed < typicalSeconds ? Math.round(typicalSeconds - elapsed) : null;
 
   return (
-    <div className="sp-card" role="status" aria-live="polite">
+    <div className="sp-card">
       <div className="sp-top">
         <div>
           <div className="sp-title">{t("scan.title")}</div>
-          <div className="muted small">
+          <div className="muted small" role="status">
             {p.phase === "search" && !p.splunkState ? (
               t("scan.signoz")
             ) : p.phase === "search" ? (
@@ -184,7 +184,14 @@ export function ScanProgressCard({
           <Chibi />
           <span className="sp-dust" />
         </div>
-        <div className="sp-track">
+        <div
+          className="sp-track"
+          role="progressbar"
+          aria-label={t("scan.running")}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(pct)}
+        >
           <div className="sp-fill" style={{ width: `${pct}%` }} />
         </div>
       </div>
@@ -268,7 +275,7 @@ export function AssessProgressCard({
     typicalSeconds && elapsed < typicalSeconds ? Math.round(typicalSeconds - elapsed) : null;
   const action = lastAction(progress.last);
   return (
-    <div className="sp-card" role="status" aria-live="polite" data-testid="assess-progress">
+    <div className="sp-card" data-testid="assess-progress">
       <div className="sp-top">
         <div>
           <div className="sp-title">{t("cs.progressTitle")}</div>
@@ -294,7 +301,14 @@ export function AssessProgressCard({
           <Chibi />
           <span className="sp-dust" />
         </div>
-        <div className="sp-track">
+        <div
+          className="sp-track"
+          role="progressbar"
+          aria-label={t("scan.running")}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(pct)}
+        >
           <div className="sp-fill" style={{ width: `${pct}%` }} />
         </div>
       </div>

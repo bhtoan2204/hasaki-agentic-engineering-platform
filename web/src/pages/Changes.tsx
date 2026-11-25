@@ -106,7 +106,8 @@ function SlopPanel({ s }: { s: SlopView }) {
       <div className="rv-sec-title" style={{ marginTop: 16, flexWrap: "wrap" }}>
         <ShieldCheck size={14} /> {t("chg.slop")}
         <span className="muted small" style={{ textTransform: "none", letterSpacing: 0 }}>
-          {s.mode} · {s.level} · {s.status} · {s.files_scanned} file · {s.detector_ms} ms
+          {s.mode} · {s.level} · {s.status} ·{" "}
+          {t("ch.filesScanned", { n: s.files_scanned ?? 0, ms: s.detector_ms ?? 0 })}
         </span>
       </div>
       {findings.length === 0 && <div className="muted small">{t("chg.slopNone")}</div>}
@@ -368,12 +369,26 @@ export function Changes({
                       <tr
                         key={f.path}
                         className={"click" + (file[r.repo] === f.path ? " on" : "")}
+                        tabIndex={0}
+                        aria-selected={file[r.repo] === f.path}
                         onClick={() =>
                           setFile({
                             ...file,
                             [r.repo]: file[r.repo] === f.path ? null : f.path,
                           })
                         }
+                        onKeyDown={(e) => {
+                          if (
+                            (e.key === "Enter" || e.key === " ") &&
+                            e.target === e.currentTarget
+                          ) {
+                            e.preventDefault();
+                            setFile({
+                              ...file,
+                              [r.repo]: file[r.repo] === f.path ? null : f.path,
+                            });
+                          }
+                        }}
                       >
                         <td className="mono" style={{ overflowWrap: "anywhere" }}>
                           {f.path}
@@ -410,7 +425,7 @@ export function Changes({
               <Diff text={file[r.repo] ? fileDiff(r.diff, file[r.repo]!) : r.diff} />
               {r.slop && <SlopPanel s={r.slop} />}
               <div className="rv-sec-title" style={{ marginTop: 16, flexWrap: "wrap" }}>
-                <GitPullRequest size={14} /> PR preview
+                <GitPullRequest size={14} /> {t("ch.prPreview")}
                 <span style={{ textTransform: "none", letterSpacing: 0 }}>
                   {r.pr_preview.will_open ? (
                     <Badge s="COMPLETED">{t("ch.willOpen")}</Badge>
@@ -437,7 +452,7 @@ export function Changes({
       {data.validation.length > 0 && (
         <>
           <div className="rv-sec-title" style={{ marginTop: 18 }}>
-            <ListChecks size={14} /> Validation
+            <ListChecks size={14} /> {t("ch.validation")}
           </div>
           {data.validation.map((v) => (
             <details
@@ -467,7 +482,7 @@ export function Changes({
       {data.pull_requests.length > 0 && (
         <>
           <div className="rv-sec-title" style={{ marginTop: 18 }}>
-            <GitPullRequest size={14} /> Pull requests
+            <GitPullRequest size={14} /> {t("ch.pullRequests")}
           </div>
           {data.pull_requests.map((p) => (
             <div key={p.id} className="rp-file">

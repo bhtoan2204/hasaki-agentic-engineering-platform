@@ -211,7 +211,7 @@ function Hero({ active, waiting }: { active: number; waiting: number }) {
         <div className="ov-hero-kicker">
           <Sparkles size={14} /> {BRAND.tagline}
         </div>
-        <h1>Welcome to {BRAND.product}</h1>
+        <h1>{t("ov.welcome", { product: BRAND.product })}</h1>
         <p>
           {active ? (
             <>
@@ -263,7 +263,7 @@ function MiniOffice({ runId }: { runId: number | null }) {
         <span className="sub">
           {snap.run ? (
             <>
-              Run #{snap.run.id} · {t("ov.working", { n: working })}
+              {t("common.runN", { id: snap.run.id })} · {t("ov.working", { n: working })}
               {waiting ? ` · ${t("ov.needYou", { n: waiting })}` : ""}
             </>
           ) : (
@@ -326,7 +326,7 @@ function ActionInbox({ questions }: { questions: OverviewQuestion[] }) {
                 <span className="ov-dot wait" />
                 <span className="ov-li-main">
                   <b>
-                    Run #{qs[0].run_id} · {qs[0].step_key}
+                    {t("common.runN", { id: qs[0].run_id })} · {qs[0].step_key}
                   </b>
                   <span className="muted small">
                     {t("office.bubble.questions", { n: qs.length })} ·{" "}
@@ -572,7 +572,7 @@ function RecentVerification({ runs }: { runs: OverviewRun[] }) {
                   />
                   <span className="ov-li-main">
                     <b>
-                      Run #{r.run} · {r.step} #{r.n}
+                      {t("common.runN", { id: r.run })} · {r.step} #{r.n}
                     </b>
                     <span className="muted small">
                       {typeof r.v.rounds === "number"

@@ -171,7 +171,7 @@ export function IntakeQueue({ all = false }: { all?: boolean }) {
                   {i.work_item_code || t("in.workItem")}
                 </a>
               )}
-              {i.run_id && <a href={`#/runs/${i.run_id}`}>run #{i.run_id}</a>}
+              {i.run_id && <a href={`#/runs/${i.run_id}`}>{t("common.runN", { id: i.run_id })}</a>}
               {i.permalink && (
                 <a href={i.permalink} target="_blank" rel="noreferrer">
                   {t("in.source")} <ExternalLink size={11} />
@@ -299,7 +299,9 @@ export function IntakePolicies() {
           >
             <header className="in-policy-head">
               <b>{t(`in.src.${p.source}`)}</b>
-              {p.owner_id ? <span className="in-item-id mono">owner {p.owner_id}</span> : null}
+              {p.owner_id ? (
+                <span className="in-item-id mono">{t("in.ownerId", { id: p.owner_id })}</span>
+              ) : null}
               {p.paused && <Chip tone="wait">{t("in.paused")}</Chip>}
               <div className="in-modes" role="group" aria-label={t("in.f.mode")}>
                 {MODES.map((m) => (

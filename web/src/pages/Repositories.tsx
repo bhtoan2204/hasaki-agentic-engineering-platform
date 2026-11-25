@@ -390,7 +390,7 @@ export function RepositoriesPage({
                 </button>
               )}
               {manage && r && (
-                <button type="button" className="danger" onClick={() => remove(r.name)}>
+                <button type="button" className="danger repo-delete" onClick={() => remove(r.name)}>
                   <Trash2 size={15} />
                   {t("repo.delete")}
                 </button>
@@ -488,6 +488,9 @@ export function RepositoriesPage({
                       <FolderGit2 size={16} />
                       <h4>{t("repo.workspace")}</h4>
                     </div>
+                    {workspace.error && (
+                      <ErrorBox error={workspace.error} onRetry={workspace.reload} />
+                    )}
                     <p>{t(`repo.workspace.${workspace.data?.status ?? "remote_configured"}`)}</p>
                     <p className="muted small">{workspace.data?.instance_id}</p>
                     <div className="row" style={{ flexWrap: "wrap" }}>
