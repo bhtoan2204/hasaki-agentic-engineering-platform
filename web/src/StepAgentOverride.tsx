@@ -26,10 +26,10 @@ export function StepAgentOverride({
       <p className="muted small">{t("sao.desc")}</p>
       <StepAgentFields allowVerification={false} value={draft} onChange={setDraft} />
       <div className="actions">
-        <button disabled={busy} onClick={() => submit(draft)}>
+        <button type="button" disabled={busy} onClick={() => submit(draft)}>
           {t("sao.save")}
         </button>
-        <button className="ghost" disabled={busy} onClick={() => submit(null)}>
+        <button type="button" className="ghost" disabled={busy} onClick={() => submit(null)}>
           {t("sao.restore")}
         </button>
       </div>

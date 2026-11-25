@@ -97,7 +97,12 @@ export function AgentDetailsPanel({
           </div>
           <div className="muted small">{t(`office.role.${agent.role}.does`)}</div>
         </div>
-        <button className="quiet icon" onClick={onClose} aria-label={t("common.close")}>
+        <button
+          type="button"
+          className="quiet icon"
+          onClick={onClose}
+          aria-label={t("common.close")}
+        >
           <X size={17} />
         </button>
       </header>

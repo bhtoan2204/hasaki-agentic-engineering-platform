@@ -197,7 +197,7 @@ export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () =
     onChanged();
   };
   const back = (
-    <button className="quiet sm kn-back" onClick={() => navigate("/knowledge")}>
+    <button type="button" className="quiet sm kn-back" onClick={() => navigate("/knowledge")}>
       <ArrowLeft size={15} />
       {t("kn.back")}
     </button>
@@ -256,6 +256,7 @@ export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () =
                 <span className="muted small">{t("kp.bulk.selected", { n: selected.size })}</span>
                 <span className="kp-bulk-actions">
                   <button
+                    type="button"
                     className="sm"
                     disabled={!selected.size || bulkBusy}
                     aria-busy={bulkBusy}
@@ -265,6 +266,7 @@ export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () =
                     {t("kp.bulk.approve", { n: selected.size })}
                   </button>
                   <button
+                    type="button"
                     className="ghost sm"
                     disabled={!selected.size || bulkBusy}
                     onClick={() => bulk("reject")}
@@ -390,7 +392,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
       });
   }, [p]);
   const back = (
-    <button className="quiet sm" onClick={() => navigate("/knowledge/~proposals")}>
+    <button type="button" className="quiet sm" onClick={() => navigate("/knowledge/~proposals")}>
       <ArrowLeft size={15} />
       {t("kp.backToList")}
     </button>
@@ -813,6 +815,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             </div>
             <div className="row tight">
               <button
+                type="button"
                 className="ok"
                 disabled={
                   (p.target_changed && !accept) ||
@@ -823,7 +826,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 <CheckCircle2 size={15} />
                 {t("kp.approve")}
               </button>
-              <button className="ghost" onClick={() => decide("reject")}>
+              <button type="button" className="ghost" onClick={() => decide("reject")}>
                 <XCircle size={15} />
                 {t("kp.reject")}
               </button>
@@ -840,6 +843,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
               style={{ flex: 1 }}
             />
             <button
+              type="button"
               className="ghost"
               onClick={async () => {
                 const ok = await dialog.confirm({

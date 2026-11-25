@@ -87,6 +87,7 @@ export function OfficeToolbar({
         </span>
       )}
       <button
+        type="button"
         className={`ghost sm${preview ? " is-on" : ""}`}
         aria-pressed={preview}
         onClick={() => onPreview(!preview)}
@@ -95,6 +96,7 @@ export function OfficeToolbar({
         <Sparkles size={15} /> Preview
       </button>
       <button
+        type="button"
         className={`ghost sm${animate ? " is-on" : ""}`}
         aria-pressed={animate}
         onClick={() => onAnimate(!animate)}
@@ -110,6 +112,7 @@ export function OfficeToolbar({
         )}
       </button>
       <button
+        type="button"
         className={`ghost sm${compact ? " is-on" : ""}`}
         aria-pressed={compact}
         onClick={() => onCompact(!compact)}
@@ -124,7 +127,7 @@ export function OfficeToolbar({
           </>
         )}
       </button>
-      <button className="ghost sm" aria-pressed={fullscreen} onClick={onFullscreen}>
+      <button type="button" className="ghost sm" aria-pressed={fullscreen} onClick={onFullscreen}>
         {fullscreen ? (
           <>
             <Minimize2 size={15} /> {t("office.exitFullscreen")}

@@ -59,7 +59,7 @@ export function AutonomyPolicies() {
           {p.revoked_at ? (
             <span className="err">{t("au.revoked")}</span>
           ) : (
-            <button className="ghost sm" onClick={() => revoke(p.id)}>
+            <button type="button" className="ghost sm" onClick={() => revoke(p.id)}>
               {t("au.revoke")}
             </button>
           )}
@@ -140,7 +140,9 @@ export function AutonomyPolicies() {
               style={{ width: 90 }}
             />
           </label>
-          <button onClick={save}>{t("au.save")}</button>
+          <button type="button" onClick={save}>
+            {t("au.save")}
+          </button>
         </div>
       )}
     </section>

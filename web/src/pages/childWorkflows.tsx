@@ -127,7 +127,7 @@ function ChildRunNodeImpl({ data }: NodeProps<Node<ChildNodeData>>) {
       tabIndex={0}
       title={c.reason ?? undefined}
       onClick={() => open()}
-      onKeyDown={(e) => e.key === "Enter" && open()}
+      onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && open()}
     >
       <span className="gn-rail" aria-hidden />
       <div className="gn-head">
@@ -192,22 +192,27 @@ function ChildRunNodeImpl({ data }: NodeProps<Node<ChildNodeData>>) {
       {c.error && <div className="gc-error">{c.error}</div>}
       <div className="gc-actions" onPointerDown={stop} onClick={stop}>
         {approval && (
-          <button className="xs gc-approve" onClick={() => open(`/${approval.key}`)}>
+          <button type="button" className="xs gc-approve" onClick={() => open(`/${approval.key}`)}>
             <Hand size={12} /> {t("child.needsApproval", { step: approval.name })}
           </button>
         )}
         {proposed && (
-          <button className="xs" onClick={start}>
+          <button type="button" className="xs" onClick={start}>
             <Play size={12} /> {t("child.start")}
           </button>
         )}
         {cancellable && (
-          <button className="xs ghost" onClick={cancel}>
+          <button type="button" className="xs ghost" onClick={cancel}>
             <Square size={11} /> {t("child.cancel")}
           </button>
         )}
         {c.child_run_id && (
-          <button className="xs ghost" onClick={() => open()} aria-label={t("child.open")}>
+          <button
+            type="button"
+            className="xs ghost"
+            onClick={() => open()}
+            aria-label={t("child.open")}
+          >
             <ExternalLink size={12} /> {t("child.open")}
           </button>
         )}

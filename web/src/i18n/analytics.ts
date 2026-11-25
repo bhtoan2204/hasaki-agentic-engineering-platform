@@ -25,6 +25,8 @@ const copy: Record<string, [string, string]> = {
     "Mức sử dụng AI, chi phí, hiệu suất agent và workflow",
     "AI usage, cost, agent performance and workflows",
   ],
+  in: ["trong", "in"],
+  time: ["Thời gian", "Time"],
   health: ["Sức khỏe production", "Production health"],
   productionAnalytics: ["Phân tích lỗi production", "Production error analytics"],
   operationalErrors: ["Quản lý sự cố", "Incident operations"],

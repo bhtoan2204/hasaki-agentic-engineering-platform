@@ -25,7 +25,17 @@ import {
 import { api, useApi } from "../api.ts";
 import { AGENT_PROVIDERS, agentKey, asProvider } from "../agentProvider.tsx";
 import { dialog } from "../dialog/index.ts";
-import { EmptyState, ErrorBox, Loading, Markdown, SearchInput, act, ago, toast } from "../ui.tsx";
+import {
+  Drawer,
+  EmptyState,
+  ErrorBox,
+  Loading,
+  Markdown,
+  SearchInput,
+  act,
+  ago,
+  toast,
+} from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import {
   applyChatEvent,
@@ -396,10 +406,10 @@ function OperationCard({
       {op.error && <div className="chat-operation-error">{op.error}</div>}
       {op.status === "pending" && (
         <div className="chat-failure-actions">
-          <button className="sm" onClick={() => onDecide(op.id, "confirm")}>
+          <button type="button" className="sm" onClick={() => onDecide(op.id, "confirm")}>
             {t("chat.op.confirm")}
           </button>
-          <button className="ghost sm" onClick={() => onDecide(op.id, "reject")}>
+          <button type="button" className="ghost sm" onClick={() => onDecide(op.id, "reject")}>
             {t("chat.op.reject")}
           </button>
           <span className="muted">
@@ -445,6 +455,7 @@ function OperationBatchCard({
       ))}
       <div className="chat-failure-actions">
         <button
+          type="button"
           className="sm"
           disabled={!chosen.length}
           onClick={() => onDecideMany(chosen, "confirm")}
@@ -452,6 +463,7 @@ function OperationBatchCard({
           {t("chat.op.batch.confirm", { n: chosen.length })}
         </button>
         <button
+          type="button"
           className="ghost sm"
           disabled={!chosen.length}
           onClick={() => onDecideMany(chosen, "reject")}
@@ -614,21 +626,40 @@ const ChatMessages = memo(function ChatMessages({
               )}
               {m.role === "assistant" && (
                 <div className="chat-bubble-actions">
-                  <button className="ghost xs" onClick={() => actions.copy(m.content)}>
+                  <button
+                    type="button"
+                    className="ghost xs"
+                    aria-label={t("chat.copy")}
+                    onClick={() => actions.copy(m.content)}
+                  >
                     <Copy size={14} />
                   </button>
                   {m.turn_id && !hasActiveTurn && (
-                    <button className="ghost xs" onClick={() => actions.regenerate(m.turn_id!)}>
+                    <button
+                      type="button"
+                      className="ghost xs"
+                      aria-label={t("chat.regenerate")}
+                      onClick={() => actions.regenerate(m.turn_id!)}
+                    >
                       <RefreshCw size={14} />
                     </button>
                   )}
-                  <button className="ghost xs" onClick={() => actions.delegate("task")}>
+                  <button
+                    type="button"
+                    className="ghost xs"
+                    onClick={() => actions.delegate("task")}
+                  >
                     <Workflow size={14} /> {t("chat.createTask")}
                   </button>
-                  <button className="ghost xs" onClick={() => actions.delegate("delegate")}>
+                  <button
+                    type="button"
+                    className="ghost xs"
+                    onClick={() => actions.delegate("delegate")}
+                  >
                     {t("chat.delegate")}
                   </button>
                   <button
+                    type="button"
                     className="ghost xs"
                     title={t("chat.investigateTip")}
                     onClick={() => actions.delegate("investigation")}
@@ -658,16 +689,20 @@ const ChatMessages = memo(function ChatMessages({
                     <div className="muted">{t("chat.failure.fallbackTried")}</div>
                   )}
                   <div className="chat-failure-actions">
-                    <button className="sm" onClick={() => actions.retry(turn)}>
+                    <button type="button" className="sm" onClick={() => actions.retry(turn)}>
                       {t("chat.retry")}
                     </button>
-                    <button className="ghost sm" onClick={() => actions.retryOther(turn)}>
+                    <button
+                      type="button"
+                      className="ghost sm"
+                      onClick={() => actions.retryOther(turn)}
+                    >
                       {t("chat.retryOther")}
                     </button>
                     <a className="btn ghost sm" href="#/settings">
                       {t("chat.openSettings")}
                     </a>
-                    <button className="ghost sm" onClick={actions.refreshHealth}>
+                    <button type="button" className="ghost sm" onClick={actions.refreshHealth}>
                       {t("chat.refreshHealth")}
                     </button>
                   </div>
@@ -1373,7 +1408,12 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
         <div className="chat-side-head">
           <div className="row">
             <h2>{t("nav.chat")}</h2>
-            <button className="sm" onClick={() => void createChat()} aria-label={t("chat.new")}>
+            <button
+              type="button"
+              className="sm"
+              onClick={() => void createChat()}
+              aria-label={t("chat.new")}
+            >
               <MessageSquarePlus size={16} strokeWidth={1.9} /> {t("chat.new")}
             </button>
           </div>
@@ -1482,6 +1522,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       <section className="chat-main" aria-label={t("chat.thread")}>
         <div className="chat-toolbar">
           <button
+            type="button"
             className="ghost icon sm"
             onClick={() => setSideOpen((v) => !v)}
             aria-label={sideOpen ? t("chat.hideList") : t("chat.showList")}
@@ -1489,12 +1530,13 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
             {sideOpen ? <ChevronLeft size={16} /> : <PanelLeft size={16} />}
           </button>
           <div className="chat-title">{detail?.conversation.title || t("chat.untitled")}</div>
-          <button className="ghost sm" onClick={() => setMemoryOpen(true)}>
+          <button type="button" className="ghost sm" onClick={() => setMemoryOpen(true)}>
             {t("chat.memory")}
           </button>
           {detail && (
             <>
               <button
+                type="button"
                 className="ghost sm"
                 onClick={() => void patchConversation({ archived: true })}
                 aria-label={t("chat.archive")}
@@ -1502,6 +1544,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                 <Archive size={15} />
               </button>
               <button
+                type="button"
                 className="ghost sm danger"
                 onClick={() => void removeConversation(detail.conversation.id)}
                 aria-label={t("chat.delete")}
@@ -1517,7 +1560,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
             <MessagesSquare size={36} strokeWidth={1.6} />
             <h3>{t("chat.welcome")}</h3>
             <p className="muted">{t("chat.welcomeHint")}</p>
-            <button onClick={() => void createChat()}>{t("chat.new")}</button>
+            <button type="button" onClick={() => void createChat()}>
+              {t("chat.new")}
+            </button>
           </div>
         )}
         {activeId && loadingDetail && !detail && <Loading label={t("chat.loading")} />}
@@ -1600,6 +1645,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                           <div>{p.error}</div>
                           <div className="chat-failure-actions">
                             <button
+                              type="button"
                               className="sm"
                               onClick={() => retrySend(p)}
                               disabled={busy || !!detail.active_turn}
@@ -1607,6 +1653,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                               {t("chat.retry")}
                             </button>
                             <button
+                              type="button"
                               className="ghost sm"
                               onClick={() =>
                                 setPending((all) => all.filter((x) => x.cid !== p.cid))
@@ -1721,7 +1768,9 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   ))}
                 </select>
                 <button
+                  type="button"
                   className={`ghost sm${advanced ? " on" : ""}`}
+                  aria-label={t("chat.provider")}
                   onClick={() => setAdvanced((v) => !v)}
                   aria-expanded={advanced}
                 >
@@ -1814,7 +1863,11 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                 <div className="chat-proposal" role="status">
                   <Workflow size={15} />
                   <span>{t("chat.proposal", { title: proposal.title })}</span>
-                  <button className="sm" onClick={() => void openDelegation(proposal)}>
+                  <button
+                    type="button"
+                    className="sm"
+                    onClick={() => void openDelegation(proposal)}
+                  >
                     {t("chat.proposal.review")}
                   </button>
                 </div>
@@ -1903,11 +1956,12 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   )}
                 </span>
                 {detail.active_turn ? (
-                  <button className="warn" onClick={() => void cancel()}>
+                  <button type="button" className="warn" onClick={() => void cancel()}>
                     <Square size={15} /> {t("chat.stop")}
                   </button>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => void send()}
                     disabled={(!draft.trim() && !images.length && !documents.length) || busy}
                   >
@@ -1921,9 +1975,8 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       </section>
 
       {memoryOpen && (
-        <div className="chat-modal" role="dialog" aria-modal="true" aria-label={t("chat.memory")}>
+        <Drawer title={t("chat.memory")} onClose={() => setMemoryOpen(false)}>
           <div className="chat-modal-card">
-            <h3>{t("chat.memory")}</h3>
             <p className="muted">{t("chat.memory.hint")}</p>
             {memories.error && <ErrorBox error={memories.error} />}
             {!memories.data && !memories.error && <Loading />}
@@ -1940,12 +1993,14 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   <div>{m.content}</div>
                   <div className="chat-failure-actions">
                     <button
+                      type="button"
                       className="ghost xs"
                       onClick={() => void updateMemory(m.key, { enabled: !m.enabled })}
                     >
                       {m.enabled ? t("chat.memory.disable") : t("chat.memory.enable")}
                     </button>
                     <button
+                      type="button"
                       className="ghost xs"
                       onClick={async () => {
                         const content = await dialog.prompt({
@@ -1958,7 +2013,11 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     >
                       {t("chat.memory.edit")}
                     </button>
-                    <button className="ghost xs danger" onClick={() => void deleteMemory(m.key)}>
+                    <button
+                      type="button"
+                      className="ghost xs danger"
+                      onClick={() => void deleteMemory(m.key)}
+                    >
                       {t("chat.memory.delete")}
                     </button>
                   </div>
@@ -1966,18 +2025,17 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
               ))}
             </div>
             <div className="chat-failure-actions">
-              <button className="ghost sm" onClick={() => setMemoryOpen(false)}>
+              <button type="button" className="ghost sm" onClick={() => setMemoryOpen(false)}>
                 {t("common.close")}
               </button>
             </div>
           </div>
-        </div>
+        </Drawer>
       )}
 
       {preview && (
-        <div className="chat-modal" role="dialog" aria-modal="true">
+        <Drawer title={t("chat.preview")} onClose={() => setPreview(null)}>
           <div className="chat-modal-card">
-            <h3>{t("chat.preview")}</h3>
             <dl className="chat-preview-grid">
               <dt>{t("chat.preview.title")}</dt>
               <dd>{preview.title}</dd>
@@ -1991,15 +2049,19 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
               <dd>{preview.risk?.level ?? "—"}</dd>
             </dl>
             <div className="chat-modal-actions">
-              <button className="ghost" onClick={() => setPreview(null)}>
+              <button type="button" className="ghost" onClick={() => setPreview(null)}>
                 {t("chat.cancel")}
               </button>
-              <button onClick={() => void confirmDelegation()} disabled={!preview.workflow}>
+              <button
+                type="button"
+                onClick={() => void confirmDelegation()}
+                disabled={!preview.workflow}
+              >
                 {t("chat.confirmDelegate")}
               </button>
             </div>
           </div>
-        </div>
+        </Drawer>
       )}
     </div>
   );

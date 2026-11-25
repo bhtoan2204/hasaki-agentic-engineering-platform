@@ -134,7 +134,12 @@ export function ProductionErrorsPage({
                 [7, "range7d"],
                 [30, "range30d"],
               ].map(([n, key]) => (
-                <button key={key} className="ghost xs" onClick={() => range(Number(n))}>
+                <button
+                  type="button"
+                  key={key}
+                  className="ghost xs"
+                  onClick={() => range(Number(n))}
+                >
                   {t(`an.${key}`)}
                 </button>
               ))}

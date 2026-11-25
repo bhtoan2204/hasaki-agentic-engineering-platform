@@ -109,6 +109,7 @@ export function Login({
             ))}
           </div>
           <button
+            type="button"
             className="ghost icon"
             aria-label={t(theme === "light" ? "theme.toDark" : "theme.toLight")}
             onClick={onTheme}
@@ -141,7 +142,7 @@ export function Login({
                 npm run admin:bootstrap -- --username &lt;username&gt; --claim-legacy
               </pre>
               <p className="small muted">{t("auth.bootstrapReload")}</p>
-              <button className="ghost" onClick={load}>
+              <button type="button" className="ghost" onClick={load}>
                 {t("auth.checkSetup")}
               </button>
             </div>

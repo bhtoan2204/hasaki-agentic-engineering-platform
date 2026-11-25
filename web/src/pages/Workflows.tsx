@@ -129,7 +129,8 @@ export function WorkflowsPage() {
       return act(async () => {
         throw new Error(t("wfs.needKey"));
       });
-    create(await api<WorkflowDefinition>(`/api/workflows/${src}`));
+    const def = await act(() => api<WorkflowDefinition>(`/api/workflows/${src}`));
+    if (def) create(def);
   };
 
   const list = useMemo(() => {
@@ -172,7 +173,7 @@ export function WorkflowsPage() {
         title={t("wfs.title")}
         subtitle={t("wfs.subtitle")}
         actions={
-          <button onClick={() => openCreate()}>
+          <button type="button" onClick={() => openCreate()}>
             <Plus size={16} strokeWidth={2.2} /> {t("wfs.new")}
           </button>
         }
@@ -224,7 +225,7 @@ export function WorkflowsPage() {
             icon={Workflow}
             title={t("wfs.emptyTitle")}
             action={
-              <button onClick={() => openCreate()}>
+              <button type="button" onClick={() => openCreate()}>
                 <Plus size={16} /> {t("wfs.createFirst")}
               </button>
             }
@@ -238,7 +239,11 @@ export function WorkflowsPage() {
             icon={Layers}
             title={t("wfs.noMatch")}
             action={
-              <button className="ghost sm" onClick={() => (setQ(""), setFilter("all"))}>
+              <button
+                type="button"
+                className="ghost sm"
+                onClick={() => (setQ(""), setFilter("all"))}
+              >
                 {t("wfs.clearFilter")}
               </button>
             }
@@ -249,7 +254,7 @@ export function WorkflowsPage() {
           {list.map((w) => (
             <WorkflowCard key={w.key} w={w} onDuplicate={() => openCreate(w.key)} />
           ))}
-          <button className="wfs-new" onClick={() => openCreate()}>
+          <button type="button" className="wfs-new" onClick={() => openCreate()}>
             <span className="wfs-new-icon">
               <FilePlus2 size={22} strokeWidth={1.8} />
             </span>
@@ -338,7 +343,7 @@ function WorkflowCard({ w, onDuplicate }: { w: WorkflowSummary; onDuplicate: () 
       role="link"
       tabIndex={0}
       onClick={open}
-      onKeyDown={(e) => e.key === "Enter" && open()}
+      onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && open()}
       aria-label={t("wfs.open", { name: w.name })}
     >
       <div className="wfs-card-top">
@@ -351,6 +356,7 @@ function WorkflowCard({ w, onDuplicate }: { w: WorkflowSummary; onDuplicate: () 
           <span className="mono muted">{w.key}</span>
         </div>
         <button
+          type="button"
           className="ghost xs"
           onClick={(e) => (e.stopPropagation(), onDuplicate())}
           aria-label={t("wfs.dupName", { name: w.name })}

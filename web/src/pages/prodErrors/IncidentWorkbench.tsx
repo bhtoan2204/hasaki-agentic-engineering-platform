@@ -275,7 +275,9 @@ export function IncidentWorkbench({
     }
   };
 
+  const [fixing, setFixing] = useState<string | null>(null);
   const fix = async (c: Cause) => {
+    if (fixing) return;
     const ok = await dialog.confirm({
       title: t("an.wb.fixTitle"),
       description: t(c.level === "unknown" ? "an.wb.fixBodyDefectOnly" : "an.wb.fixBody", {
@@ -284,6 +286,7 @@ export function IncidentWorkbench({
       confirmLabel: t("an.wb.fixConfirm"),
     });
     if (!ok) return;
+    setFixing(c.key);
     try {
       const r = await api<{ created: boolean; run_id: number }>(
         `/api/prod-errors/${fingerprint}/workbench/fix`,
@@ -296,6 +299,8 @@ export function IncidentWorkbench({
       wb.reload();
     } catch (e) {
       toast((e as Error).message, "err");
+    } finally {
+      setFixing(null);
     }
   };
 
@@ -364,6 +369,8 @@ export function IncidentWorkbench({
                         size="sm"
                         variant="secondary"
                         icon={<Wrench size={13} />}
+                        loading={fixing === c.key}
+                        disabled={!!fixing}
                         onClick={() => fix(c)}
                       >
                         {t("an.wb.createFix")}

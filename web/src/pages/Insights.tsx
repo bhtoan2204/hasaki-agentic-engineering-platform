@@ -835,11 +835,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                   "run_id",
                   t("ins.col.run"),
                   (r) => (
-                    <a
-                      onClick={() => navigate(`/runs/${r.run_id}/${r.step_key}`)}
-                      style={{ cursor: "pointer" }}
-                      className="mono"
-                    >
+                    <a href={`#/runs/${r.run_id}/${r.step_key}`} className="mono">
                       #{r.run_id} · {r.step_key}
                     </a>
                   ),

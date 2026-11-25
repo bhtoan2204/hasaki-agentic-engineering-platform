@@ -157,7 +157,11 @@ export function AgentOfficePage({ param }: { param?: string }) {
             <div className="office-idle-card">
               <div>
                 <b>{t("office.idleTitle")}</b> {t("office.idleBody")}{" "}
-                <button className="linkish" onClick={() => navigate("/office/preview")}>
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => navigate("/office/preview")}
+                >
                   {t("office.preview")}
                 </button>
               </div>
@@ -175,6 +179,7 @@ export function AgentOfficePage({ param }: { param?: string }) {
             {agents.map((a) => (
               <li key={a.role}>
                 <button
+                  type="button"
                   className={`office-chip pose-${a.pose}${selected === a.role ? " is-sel" : ""}`}
                   onClick={() => setSelected((s) => (s === a.role ? null : a.role))}
                   aria-pressed={selected === a.role}

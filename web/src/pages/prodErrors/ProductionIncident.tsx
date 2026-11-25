@@ -85,7 +85,7 @@ export function ProductionIncident({ fingerprint, query }: { fingerprint: string
   return (
     <div className="an-service-details an-prod-incident">
       <div className="an-service-back-row">
-        <a className="ghost sm" href={`#${returnTo}`}>
+        <a className="btn ghost sm" href={`#${returnTo}`}>
           <ArrowLeft size={14} />
           {t("an.backToHealth")}
         </a>

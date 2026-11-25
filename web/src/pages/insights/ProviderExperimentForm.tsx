@@ -74,6 +74,7 @@ export function ProviderExperimentForm({
           {t("an.eval.publishSuiteFirst")}
           {admin && (
             <button
+              type="button"
               className="sm"
               onClick={() =>
                 act(async () => {
@@ -172,6 +173,7 @@ export function ProviderExperimentForm({
       )}
       <div className="row" style={{ marginTop: 12 }}>
         <button
+          type="button"
           className="sm"
           disabled={busy || !suites.data?.length || (mode === "live" && !paid)}
           onClick={() => queue()}
@@ -179,13 +181,14 @@ export function ProviderExperimentForm({
           {t("an.eval.queueEval")}
         </button>
         <button
+          type="button"
           className="sm ghost"
           disabled={busy || !suites.data?.length || mode !== "fixture"}
           onClick={() => queue(true)}
         >
           {t("an.eval.queueStudy")}
         </button>
-        <button className="quiet sm" onClick={() => navigate("/insights/quality")}>
+        <button type="button" className="quiet sm" onClick={() => navigate("/insights/quality")}>
           {t("an.eval.existingRunnerBtn")}
         </button>
       </div>

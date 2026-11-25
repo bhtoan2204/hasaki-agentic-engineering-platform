@@ -74,7 +74,7 @@ export function EvaluationRecommendations() {
           <input value={cohort} onChange={(e) => setCohort(e.target.value)} />
         </Field>
       </div>
-      <button className="sm" disabled={!category.trim()} onClick={generate}>
+      <button type="button" className="sm" disabled={!category.trim()} onClick={generate}>
         {t("an.eval.generate")}
       </button>
       {rows.error && <ErrorBox error={rows.error} onRetry={rows.reload} />}
@@ -135,6 +135,7 @@ export function EvaluationRecommendations() {
                 {t("an.eval.allowDefaultUnknownCost")}
               </label>
               <button
+                type="button"
                 className="sm"
                 onClick={() =>
                   act(async () => {
@@ -159,6 +160,7 @@ export function EvaluationRecommendations() {
         <p key={p.id} className="small">
           {p.category} · {p.enabled ? t("an.eval.enabled") : t("an.eval.disabled")}{" "}
           <button
+            type="button"
             className="quiet xs"
             onClick={() =>
               act(async () => {

@@ -376,6 +376,7 @@ export function RepositoriesPage({
             <>
               {tabs}
               <button
+                type="button"
                 className="ghost"
                 onClick={() => navigate(manage ? manageHref() : "/repositories")}
               >
@@ -383,13 +384,13 @@ export function RepositoriesPage({
                 {t("repo.list")}
               </button>
               {manage && (
-                <button className="ghost" onClick={startNew}>
+                <button type="button" className="ghost" onClick={startNew}>
                   <Plus size={15} />
                   {t("repo.add")}
                 </button>
               )}
               {manage && r && (
-                <button className="danger" onClick={() => remove(r.name)}>
+                <button type="button" className="danger" onClick={() => remove(r.name)}>
                   <Trash2 size={15} />
                   {t("repo.delete")}
                 </button>
@@ -403,6 +404,7 @@ export function RepositoriesPage({
             title={t("repo.missing")}
             action={
               <button
+                type="button"
                 className="ghost sm"
                 onClick={() => navigate(manage ? manageHref() : "/repositories")}
               >
@@ -491,6 +493,7 @@ export function RepositoriesPage({
                     <div className="row" style={{ flexWrap: "wrap" }}>
                       {(["test-connection", "prepare", "refresh"] as const).map((action) => (
                         <button
+                          type="button"
                           key={action}
                           className="ghost sm"
                           onClick={async () => {
@@ -510,7 +513,7 @@ export function RepositoriesPage({
                           {t(`repo.${action}`)}
                         </button>
                       ))}
-                      <button className="ghost sm" onClick={workspace.reload}>
+                      <button type="button" className="ghost sm" onClick={workspace.reload}>
                         {t("repo.workspaceStatus")}
                       </button>
                     </div>
@@ -572,6 +575,7 @@ export function RepositoriesPage({
                             <div className="repo-ci-actions">
                               {isAdmin && (
                                 <button
+                                  type="button"
                                   className="ghost sm"
                                   onClick={async () => {
                                     if (
@@ -590,13 +594,14 @@ export function RepositoriesPage({
                                   {t("repo.ci.reindex")}
                                 </button>
                               )}
-                              <button className="ghost sm" onClick={index.reload}>
+                              <button type="button" className="ghost sm" onClick={index.reload}>
                                 {t("repo.ci.refresh")}
                               </button>
                               {isAdmin &&
                                 state?.indexing_run_id &&
                                 ["queued", "running"].includes(state.status) && (
                                   <button
+                                    type="button"
                                     className="ghost sm"
                                     onClick={async () => {
                                       if (
@@ -736,12 +741,13 @@ export function RepositoriesPage({
           <>
             {tabs}
             {manage ? (
-              <button onClick={startNew}>
+              <button type="button" onClick={startNew}>
                 <Plus size={15} strokeWidth={2.2} />
                 {t("repo.add")}
               </button>
             ) : (
               <button
+                type="button"
                 className="ghost"
                 onClick={async () => {
                   if (
@@ -820,7 +826,7 @@ export function RepositoriesPage({
               icon={FolderGit2}
               title={t("repo.empty")}
               action={
-                <button onClick={startNew}>
+                <button type="button" onClick={startNew}>
                   <Plus size={15} />
                   {t("repo.add")}
                 </button>
@@ -925,6 +931,7 @@ export function RepositoriesPage({
                 aria-label={t("repo.project")}
               />
               <button
+                type="button"
                 className="sm ghost"
                 onClick={async () =>
                   setRanked(await act(() => api<RankResult>("/api/repositories/rank", rank)))
@@ -1122,6 +1129,7 @@ function RepoForm({
         />
       </Field>
       <button
+        type="button"
         className="ghost sm"
         onClick={async () => {
           const result = await act(
@@ -1197,7 +1205,7 @@ function RepoForm({
           </label>
         )}
         <span className="grow" />
-        <button disabled={!form.name || nameInvalid} onClick={onSave}>
+        <button type="button" disabled={!form.name || nameInvalid} onClick={onSave}>
           <Save size={15} />
           {t("kn.save")}
         </button>

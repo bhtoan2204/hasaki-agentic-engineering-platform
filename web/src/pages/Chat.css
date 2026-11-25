@@ -626,29 +626,9 @@
   margin: var(--sp-3) 0 var(--sp-2);
 }
 
-.chat-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: color-mix(in srgb, var(--ink) 35%, transparent);
-  display: grid;
-  place-items: center;
-  padding: var(--sp-4);
-}
-
 .chat-modal-card {
-  width: min(640px, 100%);
-  max-height: min(80dvh, 720px);
-  overflow: auto;
-  background: var(--surface);
-  border-radius: var(--r-xl);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-3);
-  padding: var(--sp-4);
-}
-
-.chat-modal-card h3 {
-  margin: 0 0 var(--sp-3);
+  display: grid;
+  gap: var(--sp-3);
 }
 
 .chat-preview-grid {

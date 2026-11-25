@@ -39,7 +39,11 @@ export function UsersPage({
         title={t("auth.users")}
         subtitle={t("auth.usersIntro")}
         actions={
-          <button disabled={loading || !!error} onClick={() => setAction({ kind: "create" })}>
+          <button
+            type="button"
+            disabled={loading || !!error}
+            onClick={() => setAction({ kind: "create" })}
+          >
             <Plus size={16} />
             {t("auth.create")}
           </button>
@@ -61,7 +65,7 @@ export function UsersPage({
               title={t(query ? "auth.noMatches" : "auth.noUsers")}
               action={
                 query ? (
-                  <button className="ghost" onClick={() => setQuery("")}>
+                  <button type="button" className="ghost" onClick={() => setQuery("")}>
                     {t("auth.clearSearch")}
                   </button>
                 ) : undefined
@@ -101,6 +105,7 @@ export function UsersPage({
                       <td>
                         <div className="row tight">
                           <button
+                            type="button"
                             className="ghost sm"
                             onClick={() => setAction({ kind: "reset", user: u })}
                             aria-label={`${t("auth.reset")} · ${u.username}`}
@@ -109,15 +114,21 @@ export function UsersPage({
                             {t("auth.reset")}
                           </button>
                           <button
+                            type="button"
                             className="ghost sm"
                             disabled={u.id === me.id}
-                            data-tip={u.id === me.id ? t("auth.noSelfDeactivate") : undefined}
+                            aria-describedby={u.id === me.id ? `u-self-${u.id}` : undefined}
                             onClick={() => setAction({ kind: "status", user: u })}
                             aria-label={`${t(u.active ? "auth.deactivate" : "auth.activate")} · ${u.username}`}
                           >
                             <Power size={14} />
                             {t(u.active ? "auth.deactivate" : "auth.activate")}
                           </button>
+                          {u.id === me.id && (
+                            <span id={`u-self-${u.id}`} className="muted small">
+                              {t("auth.noSelfDeactivate")}
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>

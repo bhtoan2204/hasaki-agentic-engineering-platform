@@ -66,7 +66,11 @@ export function AgentEvaluation() {
             {r.category} · {r.context_variant}
           </span>
           <br />
-          <button className="quiet xs" onClick={() => filter("cohort", r.constraints_hash ?? "")}>
+          <button
+            type="button"
+            className="quiet xs"
+            onClick={() => filter("cohort", r.constraints_hash ?? "")}
+          >
             {r.constraints_hash?.slice(0, 12)}
           </button>
         </>
@@ -102,7 +106,7 @@ export function AgentEvaluation() {
         title={title}
         subtitle={t("an.eval.subtitle")}
         actions={
-          <button className="sm ghost" onClick={response.reload}>
+          <button type="button" className="sm ghost" onClick={response.reload}>
             <RefreshCw size={14} />
             {t("an.refresh")}
           </button>

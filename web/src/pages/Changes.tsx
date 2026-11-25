@@ -265,6 +265,7 @@ export function Changes({
           </div>
         </div>
         <button
+          type="button"
           className="quiet icon"
           aria-label={t("common.close")}
           title={t("common.close")}
@@ -286,6 +287,7 @@ export function Changes({
           </div>
           <div className="rv-attn-actions">
             <button
+              type="button"
               className="ok big"
               onClick={async () =>
                 (await act(
@@ -296,7 +298,11 @@ export function Changes({
             >
               <ShieldCheck size={16} /> {t("ch.approve")}
             </button>
-            <button className="ghost" onClick={() => navigate(`/runs/${run.id}/${prWaiting.key}`)}>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => navigate(`/runs/${run.id}/${prWaiting.key}`)}
+            >
               {t("ch.openStep")}
             </button>
           </div>
@@ -388,6 +394,7 @@ export function Changes({
                 {file[r.repo] ? t("ch.diffFile", { file: file[r.repo]! }) : t("ch.diffAll")}
                 {file[r.repo] && (
                   <button
+                    type="button"
                     className="quiet xs"
                     style={{
                       marginLeft: "auto",

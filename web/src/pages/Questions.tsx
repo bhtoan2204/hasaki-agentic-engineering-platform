@@ -106,6 +106,7 @@ function StepQuestionsCard({ qs, onDone }: { qs: OpenQuestion[]; onDone: () => v
           </div>
         </div>
         <button
+          type="button"
           className="ghost sm"
           onClick={() => navigate(`/runs/${head.run_id}/${head.step_key}`)}
         >
@@ -159,7 +160,7 @@ function StepQuestionsCard({ qs, onDone }: { qs: OpenQuestion[]; onDone: () => v
         <span className="muted small">
           {t("qx.answered", { done: answered, total: qs.length })}
         </span>
-        <button disabled={busy || !ready} onClick={submit}>
+        <button type="button" disabled={busy || !ready} onClick={submit}>
           <Send size={15} strokeWidth={2} />
           {busy ? t("qx.sending") : t("qx.send")}
         </button>
@@ -220,7 +221,7 @@ function ApprovalCard({ a, onDone }: { a: PendingApproval; onDone: () => void })
             <span className="mono muted">{a.step_key}</span>
           </div>
         </div>
-        <button className="ghost sm" onClick={open}>
+        <button type="button" className="ghost sm" onClick={open}>
           {t("qx.openInWf")} <ArrowUpRight size={14} strokeWidth={2} />
         </button>
       </header>
@@ -266,10 +267,11 @@ function ApprovalCard({ a, onDone }: { a: PendingApproval; onDone: () => void })
         </div>
         {a.quick ? (
           <>
-            <button className="danger sm" disabled={busy} onClick={() => send(false)}>
+            <button type="button" className="danger sm" disabled={busy} onClick={() => send(false)}>
               <X size={15} strokeWidth={2} /> {t("qx.ap.reject")}
             </button>
             <button
+              type="button"
               className="ok"
               disabled={busy || blocked}
               title={blocked ? t("ev.ackHint") : undefined}
@@ -279,7 +281,7 @@ function ApprovalCard({ a, onDone }: { a: PendingApproval; onDone: () => void })
             </button>
           </>
         ) : (
-          <button onClick={open}>
+          <button type="button" onClick={open}>
             {t("qx.ap.openToDecide")} <ArrowUpRight size={14} strokeWidth={2} />
           </button>
         )}

@@ -168,6 +168,7 @@ export function ChatImportReview({
                   )}
                   <a href="#/knowledge/~proposals">{t("chat.import.open")}</a>
                   <button
+                    type="button"
                     className="ghost xs"
                     disabled={busy}
                     onClick={() => void decide("reject", r)}
@@ -196,6 +197,7 @@ export function ChatImportReview({
             {t("chat.import.shared")}
           </label>
           <button
+            type="button"
             className="sm"
             disabled={busy || !rows.some((r) => r.selected && r.status === "pending")}
             onClick={() => void decide("approve")}

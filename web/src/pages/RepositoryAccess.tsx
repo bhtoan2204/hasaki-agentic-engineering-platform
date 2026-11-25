@@ -230,7 +230,7 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
           <ShieldCheck size={16} color="var(--brand)" />
           <h4>{t("repo.access.title")}</h4>
           <span className="grow" />
-          <button className="ghost sm" onClick={() => revalidate(only)}>
+          <button type="button" className="ghost sm" onClick={() => revalidate(only)}>
             <RefreshCw size={13} />
             {t("repo.revalidate")}
           </button>
@@ -312,10 +312,20 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
                       <Users size={12} /> {u.username}
                       {u.role === "admin" && <span className="muted small"> · admin</span>}
                       <div className="repo-access-bulk">
-                        <button className="ghost sm" onClick={() => bulk(u, "pull_request")}>
+                        <button
+                          type="button"
+                          className="ghost sm"
+                          aria-label={`${t("repo.access.allFull")} — ${u.username}`}
+                          onClick={() => bulk(u, "pull_request")}
+                        >
                           {t("repo.access.allFull")}
                         </button>
-                        <button className="ghost sm" onClick={() => bulk(u, "none")}>
+                        <button
+                          type="button"
+                          className="ghost sm danger"
+                          aria-label={`${t("repo.access.allNone")} — ${u.username}`}
+                          onClick={() => bulk(u, "none")}
+                        >
                           {t("repo.access.allNone")}
                         </button>
                       </div>

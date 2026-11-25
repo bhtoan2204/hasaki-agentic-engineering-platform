@@ -318,6 +318,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
           {st.browserMode === "local" && (
             <div className="wi-hconnect">
               <button
+                type="button"
                 className={st.loggedIn ? "sm ghost" : "sm"}
                 disabled={connecting || st.windowOpen}
                 onClick={async () => {
@@ -332,6 +333,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
               </button>
               {st.windowOpen && (
                 <button
+                  type="button"
                   className="ghost sm"
                   onClick={async () => {
                     await act(() => api("/api/work/login-window/close", {}));
@@ -366,16 +368,26 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
               value={token}
               onChange={(e) => setToken(e.target.value)}
             />
-            <button type="submit" disabled={!token.trim()} className="sm ghost">
+            <button
+              type="submit"
+              disabled={!token.trim()}
+              aria-describedby={token.trim() ? undefined : "wi-token-hint"}
+              className="sm ghost"
+            >
               <KeyRound size={14} strokeWidth={2} />
               {t("wi.save")}
             </button>
+            {!token.trim() && (
+              <span id="wi-token-hint" className="muted small">
+                {t("hint.enterToken")}
+              </span>
+            )}
           </form>
         </div>
       )}
       {st?.loggedIn && (
         <div className="stack wi-hlogin wi-hfetch">
-          <button className="sm" disabled={busy} onClick={refresh}>
+          <button type="button" className="sm" disabled={busy} onClick={refresh}>
             <RefreshCw size={14} strokeWidth={2} className={busy ? "wi-spin" : undefined} />
             {busy ? t("wi.fetching") : t("wi.fetchTasks")}
           </button>
@@ -386,10 +398,21 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
               value={taskId}
               onChange={(e) => setTaskId(e.target.value)}
             />
-            <button className="sm ghost" disabled={!taskId} onClick={() => pick(taskId)}>
+            <button
+              type="button"
+              className="sm ghost"
+              disabled={!taskId}
+              aria-describedby={taskId ? undefined : "wi-task-hint"}
+              onClick={() => pick(taskId)}
+            >
               <Download size={14} strokeWidth={2} />
               {t("kn.import")}
             </button>
+            {!taskId && (
+              <span id="wi-task-hint" className="muted small">
+                {t("hint.enterTaskId")}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -417,7 +440,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
                     )}
                   </a>
                 ) : (
-                  <button className="xs ghost" onClick={() => pick(r.work_id)}>
+                  <button type="button" className="xs ghost" onClick={() => pick(r.work_id)}>
                     {t("kn.import")}
                   </button>
                 )}
@@ -533,6 +556,7 @@ export function WorkItemsPage({ query }: { query: string }) {
         actions={
           <>
             <button
+              type="button"
               className="ghost icon"
               aria-label={t("wi.refreshList")}
               title={t("wi.refresh")}
@@ -540,11 +564,11 @@ export function WorkItemsPage({ query }: { query: string }) {
             >
               <RefreshCw size={16} strokeWidth={2} className={refreshing ? "wi-spin" : undefined} />
             </button>
-            <button className="ghost" onClick={() => setPanel("import")}>
+            <button type="button" className="ghost" onClick={() => setPanel("import")}>
               <FileJson size={15} strokeWidth={2} />
               {t("wi.importBtn")}
             </button>
-            <button onClick={() => setPanel("create")}>
+            <button type="button" onClick={() => setPanel("create")}>
               <Plus size={16} strokeWidth={2.2} />
               {t("wi.new")}
             </button>
@@ -633,7 +657,7 @@ export function WorkItemsPage({ query }: { query: string }) {
                 icon={ListTodo}
                 title={t("wi.empty")}
                 action={
-                  <button onClick={() => setPanel("create")}>
+                  <button type="button" onClick={() => setPanel("create")}>
                     <Plus size={16} strokeWidth={2.2} />
                     {t("wi.first")}
                   </button>
@@ -704,6 +728,7 @@ export function WorkItemsPage({ query }: { query: string }) {
             <input
               autoFocus
               placeholder={t("wi.titlePh")}
+              aria-label={t("wi.titlePh")}
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
@@ -711,6 +736,7 @@ export function WorkItemsPage({ query }: { query: string }) {
           <Field label={t("common.project")}>
             <input
               placeholder={t("wi.projectPh")}
+              aria-label={t("wi.projectPh")}
               value={form.project}
               onChange={(e) => setForm({ ...form, project: e.target.value })}
             />
@@ -724,7 +750,9 @@ export function WorkItemsPage({ query }: { query: string }) {
           </Field>
           <div className="row">
             <button
+              type="button"
               disabled={!form.title.trim()}
+              aria-describedby={form.title.trim() ? undefined : "wi-create-hint"}
               onClick={async () => {
                 const w = await act(() => api<{ id: number }>("/api/work-items", form));
                 if (w) navigate(`/work-items/${w.id}`);
@@ -733,7 +761,12 @@ export function WorkItemsPage({ query }: { query: string }) {
               <Plus size={15} strokeWidth={2.2} />
               {t("wi.create")}
             </button>
-            <button className="ghost" onClick={() => setPanel("")}>
+            {!form.title.trim() && (
+              <span id="wi-create-hint" className="muted small">
+                {t("hint.enterTitle")}
+              </span>
+            )}
+            <button type="button" className="ghost" onClick={() => setPanel("")}>
               {t("common.cancel")}
             </button>
           </div>
@@ -752,10 +785,21 @@ export function WorkItemsPage({ query }: { query: string }) {
             />
           </Field>
           <div className="row">
-            <button className="ghost" disabled={!paste} onClick={() => importJson("hasaki_work")}>
+            <button
+              type="button"
+              className="ghost"
+              disabled={!paste}
+              aria-describedby={paste ? undefined : "wi-paste-hint"}
+              onClick={() => importJson("hasaki_work")}
+            >
               <Download size={14} strokeWidth={2} />
               {t("wi.importHasaki")}
             </button>
+            {!paste && (
+              <span id="wi-paste-hint" className="muted small">
+                {t("hint.pasteJson")}
+              </span>
+            )}
           </div>
         </Drawer>
       )}
@@ -805,6 +849,7 @@ function DescriptionEditor({
         )}
         {!editing && (
           <button
+            type="button"
             className="sm ghost"
             onClick={() => (setText(description ?? ""), setEditing(true))}
           >
@@ -828,14 +873,15 @@ function DescriptionEditor({
             rows={10}
             autoFocus
             placeholder={t("wi.descPh")}
+            aria-label={t("wi.descPh")}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
           <div className="row">
-            <button className="sm" disabled={busy} onClick={save}>
+            <button type="button" className="sm" disabled={busy} onClick={save}>
               {busy ? t("wi.saving") : t("wi.save")}
             </button>
-            <button className="sm ghost" onClick={() => setEditing(false)}>
+            <button type="button" className="sm ghost" onClick={() => setEditing(false)}>
               {t("common.cancel")}
             </button>
             <span className="muted small">{t("wi.agentUses")}</span>
@@ -907,6 +953,7 @@ export function RunSummaryCard({ runs }: { runs: Array<{ id: number; status: str
         )}
         {s?.markdown && <Copy text={s.markdown} label={t("sum.copy")} />}
         <button
+          type="button"
           className="ghost xs"
           title={t("sum.refresh")}
           onClick={() => setRefresh((n) => n + 1)}
@@ -1333,20 +1380,26 @@ export function WorkItemDetail({ id }: { id: number }) {
               </select>
             </Field>
             <AgentProviderField value={agentProvider} onChange={setAgentProvider} healthyOnly />
-            <button className="wi-start" onClick={() => start("start")}>
+            <button type="button" className="wi-start" onClick={() => start("start")}>
               <Play size={16} strokeWidth={2.2} />
               {t("run.start")}
             </button>
             <div className="wi-launch-alt">
-              <button className="ghost sm" onClick={() => start("step")} title={t("run.step")}>
+              <button
+                type="button"
+                className="ghost sm"
+                onClick={() => start("step")}
+                title={t("run.step")}
+              >
                 <StepForward size={14} strokeWidth={2} />
                 {t("run.step")}
               </button>
-              <button className="ghost sm" onClick={() => start("pending")}>
+              <button type="button" className="ghost sm" onClick={() => start("pending")}>
                 <Settings2 size={14} strokeWidth={2} />
                 {t("run.pending")}
               </button>
               <button
+                type="button"
                 className="ghost sm"
                 onClick={async () => {
                   const r = await act(() =>
@@ -1434,8 +1487,10 @@ export function WorkItemDetail({ id }: { id: number }) {
               />
             </Field>
             <button
+              type="button"
               className="wi-start"
               disabled={followBusy || !followDescription.trim()}
+              aria-describedby={followDescription.trim() ? undefined : "wi-follow-hint"}
               onClick={startFollowUp}
             >
               {followKind === "bug" ? (
@@ -1445,6 +1500,11 @@ export function WorkItemDetail({ id }: { id: number }) {
               )}
               {followKind === "bug" ? t("wi.bugCreate") : t("wi.refactorCreate")}
             </button>
+            {!followDescription.trim() && (
+              <span id="wi-follow-hint" className="muted small">
+                {t("hint.describeFollowUp")}
+              </span>
+            )}
           </div>
         </Drawer>
       )}
@@ -1472,6 +1532,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                     : t("wi.none")}
                 </span>
                 <button
+                  type="button"
                   className="xs ghost"
                   onClick={async () =>
                     (await act(
@@ -1487,6 +1548,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                 </button>
                 {w.automation_policy && (
                   <button
+                    type="button"
                     className="xs ghost"
                     onClick={async () =>
                       (await act(() =>

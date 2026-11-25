@@ -417,32 +417,51 @@ function Editor({ wfKey }: { wfKey: string }) {
     if (r.valid) toast(t("wfe.valid"), "ok");
     return r.valid;
   };
-  const saveDraft = async () => {
-    if (!(await validate())) return;
-    if (
-      await act(() => api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }), t("wfe.draftSaved"))
-    ) {
-      setDirty(false);
-      setBaseVersion("draft");
-      reload();
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  /** One save/publish at a time: act() only disables the clicked button and is consumed by validate(). */
+  const exclusive = async (job: () => Promise<void>) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await job();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
-  const publish = async () => {
-    if (!(await validate())) return;
-    await api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }).catch((e) => toast(e.message));
-    const r = await act(() =>
-      api<{ unchanged?: boolean; version: number }>(`/api/workflows/${wfKey}/publish`, {
-        change_note: note,
-      }),
-    );
-    if (r) {
-      toast(r.unchanged ? t("wfe.noChange") : t("wfe.published", { version: r.version }), "ok");
-      setDirty(false);
-      setNote("");
-      setBaseVersion(r.version);
-      reload();
-    }
-  };
+  const saveDraft = () =>
+    exclusive(async () => {
+      if (!(await validate())) return;
+      if (
+        await act(
+          () => api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }),
+          t("wfe.draftSaved"),
+        )
+      ) {
+        setDirty(false);
+        setBaseVersion("draft");
+        reload();
+      }
+    });
+  const publish = () =>
+    exclusive(async () => {
+      if (!(await validate())) return;
+      await api(`/api/workflows/${wfKey}/draft`, { spec: toSave() }).catch((e) => toast(e.message));
+      const r = await act(() =>
+        api<{ unchanged?: boolean; version: number }>(`/api/workflows/${wfKey}/publish`, {
+          change_note: note,
+        }),
+      );
+      if (r) {
+        toast(r.unchanged ? t("wfe.noChange") : t("wfe.published", { version: r.version }), "ok");
+        setDirty(false);
+        setNote("");
+        setBaseVersion(r.version);
+        reload();
+      }
+    });
   publishRef.current = publish;
   const loadVersion = async (v: string) => {
     if (dirty) {
@@ -508,7 +527,9 @@ function Editor({ wfKey }: { wfKey: string }) {
           </label>
           <div className="wfe-group">
             <button
+              type="button"
               className="sm ghost"
+              aria-label={t("wfe.autoLayout")}
               title={t("wfe.autoLayoutTip")}
               onClick={() => {
                 const pos = autoLayout(spec.steps);
@@ -519,10 +540,22 @@ function Editor({ wfKey }: { wfKey: string }) {
             >
               <LayoutGrid size={15} /> <span className="wfe-lbl">{t("wfe.autoLayout")}</span>
             </button>
-            <button className="sm ghost" onClick={validate}>
+            <button
+              type="button"
+              className="sm ghost"
+              aria-label={t("wfe.validate")}
+              disabled={saving}
+              onClick={validate}
+            >
               <ShieldCheck size={15} /> <span className="wfe-lbl">{t("wfe.validate")}</span>
             </button>
-            <button className="sm ghost" onClick={saveDraft}>
+            <button
+              type="button"
+              className="sm ghost"
+              aria-label={t("wfe.saveDraft")}
+              disabled={saving}
+              onClick={saveDraft}
+            >
               <Save size={15} /> <span className="wfe-lbl">{t("wfe.saveDraft")}</span>
             </button>
           </div>
@@ -534,7 +567,10 @@ function Editor({ wfKey }: { wfKey: string }) {
               aria-label={t("wfe.changeNoteAria")}
             />
             <button
+              type="button"
               className="sm"
+              disabled={saving}
+              aria-busy={saving}
               onClick={publish}
               title={t("wfe.publishShortcut")}
               aria-keyshortcuts="Control+S Meta+S"
@@ -543,6 +579,7 @@ function Editor({ wfKey }: { wfKey: string }) {
             </button>
           </div>
           <button
+            type="button"
             className={`sm ok${showRun ? " wfe-on" : ""}`}
             disabled={!def.latest_version}
             title={def.latest_version ? "" : t("wfe.publishFirst")}
@@ -569,6 +606,7 @@ function Editor({ wfKey }: { wfKey: string }) {
                 const I = typeIcon(type);
                 return (
                   <button
+                    type="button"
                     key={type}
                     className={`wfe-pal-item ${typeTone(type)}`}
                     onClick={() => addStep(type)}
@@ -637,10 +675,14 @@ function Editor({ wfKey }: { wfKey: string }) {
                 <b>{t("wfe.emptyCanvas")}</b>
                 <p className="muted small">{t("wfe.emptyHint")}</p>
                 <div className="row" style={{ justifyContent: "center" }}>
-                  <button className="sm" onClick={() => addStep("agent")}>
+                  <button type="button" className="sm" onClick={() => addStep("agent")}>
                     <Plus size={14} /> {t("wfe.type.agent")}
                   </button>
-                  <button className="sm ghost" onClick={() => addStep("coding_agent")}>
+                  <button
+                    type="button"
+                    className="sm ghost"
+                    onClick={() => addStep("coding_agent")}
+                  >
                     <Plus size={14} /> {t("wfe.type.coding_agent")}
                   </button>
                 </div>
@@ -688,7 +730,12 @@ function ErrorsCard({
   const [open, setOpen] = useState(true);
   return (
     <div className="wfe-errors" role="alert">
-      <button className="wfe-errors-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+      <button
+        type="button"
+        className="wfe-errors-head"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
         <CircleAlert size={16} />
         <b>{t("wfe.invalid")}</b>
         <span className="count">{errors.length}</span>
@@ -707,7 +754,7 @@ function ErrorsCard({
               <li key={e}>
                 <span>{e}</span>
                 {keys.map((k) => (
-                  <button key={k} className="xs ghost" onClick={() => onPick(k)}>
+                  <button type="button" key={k} className="xs ghost" onClick={() => onPick(k)}>
                     {t("wfe.pick", { key: k })}
                   </button>
                 ))}
@@ -1029,6 +1076,7 @@ function StepForm({
     <div className="wfe-form">
       <div className="wfe-insp-head">
         <button
+          type="button"
           className="quiet icon"
           onClick={onBack}
           aria-label={t("wfe.backConfig")}
@@ -1045,7 +1093,7 @@ function StepForm({
             {t(`wfe.type.${step.type}`)} · <span className="mono">{step.key}</span>
           </span>
         </div>
-        <button className="xs danger" onClick={removeStep}>
+        <button type="button" className="xs danger" onClick={removeStep}>
           <Trash2 size={13} /> {t("wfe.deleteStep")}
         </button>
       </div>
@@ -1167,6 +1215,7 @@ function StepForm({
                       <span className="wfe-qn">{i + 1}</span>
                       <span className="grow muted small">{t("wfe.question")}</span>
                       <button
+                        type="button"
                         className="quiet xs"
                         onClick={() => set((s) => s.config.questions?.splice(i, 1))}
                       >
@@ -1200,6 +1249,7 @@ function StepForm({
                   </div>
                 ))}
                 <button
+                  type="button"
                   className="xs ghost"
                   onClick={() =>
                     set(
@@ -1499,13 +1549,18 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
   const [autonomy, setAutonomy] = useState("");
   const [outputLocale, setOutputLocale] = useState<UiLocale>(locale);
   const [agentProvider, setAgentProvider] = useState<AgentProvider>("claude");
+  const [launching, setLaunching] = useState(false);
+  const launchingRef = useRef(false);
   const start = async (mode: "start" | "step" | "pending") => {
+    if (launchingRef.current) return;
     let parsed;
     try {
       parsed = JSON.parse(inputs || "{}");
     } catch {
       return toast(t("wfe.badInputs"));
     }
+    launchingRef.current = true;
+    setLaunching(true);
     const r = await act(() =>
       api<{ id: number }>("/api/runs", {
         workflow: wfKey,
@@ -1519,7 +1574,11 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
         agent_provider: agentProvider,
       }),
     );
-    if (!r) return;
+    if (!r) {
+      launchingRef.current = false;
+      setLaunching(false);
+      return;
+    }
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
   };
@@ -1542,7 +1601,12 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
           <b>{t("wfe.runTitle", { key: wfKey })}</b>
           <span className="muted small">{t("wfe.latest")}</span>
         </div>
-        <button className="quiet icon" onClick={onClose} aria-label={t("common.close")}>
+        <button
+          type="button"
+          className="quiet icon"
+          onClick={onClose}
+          aria-label={t("common.close")}
+        >
           <X size={17} />
         </button>
       </div>
@@ -1627,13 +1691,23 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
           />
         </Section>
         <div className="wfe-run-actions">
-          <button onClick={() => start("start")}>
+          <button type="button" disabled={launching} onClick={() => start("start")}>
             <Play size={15} /> {t("rv.start")}
           </button>
-          <button className="ghost" onClick={() => start("step")}>
+          <button
+            type="button"
+            className="ghost"
+            disabled={launching}
+            onClick={() => start("step")}
+          >
             <StepForward size={15} /> {t("rv.stepMode")}
           </button>
-          <button className="ghost" onClick={() => start("pending")}>
+          <button
+            type="button"
+            className="ghost"
+            disabled={launching}
+            onClick={() => start("pending")}
+          >
             <FilePlus2 size={15} /> {t("wfe.createPending")}
           </button>
         </div>

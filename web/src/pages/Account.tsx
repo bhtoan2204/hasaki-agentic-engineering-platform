@@ -196,6 +196,7 @@ export function AccountMenu({
   return (
     <>
       <button
+        type="button"
         ref={trigger}
         className={`sb-account${active ? " on" : ""}`}
         aria-current={active ? "page" : undefined}
@@ -275,6 +276,7 @@ export function AccountMenu({
             </a>
             <div className="divider" role="separator" />
             <button
+              type="button"
               className="quiet account-logout"
               role="menuitem"
               onClick={() => {
@@ -304,10 +306,17 @@ export function AccountMenu({
             </div>
           )}
           <div className="auth-actions">
-            <button className="ghost" disabled={busy} onClick={() => setConfirm(false)} autoFocus>
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              onClick={() => setConfirm(false)}
+              autoFocus
+            >
               {t("common.cancel")}
             </button>
             <button
+              type="button"
               className="danger"
               disabled={busy}
               onClick={async () => {

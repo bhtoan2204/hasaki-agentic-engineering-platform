@@ -312,7 +312,13 @@ export function SettingsPage() {
         title={t("set.title")}
         subtitle={t("set.subtitle")}
         actions={
-          <button className="ghost" disabled={busy} onClick={restore} title={t("set.restoreHint")}>
+          <button
+            type="button"
+            className="ghost"
+            disabled={busy}
+            onClick={restore}
+            title={t("set.restoreHint")}
+          >
             <RotateCcw size={14} aria-hidden /> {t("set.restore")}
           </button>
         }
@@ -651,20 +657,26 @@ export function SettingsPage() {
         {dirty && (
           <>
             <button
+              type="button"
               className="ghost"
               disabled={busy}
               onClick={() => data?.effective && reset(fromEffective(data.effective))}
             >
               {t("set.discard")}
             </button>
-            <button disabled={busy} onClick={save} title="Ctrl+S">
+            <button type="button" disabled={busy} onClick={save} title="Ctrl+S">
               {busy ? t("set.saving") : t("common.save")}
               <kbd>Ctrl S</kbd>
             </button>
           </>
         )}
         {!dirty && note && (
-          <button className="ghost xs" onClick={() => setNote(null)} aria-label={t("set.dismiss")}>
+          <button
+            type="button"
+            className="ghost xs"
+            onClick={() => setNote(null)}
+            aria-label={t("set.dismiss")}
+          >
             ×
           </button>
         )}

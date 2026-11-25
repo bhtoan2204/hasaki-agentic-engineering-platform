@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api.ts";
 import {
   AlertTriangle,
@@ -98,6 +98,7 @@ function EvidenceAdder({
   const { t } = useI18n();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const send = async (body: EvidenceBody) => {
     setBusy(true);
     const r = await act(
@@ -116,11 +117,20 @@ function EvidenceAdder({
   };
   return (
     <div className="row tight" style={{ marginTop: 8, gap: 6 }}>
-      <label className="small" style={{ cursor: "pointer" }}>
+      <button
+        type="button"
+        className="ghost xs"
+        disabled={busy}
+        onClick={() => fileInput.current?.click()}
+      >
+        <Upload size={12} /> {t("rp.upload")}
+      </button>
+      <span>
         <input
+          ref={fileInput}
           type="file"
           accept="image/*,.pdf,.txt,.csv,.json,.md"
-          style={{ display: "none" }}
+          hidden
           disabled={busy}
           onChange={async (e) => {
             const f = e.target.files?.[0];
@@ -137,17 +147,20 @@ function EvidenceAdder({
             e.target.value = "";
           }}
         />
-        <span className="rp-upload">
-          <Upload size={12} /> {t("rp.upload")}
-        </span>
-      </label>
+      </span>
       <input
         style={{ flex: 1, minWidth: 160 }}
         placeholder={t("rp.notePh")}
+        aria-label={t("rp.notePh")}
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
-      <button className="xs ghost" disabled={busy || !note.trim()} onClick={() => send({ note })}>
+      <button
+        type="button"
+        className="xs ghost"
+        disabled={busy || !note.trim()}
+        onClick={() => send({ note })}
+      >
         <StickyNote size={11} /> {t("rp.addNote")}
       </button>
     </div>
@@ -420,6 +433,7 @@ export function ReportPanel({
               </a>
               {!final && (
                 <button
+                  type="button"
                   className="xs ghost"
                   onClick={async () =>
                     (await act(() => api(`/api/artifacts/${a.id}/delete-evidence`, {}))) &&
@@ -465,18 +479,19 @@ export function ReportPanel({
           <textarea
             rows={2}
             placeholder={t("rp.commentPh")}
+            aria-label={t("rp.commentPh")}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             style={{ marginTop: 10, background: "var(--surface)" }}
           />
           <div className="rv-attn-actions">
-            <button className="ok big" onClick={approve}>
+            <button type="button" className="ok big" onClick={approve}>
               <ShieldCheck size={16} />{" "}
               {c.MISSING + c.PARTIAL
                 ? t("rp.approveLeft", { n: c.MISSING + c.PARTIAL })
                 : t("rp.approveBtn")}
             </button>
-            <button className="ghost" onClick={regenerate}>
+            <button type="button" className="ghost" onClick={regenerate}>
               <RotateCcw size={14} /> {t("rp.regenBtn")}
             </button>
           </div>

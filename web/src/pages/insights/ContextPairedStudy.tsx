@@ -47,6 +47,7 @@ export function ContextPairedStudy() {
         ))}
       </div>
       <button
+        type="button"
         className="sm"
         disabled={!a || !b || a === b}
         onClick={() =>

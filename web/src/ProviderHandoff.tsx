@@ -108,6 +108,7 @@ export function ProviderHandoff({
           active &&
           ["RUNNING", "FAILED", "WAITING_INPUT", "RETRYING", "CANCELED"].includes(step.status) && (
             <button
+              type="button"
               className="sm"
               disabled={busy || !step.current_attempt_id}
               onClick={() => {
@@ -144,6 +145,7 @@ export function ProviderHandoff({
           {(current.status !== "STOPPING" ||
             attempts.find((a) => a.id === current.source_attempt_id)?.executor_stopped_at) && (
             <button
+              type="button"
               className="sm ghost"
               disabled={busy}
               onClick={() =>
@@ -160,7 +162,7 @@ export function ProviderHandoff({
           {error && (
             <p role="alert">
               {String(error)}{" "}
-              <button className="quiet" onClick={reload}>
+              <button type="button" className="quiet" onClick={reload}>
                 {t("handoff.retryCheck")}
               </button>
             </p>
@@ -225,6 +227,7 @@ export function ProviderHandoff({
           )}
           <div className="handoff-actions">
             <button
+              type="button"
               className="sm"
               disabled={busy || current.status !== "READY" || !target?.ok || !confirmed}
               onClick={() =>

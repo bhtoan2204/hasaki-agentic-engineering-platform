@@ -291,6 +291,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
         actions={
           <>
             <button
+              type="button"
               className={itemKey === "~proposals" ? "" : "ghost"}
               onClick={() => navigate("/knowledge/~proposals")}
               title={t("kp.subtitle")}
@@ -302,13 +303,13 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
               ) : null}
             </button>
             {me.data?.user.role === "admin" && (
-              <button className="ghost" onClick={() => navigate("/knowledge/~audit")}>
+              <button type="button" className="ghost" onClick={() => navigate("/knowledge/~audit")}>
                 <ScanSearch size={15} />
                 Audit
               </button>
             )}
             <RepoImport onDone={reloadAll} />
-            <button onClick={() => navigate("/knowledge/~new")}>
+            <button type="button" onClick={() => navigate("/knowledge/~new")}>
               <Plus size={15} strokeWidth={2.2} />
               {t("kn.newItem")}
             </button>
@@ -386,7 +387,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
               icon={BookOpen}
               title={t("kn.emptyTitle")}
               action={
-                <button className="sm" onClick={() => navigate("/knowledge/~new")}>
+                <button type="button" className="sm" onClick={() => navigate("/knowledge/~new")}>
                   <Plus size={14} />
                   {t("kn.create")}
                 </button>
@@ -471,7 +472,11 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                   icon={BookOpen}
                   title={t("kn.pickTitle")}
                   action={
-                    <button className="sm ghost" onClick={() => navigate("/knowledge/~new")}>
+                    <button
+                      type="button"
+                      className="sm ghost"
+                      onClick={() => navigate("/knowledge/~new")}
+                    >
                       <Plus size={14} />
                       {t("kn.createNew")}
                     </button>
@@ -510,7 +515,7 @@ function RepoImport({ onDone }: { onDone: () => void }) {
   const changed = preview ? preview.candidates.filter((c) => c.action !== "unchanged") : [];
   return (
     <>
-      <button className="ghost" disabled={busy} onClick={() => run(true)}>
+      <button type="button" className="ghost" disabled={busy} onClick={() => run(true)}>
         {busy ? <span className="spinner" /> : <ScanSearch size={15} />}
         {busy ? t("kn.scanning") : t("kn.scan")}
       </button>
@@ -532,12 +537,13 @@ function RepoImport({ onDone }: { onDone: () => void }) {
           </div>
           <div className="row tight" style={{ marginBottom: 12 }}>
             <button
+              type="button"
               disabled={busy || !(preview.created + preview.updated)}
               onClick={() => run(false)}
             >
               {t("kn.import")}
             </button>
-            <button className="ghost" onClick={() => setPreview(null)}>
+            <button type="button" className="ghost" onClick={() => setPreview(null)}>
               {t("common.close")}
             </button>
           </div>
@@ -674,7 +680,7 @@ function KnowledgeEditor({
     });
   }, [item]);
   const back = (
-    <button className="quiet sm kn-back" onClick={() => navigate("/knowledge")}>
+    <button type="button" className="quiet sm kn-back" onClick={() => navigate("/knowledge")}>
       <ArrowLeft size={15} />
       {t("kn.back")}
     </button>
@@ -1086,7 +1092,7 @@ function KnowledgeEditor({
                   aria-label={t("kn.changeNoteAria")}
                 />
               )}
-              <button onClick={save}>
+              <button type="button" onClick={save}>
                 {isNew ? <Plus size={15} /> : <SquarePen size={15} />}
                 {isNew ? t("kn.createBtn") : t("kn.save")}
               </button>
@@ -1123,6 +1129,7 @@ function KnowledgeEditor({
                       <span className="grow" />
                       {v.version !== item.current_version && (
                         <button
+                          type="button"
                           className="xs ghost"
                           onClick={async () => {
                             await act(async () => {
@@ -1138,6 +1145,7 @@ function KnowledgeEditor({
                         </button>
                       )}
                       <button
+                        type="button"
                         className={open ? "xs" : "xs ghost"}
                         onClick={() => setViewVersion(open ? null : v.version)}
                       >
@@ -1309,10 +1317,20 @@ function MemoryProvenance({
             onChange={(e) => setBy(e.target.value)}
             aria-label={t("kn.reviewerPh")}
           />
-          <button className="sm ok" disabled={!by.trim()} onClick={() => decide("approve")}>
+          <button
+            type="button"
+            className="sm ok"
+            disabled={!by.trim()}
+            onClick={() => decide("approve")}
+          >
             {t("kn.approve")}
           </button>
-          <button className="sm ghost" disabled={!by.trim()} onClick={() => decide("reject")}>
+          <button
+            type="button"
+            className="sm ghost"
+            disabled={!by.trim()}
+            onClick={() => decide("reject")}
+          >
             {t("kn.reject")}
           </button>
         </div>
@@ -1401,7 +1419,9 @@ function KnowledgeAuditPanel() {
     <div className="card">
       <h2>{t("kn.audit.title")}</h2>
       <p>{t("kn.audit.lead")}</p>
-      <button onClick={reload}>{t("kn.audit.refresh")}</button>
+      <button type="button" onClick={reload}>
+        {t("kn.audit.refresh")}
+      </button>
       {error && <ErrorBox error={error} onRetry={reload} />}
       {loading && !data && <SkeletonRows rows={3} />}
       {data && (

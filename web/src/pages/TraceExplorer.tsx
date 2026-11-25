@@ -363,6 +363,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
         </div>
         <div className="tx-actions">
           <button
+            type="button"
             className="ghost sm"
             onClick={() => {
               loadTrace();
@@ -374,7 +375,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
           >
             <RefreshCw size={15} className={loading ? "tx-spin" : undefined} />
           </button>
-          <button className="sm" onClick={diagnose} disabled={diagnosing || !root}>
+          <button type="button" className="sm" onClick={diagnose} disabled={diagnosing || !root}>
             {diagnosing ? (
               <LoaderCircle size={15} className="tx-spin" />
             ) : (
@@ -416,6 +417,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
               <strong>{attempts.length}</strong>
             </div>
             <button
+              type="button"
               className={failed.length ? "tx-problems" : ""}
               onClick={() => failed[0] && focusNode(failed[0].node.id)}
               disabled={!failed.length}
@@ -435,6 +437,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
                 <h3>{t("trace.diagnosis")}</h3>
                 <span className="tx-count">{findings.length}</span>
                 <button
+                  type="button"
                   className="ghost xs"
                   onClick={() => setFindings(null)}
                   aria-label={t("trace.close")}
@@ -454,7 +457,11 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
                     <b>{f.summary}</b>
                     <p>{f.suggestion}</p>
                     {evidence && (
-                      <button className="ghost xs" onClick={() => focusNode(evidence)}>
+                      <button
+                        type="button"
+                        className="ghost xs"
+                        onClick={() => focusNode(evidence)}
+                      >
                         {t("trace.viewEvidence")}
                         <ChevronRight size={13} />
                       </button>
@@ -487,6 +494,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
                 />
                 {query && (
                   <button
+                    type="button"
                     className="ghost xs"
                     onClick={() => setQuery("")}
                     aria-label={t("trace.clearSearch")}
@@ -510,6 +518,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
               </select>
               {node && node.type !== "run" && (
                 <button
+                  type="button"
                   className="tx-scope"
                   onClick={() => setSelected(null)}
                   title={t("trace.clearSelection")}
@@ -607,6 +616,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
                       >
                         {childCount ? (
                           <button
+                            type="button"
                             className="tx-disclosure"
                             aria-label={`${expanded ? t("trace.collapse") : t("trace.expand")} ${n.label}`}
                             aria-expanded={expanded}
@@ -618,6 +628,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
                           <span className="tx-disclosure" />
                         )}
                         <button
+                          type="button"
                           className="tx-node-pick"
                           onClick={() => setSelected(selected === n.id ? null : n.id)}
                           aria-pressed={selected === n.id}
@@ -663,6 +674,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
                             <FileText size={16} />
                             <h3>{t("trace.details")}</h3>
                             <button
+                              type="button"
                               className="ghost xs"
                               onClick={() => setSelected(null)}
                               aria-label={t("trace.clearSelection")}
@@ -721,6 +733,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
                 <p>{logs.length ? t("trace.adjustFilters") : t("trace.noLogsHint")}</p>
                 {(query || level || node) && (
                   <button
+                    type="button"
                     className="ghost sm"
                     onClick={() => {
                       setQuery("");
@@ -737,7 +750,12 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
             <div className="tx-panel-footer">
               <span>{t("trace.logHint")}</span>
               {moreLogs && (
-                <button className="ghost sm" onClick={loadMoreLogs} disabled={logsLoading}>
+                <button
+                  type="button"
+                  className="ghost sm"
+                  onClick={loadMoreLogs}
+                  disabled={logsLoading}
+                >
                   {logsLoading && <LoaderCircle size={13} className="tx-spin" />}
                   {t("trace.loadMore")}
                 </button>

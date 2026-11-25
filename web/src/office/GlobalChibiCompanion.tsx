@@ -247,6 +247,7 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
   if (prefs.hidden)
     return (
       <button
+        type="button"
         className="companion-restore"
         onClick={() => setPreference({ hidden: false })}
         aria-label={t("companion.restore")}
@@ -329,7 +330,12 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
                 {stateText} · {context}
               </span>
             </div>
-            <button className="quiet icon" onClick={closePanel} aria-label={t("common.close")}>
+            <button
+              type="button"
+              className="quiet icon"
+              onClick={closePanel}
+              aria-label={t("common.close")}
+            >
               <X size={16} />
             </button>
           </header>
@@ -388,6 +394,7 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
           )}
           <footer className="companion-panel-foot">
             <button
+              type="button"
               className="linkish"
               onClick={() => setSettings((v) => !v)}
               aria-expanded={settings}
@@ -395,11 +402,12 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
               <Settings2 size={14} />
               {t("companion.preferences")}
             </button>
-            <button className="linkish" onClick={closePanel}>
+            <button type="button" className="linkish" onClick={closePanel}>
               <Minus size={14} />
               {t("companion.minimize")}
             </button>
             <button
+              type="button"
               className="linkish"
               onClick={() => {
                 closePanel();
@@ -414,6 +422,7 @@ export function GlobalChibiCompanion({ section }: { section: string }) {
       )}
       <div className="companion-stage">
         <button
+          type="button"
           ref={avatarRef}
           className="companion-avatar"
           aria-label={t("companion.toggle", {

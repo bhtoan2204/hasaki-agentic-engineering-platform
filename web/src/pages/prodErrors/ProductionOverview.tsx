@@ -288,6 +288,7 @@ function ServiceDonut({ rows, onSelect }: { rows: Row[]; onSelect: (r: Row) => v
       <div className="an-health-donut-legend">
         {leading.map((r, i) => (
           <button
+            type="button"
             key={r.aggregate ? "others" : idOf(r)}
             onClick={() => (r.aggregate ? undefined : onSelect(r))}
             title={`${r.service} · ${r.namespace}: ${fmt(r.events)} (${fmt(r.error_share_pct, "number")}%)`}
@@ -504,12 +505,14 @@ export function ProductionOverview({
         <Panel title={t("an.topServices")}>
           <div className="an-health-toggle" role="group" aria-label={t("an.metric")}>
             <button
+              type="button"
               className={barMetric === "events" ? "on" : ""}
               onClick={() => setBarMetric("events")}
             >
               {t("an.metricEvents")}
             </button>
             <button
+              type="button"
               className={barMetric === "fingerprints" ? "on" : ""}
               onClick={() => setBarMetric("fingerprints")}
             >
@@ -639,12 +642,14 @@ export function ProductionOverview({
             <Panel title={t("an.severityMetric")}>
               <div className="an-health-toggle" role="group" aria-label={t("an.metric")}>
                 <button
+                  type="button"
                   className={severityMetric === "events" ? "on" : ""}
                   onClick={() => setSeverityMetric("events")}
                 >
                   {t("an.metricEvents")}
                 </button>
                 <button
+                  type="button"
                   className={severityMetric === "fingerprints" ? "on" : ""}
                   onClick={() => setSeverityMetric("fingerprints")}
                 >
@@ -701,8 +706,10 @@ export function ProductionOverview({
             const hidden = hiddenServices.includes(key);
             return (
               <button
+                type="button"
                 key={key}
                 className={hidden ? "muted" : "on"}
+                aria-pressed={!hidden}
                 onClick={() =>
                   setHiddenServices((s) => (hidden ? s.filter((x) => x !== key) : [...s, key]))
                 }
@@ -751,7 +758,11 @@ export function ProductionOverview({
               rows={(data.topFingerprints ?? []).map((r: Row) => ({
                 ...r,
                 fingerprint_link: (
-                  <button className="link-button mono" onClick={() => openIncident(r.fingerprint)}>
+                  <button
+                    type="button"
+                    className="link-button mono"
+                    onClick={() => openIncident(r.fingerprint)}
+                  >
                     {r.fingerprint}
                   </button>
                 ),
@@ -787,6 +798,7 @@ export function ProductionOverview({
                   render: (r) => (
                     <div className="an-signature">
                       <button
+                        type="button"
                         className="link-button mono"
                         onClick={() => openIncident(r.fingerprint)}
                       >
@@ -835,7 +847,7 @@ function IncidentLinks({ row, onOpen }: { row: Row; onOpen: () => void }) {
   const { t } = useI18n();
   return (
     <div className="an-incident-links">
-      <button className="ghost xs" onClick={onOpen}>
+      <button type="button" className="ghost xs" onClick={onOpen}>
         {t("an.openIncident")}
       </button>
       {row.work_item_id && (

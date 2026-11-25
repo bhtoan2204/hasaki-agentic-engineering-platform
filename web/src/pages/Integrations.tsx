@@ -74,6 +74,7 @@ function Row({
   return (
     <div className={`ig-row${open ? " is-open" : ""}`}>
       <button
+        type="button"
         className="ig-head"
         aria-expanded={open}
         aria-controls={`ig-${id}`}
@@ -138,6 +139,7 @@ function PasteForm({
       </Field>
       <div className="ig-actions">
         <button
+          type="button"
           className="sm"
           disabled={!value.trim() || busy}
           onClick={async () => {
@@ -255,6 +257,7 @@ function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
         extra={
           (st?.loggedIn || st?.expired) && (
             <button
+              type="button"
               className="sm ghost"
               onClick={async () =>
                 (await act(
@@ -323,11 +326,12 @@ function Kafka(p: { open: boolean; onToggle: (id: string) => void }) {
         extra={
           (st?.connected || st?.expired) && (
             <>
-              <button className="sm ghost" onClick={reload}>
+              <button type="button" className="sm ghost" onClick={reload}>
                 <RefreshCw size={14} strokeWidth={2} />
                 {t("ig.checkSession")}
               </button>
               <button
+                type="button"
                 className="sm ghost"
                 onClick={async () =>
                   (await act(
@@ -407,11 +411,12 @@ function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
         extra={
           st?.user && (
             <>
-              <button className="sm ghost" onClick={check}>
+              <button type="button" className="sm ghost" onClick={check}>
                 <RefreshCw size={14} strokeWidth={2} />
                 {t("ig.checkSession")}
               </button>
               <button
+                type="button"
                 className="sm ghost"
                 onClick={async () =>
                   (await act(
@@ -555,6 +560,7 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
       {st?.last_error && <p className="ig-err-text small">{st.last_error}</p>}
       <div className="ig-actions">
         <button
+          type="button"
           className="sm"
           onClick={() => save(true)}
           disabled={!(baseUrl ?? st?.base_url) || (!token && !st?.token_set)}
@@ -565,6 +571,7 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
         {st?.configured && (
           <>
             <button
+              type="button"
               className="sm ghost"
               onClick={async () => {
                 setRes(await act(() => api<SignozTestResult>("/api/integrations/signoz/test", {})));
@@ -575,11 +582,12 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
               {t("ig.signoz.test")}
             </button>
             {st.enabled && (
-              <button className="sm ghost" onClick={() => save(false)}>
+              <button type="button" className="sm ghost" onClick={() => save(false)}>
                 {t("ig.signoz.disable")}
               </button>
             )}
             <button
+              type="button"
               className="sm ghost"
               onClick={async () =>
                 (await act(
@@ -639,6 +647,7 @@ function SplunkTest({ connected }: { connected: boolean }) {
   return (
     <div className="ig-test">
       <button
+        type="button"
         className="sm ghost"
         disabled={busy}
         onClick={async () => {
@@ -700,6 +709,7 @@ function SplunkShared({ st, onSaved }: { st: SplunkStatus | null; onSaved: () =>
         extra={
           st.shared.configured && (
             <button
+              type="button"
               className="sm ghost"
               onClick={async () =>
                 (await act(
@@ -765,6 +775,7 @@ function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
         extra={
           (st?.connected || st?.expired) && (
             <button
+              type="button"
               className="sm ghost"
               onClick={async () =>
                 (await act(
@@ -922,14 +933,19 @@ function DbCard({
       {isAdmin && d.last_can_write && <div className="ig-db-warn small">{t("ig.db.canWrite")}</div>}
       {isAdmin && (
         <footer className="ig-db-actions">
-          <button className="sm ghost" onClick={onTest} disabled={state === "checking"}>
+          <button
+            type="button"
+            className="sm ghost"
+            onClick={onTest}
+            disabled={state === "checking"}
+          >
             <RefreshCw size={13} className={state === "checking" ? "ig-spin" : undefined} />{" "}
             {t("ig.db.test")}
           </button>
-          <button className="sm ghost" onClick={onEdit}>
+          <button type="button" className="sm ghost" onClick={onEdit}>
             {t("common.edit")}
           </button>
-          <button className="sm ghost" onClick={onDelete}>
+          <button type="button" className="sm ghost" onClick={onDelete}>
             {t("common.delete")}
           </button>
         </footer>
@@ -1084,11 +1100,12 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
       )}
       {p.isAdmin && !form && (
         <div className="row">
-          <button className="sm" onClick={() => setForm({ ...EMPTY_DB })}>
+          <button type="button" className="sm" onClick={() => setForm({ ...EMPTY_DB })}>
             <Database size={14} /> {t("ig.db.add")}
           </button>
           {enabled.length > 1 && (
             <button
+              type="button"
               className="sm ghost"
               onClick={() => void test(enabled.filter((d) => d.has_password).map((d) => d.key))}
             >
@@ -1193,10 +1210,10 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
           </label>
           <p className="muted small">{t("ig.db.scopeHint")}</p>
           <div className="row">
-            <button className="sm" onClick={save}>
+            <button type="button" className="sm" onClick={save}>
               {t("common.save")}
             </button>
-            <button className="sm ghost" onClick={() => setForm(null)}>
+            <button type="button" className="sm ghost" onClick={() => setForm(null)}>
               {t("common.cancel")}
             </button>
           </div>
@@ -1346,6 +1363,7 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
       </div>
       <div className="ig-actions">
         <button
+          type="button"
           className="sm"
           disabled={busy || !v.user || (!f.token && !st?.configured)}
           onClick={save}
@@ -1355,6 +1373,7 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
         </button>
         {st?.source === "platform" && (
           <button
+            type="button"
             className="sm ghost"
             onClick={async () =>
               (await act(() => api("/api/integrations/bitbucket/clear", {}), t("ig.removed"))) &&
@@ -1407,12 +1426,13 @@ function GitHubAccount(p: { open: boolean; onToggle: (id: string) => void }) {
         />
       </Field>
       <div className="ig-actions">
-        <button className="sm" disabled={busy || !token} onClick={save}>
+        <button type="button" className="sm" disabled={busy || !token} onClick={save}>
           <KeyRound size={14} strokeWidth={2} />
           {busy ? t("ig.checking") : t("ig.save")}
         </button>
         {st?.personal && (
           <button
+            type="button"
             className="sm ghost"
             onClick={async () =>
               (await act(() => api("/api/integrations/github/clear", {}), t("ig.removed"))) &&
@@ -1605,7 +1625,7 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
             placeholder={current.ssh_key ? t("ig.keep") : "-----BEGIN OPENSSH PRIVATE KEY-----"}
             onChange={(e) => setSshKey(e.target.value)}
           />
-          <button className="sm ghost" disabled={busy || !sshKey} onClick={saveSsh}>
+          <button type="button" className="sm ghost" disabled={busy || !sshKey} onClick={saveSsh}>
             <KeyRound size={14} strokeWidth={2} />
             {t("ig.gl.sshSave")}
           </button>
@@ -1618,15 +1638,21 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
         </p>
       )}
       <div className="ig-actions">
-        <button className="sm" disabled={busy || !token || !selected} onClick={save}>
+        <button type="button" className="sm" disabled={busy || !token || !selected} onClick={save}>
           <KeyRound size={14} strokeWidth={2} />
           {busy ? t("ig.checking") : t("ig.save")}
         </button>
-        <button className="sm ghost" disabled={busy || !current?.configured} onClick={test}>
+        <button
+          type="button"
+          className="sm ghost"
+          disabled={busy || !current?.configured}
+          onClick={test}
+        >
           {t("ig.gl.test")}
         </button>
         {current?.personal && (
           <button
+            type="button"
             className="sm ghost"
             onClick={async () => {
               const ok = await act(

@@ -203,6 +203,7 @@ export function DataTable({
             {t("an.rows", { n: count })} · {t("an.page", { n: page ?? 1 })}
           </span>
           <button
+            type="button"
             className="ghost sm"
             disabled={(page ?? 1) <= 1}
             onClick={() => onPage((page ?? 1) - 1)}
@@ -210,6 +211,7 @@ export function DataTable({
             {t("an.previous")}
           </button>
           <button
+            type="button"
             className="ghost sm"
             disabled={(page ?? 1) * 25 >= count}
             onClick={() => onPage((page ?? 1) + 1)}

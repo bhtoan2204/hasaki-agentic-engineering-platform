@@ -28,7 +28,7 @@ function PageFailed({ error }: { error: unknown }) {
     <div className="panel page-failed" role="alert">
       <h2>{t(stale ? "page.failed.staleTitle" : "page.failed.title")}</h2>
       <p className="muted">{t(stale ? "page.failed.staleBody" : "page.failed.body")}</p>
-      <button className="primary" onClick={reload}>
+      <button type="button" className="primary" onClick={reload}>
         {t("page.failed.reload")}
       </button>
     </div>

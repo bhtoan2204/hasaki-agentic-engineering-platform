@@ -546,6 +546,7 @@ export function QuestionsForm({
             <div className="rv-option-row">
               {q.options.map((o: string, i: number) => (
                 <button
+                  type="button"
                   key={o}
                   className={answers[q.id] === o ? "sm" : "ghost sm"}
                   aria-pressed={answers[q.id] === o}
@@ -576,6 +577,7 @@ export function QuestionsForm({
       ))}
       <div className="rv-attn-actions">
         <button
+          type="button"
           className="big"
           disabled={busy || !Object.values(answers).some((a) => a.trim())}
           onClick={submit}
@@ -699,7 +701,11 @@ export function ApprovalPanel({
       )}
       {step.type === "git_pull_request" && (
         <div className="row">
-          <button className="ghost sm" onClick={() => navigate(`/runs/${run.id}/~changes`)}>
+          <button
+            type="button"
+            className="ghost sm"
+            onClick={() => navigate(`/runs/${run.id}/~changes`)}
+          >
             <FileDiff size={14} /> {t("si.seeChanges")}
           </button>
         </div>
@@ -776,6 +782,7 @@ export function ApprovalPanel({
                 className="mono"
                 value={branch}
                 placeholder={t("si.branchCommonPh")}
+                aria-label={t("si.branchCommonPh")}
                 onChange={(e) => onCommon(e.target.value)}
               />
               {repos.length > 0 && (
@@ -833,6 +840,7 @@ export function ApprovalPanel({
       )}
       <div className="rv-attn-actions">
         <button
+          type="button"
           className="ok big"
           disabled={req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim())}
           title={
@@ -846,6 +854,7 @@ export function ApprovalPanel({
         </button>
         {gate && (
           <button
+            type="button"
             className="ghost"
             title={t("si.skipGateHint")}
             onClick={async () =>
@@ -861,7 +870,7 @@ export function ApprovalPanel({
             {t("si.skipGate")}
           </button>
         )}
-        <button className="danger" onClick={() => send(false)}>
+        <button type="button" className="danger" onClick={() => send(false)}>
           <X size={15} /> {reexec ? t("si.rejectRedoBtn", { step: reexec }) : t("si.reject")}
         </button>
       </div>
@@ -1043,6 +1052,7 @@ export function StepInspector({
             </div>
           </div>
           <button
+            type="button"
             className="quiet icon"
             aria-label={t("si.closeInspector")}
             title={t("common.close")}
@@ -1058,17 +1068,26 @@ export function StepInspector({
           attempts.length > 1) && (
           <div className="si-actions">
             {canRun && (
-              <button className="sm" onClick={() => action("run", {}, t("si.queued"))}>
+              <button
+                type="button"
+                className="sm"
+                onClick={() => action("run", {}, t("si.queued"))}
+              >
                 <Play size={13} /> {t("si.runStep")}
               </button>
             )}
             {canRetry && (
-              <button className="sm warn" onClick={() => action("retry", {}, t("si.retrying"))}>
+              <button
+                type="button"
+                className="sm warn"
+                onClick={() => action("retry", {}, t("si.retrying"))}
+              >
                 <RotateCcw size={13} /> {t("si.retry")}
               </button>
             )}
             {canRetry && step.type === "command" && step.config?.baseline_compare !== "go" && (
               <button
+                type="button"
                 className="sm ghost"
                 title={t("si.retryBaselineTip")}
                 onClick={() =>
@@ -1086,6 +1105,7 @@ export function StepInspector({
             )}
             {canSkip && (
               <button
+                type="button"
                 className="sm ghost"
                 onClick={async () => {
                   const ok = await dialog.confirm({
@@ -1103,6 +1123,7 @@ export function StepInspector({
             )}
             {["RUNNING", "RETRYING"].includes(step.status) && (
               <button
+                type="button"
                 className="sm danger"
                 onClick={async () => {
                   const ok = await dialog.confirm({
@@ -1202,7 +1223,7 @@ export function StepInspector({
                 <div style={{ flex: 1 }}>
                   <b>{t("si.reportWaiting")}</b>
                 </div>
-                <button className="sm" onClick={() => setTab("report")}>
+                <button type="button" className="sm" onClick={() => setTab("report")}>
                   {t("si.openReport")} <ArrowRight size={13} />
                 </button>
               </div>
@@ -2335,7 +2356,7 @@ function ReexecuteDialog({
           flexWrap: "wrap",
         }}
       >
-        <button className="sm" onClick={() => setOpen(true)}>
+        <button type="button" className="sm" onClick={() => setOpen(true)}>
           <RotateCcw size={13} /> {t("si.reexecuteWord")}…
         </button>
         <span className="muted small grow">{t("si.rerunHint")}</span>
@@ -2355,6 +2376,7 @@ function ReexecuteDialog({
           <RotateCcw size={16} /> {t("si.rerunTitle", { name: step.name })}
         </h4>
         <button
+          type="button"
           className="quiet icon"
           aria-label={t("common.close")}
           onClick={() => setOpen(false)}
@@ -2368,6 +2390,7 @@ function ReexecuteDialog({
           rows={4}
           autoFocus
           placeholder={t("si.guidancePh")}
+          aria-label={t("si.guidancePh")}
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -2402,6 +2425,7 @@ function ReexecuteDialog({
               <span key={k} className="pill chip-brand">
                 {catalog?.find((c) => c.key === k)?.title ?? k}
                 <button
+                  type="button"
                   aria-label={t("wfe.remove", { name: k })}
                   onClick={() => setSkills(skills.filter((x) => x !== k))}
                 >
@@ -2471,6 +2495,7 @@ function ReexecuteDialog({
       </div>
       <div className="row" style={{ marginTop: 12 }}>
         <button
+          type="button"
           disabled={busy || preview?.can_reexecute === false}
           onClick={async () => {
             setBusy(true);
@@ -2490,7 +2515,7 @@ function ReexecuteDialog({
           <RotateCcw size={14} />
           {busy ? t("pe.creating") : t("si.confirmRerun")}
         </button>
-        <button className="ghost" onClick={() => setOpen(false)}>
+        <button type="button" className="ghost" onClick={() => setOpen(false)}>
           {t("common.cancel")}
         </button>
       </div>

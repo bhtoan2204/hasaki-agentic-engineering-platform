@@ -198,6 +198,7 @@ function InvestigationHome() {
               <History size={16} /> {t("inv.history")}
             </h3>
             <button
+              type="button"
               className="ghost xs icon"
               aria-label={t("inv.refresh")}
               onClick={() => reload()}
@@ -230,7 +231,11 @@ function InvestigationHome() {
                       onClick={() => navigate(`#/investigations/${r.id}`)}
                     >
                       <td>{r.id}</td>
-                      <td className="inv-title-cell">{r.title}</td>
+                      <td className="inv-title-cell">
+                        <a href={`#/investigations/${r.id}`} onClick={(e) => e.stopPropagation()}>
+                          {r.title}
+                        </a>
+                      </td>
                       <td>
                         <Badge s={r.status} label />
                       </td>
@@ -379,7 +384,7 @@ function NewInvestigation({
         </div>
       </details>
       <div className="row">
-        <button disabled={request.trim().length < 5} onClick={start}>
+        <button type="button" disabled={request.trim().length < 5} onClick={start}>
           <FileSearch size={15} /> {t("inv.start")}
         </button>
       </div>
@@ -747,7 +752,7 @@ function SearchCard({
   return (
     <div className={`inv-search${pending ? " is-pending" : ""}`}>
       <div className="inv-search-head">
-        <button className="quiet xs" aria-expanded={open} onClick={onToggle}>
+        <button type="button" className="quiet xs" aria-expanded={open} onClick={onToggle}>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} #{s.id}
         </button>
         <Badge
@@ -790,6 +795,7 @@ function SearchCard({
             placeholder='{"results":[{"_time":"…","_raw":"…"}]}'
           />
           <button
+            type="button"
             className="sm"
             disabled={!paste.trim()}
             onClick={async () => {
@@ -1004,6 +1010,7 @@ function FixButton({
   if (!hasReport || run.status !== "COMPLETED") return null;
   return (
     <button
+      type="button"
       className="sm"
       title={t("inv.fixHint")}
       onClick={async () => {

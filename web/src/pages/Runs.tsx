@@ -251,10 +251,20 @@ export function RunsPage() {
                   </option>
                 ))}
             </select>
-            <button disabled={!wf} onClick={() => navigate(`/workflows/${wf}`)}>
+            <button
+              type="button"
+              disabled={!wf}
+              aria-describedby={wf ? undefined : "runs-open-hint"}
+              onClick={() => navigate(`/workflows/${wf}`)}
+            >
               <Play size={15} strokeWidth={2} />
               {t("runs.openRun")}
             </button>
+            {!wf && (
+              <span id="runs-open-hint" className="muted small">
+                {t("hint.pickWorkflow")}
+              </span>
+            )}
           </div>
         }
       />

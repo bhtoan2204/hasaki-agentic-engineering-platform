@@ -43,6 +43,7 @@ import {
   GitMerge,
   Ban,
   PenLine,
+  Pencil,
 } from "lucide-react";
 import { api, isStateChange, STATUS_COLORS, useApi, useLive } from "../api.ts";
 import { dialog } from "../dialog/index.ts";
@@ -698,7 +699,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                       {run.status !== "COMPLETED" && run.status !== "CANCELED" && (
                         <button
                           type="button"
-                          className="quiet"
+                          className="quiet icon xs"
+                          aria-label={t("rv.editBranch")}
                           title={t("rv.editBranch")}
                           onClick={async () => {
                             const next = await dialog.prompt({
@@ -718,7 +720,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                               });
                           }}
                         >
-                          ✎
+                          <Pencil size={12} />
                         </button>
                       )}
                     </span>
@@ -742,10 +744,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           <div className="rv-actions">
             {run.status === "PENDING" && run.worker?.local && (
               <>
-                <button className="sm" onClick={() => runAction("start")}>
+                <button type="button" className="sm" onClick={() => runAction("start")}>
                   <Play size={14} /> {t("rv.start")}
                 </button>
                 <button
+                  type="button"
                   className="sm ghost"
                   title={t("rv.stepModeTip")}
                   onClick={() => runAction("start", { step_mode: true })}
@@ -755,36 +758,50 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
               </>
             )}
             {["RUNNING", "WAITING", "FAILED"].includes(run.status) && (
-              <button className="sm ghost" onClick={() => runAction("pause")}>
+              <button type="button" className="sm ghost" onClick={() => runAction("pause")}>
                 <Pause size={14} /> {t("rv.pause")}
               </button>
             )}
             {run.status === "PAUSED" && run.worker?.local && (
-              <button className="sm" onClick={() => runAction("resume")}>
+              <button type="button" className="sm" onClick={() => runAction("resume")}>
                 <Play size={14} /> {t("rv.resume")}
               </button>
             )}
             {canFeedback && (
-              <button className="sm ghost" onClick={openFeedback} title={t("rv.feedbackTip")}>
+              <button
+                type="button"
+                className="sm ghost"
+                onClick={openFeedback}
+                title={t("rv.feedbackTip")}
+              >
                 <MessageSquareText size={14} /> {t("rv.feedback")}
               </button>
             )}
             <button
-              className={stepKey === "~changes" ? "sm" : "sm ghost"}
+              type="button"
+              className="sm ghost"
+              aria-current={stepKey === "~changes" ? "page" : undefined}
               disabled={!hasWorkspaces}
-              title={hasWorkspaces ? "" : t("rv.noChanges")}
+              aria-describedby={hasWorkspaces ? undefined : "rv-no-changes"}
               onClick={() => navigate(`/runs/${id}/~changes`)}
             >
               <FileDiff size={14} /> {t("ch.title")}
             </button>
+            {!hasWorkspaces && (
+              <span id="rv-no-changes" className="muted small">
+                {t("rv.noChanges")}
+              </span>
+            )}
             <button
-              className={stepKey === "~trace" ? "sm" : "sm ghost"}
+              type="button"
+              className="sm ghost"
+              aria-current={stepKey === "~trace" ? "page" : undefined}
               onClick={() => navigate(`/runs/${id}/~trace`)}
             >
               <Activity size={14} /> {t("trace.title")}
             </button>
             {!["CANCELED", "COMPLETED"].includes(run.status) && (
-              <button className="sm danger" onClick={() => runAction("cancel")}>
+              <button type="button" className="sm danger" onClick={() => runAction("cancel")}>
                 <Square size={13} /> {t("rv.cancel")}
               </button>
             )}
@@ -842,7 +859,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 {s.pending_input.provider_handoff.blocked_reason || t("handoff.blockedHint")}{" "}
               </span>
             )}
-            <button className="ghost xs" onClick={() => navigate(`/runs/${id}/${s.key}`)}>
+            <button
+              type="button"
+              className="ghost xs"
+              onClick={() => navigate(`/runs/${id}/${s.key}`)}
+            >
               {t("handoff.review")}
             </button>
           </div>
@@ -853,6 +874,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           <b>{t("rv.waitingYou")}</b>
           {blocked.map((s) => (
             <button
+              type="button"
               key={s.key}
               className="ghost xs"
               onClick={() => navigate(`/runs/${id}/${s.key}`)}
@@ -1134,6 +1156,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     />
                     <div className="row">
                       <button
+                        type="button"
                         className="sm"
                         disabled={!feedback.trim()}
                         onClick={async () => {
@@ -1242,6 +1265,7 @@ function ReportCard({ run }: { run: RunDetail }) {
       )}
       <div className="row">
         <button
+          type="button"
           className={waiting ? "sm" : "sm ghost"}
           onClick={() => navigate(`/runs/${run.id}/${s.key}`)}
         >
@@ -1290,6 +1314,7 @@ function DeliveryCard({ runId }: { runId: number }) {
             <div className="muted">{p.observation.repair_plan.reason}</div>
           )}
           <button
+            type="button"
             className="ghost sm"
             onClick={async () =>
               (await act(() =>
@@ -1344,6 +1369,7 @@ function AutonomyCard({ run, onDone }: { run: RunDetail; onDone: () => void }) {
           <ShieldCheck size={16} /> {t("au.title")}
         </h4>
         <button
+          type="button"
           className="ghost sm"
           onClick={async () =>
             (await act(() => api(`/api/runs/${run.id}/autonomy`, { paused: !paused }))) && onDone()
@@ -1642,6 +1668,7 @@ function RepoPicker({ run, onDone }: { run: RunDetail; onDone: () => void }) {
       </div>
       <div className="row">
         <button
+          type="button"
           className="sm ghost"
           onClick={async () =>
             (await act(
@@ -1743,7 +1770,7 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
       className="small"
       style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
     >
-      <button className="sm ghost" onClick={load}>
+      <button type="button" className="sm ghost" onClick={load}>
         {t("rv.pr.status")}
       </button>
       {pipeline && (
@@ -1765,6 +1792,7 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
       )}
       {st?.readiness?.mergeable && (
         <button
+          type="button"
           className="sm"
           onClick={async () => {
             const ok = await dialog.confirm({
@@ -1784,6 +1812,7 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
       )}
       {st && (
         <button
+          type="button"
           className="sm ghost"
           onClick={async () => {
             const ok = await dialog.confirm({

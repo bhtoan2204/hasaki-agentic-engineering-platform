@@ -317,7 +317,7 @@
   min-width: 0;
   position: sticky;
   top: 0;
-  max-height: 100vh;
+  max-height: calc(100dvh - var(--topbar-h) - var(--sp-8));
   overflow: auto;
 }
 

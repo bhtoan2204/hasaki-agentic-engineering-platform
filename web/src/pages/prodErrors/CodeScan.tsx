@@ -273,7 +273,7 @@ export function CodeScan() {
               onChange={(e) => setFocus(e.target.value)}
             />
           </label>
-          <button disabled={!targets.length} onClick={() => assess()}>
+          <button type="button" disabled={!targets.length} onClick={() => assess()}>
             <ScanSearch size={15} strokeWidth={2} />
             {t("cs.scan")}
           </button>
@@ -339,13 +339,13 @@ function FixState({ fix }: { fix: Fix }) {
   const step = (key: string) => fix.steps?.find((s) => s.key === key)?.status;
   if (step("approve") === "WAITING_APPROVAL")
     return (
-      <button className="xs" onClick={() => navigate(`/runs/${fix.run_id}/approve`)}>
+      <button type="button" className="xs" onClick={() => navigate(`/runs/${fix.run_id}/approve`)}>
         <Hand size={12} /> {t("cs.approve")}
       </button>
     );
   if (step("pr") === "WAITING_APPROVAL")
     return (
-      <button className="xs" onClick={() => navigate(`/runs/${fix.run_id}/pr`)}>
+      <button type="button" className="xs" onClick={() => navigate(`/runs/${fix.run_id}/pr`)}>
         <ExternalLink size={12} /> {t("cs.prReady")}
       </button>
     );
@@ -359,7 +359,7 @@ function FixState({ fix }: { fix: Fix }) {
           ? t("cs.fixFailed")
           : t("cs.inRun");
   return (
-    <button className="xs ghost" onClick={() => navigate(`/runs/${fix.run_id}`)}>
+    <button type="button" className="xs ghost" onClick={() => navigate(`/runs/${fix.run_id}`)}>
       <Play size={12} /> {label}
     </button>
   );
@@ -409,7 +409,7 @@ function ScanCard({ scan, onShowFindings }: { scan: Scan; onShowFindings?: () =>
       {progress && <AssessProgressCard progress={progress} typicalSeconds={scan.typical_seconds} />}
       {scan.summary && <p className="cs-summary">{scan.summary}</p>}
       {findings.length > 0 && onShowFindings && (
-        <button className="xs ghost cs-scan-findings" onClick={onShowFindings}>
+        <button type="button" className="xs ghost cs-scan-findings" onClick={onShowFindings}>
           <ListFilter size={12} /> {t("cs.showScanFindings", { n: findings.length })}
         </button>
       )}
@@ -488,7 +488,7 @@ function FindingsView({
               width="100%"
             />
             {scan && (
-              <button className="xs ghost" onClick={onClearScan}>
+              <button type="button" className="xs ghost" onClick={onClearScan}>
                 <X size={12} /> {t("cs.scanFilter", { id: scan })}
               </button>
             )}
@@ -552,6 +552,7 @@ function FindingsView({
                 role="row"
               >
                 <button
+                  type="button"
                   className="cs-head"
                   aria-expanded={isOpen}
                   onClick={() => setOpen(isOpen ? null : f.id)}
@@ -724,21 +725,26 @@ function FindingPanel({ id, onChanged }: { id: number; onChanged: () => void }) 
               {t("cs.unverifiedNoFix")}
             </span>
           ) : (
-            <button className={f.implementable ? "xs" : "xs ghost"} onClick={fix} title={f.why_not}>
+            <button
+              type="button"
+              className={f.implementable ? "xs" : "xs ghost"}
+              onClick={fix}
+              title={f.why_not}
+            >
               <Wrench size={12} /> {f.implementable ? t("cs.fix") : t("cs.fixWithDecision")}
             </button>
           ))}
         {f.status === "open" ? (
           <>
-            <button className="xs ghost" onClick={() => setStatus("resolved")}>
+            <button type="button" className="xs ghost" onClick={() => setStatus("resolved")}>
               <Check size={12} /> {t("cs.resolve")}
             </button>
-            <button className="xs ghost" onClick={() => setStatus("dismissed")}>
+            <button type="button" className="xs ghost" onClick={() => setStatus("dismissed")}>
               <X size={12} /> {t("cs.dismiss")}
             </button>
           </>
         ) : (
-          <button className="xs ghost" onClick={() => setStatus("open")}>
+          <button type="button" className="xs ghost" onClick={() => setStatus("open")}>
             <RotateCcw size={12} /> {t("cs.reopen")}
           </button>
         )}

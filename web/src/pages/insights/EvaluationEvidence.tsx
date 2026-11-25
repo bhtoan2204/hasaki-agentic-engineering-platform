@@ -82,6 +82,7 @@ export function EvaluationEvidence({
         />
         <div className="row">
           <button
+            type="button"
             className="ghost xs"
             disabled={data.pagination.page <= 1}
             onClick={() => onPage(data.pagination.page - 1)}
@@ -92,6 +93,7 @@ export function EvaluationEvidence({
             {data.pagination.page} · {data.pagination.total}
           </span>
           <button
+            type="button"
             className="ghost xs"
             disabled={data.pagination.page * data.pagination.page_size >= data.pagination.total}
             onClick={() => onPage(data.pagination.page + 1)}

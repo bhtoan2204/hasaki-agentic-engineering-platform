@@ -1169,24 +1169,6 @@
   flex: none;
 }
 
-.rp-upload {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--brand-700);
-  background: var(--brand-50);
-  border: 1px dashed var(--brand-400);
-  padding: 4px 10px;
-  border-radius: var(--r-pill);
-  cursor: pointer;
-}
-
-.rp-upload:hover {
-  background: var(--brand-100);
-}
-
 .rp-file {
   display: flex;
   gap: 10px;
@@ -1703,4 +1685,8 @@ body.rv-resizing .react-flow {
 
 .gc-lane .react-flow__handle {
   opacity: 0;
+}
+
+.rv-actions .danger {
+  margin-inline-start: auto;
 }

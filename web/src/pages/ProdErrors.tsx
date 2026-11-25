@@ -252,10 +252,15 @@ export function ScanPanel({
             {customError || (long ? t("pe.opt.comparePrev") : t("pe.opt.compareYesterday"))}
           </span>
           <span className="grow" />
-          <button className="ghost sm" onClick={onClose}>
+          <button type="button" className="ghost sm" onClick={onClose}>
             {t("common.cancel")}
           </button>
-          <button className="sm" disabled={busy || !chosen.length || !!customError} onClick={start}>
+          <button
+            type="button"
+            className="sm"
+            disabled={busy || !chosen.length || !!customError}
+            onClick={start}
+          >
             <RefreshCw size={14} strokeWidth={2} />
             {t("pe.opt.scan")}
           </button>
@@ -398,7 +403,12 @@ function FixRef({
               {p.repo}: {p.title}
             </a>
           ))}
-          <button className="xs ghost" onClick={() => link("")} title={t("pe.unlinkTip")}>
+          <button
+            type="button"
+            className="xs ghost"
+            onClick={() => link("")}
+            title={t("pe.unlinkTip")}
+          >
             <Unlink size={12} />
             {t("pe.unlink")}
           </button>
@@ -410,6 +420,7 @@ function FixRef({
       <div className="pe-fix-label small muted">{t("pe.noItem")}</div>
       <div className="row tight">
         <button
+          type="button"
           className="sm"
           disabled={busy}
           onClick={onInvestigate}
@@ -426,7 +437,12 @@ function FixRef({
           placeholder={t("pe.codePh")}
           onKeyDown={(e) => e.key === "Enter" && ref.trim() && link(ref.trim())}
         />
-        <button className="sm ghost" disabled={!ref.trim()} onClick={() => link(ref.trim())}>
+        <button
+          type="button"
+          className="sm ghost"
+          disabled={!ref.trim()}
+          onClick={() => link(ref.trim())}
+        >
           <Link2 size={14} strokeWidth={2} />
           {t("pe.attach")}
         </button>
@@ -536,7 +552,7 @@ function GroupRow({
       id={`pe-${g.fingerprint}`}
       className={`pe-row${open ? " is-open" : ""}${g.status === "ignored" ? " is-ignored" : ""}`}
     >
-      <button className="pe-head" aria-expanded={open} onClick={onToggle}>
+      <button type="button" className="pe-head" aria-expanded={open} onClick={onToggle}>
         <ChevronRight size={16} strokeWidth={2} className="pe-chev" />
         <span className={`pe-sev pe-${g.severity}`}>{t(`pe.sev.${g.severity}`)}</span>
         <span className="pe-svc" title={`${g.namespace} / ${g.service}`}>
@@ -677,12 +693,17 @@ function GroupRow({
           />
           <div className="row tight pe-actions">
             {g.status === "ignored" ? (
-              <button className="sm ghost" onClick={() => ignore(false)}>
+              <button type="button" className="sm ghost" onClick={() => ignore(false)}>
                 <Eye size={14} strokeWidth={2} />
                 {t("pe.watchAgain")}
               </button>
             ) : (
-              <button className="sm ghost" onClick={() => ignore(true)} title={t("pe.ignoreTip")}>
+              <button
+                type="button"
+                className="sm ghost"
+                onClick={() => ignore(true)}
+                title={t("pe.ignoreTip")}
+              >
                 <EyeOff size={14} strokeWidth={2} />
                 {t("pe.ignore")}
               </button>
@@ -727,6 +748,7 @@ function Schedule({ s, reload }: { s: Data["settings"]; reload: () => void }) {
         </label>
         <div className="row tight">
           <button
+            type="button"
             className="sm"
             onClick={async () =>
               (await act(
@@ -901,6 +923,7 @@ export function ProdErrorsPage({
       {settings && (
         <div className="pe-scan-actions">
           <button
+            type="button"
             disabled={!data || data.scanning || !(data.splunk.connected || data.signoz?.connected)}
             onClick={() => setPanel((v) => !v)}
             aria-expanded={panel}

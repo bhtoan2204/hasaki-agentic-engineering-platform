@@ -61,48 +61,53 @@ export function RepositoryWorkspace() {
         )}
       </p>
       {data && (
-        <table className="repo-ws-table">
-          <thead>
-            <tr>
-              <th>{t("repo.ws.repo")}</th>
-              <th>{t("repo.ws.checkout")}</th>
-              <th>{t("repo.ws.index")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {data.repositories.map((r) => (
-              <tr key={r.name}>
-                <td className="mono">{r.name}</td>
-                <td>{t(`repo.ws.state.${r.workspace}`)}</td>
-                <td className="small">
-                  {r.index ? (
-                    <>
-                      {r.index.status} · {ago(r.index.updated_at)}
-                      {r.index.requested_by
-                        ? ` · ${r.index.delegated ? t("repo.ws.via", { user: r.index.requested_by }) : r.index.requested_by}`
-                        : ""}
-                      {r.index.error && <div className="err">{r.index.error}</div>}
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td>
-                  {r.remote && (
-                    <button
-                      className="ghost sm"
-                      disabled={busy === r.name}
-                      onClick={() => void sync(r)}
-                    >
-                      <RefreshCw size={13} /> {t("repo.ws.sync")}
-                    </button>
-                  )}
-                </td>
+        <div className="table-wrap">
+          <table className="repo-ws-table">
+            <thead>
+              <tr>
+                <th>{t("repo.ws.repo")}</th>
+                <th>{t("repo.ws.checkout")}</th>
+                <th>{t("repo.ws.index")}</th>
+                <th>
+                  <span className="sr-only">{t("auth.actions")}</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.repositories.map((r) => (
+                <tr key={r.name}>
+                  <td className="mono">{r.name}</td>
+                  <td>{t(`repo.ws.state.${r.workspace}`)}</td>
+                  <td className="small">
+                    {r.index ? (
+                      <>
+                        {r.index.status} · {ago(r.index.updated_at)}
+                        {r.index.requested_by
+                          ? ` · ${r.index.delegated ? t("repo.ws.via", { user: r.index.requested_by }) : r.index.requested_by}`
+                          : ""}
+                        {r.index.error && <div className="err">{r.index.error}</div>}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td>
+                    {r.remote && (
+                      <button
+                        type="button"
+                        className="ghost sm"
+                        disabled={busy === r.name}
+                        onClick={() => void sync(r)}
+                      >
+                        <RefreshCw size={13} /> {t("repo.ws.sync")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </details>
   );

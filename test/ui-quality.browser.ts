@@ -189,6 +189,14 @@ try {
     ["evaluation", "/insights/evaluation"],
     ["office", "/office"],
     ["account", "/account"],
+    ["questions", "/questions"],
+    ["chat", "/chat"],
+    ["investigations", "/investigations"],
+    ["users", "/users"],
+    ["production-incidents", `/prod-errors/incidents?${query}`],
+    ["production-services", `/prod-errors/services?${query}`],
+    ["insights-learning", "/insights/learning"],
+    ["insights-autonomy", "/insights/autonomy"],
   ];
   for (const [name, path] of process.env.UI_QUALITY_FAST ? [] : routes) {
     for (const width of phase === "before"

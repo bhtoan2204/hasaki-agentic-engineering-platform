@@ -405,6 +405,7 @@ export function App() {
         aria-label={t("nav.aria")}
       >
         <button
+          type="button"
           className="quiet icon sb-close"
           onClick={() => {
             setNavOpen(false);
@@ -418,6 +419,7 @@ export function App() {
           <BrandLogo size={40} withName />
         </a>
         <button
+          type="button"
           className="sb-link sb-toggle"
           onClick={() => setCollapsed(!collapsed)}
           aria-label={t(collapsed ? "auth.expandSidebar" : "auth.collapseSidebar")}
@@ -477,6 +479,7 @@ export function App() {
                 <span>{t("nav.settings")}</span>
               </a>
               <button
+                type="button"
                 className={`sb-link sb-support${support ? " on" : ""}`}
                 aria-pressed={support}
                 aria-label={`${t("auth.support")}: ${t(support ? "auth.scopeOn" : "auth.scopeOff")}`}
@@ -518,6 +521,7 @@ export function App() {
       <div className="main" inert={navOpen || undefined}>
         <header className="topbar">
           <button
+            type="button"
             ref={mobileTrigger}
             aria-expanded={navOpen}
             aria-controls="main-sidebar"
@@ -573,6 +577,7 @@ export function App() {
               {openQuestions > 0 && <span className="count">{openQuestions}</span>}
             </a>
             <button
+              type="button"
               className="ghost icon"
               onClick={() => setTheme(theme === "light" ? "dark" : "light")}
               aria-label={theme === "light" ? t("theme.toDark") : t("theme.toLight")}

@@ -99,7 +99,8 @@ export function EvaluationBenchmarks() {
   };
   const inspect = async (id: number) => {
     setSelected(id);
-    setDetail(await api<EvaluationRunDetail>(`/api/evaluation-runs/${id}`));
+    const d = await act(() => api<EvaluationRunDetail>(`/api/evaluation-runs/${id}`));
+    if (d) setDetail(d);
   };
   if (suites.error || runs.error)
     return (
@@ -121,6 +122,7 @@ export function EvaluationBenchmarks() {
       <p className="muted small">{t("bench.lead")}</p>
       <div className="toolbar">
         <button
+          type="button"
           className="ghost sm"
           disabled={!runs.data.enabled}
           onClick={() =>
@@ -133,6 +135,7 @@ export function EvaluationBenchmarks() {
           {t("bench.publishBundled")}
         </button>
         <button
+          type="button"
           className="ghost sm"
           onClick={() => {
             runs.reload();
@@ -188,7 +191,7 @@ export function EvaluationBenchmarks() {
             onChange={(e) => setRepetitions(Number(e.target.value))}
           />
         </label>
-        <button disabled={!runs.data.enabled || !suites.data.length} onClick={create}>
+        <button type="button" disabled={!runs.data.enabled || !suites.data.length} onClick={create}>
           {t("bench.runSafe")}
         </button>
       </div>
@@ -215,7 +218,7 @@ export function EvaluationBenchmarks() {
               runs.data.runs.map((r) => (
                 <tr key={r.id}>
                   <td>
-                    <button className="ghost sm" onClick={() => inspect(r.id)}>
+                    <button type="button" className="ghost sm" onClick={() => inspect(r.id)}>
                       #{r.id}
                     </button>
                   </td>
@@ -262,6 +265,8 @@ export function EvaluationBenchmarks() {
           </select>
         </label>
         <button
+          type="button"
+          className="ghost"
           disabled={!baseline || !candidate || baseline === candidate}
           onClick={() =>
             act(async () => {
@@ -348,12 +353,14 @@ export function EvaluationBenchmarks() {
               })}
             </h4>
             <button
+              type="button"
               className="ghost sm"
               onClick={() => navigate(`/runs/${detail.workflow_run_id}`)}
             >
               {t("bench.openWorkflow")}
             </button>
             <button
+              type="button"
               className="ghost sm"
               onClick={() =>
                 act(async () => {

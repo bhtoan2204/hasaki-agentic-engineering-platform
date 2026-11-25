@@ -90,6 +90,7 @@ export function IntakeQueue({ all = false }: { all?: boolean }) {
         <h3>{t("in.queue")}</h3>
         {data && <span className="in-total">{data.length}</span>}
         <button
+          type="button"
           className="ghost sm icon"
           onClick={reload}
           aria-label={t("in.refresh")}
@@ -193,7 +194,7 @@ export function IntakeQueue({ all = false }: { all?: boolean }) {
             {i.reason && <div className="in-item-reason">{i.reason}</div>}
             {WAITING.includes(i.state) && (
               <div className="in-item-actions">
-                <button className="ghost sm" onClick={() => retriage(i.id)}>
+                <button type="button" className="ghost sm" onClick={() => retriage(i.id)}>
                   <RefreshCw size={13} />
                   {t("in.retriage")}
                 </button>
@@ -313,7 +314,11 @@ export function IntakePolicies() {
                   </button>
                 ))}
               </div>
-              <button className="ghost sm" onClick={() => save({ paused: !p.paused }, p)}>
+              <button
+                type="button"
+                className="ghost sm"
+                onClick={() => save({ paused: !p.paused }, p)}
+              >
                 {p.paused ? <Play size={13} /> : <Pause size={13} />}
                 {p.paused ? t("in.resume") : t("in.pause")}
               </button>
@@ -430,7 +435,9 @@ export function IntakePolicies() {
               />,
             )}
           </div>
-          <button onClick={() => save()}>{t("in.save")}</button>
+          <button type="button" onClick={() => save()}>
+            {t("in.save")}
+          </button>
         </details>
       )}
     </section>

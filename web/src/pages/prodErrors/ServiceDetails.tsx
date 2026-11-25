@@ -41,7 +41,7 @@ export function ServiceDetails({ query }: { query: string }) {
   if (!service)
     return (
       <>
-        <button className="ghost sm" onClick={back}>
+        <button type="button" className="ghost sm" onClick={back}>
           <ArrowLeft size={14} />
           {t("an.backToHealth")}
         </button>
@@ -65,7 +65,7 @@ export function ServiceDetails({ query }: { query: string }) {
     <div className="an-service-details">
       {error && <ErrorBox error={error} onRetry={reload} />}
       <div className="an-service-back-row">
-        <button className="ghost sm" onClick={back}>
+        <button type="button" className="ghost sm" onClick={back}>
           <ArrowLeft size={14} />
           {t("an.backToHealth")}
         </button>
@@ -132,7 +132,11 @@ export function ServiceDetails({ query }: { query: string }) {
           rows={(data.topFingerprints ?? []).map((r: Row) => ({
             ...r,
             open: (
-              <button className="link-button mono" onClick={() => incidentLink(r.fingerprint)}>
+              <button
+                type="button"
+                className="link-button mono"
+                onClick={() => incidentLink(r.fingerprint)}
+              >
                 {r.fingerprint}
               </button>
             ),
@@ -164,7 +168,11 @@ export function ServiceDetails({ query }: { query: string }) {
           rows={(data.details ?? []).map((r: Row) => ({
             ...r,
             open: (
-              <button className="link-button mono" onClick={() => incidentLink(r.fingerprint)}>
+              <button
+                type="button"
+                className="link-button mono"
+                onClick={() => incidentLink(r.fingerprint)}
+              >
                 {r.fingerprint}
               </button>
             ),

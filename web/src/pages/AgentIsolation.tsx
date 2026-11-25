@@ -45,32 +45,34 @@ export function AgentIsolation() {
               ))}
             </ul>
           )}
-          <table className="small">
-            <thead>
-              <tr>
-                <th>{t("iso.provider")}</th>
-                <th>{t("iso.coding")}</th>
-                <th>{t("iso.analysis")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.providers.length === 0 ? (
+          <div className="table-wrap">
+            <table className="small">
+              <thead>
                 <tr>
-                  <td colSpan={3}>
-                    <Empty>{t("common.none")}</Empty>
-                  </td>
+                  <th>{t("iso.provider")}</th>
+                  <th>{t("iso.coding")}</th>
+                  <th>{t("iso.analysis")}</th>
                 </tr>
-              ) : (
-                data.providers.map((p) => (
-                  <tr key={p.provider}>
-                    <td className="mono">{p.provider}</td>
-                    <td>{verdict(p.coding)}</td>
-                    <td>{verdict(p.analysis)}</td>
+              </thead>
+              <tbody>
+                {data.providers.length === 0 ? (
+                  <tr>
+                    <td colSpan={3}>
+                      <Empty>{t("common.none")}</Empty>
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  data.providers.map((p) => (
+                    <tr key={p.provider}>
+                      <td className="mono">{p.provider}</td>
+                      <td>{verdict(p.coding)}</td>
+                      <td>{verdict(p.analysis)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
           <p className="small muted">
             {t("iso.checked", { at: new Date(data.runtime.checked_at).toLocaleString() })}
           </p>

@@ -309,6 +309,7 @@ export function Transcript({
           const I = FILTER_ICON[k];
           return (
             <button
+              type="button"
               key={k}
               className={filter === k ? "" : "ghost"}
               aria-pressed={filter === k}

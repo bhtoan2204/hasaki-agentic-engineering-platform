@@ -154,39 +154,41 @@ function StoredReports() {
       {!reports.data && !reports.error && <Loading />}
       {reports.data?.length === 0 && <p className="muted">{t("ae.storedEmpty")}</p>}
       {!!reports.data?.length && (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>{t("ae.suite")}</th>
-              <th>commit</th>
-              <th>{t("ae.gate")}</th>
-              <th>{t("ae.owner")}</th>
-              <th>{t("ae.visibility")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {reports.data.map((r) => (
-              <tr key={r.id}>
-                <td>{r.id}</td>
-                <td title={r.manifest_hash ?? ""}>{r.suite}</td>
-                <td>{r.commit_sha ?? "—"}</td>
-                <td>{r.gate?.passed == null ? "—" : r.gate.passed ? "PASS" : "FAIL"}</td>
-                <td>
-                  {r.owner} · {r.source}
-                </td>
-                <td>
-                  {t(r.visibility === "team" ? "ae.team" : "ae.private")}
-                  {r.mine && (
-                    <button className="ghost xs" onClick={() => void share(r)}>
-                      {t(r.visibility === "team" ? "ae.unshare" : "ae.share")}
-                    </button>
-                  )}
-                </td>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>{t("ae.suite")}</th>
+                <th>commit</th>
+                <th>{t("ae.gate")}</th>
+                <th>{t("ae.owner")}</th>
+                <th>{t("ae.visibility")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {reports.data.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.id}</td>
+                  <td title={r.manifest_hash ?? ""}>{r.suite}</td>
+                  <td>{r.commit_sha ?? "—"}</td>
+                  <td>{r.gate?.passed == null ? "—" : r.gate.passed ? "PASS" : "FAIL"}</td>
+                  <td>
+                    {r.owner} · {r.source}
+                  </td>
+                  <td>
+                    {t(r.visibility === "team" ? "ae.team" : "ae.private")}
+                    {r.mine && (
+                      <button type="button" className="ghost xs" onClick={() => void share(r)}>
+                        {t(r.visibility === "team" ? "ae.unshare" : "ae.share")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

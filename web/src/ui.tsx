@@ -84,6 +84,7 @@ export function Copy({ text, label }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
+      type="button"
       className="ghost xs"
       title={t("common.copy")}
       onClick={async (e) => {
@@ -167,7 +168,7 @@ export function JsonBlock({ value, title }: { value: unknown; title?: string }) 
       <div className="row tight">
         {title && <b className="small">{title}</b>}
         <span className="grow" />
-        <button className="ghost xs" onClick={() => setRaw(!raw)}>
+        <button type="button" className="ghost xs" onClick={() => setRaw(!raw)}>
           {raw ? t("common.tree") : t("common.raw")}
         </button>
         <Copy text={text} />
@@ -548,7 +549,7 @@ export function ErrorBox({ error, onRetry }: { error: string; onRetry?: () => vo
     <div className="errorbox">
       <b>{t("common.error")}:</b> <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
       {onRetry && (
-        <button className="ghost xs" onClick={onRetry} style={{ marginLeft: 8 }}>
+        <button type="button" className="ghost xs" onClick={onRetry} style={{ marginLeft: 8 }}>
           {t("common.retry")}
         </button>
       )}
