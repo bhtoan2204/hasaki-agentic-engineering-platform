@@ -31,6 +31,7 @@ import {
   AlertTriangle,
   GitCommit,
   Bug,
+  Wrench,
 } from "lucide-react";
 import { api, useApi, useLive } from "../api.ts";
 import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
@@ -1123,11 +1124,11 @@ export function WorkItemDetail({ id }: { id: number }) {
   const wfTouched = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => setSettingsOpen(false), [id]);
-  const [bugOpen, setBugOpen] = useState(false);
-  const [bugTitle, setBugTitle] = useState("");
-  const [bugDescription, setBugDescription] = useState("");
-  const [bugBusy, setBugBusy] = useState(false);
-  useEffect(() => setBugOpen(false), [id]);
+  const [followKind, setFollowKind] = useState<"bug" | "refactor" | null>(null);
+  const [followTitle, setFollowTitle] = useState("");
+  const [followDescription, setFollowDescription] = useState("");
+  const [followBusy, setFollowBusy] = useState(false);
+  useEffect(() => setFollowKind(null), [id]);
   const routedId = useRef<number | null>(null);
   useEffect(() => {
     if (!w || wfTouched.current || routedId.current === w.id) return;
@@ -1162,18 +1163,19 @@ export function WorkItemDetail({ id }: { id: number }) {
     navigate(`/runs/${r.id}`);
   };
   const hasBranch = w.runs.length > 0 || w.pull_requests.length > 0;
-  const startBugFollowUp = async () => {
-    setBugBusy(true);
+  const startFollowUp = async () => {
+    setFollowBusy(true);
     const r = await act(() =>
-      api<{ run: { id: number } }>(`/api/work-items/${id}/bug-followups`, {
-        title: bugTitle.trim() || undefined,
-        description: bugDescription,
+      api<{ run: { id: number } }>(`/api/work-items/${id}/followups`, {
+        kind: followKind,
+        title: followTitle.trim() || undefined,
+        description: followDescription,
         start: true,
         output_locale: outputLocale,
         agent_provider: agentProvider,
       }),
     );
-    setBugBusy(false);
+    setFollowBusy(false);
     if (r) navigate(`/runs/${r.run.id}`);
   };
   const selectedWf = (wfs ?? []).find((x) => x.key === wf);
@@ -1364,11 +1366,11 @@ export function WorkItemDetail({ id }: { id: number }) {
           <section className="card wi-bug">
             <div className="wi-launch-head">
               <span className="wi-launch-icon">
-                <Bug size={18} strokeWidth={2.2} />
+                <GitCommit size={18} strokeWidth={2.2} />
               </span>
               <div>
-                <h4>{t("wi.bugFollowUp")}</h4>
-                <div className="muted small">{t("wi.bugFollowUpHint")}</div>
+                <h4>{t("wi.followUp")}</h4>
+                <div className="muted small">{t("wi.followUpHint")}</div>
               </div>
             </div>
             {!hasBranch && (
@@ -1380,48 +1382,68 @@ export function WorkItemDetail({ id }: { id: number }) {
               className="ghost wi-bug-open"
               type="button"
               aria-haspopup="dialog"
-              aria-expanded={bugOpen}
+              aria-expanded={followKind === "bug"}
               aria-describedby={hasBranch ? undefined : "wi-bug-reason"}
               disabled={!hasBranch}
-              onClick={() => setBugOpen(true)}
+              onClick={() => setFollowKind("bug")}
             >
               <Bug size={16} strokeWidth={2} />
               {t("wi.bugCreateOpen")}
             </button>
+            <button
+              className="ghost wi-bug-open"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={followKind === "refactor"}
+              aria-describedby={hasBranch ? undefined : "wi-bug-reason"}
+              disabled={!hasBranch}
+              onClick={() => setFollowKind("refactor")}
+            >
+              <Wrench size={16} strokeWidth={2} />
+              {t("wi.refactorCreateOpen")}
+            </button>
           </section>
         </aside>
       </div>
-      {bugOpen && (
+      {followKind && (
         <Drawer
           title={
             <span className="wi-settings-title">
-              <Bug size={17} />
-              {t("wi.bugFollowUp")}
+              {followKind === "bug" ? <Bug size={17} /> : <Wrench size={17} />}
+              {followKind === "bug" ? t("wi.bugFollowUp") : t("wi.refactorFollowUp")}
               <span className="mono muted small">{w.code || `#${id}`}</span>
             </span>
           }
-          onClose={() => setBugOpen(false)}
+          onClose={() => setFollowKind(null)}
           width={440}
         >
           <div className="wi-settings-body">
-            <p className="wi-settings-context">{t("wi.bugFollowUpHint")}</p>
+            <p className="wi-settings-context">
+              {followKind === "bug" ? t("wi.bugFollowUpHint") : t("wi.refactorFollowUpHint")}
+            </p>
             <Field label={t("wi.bugTitle")}>
-              <input value={bugTitle} onChange={(e) => setBugTitle(e.target.value)} />
+              <input value={followTitle} onChange={(e) => setFollowTitle(e.target.value)} />
             </Field>
-            <Field label={t("wi.bugDescription")}>
+            <Field
+              label={followKind === "bug" ? t("wi.bugDescription") : t("wi.refactorDescription")}
+            >
               <textarea
                 rows={8}
-                value={bugDescription}
-                onChange={(e) => setBugDescription(e.target.value)}
+                value={followDescription}
+                onChange={(e) => setFollowDescription(e.target.value)}
               />
             </Field>
             <button
               className="wi-start"
-              disabled={bugBusy || !bugDescription.trim()}
-              onClick={startBugFollowUp}
+              disabled={followBusy || !followDescription.trim()}
+              onClick={startFollowUp}
             >
-              <Bug size={16} strokeWidth={2.2} />
-              {t("wi.bugCreate")}
+              {followKind === "bug" ? (
+                <Bug size={16} strokeWidth={2.2} />
+              ) : (
+                <Wrench size={16} strokeWidth={2.2} />
+              )}
+              {followKind === "bug" ? t("wi.bugCreate") : t("wi.refactorCreate")}
             </button>
           </div>
         </Drawer>

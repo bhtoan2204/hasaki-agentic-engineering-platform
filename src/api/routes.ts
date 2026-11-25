@@ -628,10 +628,11 @@ export const routes: Route[] = [
   ],
   [
     "POST",
-    /^\/api\/work-items\/(\d+)\/bug-followups$/,
+    /^\/api\/work-items\/(\d+)\/(?:bug-)?followups$/,
     async (c) => (
       await requireWorkItem(c.actor, num(c.p[0]), support(c)),
-      workItems.bugFollowUp({
+      workItems.followUp({
+        kind: c.body.kind ?? "bug",
         parentId: num(c.p[0]),
         title: c.body.title,
         description: String(c.body.description ?? ""),

@@ -2034,6 +2034,9 @@ const FOLLOW_UP_NOTE =
   "This bug was found on QC for an earlier task (inputs.parent_task). That task's own branch is already checked out for this run, so the fix is committed on it and updates its pull request. " +
   "Start from what the earlier task changed (git.commits, git.commit and git.file_history on that branch) and decide whether the QC symptom is a defect of that change (fix it) or a behaviour it should have had (improve it). " +
   "Stay inside the earlier task's change unless the root cause lies elsewhere, and say so then. ";
+const REFACTOR_NOTE =
+  "This work finishes or improves an earlier task (inputs.parent_task). That task's own branch is already checked out for this run, so the changes are committed on it and update its pull request. " +
+  "Start from what the earlier task changed (git.commits, git.commit and git.file_history on that branch) and from inputs.goal; keep behaviour unchanged unless inputs.goal says otherwise. ";
 const BUG_INVESTIGATION = TEMPLATES.find((t) => t.key === "bug-investigation")!.spec as {
   description: string;
   steps: GraphStep[];
@@ -2057,6 +2060,31 @@ TEMPLATES.push({
       if (s.key === "confirm_repos")
         return { ...s, config: { ...config, auto_approve_preselected: true } };
       return s;
+    }),
+  },
+});
+
+const REFACTORING = TEMPLATES.find((t) => t.key === "refactoring")!.spec as {
+  steps: GraphStep[];
+};
+/** A refactor that finishes or improves an earlier task: the refactoring flow, on the parent's own branch (started by workItems.followUp). */
+TEMPLATES.push({
+  key: "refactor-from-task",
+  spec: {
+    ...REFACTORING,
+    name: "Refactor of a Task",
+    description:
+      "Work that finishes or improves an earlier task without a bug: analysis on that task's change → behaviour-preserving plan → approval → refactor on the task's own branch → regression tests → PR. " +
+      "Start it with POST /api/work-items/:id/followups (kind refactor) on the earlier task",
+    inputs: {
+      parent_task: { description: "code of the earlier task this work continues", required: true },
+      goal: { description: "what to refactor or finish", required: true },
+    },
+    steps: REFACTORING.steps.map((s) => {
+      const config = (s.config ?? {}) as Record<string, unknown>;
+      return s.key === "analyze"
+        ? { ...s, config: { ...config, instructions: REFACTOR_NOTE + config.instructions } }
+        : s;
     }),
   },
 });

@@ -1243,6 +1243,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.bugDescription": "Mô tả bug trên QC",
     "wi.bugCreate": "Tạo task bug và chạy",
     "wi.bugCreateOpen": "Báo bug từ QC…",
+    "wi.followUp": "Làm tiếp trên nhánh của task",
+    "wi.followUpHint":
+      "Tạo task con liên kết và chạy workflow ngay trên nhánh (và PR hiện có) của task này.",
+    "wi.refactorCreateOpen": "Refactor / hoàn thiện…",
+    "wi.refactorFollowUp": "Refactor",
+    "wi.refactorFollowUpHint":
+      "Việc không phải bug (refactor, hoàn thiện phần còn dở): tạo task liên kết và chạy workflow refactor trên nhánh của task này, giữ nguyên hành vi.",
+    "wi.refactorDescription": "Mục tiêu refactor / phần cần hoàn thiện",
+    "wi.refactorCreate": "Tạo task refactor và chạy",
     "wi.policy": "Chính sách tự động",
     "wi.policyHint":
       "Chỉ dùng khi poller tự import task: tự chạy workflow này. Mặc định không có — không gì tự chạy.",
@@ -4749,6 +4758,15 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.bugDescription": "Bug found on QC",
     "wi.bugCreate": "Create bug task and run",
     "wi.bugCreateOpen": "Report a QC bug…",
+    "wi.followUp": "Continue on this task's branch",
+    "wi.followUpHint":
+      "Creates a linked task and runs the workflow on this task's own branch (and its existing pull request).",
+    "wi.refactorCreateOpen": "Refactor / finish…",
+    "wi.refactorFollowUp": "Refactor",
+    "wi.refactorFollowUpHint":
+      "Work that is not a bug (a refactor, finishing what is left): creates a linked task and runs the refactoring workflow on this task's branch, keeping behaviour unchanged.",
+    "wi.refactorDescription": "Refactoring goal / what to finish",
+    "wi.refactorCreate": "Create refactor task and run",
     "wi.policy": "Automation policy",
     "wi.policyHint":
       "Used only when the poller imports a task by itself: it starts this workflow. Empty by default — nothing starts on its own.",
