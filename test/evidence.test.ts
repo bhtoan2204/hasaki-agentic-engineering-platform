@@ -24,7 +24,7 @@ import { runInvestigationBenchmark } from "../src/eval/investigation.ts";
 import { TEMPLATES } from "../src/workflow/templates.ts";
 import { validateSpec } from "../src/workflow/graph.ts";
 import type { WorkflowSpec } from "../src/workflow/types.ts";
-import { catalog } from "../web/src/i18n/catalog.ts";
+import { catalog } from "../shared/i18n/catalog.ts";
 
 const verifiedLog = {
   id: "C1",

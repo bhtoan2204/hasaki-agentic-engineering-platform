@@ -14,7 +14,7 @@ import { positiveId } from "./params.ts";
 import { claimIdempotency, needsIdempotency } from "./idempotency.ts";
 import { singleflight } from "../cache/index.ts";
 import { HttpError } from "./error.ts";
-import { messages as uiMessages } from "../../web/src/i18n/messages.ts";
+import { messages as uiMessages } from "../../shared/i18n/messages.ts";
 import { handleEventsSince, handleStream } from "../api/stream.ts";
 import { handleChatStream } from "../chat/events.ts";
 import {
