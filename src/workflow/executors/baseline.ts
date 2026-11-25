@@ -136,7 +136,7 @@ async function git(cwd: string, ...args: string[]) {
 }
 
 /**
- * Run `go test` for `packages` on origin/<baseBranch> in a temporary detached worktree of the same repository.
+ * Run `go test` for `packages` on `ref` (default origin/<baseBranch>) in a temporary detached worktree of the same repository.
  * `run` executes a shell command in a directory (the command step's runner, so output streams to the UI).
  */
 export async function goBaseline(
@@ -146,8 +146,13 @@ export async function goBaseline(
     command: string,
     cwd: string,
   ) => Promise<{ code: number | null; output: string; timedOut: boolean }>,
+  ref?: string,
 ): Promise<{ sha: string; report: GoTestReport; cached: string[] }> {
-  const sha = await git(workspace, "rev-parse", `origin/${await workspaceBaseBranch(workspace)}`);
+  const sha = await git(
+    workspace,
+    "rev-parse",
+    ref ?? `origin/${await workspaceBaseBranch(workspace)}`,
+  );
   const repoKey = await git(workspace, "rev-parse", "--git-common-dir");
   const report: GoTestReport = {};
   const cached: string[] = [];

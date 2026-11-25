@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   type ExecutionContext,
   type RunCommand,
 } from "../src/workflow/executors/branchMerge.ts";
+import type { GoTestReport } from "../src/workflow/executors/baseline.ts";
 import type { RunRow, StepRow } from "../src/workflow/types.ts";
 
 const ENV = {
@@ -30,7 +31,9 @@ const commit = (cwd: string, file: string, content: string, msg: string) => {
 const show = (cwd: string, ref: string, file: string) => sh(cwd, "show", `${ref}:${file}`);
 
 /** origin with release/prod and release/qc (another developer's commit), and a run worktree on `feature`. */
-function fixture(opts: { qc?: boolean; qcEdit?: [string, string] } = {}) {
+function fixture(
+  opts: { qc?: boolean; qcEdit?: [string, string]; baseFiles?: Array<[string, string]> } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "branch-merge-"));
   const origin = join(root, "origin.git"),
     clone = join(root, "clone");
@@ -38,6 +41,7 @@ function fixture(opts: { qc?: boolean; qcEdit?: [string, string] } = {}) {
   execFileSync("git", ["clone", "-q", origin, clone], { env: ENV });
   sh(clone, "checkout", "-qb", "release/prod");
   commit(clone, "a.go", "package a\n\nfunc A() int { return 1 }\n", "base");
+  for (const [file, content] of opts.baseFiles ?? []) commit(clone, file, content, `add ${file}`);
   sh(clone, "push", "-q", "origin", "release/prod");
   if (opts.qc !== false) {
     sh(clone, "checkout", "-qb", "release/qc");
@@ -179,4 +183,130 @@ test("a reply that still has conflict markers fails the merge", async () => {
     /conflict markers/,
   );
   assert.equal(sh(origin, "rev-parse", "release/qc"), before);
+});
+
+const PKG = "example.com/svc";
+const resolveTo = (prompts: string[]) =>
+  setMergeModel(async (_run, prompt) => {
+    prompts.push(prompt);
+    return "<<<RESOLVED\npackage a\n\nfunc A() int { return 2 + 3 }\nRESOLVED>>>";
+  });
+const goFail = (...tests: string[]) =>
+  [...tests.map((t) => `--- FAIL: ${t} (0.00s)`), "FAIL", `FAIL\t${PKG}\t0.010s`].join("\n");
+const baselineOf =
+  (tests: string[], seen: Array<{ packages: string[]; ref?: string }> = []) =>
+  async (_workspace: string, packages: string[], _run: unknown, ref?: string) => {
+    seen.push({ packages, ref });
+    const report: GoTestReport = {
+      [PKG]: { status: tests.length ? "fail" : "ok", tests, buildErrors: [] },
+    };
+    return { sha: ref ?? "", report, cached: [] };
+  };
+const conflict = (extra: Array<[string, string]> = []) =>
+  fixture({ qcEdit: ["a.go", "package a\n\nfunc A() int { return 3 }\n"], baseFiles: extra });
+
+test("failures that release/qc already has do not block the merge", async () => {
+  const { origin, clone } = conflict();
+  const qcTip = sh(origin, "rev-parse", "release/qc");
+  const prompts: string[] = [];
+  resolveTo(prompts);
+  const seen: Array<{ packages: string[]; ref?: string }> = [];
+  const r = await mergeAndPush(
+    context([]),
+    async () => ({ code: 1, output: goFail("TestOld"), timedOut: false }),
+    { repo: "svc", branch: "feature", path: clone },
+    "release/qc",
+    lock,
+    { baseline: baselineOf(["TestOld"], seen) },
+  );
+  assert.equal(r.status, "merged");
+  assert.deepEqual(r.pre_existing_failures, [`${PKG}: TestOld`]);
+  assert.equal(prompts.length, 1, "only the conflict went to the model, no revision round");
+  assert.deepEqual(seen, [{ packages: [PKG], ref: qcTip }], "compared on the target tip");
+  assert.equal(sh(origin, "rev-parse", "release/qc"), r.merge_commit);
+});
+
+test("a failure that release/qc does not have still blocks the merge", async () => {
+  const { origin, clone } = conflict();
+  const before = sh(origin, "rev-parse", "release/qc");
+  const prompts: string[] = [];
+  resolveTo(prompts);
+  await assert.rejects(
+    mergeAndPush(
+      context([]),
+      async () => ({ code: 1, output: goFail("TestOld", "TestNew"), timedOut: false }),
+      { repo: "svc", branch: "feature", path: clone },
+      "release/qc",
+      lock,
+      { baseline: baselineOf(["TestOld"]) },
+    ),
+    new RegExp(`nothing was pushed.*new failures compared with release/qc: ${PKG}: TestNew`),
+  );
+  assert.equal(sh(origin, "rev-parse", "release/qc"), before);
+  assert.match(prompts[1], /TestNew/);
+  assert.doesNotMatch(prompts[1], /TestOld/, "the revision prompt lists only the new failures");
+});
+
+test("stale mocks are regenerated and kept when that makes the tests pass", async () => {
+  const gen = "package a\n\n//go:generate mockgen -source=a.go -destination=a_mock.go -package=a\n";
+  const { origin, clone } = conflict([["gen.go", gen]]);
+  const prompts: string[] = [];
+  resolveTo(prompts);
+  const commands: string[] = [];
+  const r = await mergeAndPush(
+    context([]),
+    async (cmd, cwd) => {
+      commands.push(cmd);
+      if (cmd.startsWith("go generate")) {
+        writeFileSync(join(cwd, "a_mock.go"), "package a\n// regenerated\n");
+        return { code: 0, output: "", timedOut: false };
+      }
+      return existsSync(join(cwd, "a_mock.go"))
+        ? { code: 0, output: "ok", timedOut: false }
+        : { code: 1, output: goFail("TestStale"), timedOut: false };
+    },
+    { repo: "svc", branch: "feature", path: clone },
+    "release/qc",
+    lock,
+    { baseline: baselineOf([]) },
+  );
+  assert.equal(r.status, "merged");
+  assert.deepEqual(r.regenerated_mocks, ["a_mock.go"]);
+  assert.ok(commands.includes("go generate -run mockgen ."));
+  assert.equal(prompts.length, 1, "no model revision was needed");
+  assert.match(show(origin, "release/qc", "a_mock.go"), /regenerated/);
+  assert.equal(sh(origin, "rev-list", "--parents", "-n1", "release/qc").split(" ").length, 3);
+});
+
+test("regenerated mocks that do not fix the failure are discarded", async () => {
+  const gen = "package a\n\n//go:generate mockgen -source=a.go -destination=a_mock.go -package=a\n";
+  const { origin, clone } = conflict([["gen.go", gen]]);
+  const before = sh(origin, "rev-parse", "release/qc");
+  resolveTo([]);
+  const mockPresent: boolean[] = [];
+  await assert.rejects(
+    mergeAndPush(
+      context([]),
+      async (cmd, cwd) => {
+        if (cmd.startsWith("go generate")) {
+          writeFileSync(join(cwd, "a_mock.go"), "package a\n// regenerated\n");
+          return { code: 0, output: "", timedOut: false };
+        }
+        mockPresent.push(existsSync(join(cwd, "a_mock.go")));
+        return { code: 1, output: goFail("TestStale"), timedOut: false };
+      },
+      { repo: "svc", branch: "feature", path: clone },
+      "release/qc",
+      lock,
+      { baseline: baselineOf([]) },
+    ),
+    /nothing was pushed/,
+  );
+  assert.deepEqual(
+    mockPresent,
+    [false, true, false, false],
+    "tree restored after the regen attempt",
+  );
+  assert.equal(sh(origin, "rev-parse", "release/qc"), before);
+  assert.equal(sh(clone, "worktree", "list").split("\n").length, 1);
 });
