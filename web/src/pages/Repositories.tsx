@@ -1208,10 +1208,20 @@ function RepoForm({
           </label>
         )}
         <span className="grow" />
-        <button type="button" disabled={!form.name || nameInvalid} onClick={onSave}>
+        <button
+          type="button"
+          disabled={!form.name || nameInvalid}
+          aria-describedby={!form.name ? "repo-save-hint" : undefined}
+          onClick={onSave}
+        >
           <Save size={15} />
           {t("kn.save")}
         </button>
+        {!form.name && (
+          <span id="repo-save-hint" className="muted small">
+            {t("hint.needRepoName")}
+          </span>
+        )}
       </div>
     </>
   );

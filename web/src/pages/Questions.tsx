@@ -274,11 +274,16 @@ function ApprovalCard({ a, onDone }: { a: PendingApproval; onDone: () => void })
               type="button"
               className="ok"
               disabled={busy || blocked}
-              title={blocked ? t("ev.ackHint") : undefined}
+              aria-describedby={blocked ? "qx-ack-hint" : undefined}
               onClick={() => send(true)}
             >
               <ShieldCheck size={15} strokeWidth={2} /> {t("qx.ap.approve")}
             </button>
+            {blocked && (
+              <span id="qx-ack-hint" className="muted small">
+                {t("ev.ackHint")}
+              </span>
+            )}
           </>
         ) : (
           <button type="button" onClick={open}>

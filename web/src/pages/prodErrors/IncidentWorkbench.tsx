@@ -207,9 +207,19 @@ function RepoPicker({
         <small className="muted">{t("an.bh.repositoriesHint")}</small>
       </fieldset>
       <div className="bh-form-actions">
-        <Button size="sm" disabled={!chosen.length} onClick={() => onPick(chosen)}>
+        <Button
+          size="sm"
+          disabled={!chosen.length}
+          aria-describedby={!chosen.length ? "wb-pick-hint" : undefined}
+          onClick={() => onPick(chosen)}
+        >
           {t("an.bh.startConfirm")}
         </Button>
+        {!chosen.length && (
+          <span id="wb-pick-hint" className="muted small">
+            {t("hint.pickCause")}
+          </span>
+        )}
         <Button size="sm" variant="quiet" onClick={onClose}>
           {t("an.bh.close")}
         </Button>

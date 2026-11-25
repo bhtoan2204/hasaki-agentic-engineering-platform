@@ -582,12 +582,17 @@ function Editor({ wfKey }: { wfKey: string }) {
             type="button"
             className={`sm ok${showRun ? " wfe-on" : ""}`}
             disabled={!def.latest_version}
-            title={def.latest_version ? "" : t("wfe.publishFirst")}
+            aria-describedby={def.latest_version ? undefined : "wfe-run-hint"}
             aria-pressed={showRun}
             onClick={() => setShowRun(!showRun)}
           >
             <Play size={15} /> {t("wfe.run")}
           </button>
+          {!def.latest_version && (
+            <span id="wfe-run-hint" className="muted small">
+              {t("wfe.publishFirst")}
+            </span>
+          )}
         </div>
       </header>
 

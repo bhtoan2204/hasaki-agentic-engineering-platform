@@ -384,9 +384,19 @@ function NewInvestigation({
         </div>
       </details>
       <div className="row">
-        <button type="button" disabled={request.trim().length < 5} onClick={start}>
+        <button
+          type="button"
+          disabled={request.trim().length < 5}
+          aria-describedby={request.trim().length < 5 ? "inv-start-hint" : undefined}
+          onClick={start}
+        >
           <FileSearch size={15} /> {t("inv.start")}
         </button>
+        {request.trim().length < 5 && (
+          <span id="inv-start-hint" className="muted small">
+            {t("hint.requestMin")}
+          </span>
+        )}
       </div>
     </div>
   );

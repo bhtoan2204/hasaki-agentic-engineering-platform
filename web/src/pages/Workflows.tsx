@@ -305,7 +305,11 @@ export function WorkflowsPage() {
             </Field>
             {!creating && <p className="muted small">{t("wfs.blankHelp")}</p>}
             <div className="row">
-              <button type="submit" disabled={!key}>
+              <button
+                type="submit"
+                disabled={!key}
+                aria-describedby={!key ? "wfs-key-hint" : undefined}
+              >
                 {creating ? (
                   <>
                     <Copy size={15} /> {t("wfs.dupOpen")}
@@ -316,6 +320,11 @@ export function WorkflowsPage() {
                   </>
                 )}
               </button>
+              {!key && (
+                <span id="wfs-key-hint" className="muted small">
+                  {t("hint.needKey")}
+                </span>
+              )}
               <button type="button" className="ghost" onClick={() => setCreating(null)}>
                 {t("common.cancel")}
               </button>

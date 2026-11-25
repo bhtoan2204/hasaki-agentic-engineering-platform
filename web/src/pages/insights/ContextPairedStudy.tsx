@@ -50,6 +50,7 @@ export function ContextPairedStudy() {
         type="button"
         className="sm"
         disabled={!a || !b || a === b}
+        aria-describedby={!a || !b || a === b ? "cps-hint" : undefined}
         onClick={() =>
           act(async () => {
             const pair = await api<{ id: number }>("/api/evaluation-comparisons", {
@@ -62,6 +63,13 @@ export function ContextPairedStudy() {
       >
         {t("an.eval.assessPaired")}
       </button>
+      {!a ||
+        !b ||
+        (a === b && (
+          <span id="cps-hint" className="muted small">
+            {t("hint.pickTwoDifferent")}
+          </span>
+        ))}
       {report && (
         <>
           <h4>{report.context_report?.status ?? report.report.verdict}</h4>

@@ -843,15 +843,20 @@ export function ApprovalPanel({
           type="button"
           className="ok big"
           disabled={req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim())}
-          title={
+          aria-describedby={
             req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim())
-              ? t("ev.ackHint")
+              ? "si-ack-hint"
               : undefined
           }
           onClick={() => send(true)}
         >
           <ShieldCheck size={16} /> {t("si.approve")}
         </button>
+        {req?.requires_risk_acknowledgement && (!ackRisk || !comment.trim()) && (
+          <span id="si-ack-hint" className="muted small">
+            {t("ev.ackHint")}
+          </span>
+        )}
         {gate && (
           <button
             type="button"

@@ -221,7 +221,7 @@ export function ProviderHandoff({
             <span>{t("handoff.confirmCheckbox")}</span>
           </label>
           {resumeHold && (
-            <p className="muted small" role="status">
+            <p id="handoff-resume-hold" className="muted small" role="status">
               {resumeHold}
             </p>
           )}
@@ -230,6 +230,7 @@ export function ProviderHandoff({
               type="button"
               className="sm"
               disabled={busy || current.status !== "READY" || !target?.ok || !confirmed}
+              aria-describedby={resumeHold ? "handoff-resume-hold" : undefined}
               onClick={() =>
                 send("handoff-resume", {
                   handoff_id: current.id,

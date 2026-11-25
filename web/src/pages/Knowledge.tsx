@@ -1329,10 +1329,16 @@ function MemoryProvenance({
             type="button"
             className="sm ghost"
             disabled={!by.trim()}
+            aria-describedby={!by.trim() ? "kn-by-hint" : undefined}
             onClick={() => decide("reject")}
           >
             {t("kn.reject")}
           </button>
+          {!by.trim() && (
+            <span id="kn-by-hint" className="muted small">
+              {t("hint.needReviewer")}
+            </span>
+          )}
         </div>
       )}
     </div>

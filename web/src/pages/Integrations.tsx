@@ -1901,7 +1901,11 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
               </select>
             </Field>
           )}
-          {st.mode === "off" && <p className="muted small">{t("ig.tg.modeOff")}</p>}
+          {st.mode === "off" && (
+            <p id="tg-connect-hint" className="muted small">
+              {t("ig.tg.modeOff")}
+            </p>
+          )}
           {st.needsRebind && <p>{t("ig.tg.rebind")}</p>}
           <div className="ig-actions">
             {st.binding || st.needsRebind ? (
@@ -1909,7 +1913,13 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
                 {t("ig.tg.disconnect")}
               </button>
             ) : (
-              <button type="button" className="sm" disabled={st.mode === "off"} onClick={connect}>
+              <button
+                type="button"
+                className="sm"
+                disabled={st.mode === "off"}
+                aria-describedby={st.mode === "off" ? "tg-connect-hint" : undefined}
+                onClick={connect}
+              >
                 {t("ig.tg.connect")}
               </button>
             )}

@@ -273,10 +273,20 @@ export function CodeScan() {
               onChange={(e) => setFocus(e.target.value)}
             />
           </label>
-          <button type="button" disabled={!targets.length} onClick={() => assess()}>
+          <button
+            type="button"
+            disabled={!targets.length}
+            aria-describedby={!targets.length ? "cs-scan-hint" : undefined}
+            onClick={() => assess()}
+          >
             <ScanSearch size={15} strokeWidth={2} />
             {t("cs.scan")}
           </button>
+          {!targets.length && (
+            <span id="cs-scan-hint" className="muted small">
+              {t("hint.pickTarget")}
+            </span>
+          )}
         </div>
       </section>
 

@@ -138,6 +138,7 @@ export function BitbucketState({
     <span className={`repo-bb is-${state}${stale ? " is-stale" : ""}`} title={reason || undefined}>
       {t(key)}
       {stale ? ` · ${t("repo.bb.stale")}` : ""}
+      {reason ? <small className="muted"> — {reason}</small> : null}
     </span>
   );
 }
