@@ -78,19 +78,16 @@ test("Telegram: configured only in Integrations (no env fallback); values persis
   await acc.setTelegram({ chatId: "-1001" }); // empty token keeps the saved one
   assert.equal(config.telegram.botToken, TOKEN);
   assert.equal(config.telegram.chatId, "-1001");
-  await acc.testTelegram(undefined, true); // admin without a personal chat: the shared chat
+  await acc.testTelegram(); // no personal chat: this instance's chat
   assert.equal(sent.at(-1)?.chat_id, "-1001");
   // Step notifications use the user's OWN chat: settable from the UI, shown in the status, used by "send a test".
   const { ensureTestOwner } = await import("../src/auth/testOwner.ts");
   const uid = await ensureTestOwner();
-  await assert.rejects(
-    acc.testTelegram(uid, false),
-    /chat nhận thông báo/,
-    "a member without a chat gets a clear error",
-  );
+  await acc.testTelegram(uid);
+  assert.equal(sent.at(-1)?.chat_id, "-1001", "without a personal chat the instance chat is used");
   await acc.setTelegramDestination(uid, "555");
   assert.equal((await acc.telegramStatus(uid)).myChatId, "555");
-  await acc.testTelegram(uid, false);
+  await acc.testTelegram(uid);
   assert.equal(sent.at(-1)?.chat_id, "555");
   await acc.setTelegramDestination(uid, "");
   assert.equal((await acc.telegramStatus(uid)).myChatId, null, "empty clears it");
@@ -114,5 +111,40 @@ test("Bitbucket: reviewers must be UUIDs; user+token required", async () => {
   await assert.rejects(
     acc.setBitbucket({ user: "a@b.c", token: "t", reviewers: "nobody" }),
     /UUID/,
+  );
+});
+
+test("Telegram bots belong to an instance: another instance's bot and the old team-wide bot are not used", async () => {
+  const { putSharedSecret, deleteUserSecret: _unused } =
+    await import("../src/auth/secrets.ts").then((m) => ({
+      putSharedSecret: m.putSharedSecret,
+      deleteUserSecret: m.deleteUserSecret,
+    }));
+  void _unused;
+  const acc: typeof import("../src/integrations/accounts.ts") = await import(
+    `../src/integrations/accounts.ts?${Date.now()}`
+  );
+  await acc.clearTelegram();
+  Object.assign(config.telegram, { botToken: "", chatId: "" });
+  await putSharedSecret(
+    "telegram:someone-elses-machine",
+    JSON.stringify({ botToken: "111:OTHER_PERSONS_BOT_TOKEN_xx", chatId: "9" }),
+  );
+  await putSharedSecret(
+    "telegram",
+    JSON.stringify({ botToken: "222:OLD_TEAM_WIDE_BOT_TOKEN_xxxx", chatId: "8" }),
+  );
+  await acc.loadAccountSettings();
+  assert.equal(
+    config.telegram.botToken,
+    "",
+    "neither another instance's bot nor the old shared one is picked up",
+  );
+  const status = await acc.telegramStatus();
+  assert.equal(status.configured, false);
+  assert.equal(
+    status.legacySharedBot,
+    true,
+    "the UI can say that the old team bot is no longer used",
   );
 });

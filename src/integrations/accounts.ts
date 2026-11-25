@@ -41,11 +41,16 @@ let saved: { telegram: TelegramSaved | null; bitbucket: BitbucketSaved | null } 
 };
 
 const mask = (s: string) => (!s ? "" : s.length <= 8 ? "••••" : `••••${s.slice(-4)}`);
+/**
+ * The Telegram bot belongs to THIS platform instance (one per developer machine), not to the team: each instance keeps
+ * its own bot token, chat and transport mode under keys named after its instance id, so every person connects their own
+ * bot and their own machine receives and runs what that bot sends. (The former team-wide key "telegram" is ignored.)
+ */
+const telegramKind = () => `telegram:${config.instanceId}`;
+const telegramModeKey = () => `telegram_mode:${config.instanceId}`;
+
 const readJson = async <T>(key: string): Promise<T | null> => {
-  const v =
-    key === "telegram"
-      ? ((await getSharedSecret("telegram")) ?? (await settings.get(key)))
-      : await settings.get(key);
+  const v = key === "telegram" ? await getSharedSecret(telegramKind()) : await settings.get(key);
   if (!v) return null;
   try {
     return JSON.parse(v) as T;
@@ -61,7 +66,7 @@ const readJson = async <T>(key: string): Promise<T | null> => {
 export type TelegramUiMode = "off" | "polling";
 let savedMode: TelegramUiMode | null = null;
 const readMode = async (): Promise<TelegramUiMode | null> => {
-  const v = await settings.get("telegram_mode");
+  const v = await settings.get(telegramModeKey());
   return v === "off" || v === "polling" ? v : null;
 };
 
@@ -81,7 +86,7 @@ export async function setTelegramMode(mode: unknown) {
   if (mode !== "off" && mode !== "polling") throw new HttpError(400, "mode must be off or polling");
   if (mode === "polling" && !config.telegram.botToken)
     throw new HttpError(409, "Save the bot token first");
-  await settings.set("telegram_mode", mode);
+  await settings.set(telegramModeKey(), mode);
   savedMode = mode;
   apply();
   return { mode: config.telegram.mode, modeSource: telegramModeSource() };
@@ -161,6 +166,8 @@ export async function telegramStatus(userId?: number, canManage = false) {
     /** Where THIS user's step notifications (question / approval) go. Without it they are not sent at all. */
     myChatId: userId ? await getUserSecret(userId, "telegram_chat") : null,
     source: saved.telegram ? "platform" : "none",
+    /** A team-wide bot saved by an older version exists but is no longer used: each instance needs its own bot. */
+    legacySharedBot: !saved.telegram && !!(await getSharedSecret("telegram").catch(() => null)),
     chatId: config.telegram.chatId || null,
     botToken: mask(config.telegram.botToken),
     mode: config.telegram.mode,
@@ -179,7 +186,7 @@ export async function setTelegram(input: { botToken?: string; chatId?: string })
     throw new Error("chat id là một số (vd 123456789 hoặc -100… cho group) hoặc @channel");
   const me = await telegramApi<{ username?: string } | undefined>(botToken, "getMe");
   saved.telegram = { botToken, chatId };
-  await putSharedSecret("telegram", JSON.stringify(saved.telegram));
+  await putSharedSecret(telegramKind(), JSON.stringify(saved.telegram));
   apply();
   return { ...(await telegramStatus()), bot: me?.username ? `@${me.username}` : null };
 }
@@ -224,23 +231,23 @@ export async function telegramChats(input: { botToken?: string }) {
 }
 
 /** Test the user's own destination when set (what step notifications use); otherwise the shared chat (admin only). */
-export async function testTelegram(userId?: number, isAdmin = false) {
+export async function testTelegram(userId?: number) {
   if (!config.telegram.botToken) throw new Error("Telegram chưa cấu hình");
   const mine = userId ? await getUserSecret(userId, "telegram_chat") : null;
-  const chatId = mine ?? (isAdmin ? config.telegram.chatId : "");
+  const chatId = mine ?? config.telegram.chatId;
   if (!chatId) throw new Error("chưa có chat nhận thông báo của bạn");
   await telegramApi(config.telegram.botToken, "sendMessage", {
     chat_id: chatId,
     text: mine
       ? "✅ Claude Task Platform: thông báo bước (câu hỏi / duyệt) của bạn sẽ gửi vào chat này."
-      : "✅ Claude Task Platform: kết nối Telegram hoạt động (chat chung).",
+      : "✅ Claude Task Platform: kết nối Telegram hoạt động (chat của máy này).",
   });
-  return { ok: true, chat: mine ? "mine" : "shared" };
+  return { ok: true, chat: mine ? "mine" : "instance" };
 }
 
 export async function clearTelegram() {
   saved.telegram = null;
-  await putSharedSecret("telegram", "null");
+  await putSharedSecret(telegramKind(), "null");
   apply();
   return telegramStatus();
 }

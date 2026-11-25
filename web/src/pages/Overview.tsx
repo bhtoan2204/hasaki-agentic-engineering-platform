@@ -187,11 +187,14 @@ export function OverviewPage() {
       </section>
 
       <div className="ov-main">
-        <MiniOffice runId={officeRun} />
+        {/* Two columns of similar height: the attendance table is tall, so the office, inbox and health stack against it. */}
         <div className="stack">
-          <TimesheetCard />
+          <MiniOffice runId={officeRun} />
           <ActionInbox questions={qList} />
           <HarnessHealth m={metrics} />
+        </div>
+        <div className="stack">
+          <TimesheetCard />
         </div>
       </div>
 

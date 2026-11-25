@@ -43,21 +43,9 @@ import type { Route } from "./types.ts";
 
 export const integrationsRoutes: Route[] = [
   // Telegram + Bitbucket credentials (saved in the platform instead of .env; secrets never returned)
-  [
-    "GET",
-    /^\/api\/integrations\/telegram$/,
-    ({ actor }) => telegramStatus(actor.id, actor.role === "admin"),
-  ],
-  [
-    "POST",
-    /^\/api\/integrations\/telegram$/,
-    ({ body, actor }) => (requireAdmin(actor), setTelegram(body)),
-  ],
-  [
-    "POST",
-    /^\/api\/integrations\/telegram\/mode$/,
-    ({ body, actor }) => (requireAdmin(actor), setTelegramMode(body.mode)),
-  ],
+  ["GET", /^\/api\/integrations\/telegram$/, ({ actor }) => telegramStatus(actor.id, true)],
+  ["POST", /^\/api\/integrations\/telegram$/, ({ body }) => setTelegram(body)],
+  ["POST", /^\/api\/integrations\/telegram\/mode$/, ({ body }) => setTelegramMode(body.mode)],
   ["POST", /^\/api\/integrations\/telegram\/connect$/, ({ actor }) => createBinding(actor.id)],
   [
     "POST",
@@ -75,21 +63,9 @@ export const integrationsRoutes: Route[] = [
     ({ body, actor }) =>
       setTelegramDestination(actor.id, String(body.chatId ?? body.chat_id ?? "")),
   ],
-  [
-    "POST",
-    /^\/api\/integrations\/telegram\/chats$/,
-    ({ body, actor }) => (requireAdmin(actor), telegramChats(body)),
-  ],
-  [
-    "POST",
-    /^\/api\/integrations\/telegram\/test$/,
-    ({ actor }) => testTelegram(actor.id, actor.role === "admin"),
-  ],
-  [
-    "POST",
-    /^\/api\/integrations\/telegram\/clear$/,
-    ({ actor }) => (requireAdmin(actor), clearTelegram()),
-  ],
+  ["POST", /^\/api\/integrations\/telegram\/chats$/, ({ body }) => telegramChats(body)],
+  ["POST", /^\/api\/integrations\/telegram\/test$/, ({ actor }) => testTelegram(actor.id)],
+  ["POST", /^\/api\/integrations\/telegram\/clear$/, () => clearTelegram()],
   // Chat autonomy policies (chat/autonomy.ts): administrators manage global/repository/workflow scopes, every user
   // only their own owner scope. Revocation and pause are immediate.
   [

@@ -855,7 +855,7 @@ test("HTTP binding/preferences remain session-and-CSRF scoped and never expose t
   const status = await (await fetch(base + "/api/integrations/telegram", { headers })).json();
   assert.ok(!JSON.stringify(status).includes(TOKEN));
   assert.equal(status.binding.telegram_user_id, "101");
-  assert.equal(status.canManage, false);
+  assert.equal(status.canManage, true, "everyone manages the bot of their own instance");
   assert.equal(
     (
       await fetch(base + "/api/integrations/telegram/preferences", {
@@ -876,16 +876,7 @@ test("HTTP binding/preferences remain session-and-CSRF scoped and never expose t
     ).status,
     409,
   );
-  assert.equal(
-    (
-      await fetch(base + "/api/integrations/telegram", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ botToken: TOKEN, chatId: "202" }),
-      })
-    ).status,
-    403,
-  );
+  // The bot of this instance is managed by whoever uses the instance (no administrator-only restriction any more).
 });
 test("offline assigned workers retain queued approval without transferring ownership or bypassing fencing", async () => {
   const { run } = await gate();
@@ -1095,7 +1086,7 @@ test("administrator-managed credentials saved on another instance reach this rec
   try {
     assert.equal(await refreshTelegramSettings(), false);
     await putSharedSecret(
-      "telegram",
+      `telegram:${config.instanceId}`,
       JSON.stringify({ botToken: "67890:ROTATED_TOKEN", chatId: "-1001" }),
     );
     assert.equal(await refreshTelegramSettings(), true);
@@ -1103,7 +1094,7 @@ test("administrator-managed credentials saved on another instance reach this rec
     assert.equal(config.telegram.chatId, "-1001");
     assert.equal(await refreshTelegramSettings(), false);
   } finally {
-    await putSharedSecret("telegram", "null");
+    await putSharedSecret(`telegram:${config.instanceId}`, "null");
     await refreshTelegramSettings();
     config.telegram.botToken = TOKEN;
     config.telegram.chatId = "";
@@ -1125,11 +1116,11 @@ test("administrators switch the receiver on/off from the UI; other instances fol
     assert.deepEqual(r, { mode: "polling", modeSource: "platform" });
     assert.equal(config.telegram.mode, "polling");
     // Another instance saved "off": this one picks it up on its periodic refresh.
-    await settings.set("telegram_mode", "off");
+    await settings.set(`telegram_mode:${config.instanceId}`, "off");
     assert.equal(await refreshTelegramSettings(), true);
     assert.equal(config.telegram.mode, "off");
     assert.equal(telegramModeSource(), "platform");
-    // HTTP: a member cannot change it (owner is a member; the setting is session/CSRF scoped like the page).
+    // HTTP: every person manages the bot of their own instance, so a member may change it too.
     const login = await fetch(base + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1144,12 +1135,12 @@ test("administrators switch the receiver on/off from the UI; other instances fol
     const member = await fetch(base + "/api/integrations/telegram/mode", {
       method: "POST",
       headers,
-      body: JSON.stringify({ mode: "polling" }),
+      body: JSON.stringify({ mode: "off" }),
     });
-    assert.equal(member.status, 403);
-    assert.equal(config.telegram.mode, "off", "unchanged by the refused request");
+    assert.equal(member.status, 200);
+    assert.equal(config.telegram.mode, "off", "a member changes the mode of this instance");
   } finally {
-    await q(pool, "DELETE FROM settings WHERE key='telegram_mode'");
+    await q(pool, "DELETE FROM settings WHERE key = $1", [`telegram_mode:${config.instanceId}`]);
     await refreshTelegramSettings(); // re-applies the startup (env) credentials: restore the test bot below
     config.telegram.mode = "polling";
     config.telegram.botToken = TOKEN;
