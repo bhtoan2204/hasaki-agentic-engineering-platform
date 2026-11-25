@@ -31,7 +31,7 @@ import { artifactResponseHeaders } from "./artifactResponse.ts";
 import { compress, compressedStatic, COMPRESS_MIN_BYTES, pickEncoding } from "./compression.ts";
 import { count, observe } from "../runtimeMetrics.ts";
 import { config } from "../config.ts";
-import { logError } from "../logging.ts";
+import { logError, runWithLogContext } from "../logging.ts";
 import {
   bodyLimitFor,
   DEFAULT_BODY_LIMIT,
@@ -259,7 +259,18 @@ function correlationHeader(value: string | string[] | undefined) {
   return typeof value === "string" && /^[\w.:-]{1,128}$/.test(value) ? value : undefined;
 }
 
-export async function handle(req: IncomingMessage, res: ServerResponse) {
+/** Every log line written while a request runs (also across awaits) carries its x-request-id / x-correlation-id. */
+export function handle(req: IncomingMessage, res: ServerResponse) {
+  return runWithLogContext(
+    {
+      request_id: correlationHeader(req.headers["x-request-id"]),
+      correlation_id: correlationHeader(req.headers["x-correlation-id"]),
+    },
+    () => handleRequest(req, res),
+  );
+}
+
+async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
   const method = req.method ?? "GET";
   const key = `${method} ${url.pathname}`;

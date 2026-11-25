@@ -96,6 +96,8 @@ const histograms = new Map<string, Histogram>(
   Object.entries(HISTOGRAMS).map(([name, bounds]) => [name, new Histogram([...bounds])]),
 );
 const decisions = new Map<string, number>(DECISIONS.map((d) => [d, 0]));
+const ignored = new Map<string, number>();
+const MAX_IGNORED_CONTEXTS = 100;
 const startedAt = Date.now();
 const loop = monitorEventLoopDelay({ resolution: 20 });
 loop.enable();
@@ -105,6 +107,11 @@ export function count(name: Counter, by = 1) {
 }
 export function observe(name: HistogramName, value: number) {
   histograms.get(name)!.observe(value);
+}
+/** Errors deliberately swallowed (ignoreError): per call-site label, at most MAX_IGNORED_CONTEXTS labels, the rest in "other". */
+export function countIgnoredError(context: string) {
+  const key = ignored.has(context) || ignored.size < MAX_IGNORED_CONTEXTS ? context : "other";
+  ignored.set(key, (ignored.get(key) ?? 0) + 1);
 }
 export function countDecision(action: string) {
   // Unknown values are folded into nothing: the label set stays fixed.
@@ -125,6 +132,7 @@ export function runtimeMetricsSnapshot() {
     counters: Object.fromEntries(counters),
     histograms: Object.fromEntries([...histograms].map(([k, h]) => [k, h.snapshot()])),
     replay_decisions: Object.fromEntries(decisions),
+    ignored_errors: Object.fromEntries(ignored),
     gauges: Object.fromEntries([...gauges].map(([k, read]) => [k, read()])),
     event_loop_ms: {
       p50: ms(loop.percentile(50)),
@@ -141,5 +149,6 @@ export function resetRuntimeMetrics() {
   for (const [k, bounds] of Object.entries(HISTOGRAMS))
     histograms.set(k, new Histogram([...bounds]));
   for (const k of decisions.keys()) decisions.set(k, 0);
+  ignored.clear();
   loop.reset();
 }
