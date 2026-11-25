@@ -216,13 +216,13 @@ export function Changes({
   const { t } = useI18n();
   const { data, error, loading, reload } = useApi<RunChanges>(`/api/runs/${run.id}/changes`);
   const [file, setFile] = useState<Record<string, string | null>>({});
-  useEffect(() => void reload(), [tick]);
+  useEffect(() => void reload(), [reload, tick]);
   const lastDiff = useRef(Date.now());
   useEffect(() => {
     if (!activity || Date.now() - lastDiff.current < 10_000) return;
     lastDiff.current = Date.now();
     void reload();
-  }, [activity]);
+  }, [activity, reload]);
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <EmptyState title={t("ch.empty")} />;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ChevronRight,
@@ -960,16 +960,19 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
         : states.every((s) => s === "ok")
           ? "ok"
           : "partial";
-  const test = async (keys: string[]) => {
-    if (!keys.length) return;
-    setChecking((c) => new Set([...c, ...keys]));
-    // A failed connection is a result (ok: false), shown on the card, not an error toast.
-    await Promise.all(
-      keys.map((k) => api(`/api/integrations/databases/${k}/test`, {}).catch(() => null)),
-    );
-    setChecking((c) => new Set([...c].filter((k) => !keys.includes(k))));
-    reload();
-  };
+  const test = useCallback(
+    async (keys: string[]) => {
+      if (!keys.length) return;
+      setChecking((c) => new Set([...c, ...keys]));
+      // A failed connection is a result (ok: false), shown on the card, not an error toast.
+      await Promise.all(
+        keys.map((k) => api(`/api/integrations/databases/${k}/test`, {}).catch(() => null)),
+      );
+      setChecking((c) => new Set([...c].filter((k) => !keys.includes(k))));
+      reload();
+    },
+    [reload],
+  );
   // Loading the page re-checks databases never checked or checked more than five minutes ago (admins only), so the
   // lights in the collapsed row are current before anyone opens it.
   const autoChecked = useRef(false);
@@ -983,7 +986,7 @@ function ProjectDatabases(p: { open: boolean; onToggle: (id: string) => void; is
       )
       .map((d) => d.key);
     void test(stale);
-  }, [p.isAdmin, data]);
+  }, [p.isAdmin, data, test]);
   const set = (k: keyof DbForm, v: DbForm[keyof DbForm]) => {
     if (form) setForm({ ...form, [k]: v });
   };
@@ -1354,10 +1357,8 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
           <button
             className="sm ghost"
             onClick={async () =>
-              (await act(
-                () => api("/api/integrations/bitbucket/clear", {}),
-                t("ig.removed"),
-              )) && (setF({ token: "" }), reload())
+              (await act(() => api("/api/integrations/bitbucket/clear", {}), t("ig.removed"))) &&
+              (setF({ token: "" }), reload())
             }
           >
             <LogOut size={14} strokeWidth={2} />
@@ -1653,9 +1654,12 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
  */
 function BackgroundGit(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
-  const { data: st, reload } = useApi<{ enabled: boolean; hosts: string[] }>("/api/integrations/background-git");
+  const { data: st, reload } = useApi<{ enabled: boolean; hosts: string[] }>(
+    "/api/integrations/background-git",
+  );
   const toggle = async (enabled: boolean) => {
-    if (await act(() => api("/api/integrations/background-git", { enabled }), t("ig.bg.saved"))) void reload();
+    if (await act(() => api("/api/integrations/background-git", { enabled }), t("ig.bg.saved")))
+      void reload();
   };
   return (
     <Row
@@ -1847,22 +1851,22 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
           </p>
           {st.canManage && (
             <Field label={t("ig.tg.modeTitle")}>
-                <select
-                  aria-label={t("ig.tg.modeTitle")}
-                  value={st.mode === "polling" ? "polling" : "off"}
-                  onChange={async (e) => {
-                    if (
-                      await act(
-                        () => api("/api/integrations/telegram/mode", { mode: e.target.value }),
-                        t("ig.tg.modeSaved"),
-                      )
+              <select
+                aria-label={t("ig.tg.modeTitle")}
+                value={st.mode === "polling" ? "polling" : "off"}
+                onChange={async (e) => {
+                  if (
+                    await act(
+                      () => api("/api/integrations/telegram/mode", { mode: e.target.value }),
+                      t("ig.tg.modeSaved"),
                     )
-                      reload();
-                  }}
-                >
-                  <option value="off">{t("ig.tg.modeOffOpt")}</option>
-                  <option value="polling">{t("ig.tg.modePolling")}</option>
-                </select>
+                  )
+                    reload();
+                }}
+              >
+                <option value="off">{t("ig.tg.modeOffOpt")}</option>
+                <option value="polling">{t("ig.tg.modePolling")}</option>
+              </select>
             </Field>
           )}
           {st.mode === "off" && <p className="muted small">{t("ig.tg.modeOff")}</p>}
@@ -1999,9 +2003,7 @@ function AgentAccounts() {
   return (
     <section className="ig-group">
       <h3 className="ig-group-title">{t("ig.cli.title")}</h3>
-      <p className="small muted">
-        {t("ig.cli.lead")}
-      </p>
+      <p className="small muted">{t("ig.cli.lead")}</p>
       {status.loading && !status.data && <SkeletonRows rows={2} />}
       {status.error && <ErrorBox error={status.error} onRetry={status.reload} />}
       {status.data && !status.data.length && <Empty>{t("ig.cli.none")}</Empty>}

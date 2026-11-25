@@ -1,5 +1,5 @@
 import { IntakeQueue } from "./Intake.tsx";
-import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   ChevronRight,
   CircleHelp,
@@ -1119,17 +1119,19 @@ export function WorkItemDetail({ id }: { id: number }) {
   const [agentProvider, setAgentProvider] = useState<AgentProvider>("claude");
   // Intent routing: preselect a workflow whose triggers match the item (e.g. a production log investigation).
   // Only a suggestion: a workflow the user picked is never overridden.
-  const [wfTouched, setWfTouched] = useState(false);
+  const wfTouched = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => setSettingsOpen(false), [id]);
+  const routedId = useRef<number | null>(null);
   useEffect(() => {
-    if (!w || wfTouched) return;
+    if (!w || wfTouched.current || routedId.current === w.id) return;
+    routedId.current = w.id;
     api<{ workflow?: string } | null>("/api/workflows/route", {
       text: `${w.title ?? ""}\n${w.description ?? ""}`,
     })
-      .then((r) => r?.workflow && !wfTouched && setWf(r.workflow))
+      .then((r) => r?.workflow && !wfTouched.current && setWf(r.workflow))
       .catch(() => {});
-  }, [w?.id]);
+  }, [w]);
   if (loading && !w) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!w)
@@ -1276,7 +1278,10 @@ export function WorkItemDetail({ id }: { id: number }) {
               </div>
             </div>
             <Field label={t("common.workflow")}>
-              <select value={wf} onChange={(e) => (setWf(e.target.value), setWfTouched(true))}>
+              <select
+                value={wf}
+                onChange={(e) => ((wfTouched.current = true), setWf(e.target.value))}
+              >
                 {(wfs ?? [])
                   .filter((x) => x.latest_version > 0)
                   .map((x) => (

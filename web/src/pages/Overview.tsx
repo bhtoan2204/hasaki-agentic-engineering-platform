@@ -104,8 +104,16 @@ const fmt = (n: number | null | undefined, d = 0) =>
 export function OverviewPage() {
   const { t } = useI18n();
   const { data: runs, error: runsError, reload: reloadRuns } = useApi<OverviewRun[]>("/api/runs");
-  const { data: questions, error: qError, reload: reloadQ } = useApi<OverviewQuestion[]>("/api/questions");
-  const { data: metrics, error: mError, reload: reloadM } = useApi<MetricsSummary>("/api/metrics/summary?days=30");
+  const {
+    data: questions,
+    error: qError,
+    reload: reloadQ,
+  } = useApi<OverviewQuestion[]>("/api/questions");
+  const {
+    data: metrics,
+    error: mError,
+    reload: reloadM,
+  } = useApi<MetricsSummary>("/api/metrics/summary?days=30");
   useLive(null, (p) => {
     if (!p || p.kind === "status") void (reloadRuns(), reloadQ());
   });
@@ -501,7 +509,11 @@ function RecentVerification({ runs }: { runs: OverviewRun[] }) {
   useEffect(() => {
     let alive = true;
     Promise.all(
-      runList.slice(0, 6).map((r) => api<RunAttempts>(`/api/runs/${r.id}`).catch(() => null)),
+      ids
+        .split(",")
+        .filter(Boolean)
+        .slice(0, 6)
+        .map((id) => api<RunAttempts>(`/api/runs/${id}`).catch(() => null)),
     ).then((details) => {
       if (!alive) return;
       const out: VerificationRow[] = [];

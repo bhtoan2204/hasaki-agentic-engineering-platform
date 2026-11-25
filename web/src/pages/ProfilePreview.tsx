@@ -91,24 +91,24 @@ export function ProfilePreview({
   const { t } = useI18n();
   const [data, setData] = useState<RunPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const key = JSON.stringify([workflow, workItemId, repositories, inputs, value, autonomy]);
+  const body = JSON.stringify({
+    workflow,
+    work_item_id: workItemId ?? null,
+    repositories,
+    inputs,
+    profile: value,
+    autonomy: autonomy || undefined,
+  });
   useEffect(() => {
     if (!workflow) return;
     let stop = false;
-    api<RunPreview>("/api/runs/preview", {
-      workflow,
-      work_item_id: workItemId ?? null,
-      repositories,
-      inputs,
-      profile: value,
-      autonomy: autonomy || undefined,
-    })
+    api<RunPreview>("/api/runs/preview", JSON.parse(body))
       .then((d) => !stop && (setData(d), setError(null)))
       .catch((e) => !stop && setError(e.message));
     return () => {
       stop = true;
     };
-  }, [key]);
+  }, [workflow, body]);
   const { nodes, edges } = useMemo(() => {
     const steps = Array.isArray(data?.graph?.steps) ? data.graph.steps : [];
     if (!steps.length) return { nodes: [], edges: [] };

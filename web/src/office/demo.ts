@@ -223,12 +223,13 @@ export function usePreviewOffice(enabled: boolean) {
     started: Record<string, number>;
     finished: Record<string, number>;
     events: Record<string, EventLite[]>;
+    seen: Record<string, Set<string>>;
     seq: number;
-  }>({ started: {}, finished: {}, events: {}, seq: 1 });
+  }>({ started: {}, finished: {}, events: {}, seen: {}, seq: 1 });
   useEffect(() => {
     if (!enabled) return;
     setI(0);
-    times.current = { started: {}, finished: {}, events: {}, seq: 1 };
+    times.current = { started: {}, finished: {}, events: {}, seen: {}, seq: 1 };
     const t = setInterval(() => setI((n) => (n + 1) % FRAMES.length), FRAME_MS);
     return () => clearInterval(t);
   }, [enabled]);
@@ -252,14 +253,17 @@ export function usePreviewOffice(enabled: boolean) {
     if (s.status === P) {
       delete tm.started[s.key];
       delete tm.finished[s.key];
+      delete tm.seen[s.key];
     }
     if (["COMPLETED", "FAILED", "CANCELED", "SKIPPED"].includes(s.status) && !tm.finished[s.key])
       tm.finished[s.key] = now;
     if (!["COMPLETED", "FAILED", "CANCELED", "SKIPPED"].includes(s.status))
       delete tm.finished[s.key];
-    for (const e of frame.events?.[s.key] ?? []) {
+    (frame.events?.[s.key] ?? []).forEach((e, n) => {
+      const seen = (tm.seen[s.key] ??= new Set());
+      if (seen.has(`${i}:${n}`)) return;
+      seen.add(`${i}:${n}`);
       const list = (tm.events[s.key] ??= []);
-      if (list.at(-1)?.content === `${i}:${e.name ?? e.kind}`) continue;
       list.push({
         id: tm.seq++,
         kind: e.kind,
@@ -267,7 +271,7 @@ export function usePreviewOffice(enabled: boolean) {
         data: e.name ? { name: e.name, input: e.input } : undefined,
         created_at: new Date(now).toISOString(),
       });
-    }
+    });
   }
   const attempts: AttemptLite[] = steps
     .filter((s) => s.current_attempt_id)

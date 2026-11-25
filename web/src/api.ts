@@ -201,9 +201,10 @@ export function useApi<T = unknown>(path: string | null, deps: unknown[] = []) {
   const reload = useCallback(() => load(false), [load]);
   const reloadFresh = useCallback(() => load(true), [load]);
 
+  const depsKey = JSON.stringify(deps);
   useEffect(() => {
     void reload();
-  }, [reload, ...deps]);
+  }, [reload, depsKey]);
 
   return { data, error, loading, refreshing, reload, reloadFresh, setData };
 }

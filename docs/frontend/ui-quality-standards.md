@@ -93,3 +93,17 @@ Before submitting layout changes:
 - Exercise VI/EN, light/dark, sidebar expanded/collapsed, 125%/150% zoom stress, long names, populated/empty/loading/error states, keyboard actions and browser history.
 - Measure rectangles for chart identity/bar/count/share overlap; measure control heights, numeric alignment and usable editor canvas width. View screenshots as well as measurement output.
 - Report the exact scope and any emulation limitations. Headless CSS/viewport zoom testing must not be described as using browser chrome's zoom menu.
+
+## 11. Components, state and effects
+
+Apply these when writing or reviewing React code; they cover structure, not appearance.
+
+- **Boundaries.** A component owns one responsibility. Split a section out when it has its own state, data or lifecycle, or a second caller; do not split by line count. A long page that only composes children is fine. Extract a hook when an effect and state cluster (streaming, polling, a form draft) is cohesive. Page-local pieces stay under `pages/<page>/`; reuse across pages goes to `components/` or `ui.tsx`.
+- **Data.** Fetch with `useApi` (it dedupes in-flight requests and discards out-of-order responses). Refetch with its `reload`/`reloadFresh`; do not call `api()` from an effect except for streaming or one-off lookups.
+- **State ownership.** Compute values from props, state or the URL during render instead of mirroring them into state. The URL owns navigable state (filters, page, selection). State that is only read inside effects or handlers and never rendered belongs in a ref.
+- **Effects.** Use an effect to synchronize with something outside React (subscription, timer, stream, DOM) and always clean it up. Do not use one to derive state, react to a click, or feed another effect through state. A draft that must reset with its source is acceptable, keyed on the source's id.
+- **Async callbacks.** A callback that resolves later reads current values through a ref or a request sequence, never a value captured when the effect ran.
+- **Dependencies.** `react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps` are errors. If a dependency is omitted on purpose, prefer a primitive content key (`items.join()`); otherwise add `eslint-disable-next-line react-hooks/exhaustive-deps` with a one-line reason.
+- **Render purity.** Do not accumulate into refs or module state during render. Dedupe repeated items by identity (a seen-set), not by comparing display text.
+- **Abstraction.** Add a wrapper or helper only for a second real caller or a demonstrated invariant. Same-named helpers with different contracts are not duplicates. Export only what another module imports.
+- **Slop.** No dead branches, no catch that hides an error, no comment that narrates the code, no defensive check for a state that cannot occur.

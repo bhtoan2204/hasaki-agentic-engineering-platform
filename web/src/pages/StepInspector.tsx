@@ -893,7 +893,7 @@ export function StepInspector({
   );
   const [tab, setTab] = useState<Tab>(stepKey === "task_result_report" ? "report" : "overview");
   const [attemptId, setAttemptId] = useState<number | null>(null);
-  useEffect(() => void reload(), [tick]);
+  useEffect(() => void reload(), [reload, tick]);
   useEffect(() => setAttemptId(null), [stepKey]);
   if (loading && !data)
     return (
@@ -2322,8 +2322,8 @@ function ReexecuteDialog({
     onPreview(
       open && preview ? Object.fromEntries(preview.steps.map((s) => [s.key, s.action])) : null,
     );
-  }, [open, preview]);
-  useEffect(() => () => onPreview?.(null), []);
+  }, [open, preview, onPreview]);
+  useEffect(() => () => onPreview?.(null), [onPreview]);
   if (!open)
     return (
       <div

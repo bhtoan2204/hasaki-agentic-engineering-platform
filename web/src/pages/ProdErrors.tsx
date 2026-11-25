@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bug,
   CalendarClock,
@@ -443,7 +443,9 @@ function StackTrace({ g }: { g: Group }) {
   const load = async () => {
     if (stack !== null) return;
     try {
-      const r = await api<{ group: { detail: { stack?: string } } }>(`/api/prod-errors/${g.fingerprint}`);
+      const r = await api<{ group: { detail: { stack?: string } } }>(
+        `/api/prod-errors/${g.fingerprint}`,
+      );
       setStack(r.group.detail.stack ?? "");
     } catch (e) {
       setStack((e as Error).message);
@@ -513,7 +515,9 @@ function GroupRow({
   const traceOnly = inSource(g, "traces") && !inSource(g, "logs");
   const investigate = async () => {
     setBusy(true);
-    const r = await act(() => api<{ created: boolean; code: string }>(`/api/prod-errors/${g.fingerprint}/investigate`, {}));
+    const r = await act(() =>
+      api<{ created: boolean; code: string }>(`/api/prod-errors/${g.fingerprint}/investigate`, {}),
+    );
     setBusy(false);
     if (r) {
       toast(r.created ? t("pe.created", { code: r.code }) : t("pe.exists", { code: r.code }), "ok");
@@ -552,10 +556,7 @@ function GroupRow({
             noBaseline={g.detail.no_baseline}
           />
         </span>
-        <span
-          className="pe-time muted small"
-          title={`${t("pe.latestTip")}: ${dmyHm(g.last_at)}`}
-        >
+        <span className="pe-time muted small" title={`${t("pe.latestTip")}: ${dmyHm(g.last_at)}`}>
           {g.last_at ? (
             <>
               <span>{dmy(g.last_at)}</span>
@@ -698,10 +699,11 @@ function Schedule({ s, reload }: { s: Data["settings"]; reload: () => void }) {
   const { t } = useI18n();
   const [times, setTimes] = useState(s.schedule.join(", "));
   const [notify, setNotify] = useState(s.notify);
-  useEffect(
-    () => (setTimes(s.schedule.join(", ")), setNotify(s.notify)),
-    [s.schedule.join(), s.notify],
-  );
+  const scheduleText = s.schedule.join(", ");
+  useEffect(() => {
+    setTimes(scheduleText);
+    setNotify(s.notify);
+  }, [scheduleText, s.notify]);
   return (
     <details className="pe-schedule">
       <summary className="small">
@@ -754,27 +756,30 @@ export function ProdErrorsPage({
 }) {
   const { t } = useI18n();
   const url = new URLSearchParams(appliedQuery);
-  const setFilter = (key: string, value: string) => {
-    const p = new URLSearchParams(appliedQuery);
-    if (value) p.set(key, value);
-    else p.delete(key);
-    if (key === "list_namespace") p.delete("list_service");
-    // Severity and service lists differ per tab: a new tab starts from its own defaults.
-    if (key === "list_source") {
-      p.delete("list_service");
-      p.delete("list_severity");
-    }
-    navigate(`/prod-errors/incidents?${p}`);
-  };
+  const setFilter = useCallback(
+    (key: string, value: string) => {
+      const p = new URLSearchParams(appliedQuery);
+      if (value) p.set(key, value);
+      else p.delete(key);
+      if (key === "list_namespace") p.delete("list_service");
+      // Severity and service lists differ per tab: a new tab starts from its own defaults.
+      if (key === "list_source") {
+        p.delete("list_service");
+        p.delete("list_severity");
+      }
+      navigate(`/prod-errors/incidents?${p}`);
+    },
+    [appliedQuery],
+  );
   const all = url.get("list_ignored") === "1";
-  const setAll = (v: boolean) => setFilter("list_ignored", v ? "1" : "");
+  const setAll = useCallback((v: boolean) => setFilter("list_ignored", v ? "1" : ""), [setFilter]);
   const { data, error, loading, reload } = useApi<Data>(`/api/prod-errors${all ? "?all=1" : ""}`);
   const ns = url.get("list_namespace") || "all";
   const setNs = (v: string) => setFilter("list_namespace", v);
   const source: Source = url.get("list_source") === "traces" ? "traces" : "logs";
   // Trace groups are rarely critical/high (no day-over-day baseline yet), so that tab lists every severity.
   const sev = url.get("list_severity") || (source === "traces" ? "all" : "attention");
-  const setSev = (v: string) => setFilter("list_severity", v);
+  const setSev = useCallback((v: string) => setFilter("list_severity", v), [setFilter]);
   const service = url.get("list_service") || "";
   const incidentStatus = url.get("list_status") || "";
   const query = url.get("list_search") || "";
@@ -798,7 +803,7 @@ export function ProdErrorsPage({
           ?.scrollIntoView({ block: "center", behavior: "smooth" }),
       50,
     );
-  }, [focus, data, all, source]);
+  }, [focus, data, all, source, setAll, setFilter, setSev]);
 
   useEffect(() => {
     if (!data?.scanning) return;
@@ -825,7 +830,7 @@ export function ProdErrorsPage({
       else if (l) toast(t("pe.scanFail", { error: l.error ?? "" }));
     }
     wasScanning.current = data.scanning;
-  }, [data]);
+  }, [data, t]);
 
   const tabGroups = useMemo(
     () => (data?.groups ?? []).filter((g) => inSource(g, source)),
@@ -860,7 +865,11 @@ export function ProdErrorsPage({
   // Bug Hunter: one batched summary for the whole list (row headers), never one request per row. Detailed hunt data is
   // fetched by the expanded row only.
   const fingerprints = useMemo(
-    () => (data?.groups ?? []).map((g) => g.fingerprint).sort().join(","),
+    () =>
+      (data?.groups ?? [])
+        .map((g) => g.fingerprint)
+        .sort()
+        .join(","),
     [data?.groups],
   );
   const huntSummary = useApi<{ hunts: Record<string, HuntSummary> }>(
@@ -872,9 +881,7 @@ export function ProdErrorsPage({
   const summaries = huntSummary.data?.hunts ?? {};
   // The expanded row's hunt polls itself; the batched summary only polls for active hunts in collapsed rows.
   usePolling(
-    Object.entries(summaries).some(
-      ([fp, h]) => ACTIVE_HUNT.has(h.status) && fp !== open,
-    ),
+    Object.entries(summaries).some(([fp, h]) => ACTIVE_HUNT.has(h.status) && fp !== open),
     huntSummary.reload,
   );
   const onHunt = (fp: string, id: number, status?: string) => {
@@ -1143,7 +1150,8 @@ export function ProdErrorsPage({
                       hunt={summaries[g.fingerprint]}
                       huntId={huntSel[g.fingerprint] ?? summaries[g.fingerprint]?.id ?? null}
                       huntStatus={
-                        open === g.fingerprint || huntSel[g.fingerprint] !== summaries[g.fingerprint]?.id
+                        open === g.fingerprint ||
+                        huntSel[g.fingerprint] !== summaries[g.fingerprint]?.id
                           ? (huntLive[g.fingerprint] ?? summaries[g.fingerprint]?.status)
                           : summaries[g.fingerprint]?.status
                       }

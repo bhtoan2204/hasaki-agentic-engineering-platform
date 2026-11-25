@@ -1151,7 +1151,7 @@ function QueueBanner({ run, tick }: { run: RunDetail; tick: number }) {
   const { data, reload } = useApi<SchedulerState>(
     waiting.length && !["PAUSED", "CANCELED"].includes(run.status) ? "/api/scheduler" : null,
   );
-  useEffect(() => void reload(), [tick, waiting.length]);
+  useEffect(() => void reload(), [reload, tick, waiting.length]);
   const [, force] = useState(0);
   useEffect(() => {
     const t = setInterval(() => force((x) => x + 1), 5000);
@@ -1405,7 +1405,7 @@ const fmtS = (ms: number) =>
 function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   const { t, locale } = useI18n();
   const { data, reload } = useApi<RunMetrics>(`/api/metrics/runs/${runId}`);
-  useEffect(() => void reload(), [tick]);
+  useEffect(() => void reload(), [reload, tick]);
   if (!data) return null;
   const totals = data.totals;
   const num = (n: number | null | undefined) =>

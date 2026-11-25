@@ -174,7 +174,7 @@ export function CostPanel({
   const { data: fetched, reload } = useApi<CostData>(`${base}/cost`, [id]);
   const [data, setData] = useState<CostData | null>(null);
   useEffect(() => setData(fetched), [fetched]);
-  useEffect(() => void reload(), [tick]);
+  useEffect(() => void reload(), [reload, tick]);
   if (!data) return null;
   const budget = kind === "run" ? data.budget?.run : data.budget;
   const ownBudget = budget?.source === "own" ? (budget.limit_usd ?? null) : null;

@@ -1528,10 +1528,13 @@ function QuickRun({ wfKey, onClose }: { wfKey: string; onClose: () => void }) {
   };
   const enabledRepos = (repos ?? []).filter((r) => r.enabled);
   const selfWorkflow = wfKey === "platform-self-development";
-  const selfNames = enabledRepos.filter((r) => r.self).map((r) => r.name);
+  const selfNames = useMemo(
+    () => (repos ?? []).filter((r) => r.enabled && r.self).map((r) => r.name),
+    [repos],
+  );
   useEffect(() => {
     if (selfWorkflow) setSel(selfNames);
-  }, [selfWorkflow, selfNames.join("|")]);
+  }, [selfWorkflow, selfNames]);
   return (
     <div className="wfe-form">
       <div className="wfe-insp-head">

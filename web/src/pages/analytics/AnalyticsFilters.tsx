@@ -25,6 +25,11 @@ export function defaultFilters() {
     environment: "",
   };
 }
+function draftFromQuery(query: string) {
+  const p = new URLSearchParams(query);
+  const defaults = defaultFilters();
+  return Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, p.get(k) ?? v]));
+}
 export function AnalyticsFilters({
   query,
   options,
@@ -39,15 +44,10 @@ export function AnalyticsFilters({
   compact?: boolean;
 }) {
   const { t } = useI18n();
-  const initial = () => {
-    const p = new URLSearchParams(query);
-    const defaults = defaultFilters();
-    return Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, p.get(k) ?? v]));
-  };
-  const [draft, setDraft] = useState(initial);
+  const [draft, setDraft] = useState(() => draftFromQuery(query));
   const [advanced, setAdvanced] = useState(false);
   useEffect(() => {
-    setDraft(initial());
+    setDraft(draftFromQuery(query));
   }, [query]); // URL is the applied filter state shared by the domain dashboards.
   const set = (k: string, v: string) =>
     setDraft((d) => ({
