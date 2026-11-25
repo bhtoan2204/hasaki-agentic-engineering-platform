@@ -172,6 +172,10 @@ interface ContextToolArgs {
   path?: string;
   line?: number;
   character?: number;
+  packages?: string[];
+  run?: string;
+  race?: boolean;
+  timeout_seconds?: number;
 }
 /**
  * The read-only context tools a CodeAct program may compose (M3), by source family. Explicit: anything else —
@@ -229,6 +233,80 @@ function composableContextTools(env: PlatformToolEnv): CodeActCapability[] {
   );
 }
 
+const MAX_TEST_REPOSITORIES = 8;
+async function runTestsTool(args: ContextToolArgs, env: PlatformToolEnv) {
+  if (env.mode === "coding")
+    throw new Error(
+      "run_tests is for read-only analysis steps; coding steps are verified by the platform",
+    );
+  const [{ runAnalysisTests }, { runIsolatedCommand }, { bwrapAvailable }] = await Promise.all([
+    import("./analysisTests.ts"),
+    import("../workflow/executors/builtin.ts"),
+    import("../platform/selfDevelopment.ts"),
+  ]);
+  const rows = await authorizedRepositoryRows(env, args.repository ? [args.repository] : undefined);
+  const sandboxAvailable = !!(await bwrapAvailable());
+  const timeoutMs = (args.timeout_seconds ?? 300) * 1000;
+  const reports = [];
+  const notRun: string[] = [];
+  for (const row of rows) {
+    if (reports.length >= MAX_TEST_REPOSITORIES) {
+      notRun.push(
+        `${row.name}: not run (at most ${MAX_TEST_REPOSITORIES} repositories per call; name it in \`repository\`)`,
+      );
+      continue;
+    }
+    let path: string;
+    try {
+      path = repoPath(row);
+    } catch {
+      notRun.push(`${row.name}: not run (the checkout is unavailable on this worker)`);
+      continue;
+    }
+    const { report, logs } = await runAnalysisTests({
+      repository: row.name,
+      path,
+      packages: args.packages,
+      run: args.run,
+      race: args.race,
+      timeoutMs,
+      signal: env.signal ?? AbortSignal.timeout(timeoutMs + 60_000),
+      sandboxAvailable,
+      runner: runIsolatedCommand,
+    });
+    const evidence: Array<{ module: string; artifact_id: number }> = [];
+    for (const l of logs) {
+      const artifact = await one<{ id: number }>(
+        pool,
+        "INSERT INTO workflow_artifacts (run_id, step_id, attempt_id, kind, name, content, data) VALUES ($1, $2, $3, 'log', $4, $5, $6) RETURNING id",
+        [
+          env.runId,
+          env.stepId,
+          env.attemptId,
+          `run_tests ${row.name} ${l.module}`.slice(0, 120),
+          l.log.slice(0, 2_000_000),
+          JSON.stringify({
+            tool: "run_tests",
+            repository: row.name,
+            module: l.module,
+            command: l.command,
+          }),
+        ],
+      );
+      if (artifact) evidence.push({ module: l.module, artifact_id: artifact.id });
+    }
+    reports.push({ ...report, evidence });
+  }
+  return {
+    reports,
+    not_run: notRun,
+    incomplete: [
+      ...reports.flatMap((r) => r.incomplete.map((l) => `${r.repository}: ${l}`)),
+      ...notRun,
+    ],
+    next: "Cite a run through its artifact_id (source test_output). Every `incomplete` line is missing evidence: list it under coverage.not_inspected and missing_evidence.",
+  };
+}
 export async function executeContextTool(
   name: string,
   args: ContextToolArgs,
@@ -404,7 +482,14 @@ export async function executeContextTool(
         caution: i.negative,
         authoritative: i.authoritative,
         text: i.text,
-        provenance: source(`causal_memory:${i.id}`, i.version, null, "owner", i.why.join("; "), i.status),
+        provenance: source(
+          `causal_memory:${i.id}`,
+          i.version,
+          null,
+          "owner",
+          i.why.join("; "),
+          i.status,
+        ),
       }));
     }
     case "get_work_item": {
@@ -463,8 +548,7 @@ export async function executeContextTool(
       const entries = pack.content.entries.filter(
         (e) => args.section === "all" || e.section === args.section,
       );
-      const clamp = (n: number, min: number, max: number) =>
-        Math.min(max, Math.max(min, n));
+      const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
       const offset = clamp(args.offset!, 0, 1000);
       const entryLimit = clamp(args.limit!, 1, 20);
       return {
@@ -569,6 +653,8 @@ export async function executeContextTool(
           ),
         }));
     }
+    case "run_tests":
+      return runTestsTool(args, env);
     case "request_clarification":
       return {
         questions: await postClarification(env, args.questions!),

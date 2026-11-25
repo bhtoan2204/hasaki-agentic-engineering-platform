@@ -518,8 +518,42 @@ export function parseShell(command: string): ShellParse {
 const scanText = (p: ShellParse) =>
   [p.code, ...p.heredocs.filter((h) => !h.data).map((h) => h.body)].join("\n");
 
+/** A plain file directly in /tmp is scratch output (a test log); the OS mounts keep it away from the repository. */
+const SCRATCH_FILE = /^\/tmp\/(?!\.+$)[\w@%+=,.-]+$/;
 const harmlessRedirect = (t: string) =>
-  t === "/dev/null" || t === "&/dev/null" || /^&[0-9-]$/.test(t);
+  t === "/dev/null" || t === "&/dev/null" || /^&[0-9-]$/.test(t) || SCRATCH_FILE.test(t);
+
+/** Commands a read-only step must not run itself: they execute repository code with this process's network and credentials. */
+const ANALYSIS_DENIED: Array<[RegExp, string]> = [
+  [
+    /^go\s+(-C\s+\S+\s+)?test\b/,
+    "go test runs repository code (TestMain, init, every test) with this process's network and credentials, and `-short` does not prevent that. Use the platform run_tests tool: it inspects the tests first, then runs only the safe packages with no network, credentials masked and the repository read-only",
+  ],
+  [
+    /^(go|golangci-lint|staticcheck)\b.*\s-(toolexec|vettool|exec)(=|\s)/,
+    "-toolexec, -vettool and -exec run a program named on the command line, which is not read-only",
+  ],
+];
+
+/** The reason a command would execute repository code (judged per simple command, so quoted text is not a command). */
+function executesRepositoryCode(command: string): string | null {
+  const p = parseShell(command);
+  for (const seg of p.segments) {
+    const { text, inner } = extractSubstitutions(seg);
+    for (const body of inner ?? []) {
+      const nested = executesRepositoryCode(body);
+      if (nested) return nested;
+    }
+    const s = text
+      .trim()
+      .replace(/^((do|then|else)\s+|[({]\s*)+/, "")
+      .replace(/^([A-Za-z_]\w*=\S*\s+)+/, "")
+      .replace(/^time(\s+-p)?\s+/, "")
+      .replace(/^timeout\s+(-[ks]\s+\S+\s+|--?[a-z-]+(=\S+)?\s+)*\d+(\.\d+)?[smhd]?\s+/, "");
+    for (const [re, why] of ANALYSIS_DENIED) if (re.test(s)) return why;
+  }
+  return null;
+}
 
 /** null = read-only; otherwise the first offending segment / reason. */
 function readOnlyViolation(
@@ -959,6 +993,10 @@ export function decideBash(command: string, ctx: PolicyContext, cwd?: string): D
     return deny(
       "commit messages must not carry a Co-Authored-By trailer — remove it and commit again",
     );
+  if (ctx.mode !== "coding") {
+    const why = executesRepositoryCode(command);
+    if (why) return deny(why);
+  }
   const rm = rmRfViolation(p, ctx, cwd);
   if (rm) return deny(rm);
   const fsScan = filesystemScanViolation(p);

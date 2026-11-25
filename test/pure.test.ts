@@ -279,15 +279,16 @@ test("tool policy: dangerous shell denied everywhere, analysis shell allowlisted
     assert.ok(!decideBash(cmd, coding).allow, cmd);
   assert.ok(decideBash("go test ./internal/...", coding).allow);
   assert.ok(decideBash("git log --oneline | head -5 && grep -rn Foo .", analysis).allow);
-  // Verifying with go test is allowed in analysis/review steps; flags that write files into the checkout are not.
-  assert.ok(decideBash("go test ./...", analysis).allow);
-  assert.ok(
-    decideBash(
-      "go test ./internal/transaction/... ./internal/processor/providers/fptpay/... -count=1 -run TestIPN",
-      analysis,
-    ).allow,
-  );
-  assert.ok(decideBash("go test -coverprofile=/tmp/cover.out ./...", analysis).allow);
+  // go test executes repository code with the step's network and credentials: analysis/review steps run it only
+  // through the platform run_tests tool (analysis-tests.test.ts), never directly.
+  for (const cmd of [
+    "go test ./...",
+    "go test ./internal/transaction/... -count=1 -run TestIPN",
+    "go test -coverprofile=/tmp/cover.out ./...",
+  ]) {
+    const d = decideBash(cmd, analysis);
+    assert.ok(!d.allow && /run_tests/.test(d.reason), cmd);
+  }
   for (const cmd of [
     "go test -c ./pkg",
     "go test -o bin/x.test ./pkg",
@@ -334,10 +335,8 @@ test("tool policy: no machine-wide recursive scans; timeout-bounded reads allowe
   assert.ok(
     decideBash('timeout 60 find /home/me/src -iname "*fptpay*" 2>/dev/null | head', analysis).allow,
   );
-  assert.ok(
-    decideBash("timeout 120 go test ./...", analysis).allow,
-    "a bounded go test is a read-only verification",
-  );
+  assert.ok(decideBash("timeout 120 go vet ./...", analysis).allow, "a bounded vet is read-only");
+  assert.ok(!decideBash("timeout 120 go test ./...", analysis).allow);
   assert.ok(!decideBash("timeout 60 go generate ./...", analysis).allow);
   // no-op builtins are read-only (`|| true` was refused for a Cursor analysis step); `: ${X:=y}` is not a no-op.
   for (const cmd of ["rg TODO src || true", "true", "false", "grep -c x a.go; :"])
@@ -469,7 +468,12 @@ test("prompts keep untrusted content out of the system prompt", () => {
     repositories: ["oms-api"],
     knowledge: [
       {
-        ...k("r1", { version: 3, category: "business_rule", title: "Rule", content: "Refund only once." }),
+        ...k("r1", {
+          version: 3,
+          category: "business_rule",
+          title: "Rule",
+          content: "Refund only once.",
+        }),
         reason: "GLOBAL scope",
       },
     ],
@@ -568,8 +572,18 @@ test("a resumed session gets the run's current developer decisions (incl. ones a
       ...stepInput().run,
       inputs: {
         developer_decisions: [
-          { step: "review", text: "Nhiều phiên new/processing song song là hợp lệ.", by: "toan", at: "2026-11-11T08:48:10Z" },
-          { step: "review", text: "Phiên SUCCESS thứ hai vẫn ghi paid, gắn cờ trả thừa.", by: "toan", at: "2026-11-11T09:44:00Z" },
+          {
+            step: "review",
+            text: "Nhiều phiên new/processing song song là hợp lệ.",
+            by: "toan",
+            at: "2026-11-11T08:48:10Z",
+          },
+          {
+            step: "review",
+            text: "Phiên SUCCESS thứ hai vẫn ghi paid, gắn cờ trả thừa.",
+            by: "toan",
+            at: "2026-11-11T09:44:00Z",
+          },
         ],
       },
     },
@@ -577,7 +591,11 @@ test("a resumed session gets the run's current developer decisions (incl. ones a
   const msg = buildResumeMessage(input, undefined, [], "vi");
   assert.match(msg, /Developer decisions for this run \(binding\)/);
   assert.match(msg, /1\. \[review[\s\S]*song song là hợp lệ[\s\S]*2\. \[review[\s\S]*cờ trả thừa/);
-  assert.doesNotMatch(buildResumeMessage(stepInput(), undefined, [], "vi"), /Developer decisions/, "no section without decisions");
+  assert.doesNotMatch(
+    buildResumeMessage(stepInput(), undefined, [], "vi"),
+    /Developer decisions/,
+    "no section without decisions",
+  );
 });
 
 test("resume message after re-execute carries instructions, skills and worktree state", () => {
@@ -600,10 +618,7 @@ test("resume message after re-execute carries instructions, skills and worktree 
   assert.match(msg, /latency-service-boundaries v1/);
   assert.match(msg, /Current worktree state:\nM order.go/);
   assert.doesNotMatch(msg, /Reviewer feedback/);
-  const plain = buildResumeMessage(
-    stepInput({ pending: { feedback: "fix lint" } }),
-    undefined,
-  );
+  const plain = buildResumeMessage(stepInput({ pending: { feedback: "fix lint" } }), undefined);
   assert.match(plain, /Reviewer feedback/);
 });
 
@@ -851,7 +866,7 @@ describe("Bash policy: loops in analysis steps", () => {
     for (const c of [
       "# try common base env\nls -la",
       "ls # list ; rm -rf src",
-      "for f in a b; do # check each\n  rg -n x \"$f\"\ndone",
+      'for f in a b; do # check each\n  rg -n x "$f"\ndone',
       'echo "${#PATH}" $# "a # b"',
     ])
       assert.deepEqual(decideBash(c, A), { allow: true }, c);
@@ -921,7 +936,7 @@ describe("Bash policy: loops in analysis steps", () => {
     for (const c of [
       "(GOTOOLCHAIN=local GOFLAGS=-mod=mod time go vet ./... 2>&1 | head -50)",
       "go list -mod=mod ./...",
-      "go test -modfile=x.mod ./...",
+      "go vet -modfile=x.mod ./...",
     ])
       assert.match(reason(c) ?? "", /may rewrite go\.mod/, c);
     assert.deepEqual(decideBash("go vet -mod=readonly ./...", A), { allow: true });
@@ -934,7 +949,6 @@ describe("Bash policy: loops in analysis steps", () => {
       "golangci-lint run --output.json.path=stdout ./...",
       "govulncheck ./...",
       "deadcode -test ./...",
-      "go test -bench=. -benchmem -cpuprofile /tmp/cpu.out ./pkg/x",
       "go tool pprof -top /tmp/cpu.out",
       "go tool pprof -list Contains /tmp/cpu.out",
       "go tool pprof -top -nodecount 20 /tmp/mem.out",
@@ -1038,10 +1052,9 @@ test("git symbolic-ref (read form) and [ ] tests are read-only; a read-only subs
   ])
     assert.deepEqual(decideBash(c, A), { allow: true }, c);
   assert.equal(decideBash(`git symbolic-ref HEAD refs/heads/x`, A).allow, false);
-  assert.deepEqual(
-    decideBash(`for r in a b; do [ -d $r ] && (cd $r && git log -1); done`, A),
-    { allow: true },
-  );
+  assert.deepEqual(decideBash(`for r in a b; do [ -d $r ] && (cd $r && git log -1); done`, A), {
+    allow: true,
+  });
 });
 
 test("git worktree remove: scratch worktrees under /tmp are fine; platform worktrees and prune are not", () => {

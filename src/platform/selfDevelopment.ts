@@ -187,6 +187,7 @@ export function bwrapArguments(
   live: string | null,
   git: Array<{ commonDir: string; adminDir: string }> = [],
   noNetwork = false,
+  readOnly = false,
 ): string[] {
   // Order matters: read-only root, shared /tmp, then the credential masks (shared with the agent sandbox), then the
   // worktree's git metadata (the checkout lives under the masked dataDir too: shared objects/refs read-only, this
@@ -210,7 +211,7 @@ export function bwrapArguments(
       g.adminDir,
       g.adminDir,
     ]),
-    "--bind",
+    readOnly ? "--ro-bind" : "--bind",
     cwd,
     cwd,
     "--dev",

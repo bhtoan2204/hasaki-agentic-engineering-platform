@@ -515,7 +515,9 @@ const ASSESS_SIGNALS =
   "Classify each finding into one kind: CONCURRENCY (race, deadlock), MEMORY (leak, unbounded cache), RESOURCE (goroutine, connection or file descriptor leak), DATABASE (N+1, redundant query, missing transaction), " +
   "PERFORMANCE (blocking I/O, needless serialization, excessive allocation), CODE_QUALITY (dead code, unused dependency, duplicated logic), RELIABILITY (missing timeout, retry storm, ignored cancellation), " +
   "DATA_INTEGRITY (lost update, duplicate processing, invalid state transition), SECURITY (injection, SSRF, sensitive data exposure), BUSINESS_LOGIC (edge case, wrong condition, missing validation), DISTRIBUTED (missing idempotency, inconsistent state, message loss). " +
-  "Use the read-only analysers when they fit: go vet, go test -race, staticcheck, golangci-lint run, govulncheck, deadcode, benchmarks with -benchmem, and go tool pprof -top/-list on a profile written to /tmp. " +
+  "Use the read-only analysers when they fit: go vet, staticcheck, golangci-lint run, govulncheck, deadcode, and go tool pprof -top/-list on a profile written to /tmp. " +
+  "Run tests only with the platform run_tests tool (go test through Bash is refused): it inspects the test code first, skips packages that show signs of real external services (hardcoded credentials, external endpoints, cloud SDKs) and runs the rest with no network, credentials masked and the repository read-only. " +
+  "Everything it lists as `incomplete` (skipped unsafe packages or repositories, an unavailable sandbox, timeouts) was NOT verified: report it under coverage.not_inspected and missing_evidence, and never describe a partial run as a pass. " +
   LATENT_SWEEP +
   "Load the verification-recipes skill: it says, per kind, which test demonstrates the finding. " +
   "Give each finding the repository its code is in (`repo`) and, in `related_repos`, the other selected repositories with the same defect or affected by it. " +

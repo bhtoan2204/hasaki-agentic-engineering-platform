@@ -393,6 +393,7 @@ export const runIsolatedCommand = async (
   env: Record<string, string>,
   timeoutMs: number,
   signal: AbortSignal,
+  opts: { readOnly?: true } = {},
 ): Promise<CommandResult> => {
   const release = await acquireVerificationSlot(
     signal,
@@ -410,6 +411,7 @@ export const runIsolatedCommand = async (
   try {
     return await runCommand(command, cwd, env, timeoutMs, signal, undefined, true, {
       network: false,
+      ...opts,
     });
   } finally {
     release();
@@ -424,14 +426,14 @@ export async function runCommand(
   signal: AbortSignal,
   onChunk?: (text: string) => void,
   verification = false,
-  opts: { network?: false } = {},
+  opts: { network?: false; readOnly?: true } = {},
 ) {
   // The sandboxed helper only validates; the worker installs and signs dependencies before any command that calls it.
   if (command.includes("PLATFORM_NODE_DEPENDENCIES") && existsSync(join(cwd, "package.json")))
     await installNodeDependencies(cwd).catch(() => false);
   const proc0 = await commandProcessEnv(cwd, env, verification);
   const useBwrap = proc0.isolation?.mode === "bwrap";
-  if (opts.network === false && !useBwrap)
+  if ((opts.network === false || opts.readOnly) && !useBwrap)
     return {
       code: null,
       output: "[refused: a network-isolated command needs the bubblewrap sandbox]",
@@ -494,7 +496,13 @@ node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DE
       command: useBwrap ? "bwrap" : "bash",
       args: useBwrap
         ? [
-            ...bwrapArguments(cwd, proc0.isolation?.liveRoot ?? null, git, opts.network === false),
+            ...bwrapArguments(
+              cwd,
+              proc0.isolation?.liveRoot ?? null,
+              git,
+              opts.network === false,
+              opts.readOnly === true,
+            ),
             "bash",
             "-lc",
             script,
