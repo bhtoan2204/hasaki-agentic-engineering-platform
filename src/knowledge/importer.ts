@@ -990,7 +990,8 @@ async function applyCandidates(
       continue;
     }
     const sameContent = existing?.content_sha256 === sha(c.content);
-    const evolution = existing?.metadata?.evolution;
+    const evolution = existing?.metadata?.evolution as
+      { base_source?: unknown; proposal_id?: unknown } | undefined;
     if (existing && evolution && !sameContent) {
       const fileUnchanged = hashOf(evolution.base_source ?? null) === hashOf(source);
       const row: ImportReport["candidates"][number] = {

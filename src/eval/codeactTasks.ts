@@ -217,7 +217,7 @@ export function registerEvaluationTools() {
 }
 
 // Plans also run as sandboxed JavaScript, so tool results are untyped there.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- results of sandboxed plan tool calls are untyped JSON that the task fixtures read by shape
 type Call = (name: string, args: Record<string, unknown>) => Promise<any>;
 export interface EffectTask {
   id: string;

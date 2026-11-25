@@ -40,8 +40,7 @@ export interface LatestShared {
   owner_id: number | null;
   version: number;
   applicability: Record<string, unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   content_sha256: string;
 }
 
