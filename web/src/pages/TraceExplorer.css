@@ -7,9 +7,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 7px 12px;
-  min-height: 32px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  min-height: var(--control-h-sm);
   line-height: 1.5;
 }
 .trace-explorer button > svg {

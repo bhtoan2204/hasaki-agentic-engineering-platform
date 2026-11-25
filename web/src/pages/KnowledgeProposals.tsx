@@ -823,11 +823,23 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                   (p.target_changed && !accept) ||
                   (!!p.validation && !p.validation.passed && !override)
                 }
+                aria-describedby={
+                  (p.target_changed && !accept) ||
+                  (!!p.validation && !p.validation.passed && !override)
+                    ? "kp-approve-hint"
+                    : undefined
+                }
                 onClick={() => decide("approve")}
               >
                 <CheckCircle2 size={15} />
                 {t("kp.approve")}
               </button>
+              {((p.target_changed && !accept) ||
+                (!!p.validation && !p.validation.passed && !override)) && (
+                <span id="kp-approve-hint" className="muted small">
+                  {t("hint.confirmBeforeApprove")}
+                </span>
+              )}
               <button type="button" className="ghost" onClick={() => decide("reject")}>
                 <XCircle size={15} />
                 {t("kp.reject")}

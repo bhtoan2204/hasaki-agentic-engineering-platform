@@ -142,6 +142,7 @@ function PasteForm({
           type="button"
           className="sm"
           disabled={!value.trim() || busy}
+          aria-describedby={!value.trim() ? "ig-h1" : undefined}
           onClick={async () => {
             setBusy(true);
             const ok = await onSave(value);
@@ -152,6 +153,11 @@ function PasteForm({
           <KeyRound size={14} strokeWidth={2} />
           {busy ? (busyLabel ?? t("ig.checking")) : t("ig.save")}
         </button>
+        {!value.trim() && (
+          <span id="ig-h1" className="muted small">
+            {t("hint.fillRequired")}
+          </span>
+        )}
         {extra}
       </div>
     </>
@@ -564,10 +570,19 @@ function SigNoz(p: { open: boolean; onToggle: (id: string) => void }) {
           className="sm"
           onClick={() => save(true)}
           disabled={!(baseUrl ?? st?.base_url) || (!token && !st?.token_set)}
+          aria-describedby={
+            !(baseUrl ?? st?.base_url) || (!token && !st?.token_set) ? "ig-h2" : undefined
+          }
         >
           <KeyRound size={14} strokeWidth={2} />
           {st?.enabled ? t("ig.signoz.update") : t("ig.signoz.enable")}
         </button>
+        {!(baseUrl ?? st?.base_url) ||
+          (!token && !st?.token_set && (
+            <span id="ig-h2" className="muted small">
+              {t("hint.fillRequired")}
+            </span>
+          ))}
         {st?.configured && (
           <>
             <button
@@ -1366,11 +1381,18 @@ function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) {
           type="button"
           className="sm"
           disabled={busy || !v.user || (!f.token && !st?.configured)}
+          aria-describedby={!v.user || (!f.token && !st?.configured) ? "ig-h3" : undefined}
           onClick={save}
         >
           <KeyRound size={14} strokeWidth={2} />
           {busy ? t("ig.checking") : t("ig.save")}
         </button>
+        {!v.user ||
+          (!f.token && !st?.configured && (
+            <span id="ig-h3" className="muted small">
+              {t("hint.fillRequired")}
+            </span>
+          ))}
         {st?.source === "platform" && (
           <button
             type="button"
@@ -1426,10 +1448,21 @@ function GitHubAccount(p: { open: boolean; onToggle: (id: string) => void }) {
         />
       </Field>
       <div className="ig-actions">
-        <button type="button" className="sm" disabled={busy || !token} onClick={save}>
+        <button
+          type="button"
+          className="sm"
+          disabled={busy || !token}
+          aria-describedby={!token ? "ig-h4" : undefined}
+          onClick={save}
+        >
           <KeyRound size={14} strokeWidth={2} />
           {busy ? t("ig.checking") : t("ig.save")}
         </button>
+        {!token && (
+          <span id="ig-h4" className="muted small">
+            {t("hint.fillRequired")}
+          </span>
+        )}
         {st?.personal && (
           <button
             type="button"
@@ -1560,7 +1593,7 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
       summary={connected.length ? connected.map((i) => i.host).join(", ") : t("ig.gl.summaryOff")}
     >
       <p className="muted small">{t("ig.gl.body")}</p>
-      <Field label={t("ig.gl.instance")} hint={t("ig.gl.instanceHint")}>
+      <Field group label={t("ig.gl.instance")} hint={t("ig.gl.instanceHint")}>
         <span className="ig-gl-instance">
           <select value={selected} onChange={(e) => (setHost(e.target.value), setCheck(null))}>
             {instances.map((i) => (
@@ -1585,7 +1618,7 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
         </span>
       </Field>
       {st?.can_manage && (
-        <Field label={t("ig.gl.instanceAdd")} hint={t("ig.gl.instanceAddHint")}>
+        <Field group label={t("ig.gl.instanceAdd")} hint={t("ig.gl.instanceAddHint")}>
           <span className="ig-gl-instance">
             <input
               value={newHost}
@@ -1598,11 +1631,17 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
               type="button"
               className="sm ghost"
               disabled={busy || !newHost.trim()}
+              aria-describedby={!newHost.trim() ? "ig-h5" : undefined}
               onClick={addInstance}
             >
               <Plus size={14} strokeWidth={2} />
               {t("ig.gl.instanceAddButton")}
             </button>
+            {!newHost.trim() && (
+              <span id="ig-h5" className="muted small">
+                {t("hint.fillRequired")}
+              </span>
+            )}
           </span>
         </Field>
       )}
@@ -1616,7 +1655,7 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
         />
       </Field>
       {current?.ssh_available && (
-        <Field label={t("ig.gl.sshKey")} hint={t("ig.gl.sshKeyHint")}>
+        <Field group label={t("ig.gl.sshKey")} hint={t("ig.gl.sshKeyHint")}>
           <textarea
             rows={3}
             autoComplete="off"
@@ -1625,10 +1664,21 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
             placeholder={current.ssh_key ? t("ig.keep") : "-----BEGIN OPENSSH PRIVATE KEY-----"}
             onChange={(e) => setSshKey(e.target.value)}
           />
-          <button type="button" className="sm ghost" disabled={busy || !sshKey} onClick={saveSsh}>
+          <button
+            type="button"
+            className="sm ghost"
+            disabled={busy || !sshKey}
+            aria-describedby={!sshKey ? "ig-h6" : undefined}
+            onClick={saveSsh}
+          >
             <KeyRound size={14} strokeWidth={2} />
             {t("ig.gl.sshSave")}
           </button>
+          {!sshKey && (
+            <span id="ig-h6" className="muted small">
+              {t("hint.fillRequired")}
+            </span>
+          )}
         </Field>
       )}
       {check && (
@@ -1638,10 +1688,22 @@ function GitLabAccount(p: { open: boolean; onToggle: (id: string) => void }) {
         </p>
       )}
       <div className="ig-actions">
-        <button type="button" className="sm" disabled={busy || !token || !selected} onClick={save}>
+        <button
+          type="button"
+          className="sm"
+          disabled={busy || !token || !selected}
+          aria-describedby={!token || !selected ? "ig-h7" : undefined}
+          onClick={save}
+        >
           <KeyRound size={14} strokeWidth={2} />
           {busy ? t("ig.checking") : t("ig.save")}
         </button>
+        {!token ||
+          (!selected && (
+            <span id="ig-h7" className="muted small">
+              {t("hint.fillRequired")}
+            </span>
+          ))}
         <button
           type="button"
           className="sm ghost"

@@ -98,13 +98,29 @@
 }
 
 .chat-item:hover,
-.chat-item:focus-visible {
+.chat-item:focus-within {
   background: var(--surface-2);
 }
 
 .chat-item.is-active {
   background: var(--brand-50);
   box-shadow: inset 3px 0 0 var(--brand);
+}
+
+.chat-item-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.chat-item-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
 }
 
 .chat-item-title {
@@ -131,6 +147,7 @@
 }
 
 .chat-item-menu-wrap {
+  z-index: 1;
   position: absolute;
   top: 50%;
   right: 4px;
@@ -390,9 +407,21 @@
 
 .chat-bubble-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   margin-top: var(--sp-2);
   opacity: 0.55;
+}
+
+.chat-bubble-launch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: var(--sp-3);
+  padding-inline-start: var(--sp-3);
+  border-inline-start: 1px solid var(--line);
 }
 
 .chat-bubble:hover .chat-bubble-actions,
@@ -671,6 +700,7 @@
     min-height: 0;
   }
 }
+
 /* Images attached to a message (history, pending bubble) and to the composer. */
 .chat-thumbs {
   display: flex;
@@ -678,6 +708,7 @@
   gap: 6px;
   margin-top: 6px;
 }
+
 .chat-thumbs img {
   display: block;
   max-width: 160px;
@@ -686,16 +717,20 @@
   border: 1px solid var(--line);
   object-fit: cover;
 }
+
 .chat-thumbs.is-composer {
   margin: 0 0 6px;
 }
+
 .chat-thumbs.is-composer img {
   max-width: 72px;
   max-height: 72px;
 }
+
 .chat-thumb {
   position: relative;
 }
+
 .chat-thumb button {
   position: absolute;
   top: 2px;
@@ -704,6 +739,7 @@
   padding: 2px;
   background: var(--surface);
 }
+
 .chat-proposal {
   display: flex;
   align-items: center;
@@ -716,6 +752,7 @@
   background: var(--brand-50);
   font-size: var(--fs-sm);
 }
+
 .chat-proposal span {
   flex: 1 1 auto;
   min-width: 0;
@@ -729,6 +766,7 @@
   gap: 6px;
   margin: 6px 0;
 }
+
 .chat-doc {
   display: inline-flex;
   align-items: center;
@@ -741,19 +779,23 @@
   font-size: var(--fs-sm);
   min-width: 0;
 }
+
 .chat-doc > a,
 .chat-doc > span {
   overflow-wrap: anywhere;
   min-width: 0;
 }
+
 .chat-doc small {
   color: var(--muted);
   white-space: nowrap;
 }
+
 .chat-doc button {
   min-height: 0;
   padding: 2px;
 }
+
 .chat-import {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -761,12 +803,14 @@
   margin: 8px 0;
   background: var(--surface);
 }
+
 .chat-import-head {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
 }
+
 .chat-import ul {
   list-style: none;
   padding: 0;
@@ -774,11 +818,13 @@
   display: grid;
   gap: 8px;
 }
+
 .chat-import li {
   display: flex;
   gap: 8px;
   align-items: flex-start;
 }
+
 .chat-import-body {
   display: flex;
   flex-direction: column;
@@ -786,19 +832,23 @@
   min-width: 0;
   flex: 1;
 }
+
 .chat-import-body small {
   overflow-wrap: anywhere;
 }
+
 .chat-import-title {
   font-weight: 600;
   width: 100%;
 }
+
 .chat-import-scope {
   display: flex;
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
 }
+
 .chat-import-actions {
   display: flex;
   gap: 10px;
@@ -806,6 +856,7 @@
   justify-content: flex-end;
   flex-wrap: wrap;
 }
+
 .chat-import-errors {
   color: var(--st-err);
   font-size: var(--fs-sm);
@@ -820,6 +871,7 @@
   background: var(--surface);
   min-width: 0;
 }
+
 .chat-runs > header {
   display: flex;
   align-items: center;
@@ -828,6 +880,7 @@
   font-weight: 600;
   margin-bottom: 6px;
 }
+
 .chat-runs ul {
   list-style: none;
   margin: 0;
@@ -835,16 +888,19 @@
   display: grid;
   gap: 8px;
 }
+
 .chat-runs li {
   padding-top: 6px;
   border-top: 1px solid var(--line);
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
 .chat-runs li:first-child {
   border-top: 0;
   padding-top: 0;
 }
+
 .chat-run-head,
 .chat-run-verdicts {
   display: flex;
@@ -852,18 +908,22 @@
   flex-wrap: wrap;
   gap: 4px 10px;
 }
+
 .chat-run-status {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
+
 .chat-run-status.is-failed,
 .chat-run-failed {
   color: var(--st-err);
 }
+
 .chat-run-result p {
   margin: 6px 0 0;
 }
+
 .chat-run-report {
   margin-top: 6px;
   max-height: 420px;

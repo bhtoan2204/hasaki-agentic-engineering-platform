@@ -951,6 +951,17 @@
   }
 }
 
+/* Two save bars can be visible together: lift the provider bar above the global one. */
+.page:has(.set-savebar.is-visible) .agent-savebar {
+  bottom: calc(var(--sp-5) + var(--control-h-lg) + var(--sp-4));
+}
+
+.agent-provider-tab[aria-selected="true"] {
+  border-color: var(--brand);
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
 /* `.field > span` styles the label; controls wrapped in a span inside Field must opt out. */
 .field > .set-affix,
 .field > .set-range,

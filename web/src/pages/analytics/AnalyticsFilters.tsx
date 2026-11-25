@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { SlidersHorizontal, X } from "lucide-react";
 import { useI18n } from "../../i18n/index.tsx";
-import { Drawer } from "../../ui.tsx";
+import { Drawer, FilterField } from "../../ui.tsx";
 import type { Row } from "./shared.tsx";
 export function defaultFilters() {
   const now = new Date();
@@ -83,8 +83,7 @@ export function AnalyticsFilters({
     onApply(next);
   };
   const select = (key: string, values: Array<[string, string]>) => (
-    <label key={key}>
-      {t(`an.${key}`)}
+    <FilterField key={key} label={t(`an.${key}`)}>
       <select
         value={draft[key]}
         onChange={(e) => set(key, e.target.value)}
@@ -97,7 +96,7 @@ export function AnalyticsFilters({
           </option>
         ))}
       </select>
-    </label>
+    </FilterField>
   );
   const zones = [
     ...new Set([
@@ -111,24 +110,22 @@ export function AnalyticsFilters({
   ];
   const dates = (
     <>
-      <label>
-        {t("an.from")}
+      <FilterField label={t("an.from")}>
         <input
           required
           type="date"
           value={datePart(draft.from, draft.timezone)}
           onChange={(e) => set("from", e.target.value)}
         />
-      </label>
-      <label>
-        {t("an.to")}
+      </FilterField>
+      <FilterField label={t("an.to")}>
         <input
           required
           type="date"
           value={datePart(draft.to, draft.timezone)}
           onChange={(e) => set("to", e.target.value)}
         />
-      </label>
+      </FilterField>
     </>
   );
   if (domain === "insights" && compact) {
@@ -206,29 +203,26 @@ export function AnalyticsFilters({
         {advanced && (
           <Drawer title={t("an.moreFilters")} onClose={() => setAdvanced(false)} width={440}>
             <div className="an-filter-grid an-filter-drawer">
-              <label>
-                {t("an.timezone")}
+              <FilterField label={t("an.timezone")}>
                 <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
                   {zones.map((v) => (
                     <option key={v}>{v}</option>
                   ))}
                 </select>
-              </label>
-              <label>
-                {t("an.bucket")}
+              </FilterField>
+              <FilterField label={t("an.bucket")}>
                 <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
                   <option value="day">{t("an.day")}</option>
                   <option value="hour">{t("an.hour")}</option>
                 </select>
-              </label>
-              <label>
-                {t("an.model")}
+              </FilterField>
+              <FilterField label={t("an.model")}>
                 <input
                   value={draft.model}
                   onChange={(e) => set("model", e.target.value)}
                   placeholder={t("an.all")}
                 />
-              </label>
+              </FilterField>
               {select(
                 "user",
                 (options?.users ?? []).map((u: Row) => [String(u.id), u.username]),
@@ -267,33 +261,30 @@ export function AnalyticsFilters({
           <summary>{t("an.filters")}</summary>
           <div className="an-filter-grid">
             {dates}
-            <label>
-              {t("an.timezone")}
+            <FilterField label={t("an.timezone")}>
               <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
                 {zones.map((v) => (
                   <option key={v}>{v}</option>
                 ))}
               </select>
-            </label>
-            <label>
-              {t("an.bucket")}
+            </FilterField>
+            <FilterField label={t("an.bucket")}>
               <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
                 <option value="day">{t("an.day")}</option>
                 <option value="hour">{t("an.hour")}</option>
               </select>
-            </label>
+            </FilterField>
             {select(
               "provider",
               ["claude", "codex", "cursor", "antigravity", "copilot"].map((v) => [v, v]),
             )}
-            <label>
-              {t("an.model")}
+            <FilterField label={t("an.model")}>
               <input
                 value={draft.model}
                 onChange={(e) => set("model", e.target.value)}
                 placeholder={t("an.all")}
               />
-            </label>
+            </FilterField>
             {select(
               "user",
               (options?.users ?? []).map((u: Row) => [String(u.id), u.username]),
@@ -332,21 +323,19 @@ export function AnalyticsFilters({
         <summary>{t("an.filters")}</summary>
         <div className="an-filter-grid">
           {dates}
-          <label>
-            {t("an.timezone")}
+          <FilterField label={t("an.timezone")}>
             <select value={draft.timezone} onChange={(e) => set("timezone", e.target.value)}>
               {zones.map((v) => (
                 <option key={v}>{v}</option>
               ))}
             </select>
-          </label>
-          <label>
-            {t("an.bucket")}
+          </FilterField>
+          <FilterField label={t("an.bucket")}>
             <select value={draft.bucket} onChange={(e) => set("bucket", e.target.value)}>
               <option value="day">{t("an.day")}</option>
               <option value="hour">{t("an.hour")}</option>
             </select>
-          </label>
+          </FilterField>
           {select(
             "namespace",
             (options?.namespaces ?? []).map((v: string) => [v, v]),
@@ -368,8 +357,7 @@ export function AnalyticsFilters({
               ),
             ]),
           )}
-          <label>
-            {t("an.service")}
+          <FilterField label={t("an.service")}>
             <select
               value={draft.service ? `${draft.namespace || "*"}\u001f${draft.service}` : ""}
               onChange={(e) => {
@@ -394,7 +382,7 @@ export function AnalyticsFilters({
                   </option>
                 ))}
             </select>
-          </label>
+          </FilterField>
         </div>
         <div className="an-filter-footer">
           <p className="muted small">{t("an.productionFilterHint")}</p>

@@ -144,7 +144,11 @@ export function EvaluationBenchmarks() {
         >
           {t("repo.ci.refresh")}
         </button>
-        {!runs.data.enabled && <span className="muted small">{t("bench.disabledLocally")}</span>}
+        {!runs.data.enabled && (
+          <span id="bench-disabled-hint" className="muted small">
+            {t("bench.disabledLocally")}
+          </span>
+        )}
       </div>
       <div className="table-wrap">
         <table>
@@ -191,9 +195,25 @@ export function EvaluationBenchmarks() {
             onChange={(e) => setRepetitions(Number(e.target.value))}
           />
         </label>
-        <button type="button" disabled={!runs.data.enabled || !suites.data.length} onClick={create}>
+        <button
+          type="button"
+          disabled={!runs.data.enabled || !suites.data.length}
+          aria-describedby={
+            !runs.data.enabled
+              ? "bench-disabled-hint"
+              : !suites.data.length
+                ? "bench-nosuite-hint"
+                : undefined
+          }
+          onClick={create}
+        >
           {t("bench.runSafe")}
         </button>
+        {runs.data.enabled && !suites.data.length && (
+          <span id="bench-nosuite-hint" className="muted small">
+            {t("hint.noSuites")}
+          </span>
+        )}
       </div>
       <div className="table-wrap">
         <table>

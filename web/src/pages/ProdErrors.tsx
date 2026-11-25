@@ -248,8 +248,13 @@ export function ScanPanel({
       <div className="pe-opt">
         <div className="pe-opt-label" />
         <div className="pe-opt-foot">
-          <span className={customError ? "pe-warn small" : "muted small"}>
-            {customError || (long ? t("pe.opt.comparePrev") : t("pe.opt.compareYesterday"))}
+          <span id="pe-scan-hint" className={customError ? "pe-warn small" : "muted small"}>
+            {customError ||
+              (!chosen.length
+                ? t("hint.pickTarget")
+                : long
+                  ? t("pe.opt.comparePrev")
+                  : t("pe.opt.compareYesterday"))}
           </span>
           <span className="grow" />
           <button type="button" className="ghost sm" onClick={onClose}>
@@ -259,6 +264,7 @@ export function ScanPanel({
             type="button"
             className="sm"
             disabled={busy || !chosen.length || !!customError}
+            aria-describedby="pe-scan-hint"
             onClick={start}
           >
             <RefreshCw size={14} strokeWidth={2} />
@@ -918,12 +924,22 @@ export function ProdErrorsPage({
           <button
             type="button"
             disabled={!data || data.scanning || !(data.splunk.connected || data.signoz?.connected)}
+            aria-describedby={
+              data && !data.scanning && !(data.splunk.connected || data.signoz?.connected)
+                ? "pe-scan-now-hint"
+                : undefined
+            }
             onClick={() => setPanel((v) => !v)}
             aria-expanded={panel}
           >
             <RefreshCw size={15} className={data?.scanning ? "spin" : ""} />
             {data?.scanning ? t("pe.scanning") : t("pe.scanNow")}
           </button>
+          {data && !data.scanning && !(data.splunk.connected || data.signoz?.connected) && (
+            <span id="pe-scan-now-hint" className="muted small">
+              {t("hint.connectSource")}
+            </span>
+          )}
         </div>
       )}
       {error && <ErrorBox error={error} onRetry={reload} />}

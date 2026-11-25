@@ -644,28 +644,35 @@ const ChatMessages = memo(function ChatMessages({
                       <RefreshCw size={14} />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="ghost xs"
-                    onClick={() => actions.delegate("task")}
+                  <span
+                    className="chat-bubble-launch"
+                    role="group"
+                    aria-label={t("chat.startWork")}
                   >
-                    <Workflow size={14} /> {t("chat.createTask")}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost xs"
-                    onClick={() => actions.delegate("delegate")}
-                  >
-                    {t("chat.delegate")}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost xs"
-                    title={t("chat.investigateTip")}
-                    onClick={() => actions.delegate("investigation")}
-                  >
-                    <FileSearch size={14} /> {t("chat.investigate")}
-                  </button>
+                    <span className="muted small">{t("chat.startWork")}</span>
+                    <button
+                      type="button"
+                      className="ghost xs"
+                      onClick={() => actions.delegate("task")}
+                    >
+                      <Workflow size={14} /> {t("chat.createTask")}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost xs"
+                      onClick={() => actions.delegate("delegate")}
+                    >
+                      {t("chat.delegate")}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost xs"
+                      title={t("chat.investigateTip")}
+                      onClick={() => actions.delegate("investigation")}
+                    >
+                      <FileSearch size={14} /> {t("chat.investigate")}
+                    </button>
+                  </span>
                 </div>
               )}
             </article>
@@ -1431,25 +1438,19 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
             <div key={group.key} className="chat-group">
               <h3 className="chat-group-label">{t(`chat.group.${group.key}`)}</h3>
               {group.items.map((c) => (
-                <div
-                  key={c.id}
-                  className={`chat-item${activeId === c.id ? " is-active" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => (location.hash = `/chat/${c.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      location.hash = `/chat/${c.id}`;
-                    }
-                  }}
-                >
-                  <span className="chat-item-title" title={c.title || t("chat.untitled")}>
-                    {c.title || t("chat.untitled")}
-                  </span>
-                  {c.active_turn ? (
-                    <span className="chat-item-live">{t("chat.live.badge")}</span>
-                  ) : null}
+                <div key={c.id} className={`chat-item${activeId === c.id ? " is-active" : ""}`}>
+                  <a
+                    className="chat-item-link"
+                    href={`#/chat/${c.id}`}
+                    aria-current={activeId === c.id ? "page" : undefined}
+                  >
+                    <span className="chat-item-title" title={c.title || t("chat.untitled")}>
+                      {c.title || t("chat.untitled")}
+                    </span>
+                    {c.active_turn ? (
+                      <span className="chat-item-live">{t("chat.live.badge")}</span>
+                    ) : null}
+                  </a>
                   <div className="chat-item-menu-wrap" data-chat-menu={c.id}>
                     <button
                       type="button"

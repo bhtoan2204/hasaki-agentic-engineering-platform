@@ -539,10 +539,16 @@ function RepoImport({ onDone }: { onDone: () => void }) {
             <button
               type="button"
               disabled={busy || !(preview.created + preview.updated)}
+              aria-describedby={preview.created + preview.updated ? undefined : "kn-import-hint"}
               onClick={() => run(false)}
             >
               {t("kn.import")}
             </button>
+            {!(preview.created + preview.updated) && (
+              <span id="kn-import-hint" className="muted small">
+                {t("hint.nothingToImport")}
+              </span>
+            )}
             <button type="button" className="ghost" onClick={() => setPreview(null)}>
               {t("common.close")}
             </button>

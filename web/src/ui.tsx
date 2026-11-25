@@ -587,11 +587,23 @@ export function Field({
   label,
   children,
   hint,
+  group,
 }: {
   label: string;
   children: ReactNode;
   hint?: string;
+  /** Several controls (or nested labels) share this caption: a labelled group instead of a single <label>. */
+  group?: boolean;
 }) {
+  const labelId = useId();
+  if (group)
+    return (
+      <div className="field" role="group" aria-labelledby={labelId}>
+        <span id={labelId}>{label}</span>
+        {children}
+        {hint && <small className="muted">{hint}</small>}
+      </div>
+    );
   return (
     <label className="field">
       <span>{label}</span>

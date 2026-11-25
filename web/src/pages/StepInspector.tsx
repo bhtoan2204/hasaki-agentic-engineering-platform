@@ -2502,6 +2502,7 @@ function ReexecuteDialog({
         <button
           type="button"
           disabled={busy || preview?.can_reexecute === false}
+          aria-describedby={preview?.can_reexecute === false ? "si-reexec-hint" : undefined}
           onClick={async () => {
             setBusy(true);
             const r = await onSubmit({
@@ -2520,6 +2521,11 @@ function ReexecuteDialog({
           <RotateCcw size={14} />
           {busy ? t("pe.creating") : t("si.confirmRerun")}
         </button>
+        {preview?.can_reexecute === false && (
+          <span id="si-reexec-hint" className="muted small">
+            {t("hint.cannotReexecute")}
+          </span>
+        )}
         <button type="button" className="ghost" onClick={() => setOpen(false)}>
           {t("common.cancel")}
         </button>

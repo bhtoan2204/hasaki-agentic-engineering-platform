@@ -322,7 +322,7 @@ export function AgentSettings() {
               <RotateCcw size={13} aria-hidden /> {t("set.discard")}
             </Button>
           )}
-          <Button size="sm" loading={busy} onClick={() => void save()}>
+          <Button variant="secondary" size="sm" loading={busy} onClick={() => void save()}>
             {t("set.saveProvider")}
           </Button>
         </div>
@@ -389,7 +389,7 @@ export function AgentSettings() {
               size="sm"
               role="tab"
               aria-selected={provider === key}
-              variant={provider === key ? "primary" : "secondary"}
+              variant="secondary"
               className={`agent-provider-tab${!isEnabled ? " is-disabled-provider" : ""}`}
               onClick={() => {
                 setProvider(key);

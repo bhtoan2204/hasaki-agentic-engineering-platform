@@ -23,15 +23,6 @@
   gap: var(--sp-3);
 }
 
-.an-filter-grid label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--ink-2);
-  font-size: var(--fs-sm);
-  min-width: 0;
-}
-
 .an-filter input,
 .an-filter select {
   width: 100%;

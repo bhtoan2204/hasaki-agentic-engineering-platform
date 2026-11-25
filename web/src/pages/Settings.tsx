@@ -217,7 +217,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && !e.defaultPrevented) {
         e.preventDefault();
         void save();
       }
@@ -482,7 +482,7 @@ export function SettingsPage() {
 
           {section(
             "routing",
-            <Field label={t("set.sensitive")}>
+            <Field group label={t("set.sensitive")}>
               <span className="set-chips" role="group">
                 {PROVIDERS.map((p) => {
                   const on = form.routing.sensitiveProviders.includes(p);
