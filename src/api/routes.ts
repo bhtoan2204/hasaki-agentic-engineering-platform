@@ -1,4 +1,5 @@
 import { HttpError } from "../http/error.ts";
+import { buildRouteIndex } from "./routeIndex.ts";
 import type { Ctx, Route } from "./routes/types.ts";
 import { metaRoutes } from "./routes/meta.ts";
 import { workItemRoutes } from "./routes/work-items.ts";
@@ -53,3 +54,9 @@ export const routes: Route[] = [
   ...adminRoutes,
   ...chatRoutes,
 ];
+
+const candidates = buildRouteIndex(routes);
+
+/** The routes worth trying for this request, in match order (same winner as scanning `routes` in full). */
+export const routesFor = (method: string, pathname: string): Route[] =>
+  candidates(method, pathname);

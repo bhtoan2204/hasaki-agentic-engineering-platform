@@ -8,7 +8,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import { isTransientDbError, pool } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
-import { routes } from "../api/routes.ts";
+import { routesFor } from "../api/routes.ts";
 import { EngineError } from "../workflow/mutations.ts";
 import { positiveId } from "./params.ts";
 import { claimIdempotency, needsIdempotency } from "./idempotency.ts";
@@ -433,9 +433,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return res.end(bytes ?? a.content);
     }
 
-    for (const [routeMethod, pattern, handler] of routes) {
+    for (const [, pattern, handler] of routesFor(method, url.pathname)) {
       const m = url.pathname.match(pattern);
-      if (!m || routeMethod !== method) continue;
+      if (!m) continue;
       // Budget endpoints also accept JSON null to clear an existing budget.
       const legacyNullBudget = /^\/api\/(?:runs|work-items)\/\d+\/budget$/.test(url.pathname);
       const body =
