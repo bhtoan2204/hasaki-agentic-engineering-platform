@@ -17,10 +17,7 @@ export function EvaluationDimensions({
   return (
     <>
       {" "}
-      <Panel
-        title={t("an.eval.contextEffectiveness")}
-        hint={t("an.eval.contextEffectivenessHint")}
-      >
+      <Panel title={t("an.eval.contextEffectiveness")} hint={t("an.eval.contextEffectivenessHint")}>
         <EvaluationTable
           rows={data.context}
           columns={[
@@ -40,9 +37,7 @@ export function EvaluationDimensions({
           ]}
         />
       </Panel>
-      <Panel
-        title={t("an.eval.taskDifficultyTitle")}
-      >
+      <Panel title={t("an.eval.taskDifficultyTitle")}>
         <EvaluationTable
           rows={data.difficulty}
           columns={[
@@ -73,13 +68,9 @@ export function EvaluationDimensions({
             },
           ]}
         />
-        <p className="muted small">
-          {t("an.eval.unnecessaryModHint")}
-        </p>
+        <p className="muted small">{t("an.eval.unnecessaryModHint")}</p>
       </Panel>
-      <Panel
-        title={t("an.eval.handoffRuntimeTitle")}
-      >
+      <Panel title={t("an.eval.handoffRuntimeTitle")}>
         <EvaluationTable
           rows={data.comparisons}
           columns={[

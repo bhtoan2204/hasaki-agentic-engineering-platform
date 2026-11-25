@@ -12,10 +12,22 @@ interface Slow {
   p50_ms: number;
   p95_ms: number;
   max_ms?: number;
-  gaps?: Array<{ in: string; after: string | null; before: string | null; gap_ms: number; share: number }>;
+  gaps?: Array<{
+    in: string;
+    after: string | null;
+    before: string | null;
+    gap_ms: number;
+    share: number;
+  }>;
 }
 
-function SlowDetail({ slow, detail }: { slow: Slow; detail: { trace_id?: string; request_id?: string } }) {
+function SlowDetail({
+  slow,
+  detail,
+}: {
+  slow: Slow;
+  detail: { trace_id?: string; request_id?: string };
+}) {
   const { t } = useI18n();
   const edge = t("an.slowGapEdge");
   return (
@@ -37,7 +49,11 @@ function SlowDetail({ slow, detail }: { slow: Slow; detail: { trace_id?: string;
             {slow.gaps.map((x, i) => (
               <li key={i}>
                 <b>{fmt(Math.round(x.gap_ms))}ms</b> ({Math.round(x.share * 100)}%){" "}
-                {t("an.slowGapAt", { span: x.in, after: x.after ?? edge, before: x.before ?? edge })}
+                {t("an.slowGapAt", {
+                  span: x.in,
+                  after: x.after ?? edge,
+                  before: x.before ?? edge,
+                })}
               </li>
             ))}
           </ul>

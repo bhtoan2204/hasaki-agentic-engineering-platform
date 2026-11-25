@@ -248,7 +248,9 @@ export function Transcript({
       case "commands":
         return e.kind === "tool" && ["Bash", "run_command", "exec_command"].includes(name);
       case "errors":
-        return errors.includes(e) || (e.kind === "tool" && results[e.data?.id ?? ""]?.data?.is_error);
+        return (
+          errors.includes(e) || (e.kind === "tool" && results[e.data?.id ?? ""]?.data?.is_error)
+        );
       case "reasoning":
         return e.kind === "thinking";
       case "prompts":
@@ -293,7 +295,8 @@ export function Transcript({
         >
           {result && (
             <div className="muted small" style={{ marginTop: 4 }}>
-              {t("tr.turns", result.data?.num_turns != null ? { n: result.data.num_turns } : {})} · {dur(result.data?.duration_ms)}
+              {t("tr.turns", result.data?.num_turns != null ? { n: result.data.num_turns } : {})} ·{" "}
+              {dur(result.data?.duration_ms)}
               {result.data?.total_cost_usd != null &&
                 ` · $${Number(result.data.total_cost_usd).toFixed(3)}`}
             </div>

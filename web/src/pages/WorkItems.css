@@ -273,11 +273,11 @@
   gap: var(--sp-2);
 }
 
-.wi-hlogin>button {
+.wi-hlogin > button {
   justify-content: center;
 }
 
-.wi-hlogin>p {
+.wi-hlogin > p {
   margin: 0;
   line-height: 1.5;
 }
@@ -294,20 +294,20 @@
   gap: var(--sp-2);
 }
 
-.wi-hconnect>button {
+.wi-hconnect > button {
   flex: 1;
   justify-content: center;
 }
 
-.wi-hconnect>button.ghost:last-child:not(:first-child) {
+.wi-hconnect > button.ghost:last-child:not(:first-child) {
   flex: none;
 }
 
 /* Field rows: input and button share one height; the buttons share one width so both rows line up. */
 .wi-hfield input,
 .wi-hfield button,
-.wi-hconnect>button,
-.wi-hfetch>button {
+.wi-hconnect > button,
+.wi-hfetch > button {
   height: 32px;
   box-sizing: border-box;
 }
@@ -436,18 +436,18 @@
   font-size: var(--fs-sm);
 }
 
-.wi-item-toolbar-context>.mono {
+.wi-item-toolbar-context > .mono {
   flex: none;
   color: var(--ink-2);
 }
 
-.wi-item-toolbar-context>span:last-child {
+.wi-item-toolbar-context > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wi-item-toolbar>button {
+.wi-item-toolbar > button {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -664,7 +664,6 @@
 }
 
 @media (max-width: 1180px) {
-
   .wi-layout,
   .wi-detail {
     grid-template-columns: minmax(0, 1fr);
@@ -718,7 +717,7 @@
   text-decoration: none;
 }
 
-.wi-prod-row+.wi-prod-row {
+.wi-prod-row + .wi-prod-row {
   border-top: 1px solid var(--line);
 }
 
@@ -857,7 +856,7 @@
   font-size: var(--fs-sm);
 }
 
-.wi-sum-more>summary {
+.wi-sum-more > summary {
   cursor: pointer;
   color: var(--muted);
 }
@@ -884,7 +883,7 @@
   font-size: var(--fs-sm);
 }
 
-.wi-sum-repo>summary {
+.wi-sum-repo > summary {
   cursor: pointer;
 }
 

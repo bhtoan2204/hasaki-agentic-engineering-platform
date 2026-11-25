@@ -1,9 +1,4 @@
-import type {
-  AlertOptions,
-  ConfirmOptions,
-  DialogRequest,
-  PromptOptions,
-} from "./types.ts";
+import type { AlertOptions, ConfirmOptions, DialogRequest, PromptOptions } from "./types.ts";
 
 type Listener = (current: DialogRequest | null) => void;
 

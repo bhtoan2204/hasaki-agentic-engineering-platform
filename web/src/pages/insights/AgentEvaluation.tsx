@@ -74,8 +74,7 @@ export function AgentEvaluation() {
     },
     {
       label: t("an.eval.verifiedGraded"),
-      value: (r) =>
-        `${r.successes} / ${r.graded} (${r.distinct_tasks} ${t("an.eval.tasks")})`,
+      value: (r) => `${r.successes} / ${r.graded} (${r.distinct_tasks} ${t("an.eval.tasks")})`,
     },
     {
       label: t("an.eval.verifiedSuccess"),
@@ -163,9 +162,7 @@ export function AgentEvaluation() {
           <input value={p.get("cohort") ?? ""} onChange={(e) => filter("cohort", e.target.value)} />
         </label>
       </div>
-      <Notice>
-        {t("an.eval.fixtureControlsRankingNotice")}
-      </Notice>
+      <Notice>{t("an.eval.fixtureControlsRankingNotice")}</Notice>
       {response.error && <ErrorBox error={response.error} onRetry={response.reload} />}
       {!data && !response.error && <AnalyticsSkeleton />}
       {data && (

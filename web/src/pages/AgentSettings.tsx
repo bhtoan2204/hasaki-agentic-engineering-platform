@@ -425,9 +425,7 @@ export function AgentSettings() {
         <div className="agent-defaults-card">
           <div className="agent-subhead">
             <h4>{t("set.providerDefaults")}</h4>
-            <span className="muted small">
-              {t("set.providerDefaultsHint")}
-            </span>
+            <span className="muted small">{t("set.providerDefaultsHint")}</span>
           </div>
           <AgentValueFields
             label={t("set.defaultLabel")}
@@ -449,9 +447,7 @@ export function AgentSettings() {
         <div className="agent-profiles-card">
           <div className="agent-subhead">
             <h4>{t("set.modelRouting")}</h4>
-            <p className="muted small agent-profiles-guide">
-              {t("set.modelRoutingLead")}
-            </p>
+            <p className="muted small agent-profiles-guide">{t("set.modelRoutingLead")}</p>
           </div>
 
           <div role="tablist" aria-label={t("set.routingProfile")} className="agent-profile-tabs">
@@ -570,7 +566,10 @@ export function AgentSettings() {
                                 className="agent-eff-pill"
                                 data-tip={`reasoning_effort: ${String(effective.values.reasoning_effort ?? "account/CLI default")} (${effective.sources.reasoning_effort})`}
                               >
-                                effort: <b>{effective.values.reasoning_effort ?? t("set.cliDefaultOnly")}</b>
+                                effort:{" "}
+                                <b>
+                                  {effective.values.reasoning_effort ?? t("set.cliDefaultOnly")}
+                                </b>
                               </span>
                             )}
                             <span

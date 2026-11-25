@@ -195,7 +195,9 @@ export function RunsPage() {
     [status],
   );
   // Stat cards always describe the unfiltered list; when a status filter is active fetch it separately.
-  const { data: allRuns, reload: reloadAll } = useApi<RunListItem[]>(status ? "/api/runs" : null, [status]);
+  const { data: allRuns, reload: reloadAll } = useApi<RunListItem[]>(status ? "/api/runs" : null, [
+    status,
+  ]);
   const { data: wfs } = useApi<WorkflowOption[]>("/api/workflows");
   useLive(null, (p) => (!p || p.kind === "status") && (reload(), status && reloadAll()));
   const [wf, setWf] = useState("");

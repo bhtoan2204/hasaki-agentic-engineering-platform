@@ -63,9 +63,7 @@ export function LearningInsights() {
           </section>
           <section className="card">
             <h3>{t("ln.routing")}</h3>
-            {data.routing.recommendations.length === 0 && (
-              <Empty>{t("ln.none")}</Empty>
-            )}
+            {data.routing.recommendations.length === 0 && <Empty>{t("ln.none")}</Empty>}
             {data.routing.recommendations.map((r) => (
               <div key={`${r.definition_key}:${r.risk}`} className="small">
                 <span className="mono">{r.definition_key}</span> ({r.risk}) ·{" "}

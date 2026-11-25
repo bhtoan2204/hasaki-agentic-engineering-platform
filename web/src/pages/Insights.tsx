@@ -780,11 +780,7 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                 })}
               />
             </Panel>
-            <Panel
-              icon={Sparkles}
-              title={t("si.skillActivation")}
-              sub={t("si.skillActivationSub")}
-            >
+            <Panel icon={Sparkles} title={t("si.skillActivation")} sub={t("si.skillActivationSub")}>
               {(data.skill_activation ?? []).map((s) => (
                 <div className="small" key={`${s.key}:${s.state}`}>
                   <span className="mono">{s.key}</span> · {s.state} × {s.attempts}
@@ -1093,7 +1089,11 @@ function ReuseRecovery({ d }: { d: Record<string, unknown> }) {
     <Panel icon={Recycle} title={t("ins.decisions")} sub={t("reuse.estimated")}>
       <div className="ins-metrics ins-decisions">
         <Metric label={t("ins.contextReuse")} value={fmtInt(num(d.context_reuse))} tone="ok" />
-        <Metric label={t("ins.verificationReuse")} value={fmtInt(num(d.verification_reuse))} tone="ok" />
+        <Metric
+          label={t("ins.verificationReuse")}
+          value={fmtInt(num(d.verification_reuse))}
+          tone="ok"
+        />
         <Metric
           label={t("reuse.reused")}
           value={`${fmtInt(num(d.replay_reused))}${num(d.replay_reuse_rate_pct) == null ? "" : ` (${fmtNum(num(d.replay_reuse_rate_pct), 1)}%)`}`}
@@ -1101,13 +1101,23 @@ function ReuseRecovery({ d }: { d: Record<string, unknown> }) {
         />
         <Metric
           label={t("ins.resumeRate")}
-          value={num(d.resume_success_rate_pct) == null ? "—" : `${fmtNum(num(d.resume_success_rate_pct), 1)}%`}
+          value={
+            num(d.resume_success_rate_pct) == null
+              ? "—"
+              : `${fmtNum(num(d.resume_success_rate_pct), 1)}%`
+          }
           tone="run"
         />
         <Metric label={t("ins.restores")} value={fmtInt(num(d.restores))} />
         <Metric label={t("reuse.recovered")} value={fmtInt(num(d.recoveries))} tone="wait" />
-        <Metric label={t("ins.replayLatency")} value={pair(ms(d.replay_p50_ms), ms(d.replay_p95_ms))} />
-        <Metric label={t("ins.recoveryLatency")} value={pair(ms(d.recovery_p50_ms), ms(d.recovery_p95_ms))} />
+        <Metric
+          label={t("ins.replayLatency")}
+          value={pair(ms(d.replay_p50_ms), ms(d.replay_p95_ms))}
+        />
+        <Metric
+          label={t("ins.recoveryLatency")}
+          value={pair(ms(d.recovery_p50_ms), ms(d.recovery_p95_ms))}
+        />
         <Metric
           label={t("ins.avoided")}
           title={t("reuse.estimated")}
@@ -1116,7 +1126,11 @@ function ReuseRecovery({ d }: { d: Record<string, unknown> }) {
         />
         <Metric
           label={t("ins.checkpointSize")}
-          value={[kb(d.checkpoint_p50_bytes), kb(d.checkpoint_p95_bytes), kb(d.checkpoint_max_bytes)].join(" / ")}
+          value={[
+            kb(d.checkpoint_p50_bytes),
+            kb(d.checkpoint_p95_bytes),
+            kb(d.checkpoint_max_bytes),
+          ].join(" / ")}
         />
       </div>
     </Panel>

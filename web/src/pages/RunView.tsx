@@ -3,7 +3,14 @@ import { rolesOfSteps } from "../office/StepChibi.tsx";
 import { RunSummaryCard } from "./WorkItems.tsx";
 import { InvestigationRunCard } from "./Investigations.tsx";
 import { agentKey } from "../agentProvider.tsx";
-import { Background, ControlButton, Controls, ReactFlow, type Edge, type Node } from "@xyflow/react";
+import {
+  Background,
+  ControlButton,
+  Controls,
+  ReactFlow,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 import {
   Activity,
   AlertTriangle,
@@ -145,9 +152,7 @@ interface RunDetail extends InspectorRun {
     parent: { run_id: number; title: string; status: string; mode: string } | null;
     children: ChildWorkflow[];
   };
-  worker:
-    | (WorkerHealth & { local: boolean; available: boolean; recovery: string | null })
-    | null;
+  worker: (WorkerHealth & { local: boolean; available: boolean; recovery: string | null }) | null;
   graph: {
     steps: StepLike[];
     feedback_step?: string;
@@ -407,7 +412,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
   const stableNodes = useStableById<Node<StepNodeData>>();
   const stableEdges = useStableById<Edge>();
   const graph = useMemo(() => {
-    if (!run) return { nodes: [] as Node<StepNodeData>[], childNodes: [] as Node[], edges: [] as Edge[] };
+    if (!run)
+      return { nodes: [] as Node<StepNodeData>[], childNodes: [] as Node[], edges: [] as Edge[] };
     const specSteps = run.graph.steps;
     const placed = arranged && hasSavedLayout ? autoLayout(specSteps) : placeSteps(specSteps);
     const st = new Map(run.steps.map((s) => [s.key, s] as const));
@@ -470,7 +476,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                 : undefined
             : undefined,
           decision: decided[s.key]
-            ? { action: decided[s.key].action, outcome: decided[s.key].outcome, reason: decided[s.key].reason }
+            ? {
+                action: decided[s.key].action,
+                outcome: decided[s.key].outcome,
+                reason: decided[s.key].reason,
+              }
             : undefined,
           preview: replayPreview?.[s.key],
           childWorkflows: children[s.key],
@@ -480,7 +490,9 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       };
     });
     // Child workflows (delegation): a lane under the steps, each card linked to the step that started it.
-    const kids = childGraph(run.delegation?.children ?? [], placed, run.id, () => reloadRef.current());
+    const kids = childGraph(run.delegation?.children ?? [], placed, run.id, () =>
+      reloadRef.current(),
+    );
     return {
       nodes: stableNodes(nodes),
       childNodes: kids.nodes,
@@ -505,7 +517,10 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       maxZoom: 1,
       minZoom: 0.7,
       nodes: focusNodes(
-        [...graph.nodes.map((n) => n.id), ...graph.childNodes.filter((n) => n.type === "child").map((n) => n.id)],
+        [
+          ...graph.nodes.map((n) => n.id),
+          ...graph.childNodes.filter((n) => n.type === "child").map((n) => n.id),
+        ],
         stepKey,
       ),
     }),
@@ -524,7 +539,13 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
 
   // Deep link (#/runs/:id/:stepKey, e.g. from Telegram) to a step that is not in this run any more: open the run itself.
   useEffect(() => {
-    if (run && stepKey && stepKey !== "~changes" && stepKey !== "~trace" && !run.steps.some((s) => s.key === stepKey))
+    if (
+      run &&
+      stepKey &&
+      stepKey !== "~changes" &&
+      stepKey !== "~trace" &&
+      !run.steps.some((s) => s.key === stepKey)
+    )
       navigate(`/runs/${id}`);
   }, [run, stepKey, id]);
   if (loading && !run) return <Loading />;
@@ -601,7 +622,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                     ? t("ch.title")
                     : stepKey === "~trace"
                       ? t("trace.title")
-                    : (run.steps.find((s) => s.key === stepKey)?.name ?? stepKey)}
+                      : (run.steps.find((s) => s.key === stepKey)?.name ?? stepKey)}
                 </span>
               </>
             )}
@@ -1252,7 +1273,10 @@ function DeliveryCard({ runId }: { runId: number }) {
           · <b>{p.lifecycle}</b>
           {p.lifecycle_paused && <span className="muted"> · {t("dl.paused")}</span>}
           <div className="muted">
-            {t("dl.heads", { verified: (p.published_sha ?? "?").slice(0, 12), remote: (p.remote_head_sha ?? "?").slice(0, 12) })}
+            {t("dl.heads", {
+              verified: (p.published_sha ?? "?").slice(0, 12),
+              remote: (p.remote_head_sha ?? "?").slice(0, 12),
+            })}
             {p.observation?.pipeline && <> · CI {p.observation.pipeline.status}</>}
             {p.repair_count > 0 && <> · {t("dl.repairs", { n: p.repair_count })}</>}
             {p.synced_at && <> · {t("dl.synced", { at: time(p.synced_at) })}</>}
@@ -1262,11 +1286,15 @@ function DeliveryCard({ runId }: { runId: number }) {
               {r}
             </div>
           ))}
-          {p.observation?.repair_plan?.reason && <div className="muted">{p.observation.repair_plan.reason}</div>}
+          {p.observation?.repair_plan?.reason && (
+            <div className="muted">{p.observation.repair_plan.reason}</div>
+          )}
           <button
             className="ghost sm"
             onClick={async () =>
-              (await act(() => api(`/api/pull-requests/${p.id}/lifecycle`, { paused: !p.lifecycle_paused }))) && reload()
+              (await act(() =>
+                api(`/api/pull-requests/${p.id}/lifecycle`, { paused: !p.lifecycle_paused }),
+              )) && reload()
             }
           >
             {p.lifecycle_paused ? t("dl.resume") : t("dl.pause")}
@@ -1290,7 +1318,8 @@ function RecoveryCard({ run }: { run: RunDetail }) {
       </div>
       {episodes.slice(0, 10).map((e) => (
         <div key={e.id} className="small" style={{ margin: "4px 0" }}>
-          <span className="mono">{e.step_key}</span> · <b>{e.category}</b> · {t(`rc.status.${e.status}`)} ·{" "}
+          <span className="mono">{e.step_key}</span> · <b>{e.category}</b> ·{" "}
+          {t(`rc.status.${e.status}`)} ·{" "}
           {t("rc.counts", { n: e.occurrences, auto: e.auto_recoveries })}
           {e.last_strategy?.strategy && <> · {e.last_strategy.strategy}</>}
           {e.status === "open" && e.next_eligible_at && (
@@ -1324,7 +1353,9 @@ function AutonomyCard({ run, onDone }: { run: RunDetail; onDone: () => void }) {
         </button>
       </div>
       <AutonomySummary a={run.autonomy} />
-      <div className="small muted" style={{ marginTop: 6 }}>{t("au.decisions")}</div>
+      <div className="small muted" style={{ marginTop: 6 }}>
+        {t("au.decisions")}
+      </div>
       {decided.length === 0 && <div className="small muted">{t("au.none")}</div>}
       {decided.slice(-20).map((d) => (
         <div key={d.id} className="small">
@@ -1351,10 +1382,20 @@ function ProfileCard({ run }: { run: RunDetail }) {
         </h4>
         <ProfileBadge profile={run.profile} />
       </div>
-      {run.agent_configuration && <p className="small muted">Agent configuration version {run.agent_configuration.version} · {run.agent_configuration.capture_source} · {run.agent_configuration.captured_at}</p>}
-      {(run.graph?.transitions ?? []).map((transition: { from: string; to: string; reason: string; revision: number }) => (
-        <div className="small" key={transition.revision}>{transition.from} → {transition.to} · revision {transition.revision}: {transition.reason}</div>
-      ))}
+      {run.agent_configuration && (
+        <p className="small muted">
+          Agent configuration version {run.agent_configuration.version} ·{" "}
+          {run.agent_configuration.capture_source} · {run.agent_configuration.captured_at}
+        </p>
+      )}
+      {(run.graph?.transitions ?? []).map(
+        (transition: { from: string; to: string; reason: string; revision: number }) => (
+          <div className="small" key={transition.revision}>
+            {transition.from} → {transition.to} · revision {transition.revision}:{" "}
+            {transition.reason}
+          </div>
+        ),
+      )}
       <div className="small muted">
         {d.requested === "AUTO"
           ? t("rv.autoPick", { confidence: d.confidence })
@@ -1698,19 +1739,28 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
     setSt((await act(() => api<PullRequestStatus>(`/api/pull-requests/${id}/status`))) ?? null);
   const pipeline = st?.pipelines?.[0] ?? st?.readiness?.pipeline ?? null;
   return (
-    <div className="small" style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+    <div
+      className="small"
+      style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+    >
       <button className="sm ghost" onClick={load}>
         {t("rv.pr.status")}
       </button>
       {pipeline && (
-        <span className={`badge ${pipeline.status === "success" ? "ok" : pipeline.status === "failed" ? "err" : ""}`}>
+        <span
+          className={`badge ${pipeline.status === "success" ? "ok" : pipeline.status === "failed" ? "err" : ""}`}
+        >
           {t("rv.pr.pipeline")} #{pipeline.id}: {pipeline.status}
         </span>
       )}
       {st?.readiness && (
         <span className="muted" title={st.readiness.reasons.join("; ")}>
-          {st.readiness.mergeable ? t("rv.pr.mergeable") : `${t("rv.pr.notMergeable")}: ${st.readiness.reasons.join("; ")}`}
-          {st.readiness.approvals && !st.readiness.approvals.enforced ? ` · ${t("rv.pr.approvalsNotEnforced")}` : ""}
+          {st.readiness.mergeable
+            ? t("rv.pr.mergeable")
+            : `${t("rv.pr.notMergeable")}: ${st.readiness.reasons.join("; ")}`}
+          {st.readiness.approvals && !st.readiness.approvals.enforced
+            ? ` · ${t("rv.pr.approvalsNotEnforced")}`
+            : ""}
         </span>
       )}
       {st?.readiness?.mergeable && (
@@ -1725,7 +1775,8 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
               variant: "warning",
             });
             if (!ok) return;
-            if (await act(() => api(`/api/pull-requests/${id}/merge`, {}), t("rv.pr.merged"))) onDone();
+            if (await act(() => api(`/api/pull-requests/${id}/merge`, {}), t("rv.pr.merged")))
+              onDone();
           }}
         >
           {t("rv.pr.merge")}
@@ -1743,7 +1794,8 @@ function PullRequestControls({ id, onDone }: { id: number; onDone: () => void })
               variant: "destructive",
             });
             if (!ok) return;
-            if (await act(() => api(`/api/pull-requests/${id}/close`, {}), t("rv.pr.closed"))) onDone();
+            if (await act(() => api(`/api/pull-requests/${id}/close`, {}), t("rv.pr.closed")))
+              onDone();
           }}
         >
           {t("rv.pr.close")}

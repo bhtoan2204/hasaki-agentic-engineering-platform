@@ -14,7 +14,17 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { act, Badge, Copy, Empty, EmptyState, ErrorBox, Loading, Markdown, navigate } from "../ui.tsx";
+import {
+  act,
+  Badge,
+  Copy,
+  Empty,
+  EmptyState,
+  ErrorBox,
+  Loading,
+  Markdown,
+  navigate,
+} from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { OutputView } from "./StepInspector.tsx";
 import "./RunView.css";
@@ -110,14 +120,18 @@ function SlopPanel({ s }: { s: SlopView }) {
             </Badge>
             <ul className="vf-list">
               {rows.map((f) => (
-                <li key={`${f.fingerprint}-${f.status}`} style={{ flexDirection: "column", gap: 2 }}>
+                <li
+                  key={`${f.fingerprint}-${f.status}`}
+                  style={{ flexDirection: "column", gap: 2 }}
+                >
                   <span>
                     <b className="mono">{f.rule}</b>{" "}
                     <span className="mono">
                       {f.path}:{f.line}
                     </span>
-                    {f.symbol ? <span className="mono muted"> {f.symbol}</span> : null} · {f.category} ·{" "}
-                    {f.severity} · {f.kind} · {Math.round((f.confidence ?? 0) * 100)}%
+                    {f.symbol ? <span className="mono muted"> {f.symbol}</span> : null} ·{" "}
+                    {f.category} · {f.severity} · {f.kind} · {Math.round((f.confidence ?? 0) * 100)}
+                    %
                     {blocking.has(f.fingerprint) && (
                       <>
                         {" "}
@@ -149,7 +163,9 @@ function SlopPanel({ s }: { s: SlopView }) {
       {Array.isArray(s.unsupported_rules) && s.unsupported_rules.length > 0 && (
         <div className="muted small">
           {t("chg.slopUnsupported")}:{" "}
-          {s.unsupported_rules.map((x) => `${x.rule} (${x.status === "covered_by" ? `→ ${x.detail}` : x.detail})`).join(", ")}
+          {s.unsupported_rules
+            .map((x) => `${x.rule} (${x.status === "covered_by" ? `→ ${x.detail}` : x.detail})`)
+            .join(", ")}
         </div>
       )}
     </>
@@ -280,10 +296,7 @@ export function Changes({
             >
               <ShieldCheck size={16} /> {t("ch.approve")}
             </button>
-            <button
-              className="ghost"
-              onClick={() => navigate(`/runs/${run.id}/${prWaiting.key}`)}
-            >
+            <button className="ghost" onClick={() => navigate(`/runs/${run.id}/${prWaiting.key}`)}>
               {t("ch.openStep")}
             </button>
           </div>

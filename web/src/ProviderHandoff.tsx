@@ -124,29 +124,21 @@ export function ProviderHandoff({
       </div>
       {pending && (
         <p role="status">
-          <strong>{current.failure_category ?? t("handoff.manualSwitch")}</strong>{" "}
-          · {current.original_provider} · {current.status}
+          <strong>{current.failure_category ?? t("handoff.manualSwitch")}</strong> ·{" "}
+          {current.original_provider} · {current.status}
         </p>
       )}
       {current?.status === "BLOCKED" && (
         <div role="alert" className="error">
-          <strong>
-            {t("handoff.nextNotStarted")}
-          </strong>
-          <p>
-            {t("handoff.blockedDetail")}
-          </p>
+          <strong>{t("handoff.nextNotStarted")}</strong>
+          <p>{t("handoff.blockedDetail")}</p>
           {current.blocked_reason && <p>{current.blocked_reason}</p>}
         </div>
       )}
       {current?.blocked_reason && current.status !== "BLOCKED" && (
         <p className="error">{current.blocked_reason}</p>
       )}
-      {current?.status === "STOPPING" && (
-        <p className="muted small">
-          {t("handoff.stopping")}
-        </p>
-      )}
+      {current?.status === "STOPPING" && <p className="muted small">{t("handoff.stopping")}</p>}
       {pending && (
         <>
           {(current.status !== "STOPPING" ||
@@ -216,9 +208,7 @@ export function ProviderHandoff({
             </Field>
           </div>
           <p className="muted small">
-            {target?.ok
-              ? t("handoff.cliReady")
-              : (target?.error ?? t("handoff.checkingProvider"))}
+            {target?.ok ? t("handoff.cliReady") : (target?.error ?? t("handoff.checkingProvider"))}
           </p>
           <label className={`handoff-confirm${confirmed ? " is-on" : ""}`}>
             <input
@@ -226,9 +216,7 @@ export function ProviderHandoff({
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            <span>
-              {t("handoff.confirmCheckbox")}
-            </span>
+            <span>{t("handoff.confirmCheckbox")}</span>
           </label>
           {resumeHold && (
             <p className="muted small" role="status">
@@ -257,9 +245,7 @@ export function ProviderHandoff({
       )}
       {(handoffs.length > 0 || attempts.length > 1) && (
         <details className="handoff-history">
-          <summary>
-            {t("handoff.historyTimeline")}
-          </summary>
+          <summary>{t("handoff.historyTimeline")}</summary>
           {handoffs.map((h) => (
             <p key={h.id} className="small">
               #{h.id} · {h.original_provider} → {h.target_provider ?? "—"} · {h.status} ·{" "}

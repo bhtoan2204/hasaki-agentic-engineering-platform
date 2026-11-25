@@ -37,41 +37,36 @@ export function ProviderExperimentForm({
     if (!suite) return;
     setBusy(true);
     try {
-      await act(
-        async () => {
-          for (const context_variant of ab ? ["minimal", "pack", "tools"] : [variant]) {
-            const provider_sequence = plan
-              .split(",")
-              .map((provider, i) => ({ provider, model: models[i] || null }));
-            const row = await api<{ id: number }>("/api/evaluation-runs", {
-              suite_id: suite.id,
-              request_key: crypto.randomUUID(),
-              paid_approval: paid,
-              configuration: {
-                mode,
-                adapter: "provider_fixture",
-                provider: mode === "live" ? provider_sequence[0].provider : "fixture",
-                provider_sequence,
-                context_variant,
-                repetitions: reps,
-                case_limit: limit,
-              },
-            });
-            await api(`/api/evaluation-runs/${row.id}/start`, {});
-          }
-          onCreated();
-        },
-        t("an.eval.queued"),
-      );
+      await act(async () => {
+        for (const context_variant of ab ? ["minimal", "pack", "tools"] : [variant]) {
+          const provider_sequence = plan
+            .split(",")
+            .map((provider, i) => ({ provider, model: models[i] || null }));
+          const row = await api<{ id: number }>("/api/evaluation-runs", {
+            suite_id: suite.id,
+            request_key: crypto.randomUUID(),
+            paid_approval: paid,
+            configuration: {
+              mode,
+              adapter: "provider_fixture",
+              provider: mode === "live" ? provider_sequence[0].provider : "fixture",
+              provider_sequence,
+              context_variant,
+              repetitions: reps,
+              case_limit: limit,
+            },
+          });
+          await api(`/api/evaluation-runs/${row.id}/start`, {});
+        }
+        onCreated();
+      }, t("an.eval.queued"));
     } finally {
       setBusy(false);
     }
   };
   return (
     <Panel title={t("an.eval.experiments")}>
-      <Notice>
-        {t("an.eval.fixtureControlsNotice")}
-      </Notice>
+      <Notice>{t("an.eval.fixtureControlsNotice")}</Notice>
       {suites.loading && !suites.data && <SkeletonRows rows={2} />}
       {suites.error && <ErrorBox error={suites.error} onRetry={suites.reload} />}
       {!suites.loading && !suites.data?.length && (
@@ -165,11 +160,7 @@ export function ProviderExperimentForm({
           >
             <option value="fixture">{t("an.eval.fixtureControls")}</option>
             <option value="dry_run">{t("an.eval.dryRun")}</option>
-            {admin && (
-              <option value="live">
-                {t("an.eval.liveCapabilityCheck")}
-              </option>
-            )}
+            {admin && <option value="live">{t("an.eval.liveCapabilityCheck")}</option>}
           </select>
         </Field>
       </div>

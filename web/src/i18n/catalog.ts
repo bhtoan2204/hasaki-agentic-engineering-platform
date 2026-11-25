@@ -1235,6 +1235,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.attachments": "File đính kèm",
     "wi.history": "Lịch sử thực thi",
     "wi.settings": "Thiết lập",
+    "wi.bugFollowUp": "Bug QC",
+    "wi.bugFollowUpHint":
+      "Bug phát hiện trên QC của task này: tạo task bug liên kết và chạy workflow sửa ngay trên nhánh của task này (cập nhật PR hiện có).",
+    "wi.bugNoBranch": "Task này chưa có nhánh hay PR nào để làm tiếp.",
+    "wi.bugTitle": "Tiêu đề (tuỳ chọn)",
+    "wi.bugDescription": "Mô tả bug trên QC",
+    "wi.bugCreate": "Tạo task bug và chạy",
     "wi.policy": "Chính sách tự động",
     "wi.policyHint":
       "Chỉ dùng khi poller tự import task: tự chạy workflow này. Mặc định không có — không gì tự chạy.",
@@ -4726,6 +4733,13 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.attachments": "Attachments",
     "wi.history": "Run history",
     "wi.settings": "Settings",
+    "wi.bugFollowUp": "QC bug",
+    "wi.bugFollowUpHint":
+      "A bug found on QC for this task: creates a linked bug task and runs the fix workflow on this task's own branch (updating its existing pull request).",
+    "wi.bugNoBranch": "This task has no branch or pull request to continue yet.",
+    "wi.bugTitle": "Title (optional)",
+    "wi.bugDescription": "Bug found on QC",
+    "wi.bugCreate": "Create bug task and run",
     "wi.policy": "Automation policy",
     "wi.policyHint":
       "Used only when the poller imports a task by itself: it starts this workflow. Empty by default — nothing starts on its own.",

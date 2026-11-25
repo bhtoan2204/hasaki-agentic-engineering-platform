@@ -122,7 +122,10 @@ const copy: Record<string, [string, string]> = {
     "Thời gian không có span con (code không được trace)",
     "Time with no child span (untraced code)",
   ],
-  slowGapAt: ["trong {span}, sau {after}, trước {before}", "in {span}, after {after}, before {before}"],
+  slowGapAt: [
+    "trong {span}, sau {after}, trước {before}",
+    "in {span}, after {after}, before {before}",
+  ],
   slowGapEdge: ["mép span", "span edge"],
   yes: ["Có", "Yes"],
   no: ["Không", "No"],
@@ -348,14 +351,20 @@ const copy: Record<string, [string, string]> = {
     "Tối đa 3 repository bạn có quyền đọc.",
     "Up to 3 repositories you can read.",
   ],
-  "bh.noRepositories": ["Bạn chưa có repository nào có quyền đọc.", "You have no readable repository."],
+  "bh.noRepositories": [
+    "Bạn chưa có repository nào có quyền đọc.",
+    "You have no readable repository.",
+  ],
   "bh.alreadyRunning": [
     "Đã có một Bug Hunt đang chạy cho sự cố và repository này.",
     "A bug hunt is already running for this incident and these repositories.",
   ],
   "bh.history": ["Các lần Bug Hunt", "Bug hunts"],
   "bh.none": ["Chưa có Bug Hunt nào cho sự cố này.", "No bug hunt for this incident yet."],
-  "bh.counts": ["{c} xác nhận · {s} nghi ngờ · {r} loại bỏ", "{c} confirmed · {s} suspected · {r} rejected"],
+  "bh.counts": [
+    "{c} xác nhận · {s} nghi ngờ · {r} loại bỏ",
+    "{c} confirmed · {s} suspected · {r} rejected",
+  ],
   "bh.status.queued": ["Đang chờ", "Queued"],
   "bh.status.running": ["Đang chạy", "Running"],
   "bh.status.verifying": ["Đang kiểm chứng", "Verifying"],
@@ -473,7 +482,10 @@ const copy: Record<string, [string, string]> = {
     "Hunter tìm thấy {n} ứng viên — chưa được kiểm chứng, chỉ là giả thuyết.",
     "The hunter found {n} candidate(s) — not verified, hypotheses only.",
   ],
-  "bh.phase.verifying": ["Đang kiểm chứng độc lập {n} ứng viên:", "Independently verifying {n} claim(s):"],
+  "bh.phase.verifying": [
+    "Đang kiểm chứng độc lập {n} ứng viên:",
+    "Independently verifying {n} claim(s):",
+  ],
   "bh.triageNote": [
     "{d} ứng viên hoãn (độ tin cậy thấp hoặc vượt ngân sách), {r} bị nền tảng loại.",
     "{d} deferred (low confidence or over budget), {r} rejected by the platform.",
@@ -535,7 +547,10 @@ const copy: Record<string, [string, string]> = {
   ],
   "wb.fixConfirm": ["Tạo task", "Create task"],
   "wb.fixCreated": ["Đã tạo task sửa lỗi (run #{id})", "Fix task created (run #{id})"],
-  "wb.fixExists": ["Đã có task sửa lỗi cho nguyên nhân này (run #{id})", "A fix task already exists for this cause (run #{id})"],
+  "wb.fixExists": [
+    "Đã có task sửa lỗi cho nguyên nhân này (run #{id})",
+    "A fix task already exists for this cause (run #{id})",
+  ],
   "wb.runRuntime": ["Chạy Runtime RCA", "Run Runtime RCA"],
   "wb.runHunt": ["Chạy Bug Hunt", "Run Bug Hunt"],
   "wb.runBoth": ["Chạy cả hai", "Run both"],

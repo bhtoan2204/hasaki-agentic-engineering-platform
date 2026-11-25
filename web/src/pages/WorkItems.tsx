@@ -30,6 +30,7 @@ import {
   XCircle,
   AlertTriangle,
   GitCommit,
+  Bug,
 } from "lucide-react";
 import { api, useApi, useLive } from "../api.ts";
 import { AgentProviderField, type AgentProvider } from "../agentProvider.tsx";
@@ -1122,6 +1123,10 @@ export function WorkItemDetail({ id }: { id: number }) {
   const wfTouched = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => setSettingsOpen(false), [id]);
+  const [bugOpen, setBugOpen] = useState(false);
+  const [bugTitle, setBugTitle] = useState("");
+  const [bugDescription, setBugDescription] = useState("");
+  useEffect(() => setBugOpen(false), [id]);
   const routedId = useRef<number | null>(null);
   useEffect(() => {
     if (!w || wfTouched.current || routedId.current === w.id) return;
@@ -1155,6 +1160,19 @@ export function WorkItemDetail({ id }: { id: number }) {
     if (mode === "step") await act(() => api(`/api/runs/${r.id}/start`, { step_mode: true }));
     navigate(`/runs/${r.id}`);
   };
+  const hasBranch = w.runs.length > 0 || w.pull_requests.length > 0;
+  const startBugFollowUp = async () => {
+    const r = await act(() =>
+      api<{ run: { id: number } }>(`/api/work-items/${id}/bug-followups`, {
+        title: bugTitle.trim() || undefined,
+        description: bugDescription,
+        start: true,
+        output_locale: outputLocale,
+        agent_provider: agentProvider,
+      }),
+    );
+    if (r) navigate(`/runs/${r.run.id}`);
+  };
   const selectedWf = (wfs ?? []).find((x) => x.key === wf);
   return (
     <div className="wi-page">
@@ -1179,6 +1197,18 @@ export function WorkItemDetail({ id }: { id: number }) {
           <span className="mono">{w.code || `#${id}`}</span>
           <span title={w.title}>{w.title}</span>
         </div>
+        <button
+          className="ghost sm"
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={bugOpen}
+          disabled={!hasBranch}
+          title={hasBranch ? t("wi.bugFollowUpHint") : t("wi.bugNoBranch")}
+          onClick={() => setBugOpen(true)}
+        >
+          <Bug size={16} strokeWidth={2} />
+          {t("wi.bugFollowUp")}
+        </button>
         <button
           className="ghost sm"
           type="button"
@@ -1342,6 +1372,41 @@ export function WorkItemDetail({ id }: { id: number }) {
           </section>
         </aside>
       </div>
+      {bugOpen && (
+        <Drawer
+          title={
+            <span className="wi-settings-title">
+              <Bug size={17} />
+              {t("wi.bugFollowUp")}
+              <span className="mono muted small">{w.code || `#${id}`}</span>
+            </span>
+          }
+          onClose={() => setBugOpen(false)}
+          width={440}
+        >
+          <div className="wi-settings-body">
+            <p className="wi-settings-context">{t("wi.bugFollowUpHint")}</p>
+            <Field label={t("wi.bugTitle")}>
+              <input value={bugTitle} onChange={(e) => setBugTitle(e.target.value)} />
+            </Field>
+            <Field label={t("wi.bugDescription")}>
+              <textarea
+                rows={8}
+                value={bugDescription}
+                onChange={(e) => setBugDescription(e.target.value)}
+              />
+            </Field>
+            <button
+              className="wi-start"
+              disabled={!bugDescription.trim()}
+              onClick={startBugFollowUp}
+            >
+              <Bug size={16} strokeWidth={2.2} />
+              {t("wi.bugCreate")}
+            </button>
+          </div>
+        </Drawer>
+      )}
       {settingsOpen && (
         <Drawer
           title={

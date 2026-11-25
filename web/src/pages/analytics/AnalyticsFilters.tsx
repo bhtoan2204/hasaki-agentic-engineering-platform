@@ -135,19 +135,20 @@ export function AnalyticsFilters({
     const applied = new URLSearchParams(query);
     const defaults = defaultFilters();
     const dirty = Object.entries(defaults).some(([k, v]) => (applied.get(k) ?? "") !== v);
-    const chips = (["provider", "model", "user", "workflow", "repository", "project"] as const).flatMap(
-      (key) => {
-        const value = applied.get(key);
-        if (!value) return [];
-        const shown =
-          key === "user"
-            ? ((options?.users ?? []).find((u: Row) => String(u.id) === value)?.username ?? value)
-            : value;
-        return [{ key, shown }];
-      },
-    );
+    const chips = (
+      ["provider", "model", "user", "workflow", "repository", "project"] as const
+    ).flatMap((key) => {
+      const value = applied.get(key);
+      if (!value) return [];
+      const shown =
+        key === "user"
+          ? ((options?.users ?? []).find((u: Row) => String(u.id) === value)?.username ?? value)
+          : value;
+      return [{ key, shown }];
+    });
     const advancedCount =
-      (["model", "user", "repository", "project"] as const).filter((key) => applied.get(key)).length +
+      (["model", "user", "repository", "project"] as const).filter((key) => applied.get(key))
+        .length +
       (applied.get("timezone") && applied.get("timezone") !== defaults.timezone ? 1 : 0) +
       (applied.get("bucket") && applied.get("bucket") !== defaults.bucket ? 1 : 0);
     return (
@@ -235,10 +236,9 @@ export function AnalyticsFilters({
               {(["repository", "project"] as const).map((k) =>
                 select(
                   k,
-                  (options?.[k === "repository" ? "repositories" : "projects"] ?? []).map((v: string) => [
-                    v,
-                    v,
-                  ]),
+                  (options?.[k === "repository" ? "repositories" : "projects"] ?? []).map(
+                    (v: string) => [v, v],
+                  ),
                 ),
               )}
             </div>
@@ -301,8 +301,15 @@ export function AnalyticsFilters({
             {(["workflow", "repository", "project"] as const).map((k) =>
               select(
                 k,
-                (options?.[k === "workflow" ? "workflows" : k === "repository" ? "repositories" : "projects"] ??
-                  []).map((v: string) => [v, v]),
+                (
+                  options?.[
+                    k === "workflow"
+                      ? "workflows"
+                      : k === "repository"
+                        ? "repositories"
+                        : "projects"
+                  ] ?? []
+                ).map((v: string) => [v, v]),
               ),
             )}
           </div>

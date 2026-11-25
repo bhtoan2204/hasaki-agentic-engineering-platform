@@ -90,10 +90,7 @@ export function EvaluationTable<R extends object>({
   columns: Array<EvaluationColumn<R>>;
 }) {
   const { t } = useI18n();
-  if (!rows?.length)
-    return (
-      <EmptyState title={t("an.eval.noEvidence")} />
-    );
+  if (!rows?.length) return <EmptyState title={t("an.eval.noEvidence")} />;
   return (
     <div className="table-wrap">
       <table className="ins-table">

@@ -524,9 +524,7 @@ export function TraceExplorer({ runId, activity }: { runId: number; activity: nu
               {t("trace.oldestFirst")}
               <span>{t("trace.treeHint")}</span>
             </div>
-            {logError && (
-              <ErrorBox error={logError} onRetry={() => void loadLogs()} />
-            )}
+            {logError && <ErrorBox error={logError} onRetry={() => void loadLogs()} />}
             <div className="tx-timeline-scroll">
               <div className="tx-nodes" aria-label={t("trace.execution")}>
                 {entries.map((entry) => {

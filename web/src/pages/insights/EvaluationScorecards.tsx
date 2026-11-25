@@ -20,12 +20,7 @@ function EvaluationQualityPlot({
       r.verified_success_rate != null &&
       (cost ? r.cost_per_verified_success != null : r.median_ms != null),
   );
-  if (!points.length)
-    return (
-      <Empty>
-        {t("an.eval.noMeasuredCoords")}
-      </Empty>
-    );
+  if (!points.length) return <Empty>{t("an.eval.noMeasuredCoords")}</Empty>;
   const max = Math.max(
     ...points.map((r) => Number(cost ? r.cost_per_verified_success : r.median_ms)),
     1,
@@ -34,11 +29,7 @@ function EvaluationQualityPlot({
     <svg
       viewBox="0 0 600 230"
       role="img"
-      aria-label={
-        cost
-          ? t("an.eval.qualityVsCostAria")
-          : t("an.eval.qualityVsLatencyAria")
-      }
+      aria-label={cost ? t("an.eval.qualityVsCostAria") : t("an.eval.qualityVsLatencyAria")}
       style={{ width: "100%", maxHeight: 260 }}
     >
       <path d="M45 10 V200 H585" fill="none" stroke="var(--line)" />
@@ -65,9 +56,7 @@ function EvaluationQualityPlot({
         </circle>
       ))}
       <text x={45} y={223} fontSize={12} fill="var(--ink-2)">
-        {cost
-          ? t("an.eval.reportedCostPerSuccess")
-          : t("an.eval.medianCompletionTime")}
+        {cost ? t("an.eval.reportedCostPerSuccess") : t("an.eval.medianCompletionTime")}
       </text>
     </svg>
   );
@@ -83,18 +72,14 @@ export function EvaluationScorecards({
   return (
     <>
       {" "}
-      <Panel
-        title={t("an.eval.scorecardsTitle")}
-      >
+      <Panel title={t("an.eval.scorecardsTitle")}>
         <EvaluationTable rows={data.comparisons} columns={common} />
       </Panel>
       <div className="ins-grid">
         <Panel title={t("an.eval.qualityVsLatency")}>
           <EvaluationQualityPlot rows={data.comparisons} />
         </Panel>
-        <Panel
-          title={t("an.eval.qualityVsCost")}
-        >
+        <Panel title={t("an.eval.qualityVsCost")}>
           <EvaluationQualityPlot rows={data.comparisons} cost />
         </Panel>
       </div>

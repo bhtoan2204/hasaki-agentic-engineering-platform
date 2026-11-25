@@ -11,7 +11,8 @@ import { recoverFromChunkError } from "./PageBoundary.tsx";
 setDialogOpenChange(setActDialogOpen);
 // Vite reports a failed preload of a lazy page (a chunk of a replaced build) here, before React sees the import fail.
 window.addEventListener("vite:preloadError", (event) => {
-  if (recoverFromChunkError((event as Event & { payload?: unknown }).payload)) event.preventDefault();
+  if (recoverFromChunkError((event as Event & { payload?: unknown }).payload))
+    event.preventDefault();
 });
 
 createRoot(document.getElementById("root")!).render(

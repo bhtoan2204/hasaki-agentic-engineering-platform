@@ -11,7 +11,9 @@ import "../analytics/analytics.css";
 export const ANALYTICS_TABS = ["usage", "performance", "workflows"] as const;
 type Tab = (typeof ANALYTICS_TABS)[number];
 function workflowSection(value: string | null): WorkflowView {
-  return value === "workflows" || value === "bottlenecks" || value === "details" ? value : "overview";
+  return value === "workflows" || value === "bottlenecks" || value === "details"
+    ? value
+    : "overview";
 }
 function DashboardBody({
   tab,

@@ -50,8 +50,7 @@ export function DialogHost() {
         : "default";
 
   const preferCancel =
-    active.kind === "confirm" &&
-    (active.options.preferCancelFocus ?? variant === "destructive");
+    active.kind === "confirm" && (active.options.preferCancelFocus ?? variant === "destructive");
 
   const title = active.options.title;
   const description = active.options.description;
@@ -64,9 +63,7 @@ export function DialogHost() {
         : (active.options.confirmLabel ?? t("common.confirm"));
 
   const cancelLabel =
-    active.kind === "alert"
-      ? null
-      : (active.options.cancelLabel ?? t("common.cancel"));
+    active.kind === "alert" ? null : (active.options.cancelLabel ?? t("common.cancel"));
 
   function closeCancel() {
     if (busy) return;

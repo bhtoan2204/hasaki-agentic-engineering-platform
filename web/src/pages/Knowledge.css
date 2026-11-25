@@ -83,7 +83,7 @@
   gap: var(--sp-2);
 }
 
-.kn-filter>.search {
+.kn-filter > .search {
   grid-column: 1 / -1;
 }
 
@@ -428,7 +428,7 @@
   gap: var(--sp-4);
 }
 
-.kn-overview-grid>.kn-section {
+.kn-overview-grid > .kn-section {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -650,7 +650,7 @@
   margin-bottom: var(--sp-3);
 }
 
-.kn-import-sum>div {
+.kn-import-sum > div {
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -817,7 +817,7 @@
   cursor: pointer;
 }
 
-.kp-row>.kn-item {
+.kp-row > .kn-item {
   flex: 1;
   min-width: 0;
 }
@@ -875,7 +875,7 @@
   overflow: auto;
 }
 
-.kp-diff>div {
+.kp-diff > div {
   padding: 0 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

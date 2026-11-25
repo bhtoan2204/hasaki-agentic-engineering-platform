@@ -182,10 +182,13 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
   const bulk = async (user: { id: number; username: string }, level: Level) => {
     const ok = await dialog.confirm({
       title: t("repo.access.bulk.title"),
-      description: t(level === "none" ? "repo.access.allNoneConfirm" : "repo.access.allFullConfirm", {
-        user: user.username,
-        n: m.repositories.length,
-      }),
+      description: t(
+        level === "none" ? "repo.access.allNoneConfirm" : "repo.access.allFullConfirm",
+        {
+          user: user.username,
+          n: m.repositories.length,
+        },
+      ),
       confirmLabel: t("repo.access.bulk.action"),
       cancelLabel: t("common.cancel"),
       variant: level === "none" ? "destructive" : "warning",

@@ -292,7 +292,8 @@ function ApprovalCard({ a, onDone }: { a: PendingApproval; onDone: () => void })
 export function QuestionsPage() {
   const { t } = useI18n();
   const { data: open, error, loading, reload } = useApi<OpenQuestion[]>("/api/questions");
-  const { data: history, reload: reloadHistory } = useApi<AnsweredQuestion[]>("/api/questions/history");
+  const { data: history, reload: reloadHistory } =
+    useApi<AnsweredQuestion[]>("/api/questions/history");
   const approvals = useApi<PendingApproval[]>("/api/approvals");
   // Questions open and close with step status changes and user actions, never with transcript lines.
   useLive(null, (p) => isStateChange(p) && (reload(), reloadHistory(), approvals.reload()));

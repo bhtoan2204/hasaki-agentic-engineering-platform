@@ -677,7 +677,13 @@ function renderToast(
   if (prev?.timer) window.clearTimeout(prev.timer);
   const duration =
     opts?.durationMs ??
-    (kind === "loading" ? 0 : kind === "ok" || kind === "info" ? 2500 : kind === "warn" ? 5000 : 7000);
+    (kind === "loading"
+      ? 0
+      : kind === "ok" || kind === "info"
+        ? 2500
+        : kind === "warn"
+          ? 5000
+          : 7000);
   let timer: number | undefined;
   if (duration > 0) {
     timer = window.setTimeout(() => {

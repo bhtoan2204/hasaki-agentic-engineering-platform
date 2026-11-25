@@ -401,7 +401,10 @@ export function ProductionOverview({
             Math.min(
               100,
               (Number(freshness.window_coverage_ms ?? 0) /
-                Math.max(1, Date.parse(data.range?.to ?? "") - Date.parse(data.range?.from ?? ""))) *
+                Math.max(
+                  1,
+                  Date.parse(data.range?.to ?? "") - Date.parse(data.range?.from ?? ""),
+                )) *
                 100,
             ),
             "number",

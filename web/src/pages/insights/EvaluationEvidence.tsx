@@ -15,9 +15,7 @@ export function EvaluationEvidence({
       <Panel title={t("an.eval.failureDist")}>
         <BreakdownBars rows={data.failures} field="samples" labelKey="category" />
       </Panel>
-      <Panel
-        title={t("an.eval.prodObservations")}
-      >
+      <Panel title={t("an.eval.prodObservations")}>
         <EvaluationTable
           rows={data.production}
           columns={[

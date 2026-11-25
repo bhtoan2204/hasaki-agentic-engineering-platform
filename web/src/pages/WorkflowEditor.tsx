@@ -250,25 +250,22 @@ function Editor({ wfKey }: { wfKey: string }) {
     pickedAt.current = performance.now();
     setSelected(key);
   }, []);
-  const nodes: Node<StepNodeData>[] = useMemo(
-    () => {
-      const roles = rolesOfSteps(spec?.steps ?? []);
-      return (spec?.steps ?? []).map((s) => ({
-        id: s.key,
-        type: "step",
-        position: positions[s.key] ?? { x: 0, y: 0 },
+  const nodes: Node<StepNodeData>[] = useMemo(() => {
+    const roles = rolesOfSteps(spec?.steps ?? []);
+    return (spec?.steps ?? []).map((s) => ({
+      id: s.key,
+      type: "step",
+      position: positions[s.key] ?? { x: 0, y: 0 },
+      selected: s.key === selected,
+      data: {
+        step: s,
+        role: roles[s.key],
         selected: s.key === selected,
-        data: {
-          step: s,
-          role: roles[s.key],
-          selected: s.key === selected,
-          invalid: invalidKeys.has(s.key),
-          onPick: pickStep,
-        },
-      }));
-    },
-    [spec, positions, selected, invalidKeys, pickStep],
-  );
+        invalid: invalidKeys.has(s.key),
+        onPick: pickStep,
+      },
+    }));
+  }, [spec, positions, selected, invalidKeys, pickStep]);
   const edges: Edge[] = useMemo(
     () =>
       toEdges(spec?.steps ?? [], undefined, positions).map((e) => ({

@@ -28,9 +28,7 @@ export function ContextPairedStudy() {
   return (
     <Panel title={t("an.eval.pairedValueTitle")}>
       {rows.error && <ErrorBox error={rows.error} onRetry={rows.reload} />}
-      <p className="muted small">
-        {t("an.eval.pairedValueHint")}
-      </p>
+      <p className="muted small">{t("an.eval.pairedValueHint")}</p>
       <div className="grid2">
         {[
           [a, setA, t("an.eval.baselineEval")],
@@ -67,10 +65,9 @@ export function ContextPairedStudy() {
         <>
           <h4>{report.context_report?.status ?? report.report.verdict}</h4>
           <p className="small">
-            {t("an.eval.pairedTasks")}:{" "}
-            {report.context_report?.distinct_paired_tasks ?? "—"} ·{" "}
-            {t("an.eval.improvementsRegressions")}:{" "}
-            {report.context_report?.improved ?? "—"} / {report.context_report?.regressed ?? "—"} · Δ{" "}
+            {t("an.eval.pairedTasks")}: {report.context_report?.distinct_paired_tasks ?? "—"} ·{" "}
+            {t("an.eval.improvementsRegressions")}: {report.context_report?.improved ?? "—"} /{" "}
+            {report.context_report?.regressed ?? "—"} · Δ{" "}
             {fmt(report.context_report?.paired_duration_delta_ms, "ms")}
           </p>
           <details>

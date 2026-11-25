@@ -52,7 +52,12 @@ export function WorkflowDashboard({
         <Overview data={data} onView={onView} onSelectWorkflow={onSelectWorkflow} />
       )}
       {view === "workflows" && (
-        <WorkflowTable data={data} page={page} onPage={onPage} onSelectWorkflow={onSelectWorkflow} />
+        <WorkflowTable
+          data={data}
+          page={page}
+          onPage={onPage}
+          onSelectWorkflow={onSelectWorkflow}
+        />
       )}
       {view === "bottlenecks" && (
         <Bottlenecks data={data} page={page} onPage={onPage} onSelectWorkflow={onSelectWorkflow} />
@@ -80,8 +85,7 @@ function Overview({
   );
   const slowest = slowestWorkflow(data.workflows ?? [], Number(e.workflows ?? 0));
   const slowStep = (data.steps ?? []).find((row: Row) => number(row.execution_ms) != null) as
-    | Row
-    | undefined;
+    Row | undefined;
   const retry = data.hotspots?.retries?.[0] as Row | undefined;
   const blocked = data.hotspots?.blocked?.[0] as Row | undefined;
   const notes = [
@@ -130,7 +134,9 @@ function Overview({
           onClick: () => onView("bottlenecks"),
         }
       : null,
-  ].filter((item) => item != null).slice(0, 4);
+  ]
+    .filter((item) => item != null)
+    .slice(0, 4);
   return (
     <>
       <div className="ins-stats an-kpis">
@@ -141,49 +147,58 @@ function Overview({
           style="pct"
           hint={t("an.labeled", { n: e.labeled_repositories ?? 0 })}
         />
-        <Metric label="switching" value={e.agent_switches} tone={Number(e.agent_switches) > 0 ? "wait" : "brand"} />
-        <Metric label="missing" value={e.missing_context} tone={Number(e.missing_context) > 0 ? "err" : "ok"} hint={t("an.contextHint")} />
+        <Metric
+          label="switching"
+          value={e.agent_switches}
+          tone={Number(e.agent_switches) > 0 ? "wait" : "brand"}
+        />
+        <Metric
+          label="missing"
+          value={e.missing_context}
+          tone={Number(e.missing_context) > 0 ? "err" : "ok"}
+          hint={t("an.contextHint")}
+        />
       </div>
       <div className="an-overview">
         <div className="an-overview-chart">
           <Panel title={t(chart === "failures" ? "an.verificationTrend" : "an.throughput")}>
-          <Segmented<Chart>
-            label={t("an.throughput")}
-            value={chart}
-            onChange={setChart}
-            options={[
-              ["completed_runs", t("an.showThroughput")],
-              ["failures", t("an.showFailures")],
-            ]}
-          />
-          <Trend
-            timezone={data.filters?.timezone}
-            rows={chart === "failures" ? (data.verification_trend ?? []) : (data.trend ?? [])}
-            field={chart}
-            label={t(chart === "failures" ? "an.verificationTrend" : "an.throughput")}
-          />
-        </Panel>
+            <Segmented<Chart>
+              label={t("an.throughput")}
+              value={chart}
+              onChange={setChart}
+              options={[
+                ["completed_runs", t("an.showThroughput")],
+                ["failures", t("an.showFailures")],
+              ]}
+            />
+            <Trend
+              timezone={data.filters?.timezone}
+              rows={chart === "failures" ? (data.verification_trend ?? []) : (data.trend ?? [])}
+              field={chart}
+              label={t(chart === "failures" ? "an.verificationTrend" : "an.throughput")}
+            />
+          </Panel>
         </div>
         <div className="an-overview-attn">
-        <Panel title={t("an.attention")}>
-          {notes.length ? (
-            <div className="an-attn-list">
-              {notes.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className={`an-attn${item.tone ? ` ${item.tone}` : ""}`}
-                  onClick={item.onClick}
-                >
-                  <span>{item.title}</span>
-                  <strong>{item.detail}</strong>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="muted small">{t("an.noAttention")}</p>
-          )}
-        </Panel>
+          <Panel title={t("an.attention")}>
+            {notes.length ? (
+              <div className="an-attn-list">
+                {notes.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`an-attn${item.tone ? ` ${item.tone}` : ""}`}
+                    onClick={item.onClick}
+                  >
+                    <span>{item.title}</span>
+                    <strong>{item.detail}</strong>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted small">{t("an.noAttention")}</p>
+            )}
+          </Panel>
         </div>
       </div>
     </>
@@ -217,7 +232,11 @@ function WorkflowTable({
             key: "workflow",
             label: "workflow",
             render: (r) => (
-              <button type="button" className="an-drill" onClick={() => onSelectWorkflow(String(r.workflow))}>
+              <button
+                type="button"
+                className="an-drill"
+                onClick={() => onSelectWorkflow(String(r.workflow))}
+              >
                 {String(r.workflow)}
                 {slowest && !slowest.partial && r.workflow === slowest.row.workflow ? (
                   <em className="an-slow-badge">{t("an.slowBadge")}</em>
@@ -294,7 +313,11 @@ function Bottlenecks({
               key: "workflow",
               label: "workflow",
               render: (r) => (
-                <button type="button" className="an-drill" onClick={() => onSelectWorkflow(String(r.workflow))}>
+                <button
+                  type="button"
+                  className="an-drill"
+                  onClick={() => onSelectWorkflow(String(r.workflow))}
+                >
                   {String(r.workflow)}
                 </button>
               ),
@@ -304,8 +327,18 @@ function Bottlenecks({
             { key: "execution_ms", label: "execution", style: "ms" },
             { key: "retries", label: "retry", style: "number" },
             { key: "blocked", label: "blocked", style: "number", responsivePriority: "secondary" },
-            { key: "context_preparation_ms", label: "context", style: "ms", responsivePriority: "secondary" },
-            { key: "approval_wait_ms", label: "approval", style: "ms", responsivePriority: "secondary" },
+            {
+              key: "context_preparation_ms",
+              label: "context",
+              style: "ms",
+              responsivePriority: "secondary",
+            },
+            {
+              key: "approval_wait_ms",
+              label: "approval",
+              style: "ms",
+              responsivePriority: "secondary",
+            },
           ]}
         />
       </Panel>
@@ -338,7 +371,8 @@ function RunDetails({
             key: "verified",
             label: "verification",
             responsivePriority: "secondary",
-            render: (r) => (r.verified == null ? "—" : t(r.verified ? "an.passed" : "an.notPassed")),
+            render: (r) =>
+              r.verified == null ? "—" : t(r.verified ? "an.passed" : "an.notPassed"),
           },
           {
             key: "created_at",

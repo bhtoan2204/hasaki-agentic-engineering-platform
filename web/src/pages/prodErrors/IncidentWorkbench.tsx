@@ -53,7 +53,12 @@ export interface Workbench {
     reasons: string[];
     causes: Cause[];
     conflicts: Array<{ cause: string; detail: string; refs: string[] }>;
-    verified_defects: Array<{ ref: string; location: Loc | null; causality: string; statement: string }>;
+    verified_defects: Array<{
+      ref: string;
+      location: Loc | null;
+      causality: string;
+      statement: string;
+    }>;
     runtime_findings: Array<{ ref: string; statement: string }>;
     missing_evidence: string[];
     next_actions: Array<{ kind: string; detail: string; cause?: string }>;
@@ -63,12 +68,24 @@ export interface Workbench {
   runtime: Progress | null;
   bug_hunt: Progress | null;
   evidence: Array<{ ref: string; run_id: number; stale: boolean; valid: boolean }>;
-  fix_tasks: Array<{ cause_key: string; run_id: number | null; code: string | null; status: string | null }>;
+  fix_tasks: Array<{
+    cause_key: string;
+    run_id: number | null;
+    code: string | null;
+    status: string | null;
+  }>;
   versions: Array<{ version: number; status: string; created_at: string }>;
-  metrics: Metrics & { verified_rcas: number; cost_per_verified_rca: number | null; reconciliation_llm_calls: number };
+  metrics: Metrics & {
+    verified_rcas: number;
+    cost_per_verified_rca: number | null;
+    reconciliation_llm_calls: number;
+  };
 }
 
-const loc = (l: Loc | null) => (l ? `${l.repository}:${l.file}${l.line_start ? `:${l.line_start}` : ""}${l.function ? ` (${l.function})` : ""}` : "—");
+const loc = (l: Loc | null) =>
+  l
+    ? `${l.repository}:${l.file}${l.line_start ? `:${l.line_start}` : ""}${l.function ? ` (${l.function})` : ""}`
+    : "—";
 const usd = (v: number | null) => (v == null ? "—" : `$${v.toFixed(v < 1 ? 4 : 2)}`);
 const runOf = (ref: string) => /^(?:run:(\d+)|bug_hunt:(\d+))/.exec(ref);
 
@@ -102,7 +119,17 @@ function MetricsLine({ m }: { m: Metrics | null }) {
   );
 }
 
-function SourceCard({ title, icon, p, hunt }: { title: string; icon: React.ReactNode; p: Progress | null; hunt?: boolean }) {
+function SourceCard({
+  title,
+  icon,
+  p,
+  hunt,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  p: Progress | null;
+  hunt?: boolean;
+}) {
   const { t } = useI18n();
   return (
     <div className="wb-source" data-testid={hunt ? "wb-hunt" : "wb-runtime"}>
@@ -117,8 +144,16 @@ function SourceCard({ title, icon, p, hunt }: { title: string; icon: React.React
       {!p && <p className="muted small">{t("an.wb.notRun")}</p>}
       {p && (
         <>
-          <div className="wb-progress" role="progressbar" aria-valuemin={0} aria-valuemax={p.steps_total} aria-valuenow={p.steps_done}>
-            <span style={{ width: `${p.steps_total ? (100 * p.steps_done) / p.steps_total : 0}%` }} />
+          <div
+            className="wb-progress"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={p.steps_total}
+            aria-valuenow={p.steps_done}
+          >
+            <span
+              style={{ width: `${p.steps_total ? (100 * p.steps_done) / p.steps_total : 0}%` }}
+            />
           </div>
           <div className="small">
             {t("an.wb.steps", { done: p.steps_done, total: p.steps_total })}
@@ -135,9 +170,16 @@ function SourceCard({ title, icon, p, hunt }: { title: string; icon: React.React
   );
 }
 
-function RepoPicker({ onPick, onClose }: { onPick: (repos: string[]) => void; onClose: () => void }) {
+function RepoPicker({
+  onPick,
+  onClose,
+}: {
+  onPick: (repos: string[]) => void;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
-  const repos = useApi<Array<{ name: string; enabled: boolean; self?: boolean }>>("/api/repositories");
+  const repos =
+    useApi<Array<{ name: string; enabled: boolean; self?: boolean }>>("/api/repositories");
   const [chosen, setChosen] = useState<string[]>([]);
   const available = (repos.data ?? []).filter((r) => r.enabled && !r.self);
   return (
@@ -150,12 +192,18 @@ function RepoPicker({ onPick, onClose }: { onPick: (repos: string[]) => void; on
               type="checkbox"
               checked={chosen.includes(r.name)}
               disabled={!chosen.includes(r.name) && chosen.length >= 3}
-              onChange={(e) => setChosen((c) => (e.target.checked ? [...c, r.name] : c.filter((x) => x !== r.name)))}
+              onChange={(e) =>
+                setChosen((c) =>
+                  e.target.checked ? [...c, r.name] : c.filter((x) => x !== r.name),
+                )
+              }
             />{" "}
             {r.name}
           </label>
         ))}
-        {repos.data && !available.length && <span className="muted">{t("an.bh.noRepositories")}</span>}
+        {repos.data && !available.length && (
+          <span className="muted">{t("an.bh.noRepositories")}</span>
+        )}
         <small className="muted">{t("an.bh.repositoriesHint")}</small>
       </fieldset>
       <div className="bh-form-actions">
@@ -174,7 +222,13 @@ function RepoPicker({ onPick, onClose }: { onPick: (repos: string[]) => void; on
  * Unified Incident Workbench (Incidents accordion): the reconciled RCA first, then each workflow's status, then the
  * evidence. Nothing starts without a click; a completed workflow is re-run only after an explicit confirmation.
  */
-export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string; onHunt?: (huntId: number, status?: string) => void }) {
+export function IncidentWorkbench({
+  fingerprint,
+  onHunt,
+}: {
+  fingerprint: string;
+  onHunt?: (huntId: number, status?: string) => void;
+}) {
   const { t } = useI18n();
   const wb = useApi<Workbench>(`/api/prod-errors/${fingerprint}/workbench`);
   const [picking, setPicking] = useState<null | "bug-hunt" | "both">(null);
@@ -182,14 +236,22 @@ export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string
   const d = wb.data;
   usePolling(!!(d?.runtime?.active || d?.bug_hunt?.active), wb.reload);
 
-  const start = async (kind: "runtime" | "bug-hunt" | "both", repositories?: string[], force = false): Promise<void> => {
+  const start = async (
+    kind: "runtime" | "bug-hunt" | "both",
+    repositories?: string[],
+    force = false,
+  ): Promise<void> => {
     setBusy(true);
     try {
-      const r = await api<Record<string, unknown>>(`/api/prod-errors/${fingerprint}/workbench/${kind}`, {
-        ...(repositories ? { repositories } : {}),
-        ...(force ? { force: true } : {}),
-      });
-      const errs = kind === "both" ? Object.values(r).filter((x) => (x as { error?: string })?.error) : [];
+      const r = await api<Record<string, unknown>>(
+        `/api/prod-errors/${fingerprint}/workbench/${kind}`,
+        {
+          ...(repositories ? { repositories } : {}),
+          ...(force ? { force: true } : {}),
+        },
+      );
+      const errs =
+        kind === "both" ? Object.values(r).filter((x) => (x as { error?: string })?.error) : [];
       if (errs.length) toast(errs.map((e) => (e as { error: string }).error).join("\n"), "err");
       else toast(t("an.wb.started"), "ok");
       const hunt = (kind === "both" ? r.bug_hunt : r) as { hunt_id?: number } | undefined;
@@ -216,15 +278,20 @@ export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string
   const fix = async (c: Cause) => {
     const ok = await dialog.confirm({
       title: t("an.wb.fixTitle"),
-      description: t(c.level === "unknown" ? "an.wb.fixBodyDefectOnly" : "an.wb.fixBody", { cause: loc(c.location) }),
+      description: t(c.level === "unknown" ? "an.wb.fixBodyDefectOnly" : "an.wb.fixBody", {
+        cause: loc(c.location),
+      }),
       confirmLabel: t("an.wb.fixConfirm"),
     });
     if (!ok) return;
     try {
-      const r = await api<{ created: boolean; run_id: number }>(`/api/prod-errors/${fingerprint}/workbench/fix`, {
-        cause_key: c.key,
-        confirm: true,
-      });
+      const r = await api<{ created: boolean; run_id: number }>(
+        `/api/prod-errors/${fingerprint}/workbench/fix`,
+        {
+          cause_key: c.key,
+          confirm: true,
+        },
+      );
       toast(t(r.created ? "an.wb.fixCreated" : "an.wb.fixExists", { id: r.run_id }), "ok");
       wb.reload();
     } catch (e) {
@@ -235,7 +302,9 @@ export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string
   if (wb.error && !d) return <ErrorBox error={wb.error} onRetry={wb.reload} />;
   if (!d?.rca) return <p className="muted small">{t("an.bh.loading")}</p>;
   const rca = d.rca;
-  const fixable = new Set(rca.next_actions.filter((a) => a.kind === "create_fix").map((a) => a.cause));
+  const fixable = new Set(
+    rca.next_actions.filter((a) => a.kind === "create_fix").map((a) => a.cause),
+  );
   return (
     <section className="wb" aria-label={t("an.wb.title")} data-testid="incident-workbench">
       <div className="wb-summary" data-testid="wb-summary">
@@ -246,7 +315,11 @@ export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string
           <span className={`pill wb-status wb-${rca.status.toLowerCase()}`} data-testid="wb-status">
             {t(`an.wb.status.${rca.status}`)}
           </span>
-          {rca.version != null && <span className="muted small">{t("an.wb.version", { v: rca.version, n: d.versions.length })}</span>}
+          {rca.version != null && (
+            <span className="muted small">
+              {t("an.wb.version", { v: rca.version, n: d.versions.length })}
+            </span>
+          )}
         </div>
         <ul className="small">
           {rca.reasons.map((r) => (
@@ -287,7 +360,12 @@ export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string
                   </td>
                   <td>
                     {fixable.has(c.key) && (
-                      <Button size="sm" variant="secondary" icon={<Wrench size={13} />} onClick={() => fix(c)}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={<Wrench size={13} />}
+                        onClick={() => fix(c)}
+                      >
                         {t("an.wb.createFix")}
                       </Button>
                     )}
@@ -300,13 +378,30 @@ export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string
       </div>
 
       <div className="wb-actions">
-        <Button size="sm" icon={<Activity size={14} />} loading={busy} disabled={!!d.runtime?.active} onClick={() => start("runtime")}>
+        <Button
+          size="sm"
+          icon={<Activity size={14} />}
+          loading={busy}
+          disabled={!!d.runtime?.active}
+          onClick={() => start("runtime")}
+        >
           {t("an.wb.runRuntime")}
         </Button>
-        <Button size="sm" variant="secondary" icon={<Bug size={14} />} disabled={busy || !!d.bug_hunt?.active} onClick={() => setPicking("bug-hunt")}>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<Bug size={14} />}
+          disabled={busy || !!d.bug_hunt?.active}
+          onClick={() => setPicking("bug-hunt")}
+        >
           {t("an.wb.runHunt")}
         </Button>
-        <Button size="sm" variant="secondary" disabled={busy || !!d.runtime?.active || !!d.bug_hunt?.active} onClick={() => setPicking("both")}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy || !!d.runtime?.active || !!d.bug_hunt?.active}
+          onClick={() => setPicking("both")}
+        >
           {t("an.wb.runBoth")}
         </Button>
       </div>
@@ -333,7 +428,8 @@ export function IncidentWorkbench({ fingerprint, onHunt }: { fingerprint: string
           <ul className="small">
             {rca.verified_defects.map((v) => (
               <li key={v.ref}>
-                <span className="mono">{loc(v.location)}</span> — {t("an.wb.defectCausality", { c: v.causality })} · <Ref r={v.ref} wb={d} />
+                <span className="mono">{loc(v.location)}</span> —{" "}
+                {t("an.wb.defectCausality", { c: v.causality })} · <Ref r={v.ref} wb={d} />
               </li>
             ))}
           </ul>

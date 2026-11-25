@@ -247,9 +247,7 @@ export function ModelCombobox({
         </button>
       </div>
       {discovery === "available" && value && !selectedCatalogModel && (
-        <small className="set-warn agent-combo-warn">
-          {t("set.comboCustomWarn")}
-        </small>
+        <small className="set-warn agent-combo-warn">{t("set.comboCustomWarn")}</small>
       )}
       {open &&
         menuRect &&
@@ -344,9 +342,7 @@ export function AgentValueFields({
         </div>
       )}
       {controls?.model === false && value.model && (
-        <p className="small set-warn">
-          {t("set.modelUnsupported", { model: value.model })}
-        </p>
+        <p className="small set-warn">{t("set.modelUnsupported", { model: value.model })}</p>
       )}
       {!!efforts.length && (
         <Field label={name(t("set.field.reasoningEffort"))}>

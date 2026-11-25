@@ -141,9 +141,7 @@ export function EvaluationBenchmarks() {
         >
           {t("repo.ci.refresh")}
         </button>
-        {!runs.data.enabled && (
-          <span className="muted small">{t("bench.disabledLocally")}</span>
-        )}
+        {!runs.data.enabled && <span className="muted small">{t("bench.disabledLocally")}</span>}
       </div>
       <div className="table-wrap">
         <table>
@@ -223,8 +221,9 @@ export function EvaluationBenchmarks() {
                   </td>
                   <td>{statusText(r.status) || r.status}</td>
                   <td>
-                    {r.configuration.adapter} · P1 {r.configuration.code_intelligence ? "ON" : "OFF"}{" "}
-                    · {r.configuration.prompt_version}
+                    {r.configuration.adapter} · P1{" "}
+                    {r.configuration.code_intelligence ? "ON" : "OFF"} ·{" "}
+                    {r.configuration.prompt_version}
                   </td>
                   <td>
                     {r.finished}/{r.tasks}
@@ -301,7 +300,11 @@ export function EvaluationBenchmarks() {
                     <td>
                       {p.task} / {p.repetition}
                     </td>
-                    <td>{p.baseline?.status ? (statusText(p.baseline.status) || p.baseline.status) : t("common.none")}</td>
+                    <td>
+                      {p.baseline?.status
+                        ? statusText(p.baseline.status) || p.baseline.status
+                        : t("common.none")}
+                    </td>
                     <td>{statusText(p.candidate.status) || p.candidate.status}</td>
                     <td>
                       {p.baseline
@@ -339,7 +342,10 @@ export function EvaluationBenchmarks() {
         <>
           <div className="toolbar">
             <h4>
-              {t("bench.evalDetail", { id: detail.id, status: statusText(detail.status) || detail.status })}
+              {t("bench.evalDetail", {
+                id: detail.id,
+                status: statusText(detail.status) || detail.status,
+              })}
             </h4>
             <button
               className="ghost sm"
@@ -372,7 +378,9 @@ export function EvaluationBenchmarks() {
           {detail.cases.map((c) => (
             <details key={`${c.task_id}-${c.repetition}`}>
               <summary>
-                {c.task_id} / {c.repetition} · {c.status ? (statusText(c.status) || c.status) : c.step_status} · {t("cl.score", { n: number(c.quality_score) })}
+                {c.task_id} / {c.repetition} ·{" "}
+                {c.status ? statusText(c.status) || c.status : c.step_status} ·{" "}
+                {t("cl.score", { n: number(c.quality_score) })}
               </summary>
               <p>{c.definition.description}</p>
               <p className="mono">{t("bench.pinnedCommit", { commit: c.base_commit })}</p>

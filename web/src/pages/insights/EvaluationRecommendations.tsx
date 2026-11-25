@@ -60,10 +60,7 @@ export function EvaluationRecommendations() {
   const show = active ?? rows.data?.[0],
     d = show?.decision;
   return (
-    <Panel
-      title={t("an.eval.recommendations")}
-      hint={t("an.eval.recommendationsHint")}
-    >
+    <Panel title={t("an.eval.recommendations")} hint={t("an.eval.recommendationsHint")}>
       <div className="grid2">
         <Field label={t("an.eval.taskCategory")}>
           <input
@@ -83,11 +80,7 @@ export function EvaluationRecommendations() {
       {rows.error && <ErrorBox error={rows.error} onRetry={rows.reload} />}
       {policies.error && <ErrorBox error={policies.error} onRetry={policies.reload} />}
       {rows.loading && !rows.data && <SkeletonRows rows={2} />}
-      {!rows.loading && !show && (
-        <Empty>
-          {t("an.eval.insufficientEvidence")}
-        </Empty>
-      )}
+      {!rows.loading && !show && <Empty>{t("an.eval.insufficientEvidence")}</Empty>}
       {show && d && (
         <>
           <h4>
@@ -96,17 +89,14 @@ export function EvaluationRecommendations() {
               : t("an.eval.insufficientOrUnavailable")}
           </h4>
           <p className="small">
-            {t("an.eval.confidence")}: {d.confidence} · {t("an.eval.samples")}:{" "}
-            {d.samples ?? 0} · {t("an.eval.distinctTasks")}:{" "}
-            {d.distinct_tasks ?? 0} · {t("an.eval.verifiedSuccess")}:{" "}
+            {t("an.eval.confidence")}: {d.confidence} · {t("an.eval.samples")}: {d.samples ?? 0} ·{" "}
+            {t("an.eval.distinctTasks")}: {d.distinct_tasks ?? 0} · {t("an.eval.verifiedSuccess")}:{" "}
             {fmt(d.success_rate, "pct")} · {t("an.eval.median")}: {fmt(d.median_ms, "ms")} ·{" "}
             {t("an.eval.costAvailability")}: {d.cost_availability ?? "Unknown"}
           </p>
           <p className="muted small">{d.reason}</p>
           <details>
-            <summary>
-              {t("an.eval.supportingEvidenceVer")}
-            </summary>
+            <summary>{t("an.eval.supportingEvidenceVer")}</summary>
             <p className="mono small">
               {show.version} · {show.evidence_hash}
             </p>
