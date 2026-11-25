@@ -1,3 +1,5 @@
+import { LATENT_REVIEW_RULE, LATENT_SWEEP } from "../latentRisk/checklist.ts";
+
 /**
  * Built-in workflow templates. Seeded on startup as normal versioned definitions (is_template = true):
  * editing one publishes a new version; running runs stay pinned to the version they started with.
@@ -361,12 +363,16 @@ const REVIEW = {
     "swallowed or double-logged errors, comments the minimal-comments standard rejects, placeholder/TODO stubs, helpers that duplicate an existing one in the repo, " +
     "unrequested backward-compat shims, single-use abstractions, tests that assert nothing, and edits outside the task. Prefix such findings with [slop], " +
     "cite the evidence (the invariant, the existing helper, the lost error) and keep them low unless they hide a defect (a swallowed error is medium or high); " +
-    "low [slop] findings alone do not reject the change. Report findings; do not modify code.",
+    "low [slop] findings alone do not reject the change. " +
+    LATENT_REVIEW_RULE +
+    "Report findings; do not modify code.",
   output_contract:
     "{ approved: boolean, findings: [{ severity: 'high'|'medium'|'low', file, line, issue, evidence, suggestion }], summary }",
   workspace_read: true,
   // Scope + curated per-language rules from Alibaba OpenCodeReview (delegation mode, no extra model/API key).
   open_code_review: true,
+  // Adds the deterministic latent-risk probe's candidates for this diff to the prompt (src/latentRisk).
+  latent_risks: true,
 };
 
 /**
@@ -510,6 +516,7 @@ const ASSESS_SIGNALS =
   "PERFORMANCE (blocking I/O, needless serialization, excessive allocation), CODE_QUALITY (dead code, unused dependency, duplicated logic), RELIABILITY (missing timeout, retry storm, ignored cancellation), " +
   "DATA_INTEGRITY (lost update, duplicate processing, invalid state transition), SECURITY (injection, SSRF, sensitive data exposure), BUSINESS_LOGIC (edge case, wrong condition, missing validation), DISTRIBUTED (missing idempotency, inconsistent state, message loss). " +
   "Use the read-only analysers when they fit: go vet, go test -race, staticcheck, golangci-lint run, govulncheck, deadcode, benchmarks with -benchmem, and go tool pprof -top/-list on a profile written to /tmp. " +
+  LATENT_SWEEP +
   "Load the verification-recipes skill: it says, per kind, which test demonstrates the finding. " +
   "Give each finding the repository its code is in (`repo`) and, in `related_repos`, the other selected repositories with the same defect or affected by it. " +
   "Give each finding a `title` of at most 80 characters naming the defect, and the `symbol` (function, method or type) its code is in: findings are tracked across scans by repo, category, file and symbol. " +
@@ -523,6 +530,7 @@ const FINDINGS_CONTRACT =
 const IMPROVE_ASSESS = {
   evidence: "root_cause",
   code_evidence: "required",
+  latent_risks: true,
   instructions:
     "Assess the selected repositories for ONE improvement worth making, in stages, and stop as soon as the evidence decides. " +
     ASSESS_SIGNALS +
@@ -546,6 +554,7 @@ const IMPROVE_ASSESS = {
 const IMPROVE_SCAN = {
   evidence: "analysis",
   code_evidence: "required",
+  latent_risks: true,
   instructions:
     "Assess the selected repositories in stages and list every evidence-backed finding (at most 20, most severe first). Nothing is changed and nothing is selected here: a person picks the findings to fix. " +
     ASSESS_SIGNALS +

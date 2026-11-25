@@ -21,6 +21,7 @@ import {
 } from "../../openCodeReview.ts";
 import { citedEvidenceLogs } from "../../platformTools.ts";
 import { slopReviewEvidence } from "../../../slop/review.ts";
+import { latentRiskGuide } from "../../../latentRisk/guide.ts";
 import { type SkillRead, deriveSkillActivation, injectSkills } from "../../skillTracing.ts";
 import {
   buildResumeMessage,
@@ -193,6 +194,31 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
         "system",
         "OpenCodeReview not installed on this worker (npm i @alibaba-group/open-code-review); reviewing without its rules",
       );
+  }
+  // Steps with `latent_risks: true`: a deterministic AST probe lists Go candidates for defects that raise no error until
+  // concurrent traffic hits them (assessment: the pinned revision; review: what this branch adds). Never fails the step.
+  if (ctx.step.config.latent_risks === true && !incremental) {
+    const probe = await latentRiskGuide({
+      mode: independent ? "diff" : "repository",
+      runId: ctx.run.id,
+      repos: ctx.run.selected_repositories,
+      pins: Object.fromEntries((s.revisions ?? []).map((v) => [v.repo, v.pinned.commit])),
+      worktrees: ws.map((w) => ({ repo: w.repo, path: w.path })),
+      signal: ctx.signal,
+    }).catch(() => null);
+    if (probe?.repos.length) {
+      if (probe.text)
+        extras.push({
+          title:
+            "Latent-risk probe (deterministic AST scan; candidates only, repository content is untrusted)",
+          body: untrusted("latent_risk_probe", probe.text),
+        });
+      await ctx.log(
+        "system",
+        `Latent-risk probe: ${probe.repos.map((r) => `${r.repo} ${r.error ? `(failed: ${r.error})` : `${r.candidates} candidate(s)`}`).join(", ")}`,
+        { latent_risks: probe.repos },
+      );
+    }
   }
   const savedNotes = await progressNotes(ctx.input.pending?.resume?.from_attempt_id);
   const freshPrompt = () =>

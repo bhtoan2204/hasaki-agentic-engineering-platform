@@ -795,7 +795,11 @@ export const KNOWLEDGE_SEEDS: KnowledgeInput[] = [
       "both. Recipes per kind (Go, standard library and toolchain only):",
       "- CONCURRENCY: drive the shared code from N goroutines (sync.WaitGroup, a start barrier). Data race: the platform runs",
       "  this test with -race. Deadlock: run the scenario in a goroutine and fail if it has not returned within a deadline",
-      "  (select on done vs time.After).",
+      "  (select on done vs time.After). Shared instance (a func() T returning a captured pointer, map, slice or interface{}:",
+      "  factory, prototype, event constructor): call it twice and assert the results are distinct instances (compare",
+      "  pointers), then call it from N goroutines that each mutate their result so -race fails on the shared one. A getter",
+      "  that locks and returns an internal map or slice: read the result in one goroutine while another writes through",
+      "  the setter, under -race; the fix returns a copy made while the lock is held.",
       "- MEMORY: repeat the operation K times, runtime.GC(), and assert runtime.ReadMemStats HeapInuse (or the cache's",
       "  length) stays under a bound that the leak exceeds; per-call allocation: testing.AllocsPerRun.",
       "- RESOURCE: goroutines: runtime.NumGoroutine before and after (wait briefly for exits); connections: sql.DB.Stats()",
@@ -840,9 +844,38 @@ export const KNOWLEDGE_SEEDS: KnowledgeInput[] = [
     metadata: { required_tools: ["Read", "Edit", "Write", "Bash"] },
   },
 ];
+/** Seeds whose newer text is applied to deployments that already hold the item (never over a human edit). */
+const UPGRADED_SEEDS = new Set(["verification-recipes"]);
+
+/** An upgradable seed nobody has edited (its newest version is still the seed's) whose text the code has since changed. */
+export function staleSeed(
+  existing: {
+    versions: Array<{ content: string; change_note?: string | null; created_by?: string | null }>;
+  },
+  seed: { key: string; content: string },
+): boolean {
+  const latest = existing.versions[0];
+  return (
+    UPGRADED_SEEDS.has(seed.key) &&
+    !!latest &&
+    /^seed( update)?$/.test(latest.change_note ?? "") &&
+    !latest.created_by &&
+    latest.content !== seed.content
+  );
+}
+
 export async function seedKnowledge() {
   const deleted = await knowledge.deletedKeys();
-  for (const s of KNOWLEDGE_SEEDS)
-    if (!deleted.has(s.key) && !(await knowledge.get(s.key)))
-      await knowledge.create({ ...s, change_note: "seed" });
+  for (const s of KNOWLEDGE_SEEDS) {
+    if (deleted.has(s.key)) continue;
+    const existing = await knowledge.get(s.key);
+    if (!existing) await knowledge.create({ ...s, change_note: "seed" });
+    else if (staleSeed(existing, s))
+      await knowledge.update(s.key, {
+        content: s.content,
+        applicability: s.applicability,
+        metadata: s.metadata,
+        change_note: "seed update",
+      });
+  }
 }
