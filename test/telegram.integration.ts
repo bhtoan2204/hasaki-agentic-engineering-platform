@@ -1293,6 +1293,12 @@ test("an unreachable Telegram API is reported as a network failure with its syst
       2000,
       "a Telegram-side error retries quickly",
     );
+    const conflict = new TelegramApiError(409);
+    assert.deepEqual(
+      [1, 2, 3, 4, 5, 6, 7, 20].map((n) => retryDelayMs(conflict, n)),
+      [2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000],
+      "a competing consumer is probed with exponential backoff, not every two seconds",
+    );
   } finally {
     config.telegram.apiBase = saved;
   }

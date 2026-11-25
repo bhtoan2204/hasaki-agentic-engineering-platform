@@ -314,8 +314,11 @@ async function refreshTelegramCredentials() {
  * no VPN/proxy) backs off for a minute so an instance sharing the database that CAN reach it keeps the lease, instead
  * of the two alternating every few seconds.
  */
-export function retryDelayMs(e: unknown) {
-  return e instanceof TelegramApiError && e.network ? 60_000 : 2000;
+export function retryDelayMs(e: unknown, failures = 1) {
+  if (e instanceof TelegramApiError && e.network) return 60_000;
+  if (e instanceof TelegramApiError && e.code === 409)
+    return Math.min(60_000, 2000 * 2 ** (failures - 1));
+  return 2000;
 }
 /** A loggable reason: Telegram error codes and our own messages only, never URLs, tokens or payloads. */
 export function consumerFailure(e: unknown) {
@@ -353,7 +356,14 @@ export function startTelegramTransport() {
   });
   const stopping = new AbortController();
   let lastFailure = "",
-    refreshedAt = 0;
+    refreshedAt = 0,
+    failures = 0;
+  const markActive = () => {
+    failures = 0;
+    if (!lastFailure) return;
+    console.log(`Telegram ${config.telegram.mode} receiver active`);
+    lastFailure = "";
+  };
   const task = (async () => {
     while (!stopping.signal.aborted) {
       // Credentials saved by an administrator on ANOTHER instance must reach this receiver without a restart.
@@ -414,10 +424,7 @@ export function startTelegramTransport() {
             },
             { signal: session.signal },
           );
-        if (lastFailure) {
-          console.log(`Telegram ${mode} receiver active`);
-          lastFailure = "";
-        }
+        if (mode === "webhook") markActive();
         while (!session.signal.aborted && key === botKey() && mode === config.telegram.mode) {
           if (Date.now() - refreshedAt >= CREDENTIAL_REFRESH_MS) {
             refreshedAt = Date.now();
@@ -448,6 +455,7 @@ export function startTelegramTransport() {
               { signal: session.signal, timeout: 15000 },
             );
             if (!Array.isArray(updates)) throw new Error("Invalid Telegram update batch");
+            markActive();
             await persistPollingBatch(updates, owner, claim.epoch, key);
             if (!updates.length) await sleep(250, undefined, { signal: session.signal });
           } else await sleep(500, undefined, { signal: session.signal });
@@ -458,7 +466,10 @@ export function startTelegramTransport() {
           if (reason !== lastFailure)
             console.warn(`Telegram ${mode} receiver unavailable: ${reason}; will retry`);
           lastFailure = reason;
-          await sleep(retryDelayMs(e), undefined, { signal: stopping.signal }).catch(() => {});
+          failures++;
+          await sleep(retryDelayMs(e, failures), undefined, { signal: stopping.signal }).catch(
+            () => {},
+          );
         }
       } finally {
         if (heartbeat) clearInterval(heartbeat);
