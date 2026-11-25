@@ -1,7 +1,8 @@
 # Encryption key rotation (design)
 
-Status: **proposal, awaiting approval. No code has been written.** Step B (implementation) starts only after this document
-is approved.
+Status: **approved and implemented** (`src/auth/crypto.ts`, `src/auth/rotation.ts`, `src/cli/rotate-keys.ts`). The four
+decisions in section 10 were taken as proposed: derived key id, two-release rollout, checkpoints left on the old key,
+sessions survive rotation.
 
 Goal: change the application key without losing a single stored credential, with a reader/writer that understands
 several keys, and a re-encrypt command that is safe to repeat.
@@ -184,7 +185,7 @@ Unit: format parse/serialise, kid derivation and duplicate-kid rejection, config
   rotation becomes frequent.
 - External KMS.
 
-## 10. Decisions I need from you
+## 10. Decisions (all taken as proposed)
 
 1. **Key id derived from the key** (proposed) vs. an explicit label such as `AUTH_SECRET_V2=...`.
 2. **Two-release rollout** (reader first, writer later; proposed) vs. a single release (simpler, but a machine on old code

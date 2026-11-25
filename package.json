@@ -35,6 +35,7 @@
     "skills:import-external": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/import-external-skills.ts",
     "step:reexecute": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/reexecute-step.ts",
     "bench": "node --disable-warning=ExperimentalWarning src/cli/bench.ts",
+    "auth:rotate-keys": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/rotate-keys.ts",
     "admin:bootstrap": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/bootstrap-admin.ts",
     "bench:dependencies": "node --disable-warning=ExperimentalWarning src/cli/bench-dependencies.ts",
     "bench:cache": "node --disable-warning=ExperimentalWarning --expose-gc src/cli/benchCache.ts",

@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { pool, q, one } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { clientIp } from "../http/clientIp.ts";
-import { randomToken, safeEqual, sessionHash } from "./crypto.ts";
+import { randomToken, safeEqual, sessionHash, sessionHashes } from "./crypto.ts";
 import { verifyPassword } from "./password.ts";
 import { assertUsername, publicUser, userByUsername, type PublicUser } from "./users.ts";
 import {
@@ -154,15 +154,19 @@ export async function login(
 export async function sessionFromRequest(req: IncomingMessage): Promise<SessionUser | null> {
   const token = readCookie(req);
   if (!token) return null;
-  let hash: string;
+  let hashes: string[];
   try {
-    hash = sessionHash(token);
+    // One hash per configured key: a session created before a key rotation still authenticates (key-rotation.md).
+    hashes = sessionHashes(token);
   } catch {
     return null;
   }
-  const hit = cachedSession<SessionUser>(hash);
-  if (hit) return hit;
+  for (const candidate of hashes) {
+    const hit = cachedSession<SessionUser>(candidate);
+    if (hit) return hit;
+  }
   const row = await one<{
+    token_hash: string;
     id: number;
     username: string;
     role: string;
@@ -172,16 +176,16 @@ export async function sessionFromRequest(req: IncomingMessage): Promise<SessionU
     revoked_at: string | null;
   }>(
     pool,
-    `SELECT u.id, u.username, u.role, u.active, s.csrf_token, s.expires_at, s.revoked_at
+    `SELECT s.token_hash, u.id, u.username, u.role, u.active, s.csrf_token, s.expires_at, s.revoked_at
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token_hash = $1`,
-    [hash],
+      WHERE s.token_hash = ANY($1)`,
+    [hashes],
   );
   if (!row || row.revoked_at || !row.active) return null;
   const expiresAt = new Date(row.expires_at).getTime();
   if (expiresAt <= Date.now()) return null;
   const user = { ...publicUser(row), csrf: row.csrf_token };
-  rememberSession(hash, Number(row.id), expiresAt, user);
+  rememberSession(row.token_hash, Number(row.id), expiresAt, user);
   return user;
 }
 
@@ -189,12 +193,12 @@ export async function logout(req: IncomingMessage) {
   const token = readCookie(req);
   if (!token) return;
   try {
-    const hash = sessionHash(token);
-    forgetSession(hash);
+    const hashes = sessionHashes(token);
+    for (const hash of hashes) forgetSession(hash);
     await q(
       pool,
-      "UPDATE sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL",
-      [hash],
+      "UPDATE sessions SET revoked_at = now() WHERE token_hash = ANY($1) AND revoked_at IS NULL",
+      [hashes],
     );
   } catch {
     /* missing AUTH_SECRET: nothing to revoke */

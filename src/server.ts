@@ -1,5 +1,6 @@
 import { startTelegramTransport } from "./telegram/transport.ts";
 import { pruneLoginAttempts } from "./auth/sessions.ts";
+import { keyRing, writeFormat } from "./auth/crypto.ts";
 import { enforceAutonomyTimeouts } from "./chat/autonomy.ts";
 import { radarTick } from "./radar/scan.ts";
 import { dispatchDelegations } from "./workflow/delegationDispatch.ts";
@@ -50,8 +51,11 @@ import { stopSupervised } from "./agent/process/supervisor.ts";
 // logged that as "Telegram API error 503". Give each address 2.5 s; a real outage still fails at the caller's timeout.
 setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
-if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16) {
-  console.error("AUTH_SECRET must be set (at least 16 characters). Refusing to start.");
+try {
+  keyRing();
+  writeFormat();
+} catch (e) {
+  console.error(`${(e as Error).message}. Refusing to start.`);
   process.exit(1);
 }
 
