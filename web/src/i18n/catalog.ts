@@ -1242,6 +1242,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.bugTitle": "Tiêu đề (tuỳ chọn)",
     "wi.bugDescription": "Mô tả bug trên QC",
     "wi.bugCreate": "Tạo task bug và chạy",
+    "wi.bugCreateOpen": "Báo bug từ QC…",
     "wi.policy": "Chính sách tự động",
     "wi.policyHint":
       "Chỉ dùng khi poller tự import task: tự chạy workflow này. Mặc định không có — không gì tự chạy.",
@@ -4740,6 +4741,7 @@ export const catalog: Record<"vi" | "en", Record<string, string>> = {
     "wi.bugTitle": "Title (optional)",
     "wi.bugDescription": "Bug found on QC",
     "wi.bugCreate": "Create bug task and run",
+    "wi.bugCreateOpen": "Report a QC bug…",
     "wi.policy": "Automation policy",
     "wi.policyHint":
       "Used only when the poller imports a task by itself: it starts this workflow. Empty by default — nothing starts on its own.",

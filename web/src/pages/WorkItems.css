@@ -497,6 +497,8 @@
 .wi-detail-side {
   position: sticky;
   top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
 }
 
 .wi-desc {
@@ -641,6 +643,16 @@
   justify-content: center;
   padding: 11px 16px;
   font-size: var(--fs-md);
+  margin-top: var(--sp-3);
+}
+
+.wi-bug {
+  margin-top: var(--sp-3);
+}
+
+.wi-bug .wi-bug-open {
+  width: 100%;
+  justify-content: center;
   margin-top: var(--sp-3);
 }
 

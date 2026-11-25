@@ -35,6 +35,7 @@ dark theme is token-driven (`:root[data-theme="dark"]`). Vietnamese UI copy (kee
 
 - Pages own their layout; put page-specific CSS in `web/src/pages/<Page>.css` (imported by the page), class names prefixed with the page (`.wi-…`, `.runs-…`). Do not edit `styles.css`, `ui.tsx`, `App.tsx` (the shell already provides sidebar + topbar; pages render inside `.page` with padding, or `.page.full` for canvas pages).
 - Code structure, state and effects follow `docs/frontend/ui-quality-standards.md` §11.
+- Every frontend change goes through the checklist in `docs/frontend/ui-quality-standards.md` §12 (placement, grouping, hierarchy, states, reuse, i18n, verification).
 - Keep every API call, route, handler and behaviour. Redesign = layout, hierarchy, components, states — not semantics.
 - Real data only. Never invent metrics; show "—" / empty states when data is missing.
 - Responsive: must work at 1440 / 1024 / 390 px with no horizontal page overflow (wide tables scroll inside `.table-wrap`).

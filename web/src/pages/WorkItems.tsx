@@ -1126,6 +1126,7 @@ export function WorkItemDetail({ id }: { id: number }) {
   const [bugOpen, setBugOpen] = useState(false);
   const [bugTitle, setBugTitle] = useState("");
   const [bugDescription, setBugDescription] = useState("");
+  const [bugBusy, setBugBusy] = useState(false);
   useEffect(() => setBugOpen(false), [id]);
   const routedId = useRef<number | null>(null);
   useEffect(() => {
@@ -1162,6 +1163,7 @@ export function WorkItemDetail({ id }: { id: number }) {
   };
   const hasBranch = w.runs.length > 0 || w.pull_requests.length > 0;
   const startBugFollowUp = async () => {
+    setBugBusy(true);
     const r = await act(() =>
       api<{ run: { id: number } }>(`/api/work-items/${id}/bug-followups`, {
         title: bugTitle.trim() || undefined,
@@ -1171,6 +1173,7 @@ export function WorkItemDetail({ id }: { id: number }) {
         agent_provider: agentProvider,
       }),
     );
+    setBugBusy(false);
     if (r) navigate(`/runs/${r.run.id}`);
   };
   const selectedWf = (wfs ?? []).find((x) => x.key === wf);
@@ -1197,18 +1200,6 @@ export function WorkItemDetail({ id }: { id: number }) {
           <span className="mono">{w.code || `#${id}`}</span>
           <span title={w.title}>{w.title}</span>
         </div>
-        <button
-          className="ghost sm"
-          type="button"
-          aria-haspopup="dialog"
-          aria-expanded={bugOpen}
-          disabled={!hasBranch}
-          title={hasBranch ? t("wi.bugFollowUpHint") : t("wi.bugNoBranch")}
-          onClick={() => setBugOpen(true)}
-        >
-          <Bug size={16} strokeWidth={2} />
-          {t("wi.bugFollowUp")}
-        </button>
         <button
           className="ghost sm"
           type="button"
@@ -1370,6 +1361,34 @@ export function WorkItemDetail({ id }: { id: number }) {
               </button>
             </div>
           </section>
+          <section className="card wi-bug">
+            <div className="wi-launch-head">
+              <span className="wi-launch-icon">
+                <Bug size={18} strokeWidth={2.2} />
+              </span>
+              <div>
+                <h4>{t("wi.bugFollowUp")}</h4>
+                <div className="muted small">{t("wi.bugFollowUpHint")}</div>
+              </div>
+            </div>
+            {!hasBranch && (
+              <div className="muted small" id="wi-bug-reason">
+                {t("wi.bugNoBranch")}
+              </div>
+            )}
+            <button
+              className="ghost wi-bug-open"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={bugOpen}
+              aria-describedby={hasBranch ? undefined : "wi-bug-reason"}
+              disabled={!hasBranch}
+              onClick={() => setBugOpen(true)}
+            >
+              <Bug size={16} strokeWidth={2} />
+              {t("wi.bugCreateOpen")}
+            </button>
+          </section>
         </aside>
       </div>
       {bugOpen && (
@@ -1398,7 +1417,7 @@ export function WorkItemDetail({ id }: { id: number }) {
             </Field>
             <button
               className="wi-start"
-              disabled={!bugDescription.trim()}
+              disabled={bugBusy || !bugDescription.trim()}
               onClick={startBugFollowUp}
             >
               <Bug size={16} strokeWidth={2.2} />

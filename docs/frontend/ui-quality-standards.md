@@ -107,3 +107,19 @@ Apply these when writing or reviewing React code; they cover structure, not appe
 - **Render purity.** Do not accumulate into refs or module state during render. Dedupe repeated items by identity (a seen-set), not by comparing display text.
 - **Abstraction.** Add a wrapper or helper only for a second real caller or a demonstrated invariant. Same-named helpers with different contracts are not duplicates. Export only what another module imports.
 - **Slop.** No dead branches, no catch that hides an error, no comment that narrates the code, no defensive check for a state that cannot occur.
+
+## 12. Frontend change checklist
+
+Go through this list for every frontend change: a new control, a moved control, a new page section. State in the change summary which items were checked and what was not verified. Items 1–6 cover placement and clarity; the others point to the sections that already define the rule.
+
+1. **Placement follows intent.** A control sits where a user looks for what it does. Actions that start work belong with the launch actions; page-level context and settings belong in the page toolbar; a page's own primary actions go in `PageHeader` `actions`. Do not park an action in a bar because it has room.
+2. **Grouping.** Related controls are adjacent. A `justify-content: space-between` row with more than two children needs explicit groups (a wrapper or `margin-left: auto`), otherwise the middle child floats.
+3. **Hierarchy.** One primary action per area. Secondary actions use `.ghost` or `.quiet`; destructive actions are visually separate.
+4. **Recognition.** The label states the outcome ("Create bug task and run", not "Submit") and a visible one-line hint says what will happen. An icon accompanies text for a non-obvious action.
+5. **Disabled and empty states.** A disabled control shows why as visible text, linked with `aria-describedby`; a tooltip alone is not enough (§8). Empty states say what to do next.
+6. **Feedback.** Submitting disables the control while busy so it cannot fire twice; a failure shows its cause (toast or `ErrorBox`); success navigates or confirms without shifting the layout (§7).
+7. **Reuse.** Use the existing components, classes and tokens (§1, §2, §9). Add CSS only for what none provide, scoped by the page prefix, and delete the rules it supersedes (§10).
+8. **Responsive and scroll.** Check 1440, 1024 and 390 px. A sticky or tall column scrolls inside itself and never clips its content (§5, §7).
+9. **Accessibility.** Native `<button type>`, labelled inputs, visible focus and the drawer rules of §8.
+10. **Text.** Every visible string exists in both the Vietnamese and English catalogs; no hard-coded copy.
+11. **Verification.** The §10 checks, plus a screenshot of the changed area at two widths. Report the scope and any limitation, as §10 requires.
