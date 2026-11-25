@@ -15,6 +15,7 @@ import {
   Layers,
   Lightbulb,
   Lock,
+  LoaderCircle,
   Plus,
   Power,
   ScanSearch,
@@ -29,6 +30,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
+import { PageBoundary } from "../PageBoundary.tsx";
 import { dialog } from "../dialog/index.ts";
 import {
   act,
@@ -41,6 +43,7 @@ import {
   JsonBlock,
   Markdown,
   navigate,
+  Pager,
   PageHeader,
   SearchInput,
   SkeletonRows,
@@ -131,6 +134,7 @@ type KnowledgeSummary = {
   enforced: boolean;
   enabled: boolean;
   current_version: number;
+  updated_at: string;
   metadata?: KnowledgeMetadata | null;
 };
 type KnowledgeVersion = {
@@ -146,7 +150,6 @@ type KnowledgeVersion = {
 type KnowledgeDetail = KnowledgeSummary & {
   conflict_key: string | null;
   priority: number;
-  updated_at: string;
   expires_at?: string | null;
   versions: KnowledgeVersion[];
   audit: Array<{ id: number; action: string; created_at: string; detail: unknown }>;
@@ -230,40 +233,54 @@ const emptyDraft = (category = "business_rule"): Draft => ({
 });
 
 export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: string }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const me = useApi<{ user: { role: string } }>("/api/auth/me");
   const pendingProposals = useApi<ProposalRef[]>("/api/knowledge-proposals?status=pending");
   const [cat, setCat] = useState("");
   const [q, setQ] = useState("");
   const [scope, setScope] = useState("");
+  const [sort, setSort] = useState<"newest" | "oldest">("newest");
   const [page, setPage] = useState(1);
   const [needle, setNeedle] = useState("");
   useEffect(() => {
-    const id = setTimeout(() => setNeedle(q.trim()), 250);
+    const search = q.trim();
+    if (search === needle) return;
+    const id = setTimeout(() => {
+      setNeedle(search);
+      setPage(1);
+    }, 250);
     return () => clearTimeout(id);
-  }, [q]);
-  useEffect(() => setPage(1), [cat, scope, needle]);
-  const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
+  }, [q, needle]);
+  const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE), sort });
   if (cat) params.set("category", cat);
   if (scope) params.set("scope", scope);
   if (needle) params.set("q", needle);
-  const { data, error, loading, reload } = useApi<KnowledgePage>(`/api/knowledge?${params}`, [
-    page,
-    cat,
-    scope,
-    needle,
-  ]);
+  const { data, error, loading, refreshing, reload, reloadFresh } = useApi<KnowledgePage>(
+    `/api/knowledge?${params}`,
+  );
+  const pending = loading || refreshing;
   const counts = data?.counts ?? null;
   const items = data?.items ?? [];
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
   useEffect(() => {
-    if (data && page > pages) setPage(pages);
-  }, [data, page, pages]);
+    if (!pending && !error && data && page > pages) setPage(pages);
+  }, [data, error, page, pages, pending]);
   const reloadAll = () => {
-    reload();
+    reloadFresh();
     pendingProposals.reload();
   };
   const filtered = !!(cat || scope || needle);
+  const detailKey = itemKey === "~proposals" && subKey ? `${itemKey}/${subKey}` : itemKey;
+  const updatedDate = new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const loadingList = (
+    <span className="kn-list-loading" role="status">
+      <LoaderCircle size={14} className="button-spinner" aria-hidden />
+      {t("common.loading")}
+    </span>
+  );
 
   return (
     <div className="kn">
@@ -307,7 +324,11 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
               type="button"
               className={`kn-cat${k === cat ? " on" : ""}`}
               aria-pressed={k === cat}
-              onClick={() => setCat(k)}
+              onClick={() => {
+                if (k === cat) return;
+                setCat(k);
+                setPage(1);
+              }}
             >
               <I size={15} strokeWidth={2} />
               <span>{t(catKey(k))}</span>
@@ -322,7 +343,10 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
             <SearchInput value={q} onChange={setQ} placeholder={t("kn.searchPh")} width="100%" />
             <select
               value={scope}
-              onChange={(e) => setScope(e.target.value)}
+              onChange={(e) => {
+                setScope(e.target.value);
+                setPage(1);
+              }}
               aria-label={t("kn.scopeFilter")}
             >
               <option value="">{t("kn.allScopes")}</option>
@@ -332,9 +356,29 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                 </option>
               ))}
             </select>
+            <select
+              value={sort}
+              aria-label={t("kn.sortUpdatedAt")}
+              onChange={(e) => {
+                setSort(e.target.value === "oldest" ? "oldest" : "newest");
+                setPage(1);
+              }}
+            >
+              <option value="newest">{t("kn.updatedNewest")}</option>
+              <option value="oldest">{t("kn.updatedOldest")}</option>
+            </select>
           </div>
-          {loading && !data ? (
-            <SkeletonRows rows={6} />
+          {data && !error && (
+            <div className="kn-list-meta">
+              <span>{t("kn.resultCount", { count: data.total.toLocaleString(locale) })}</span>
+              {pending && pages === 1 && items.length > 0 && loadingList}
+            </div>
+          )}
+          {pending && !items.length ? (
+            <>
+              {loadingList}
+              <SkeletonRows rows={6} />
+            </>
           ) : error ? (
             <ErrorBox error={error} onRetry={reload} />
           ) : !data?.total && !filtered ? (
@@ -354,7 +398,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
             <div className="kn-none">{t("kn.noMatch")}</div>
           ) : (
             <>
-              <ul className="kn-items">
+              <ul className="kn-items" aria-busy={pending} inert={pending}>
                 {items.map((k) => {
                   const I = CAT_ICON[k.category] ?? FileText;
                   return (
@@ -382,6 +426,11 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                             <span className="kn-tag">{t(catKey(k.category))}</span>
                             <span className="kn-tag mono">v{k.current_version}</span>
                             <LoadChip metadata={k.metadata} />
+                            <time className="kn-tag" dateTime={k.updated_at}>
+                              {t("kn.updatedAt", {
+                                time: updatedDate.format(new Date(k.updated_at)),
+                              })}
+                            </time>
                           </span>
                         </span>
                       </button>
@@ -389,89 +438,47 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                   );
                 })}
               </ul>
-              <Pager page={page} pages={pages} total={data?.total ?? 0} onPage={setPage} />
+              {pages > 1 && (
+                <div className="kn-page-controls">
+                  <Pager page={page} pages={pages} onPage={setPage} />
+                  {pending && loadingList}
+                </div>
+              )}
             </>
           )}
         </aside>
         <section className="kn-detail">
-          {itemKey === "~audit" ? (
-            <KnowledgeAuditPanel />
-          ) : itemKey === "~proposals" ? (
-            <ProposalsPanel id={subKey} onChanged={reloadAll} />
-          ) : itemKey ? (
-            <KnowledgeEditor
-              key={itemKey}
-              itemKey={itemKey}
-              defaultCategory={cat || "business_rule"}
-              onSaved={reloadAll}
-            />
-          ) : (
-            <div className="card kn-placeholder">
-              <EmptyState
-                icon={BookOpen}
-                title={t("kn.pickTitle")}
-                action={
-                  <button className="sm ghost" onClick={() => navigate("/knowledge/~new")}>
-                    <Plus size={14} />
-                    {t("kn.createNew")}
-                  </button>
-                }
-              >
-                {t("kn.pickBody")}
-              </EmptyState>
-            </div>
-          )}
+          <PageBoundary key={detailKey}>
+            {itemKey === "~audit" ? (
+              <KnowledgeAuditPanel />
+            ) : itemKey === "~proposals" ? (
+              <ProposalsPanel id={subKey} onChanged={reloadAll} />
+            ) : itemKey ? (
+              <KnowledgeEditor
+                itemKey={itemKey}
+                defaultCategory={cat || "business_rule"}
+                onSaved={reloadAll}
+              />
+            ) : (
+              <div className="card kn-placeholder">
+                <EmptyState
+                  icon={BookOpen}
+                  title={t("kn.pickTitle")}
+                  action={
+                    <button className="sm ghost" onClick={() => navigate("/knowledge/~new")}>
+                      <Plus size={14} />
+                      {t("kn.createNew")}
+                    </button>
+                  }
+                >
+                  {t("kn.pickBody")}
+                </EmptyState>
+              </div>
+            )}
+          </PageBoundary>
         </section>
       </div>
     </div>
-  );
-}
-
-function pageWindow(page: number, pages: number): Array<number | "…"> {
-  const keep = new Set([1, pages, page - 1, page, page + 1]);
-  const out: Array<number | "…"> = [];
-  let prev = 0;
-  for (const n of [...keep].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b)) {
-    if (n - prev > 1) out.push("…");
-    out.push(n);
-    prev = n;
-  }
-  return out;
-}
-
-function Pager({
-  page,
-  pages,
-  total,
-  onPage,
-}: {
-  page: number;
-  pages: number;
-  total: number;
-  onPage: (n: number) => void;
-}) {
-  if (pages <= 1) return null;
-  return (
-    <nav className="kn-pager" aria-label="Pagination">
-      <span className="kn-pager-total">{total}</span>
-      {pageWindow(page, pages).map((n, i) =>
-        n === "…" ? (
-          <span key={`gap${i}`} className="kn-pager-gap">
-            …
-          </span>
-        ) : (
-          <button
-            key={n}
-            type="button"
-            className={`sm${n === page ? "" : " ghost"}`}
-            aria-current={n === page ? "page" : undefined}
-            onClick={() => onPage(n)}
-          >
-            {n}
-          </button>
-        ),
-      )}
-    </nav>
   );
 }
 

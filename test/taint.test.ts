@@ -38,8 +38,12 @@ test("sinks are declared for every mutating registry tool", async () => {
     "runs.retry_step",
     "runs.start",
   ]);
+  // Chat-level actions (not registry tools) that an autonomy policy may run unattended also declare their fields.
+  const chatSinks = ["work.delegate"];
   assert.deepEqual(
-    Object.keys(SINKS).sort(),
+    Object.keys(SINKS)
+      .filter((k) => !chatSinks.includes(k))
+      .sort(),
     mutating,
     "a new mutating tool must declare its sink fields",
   );

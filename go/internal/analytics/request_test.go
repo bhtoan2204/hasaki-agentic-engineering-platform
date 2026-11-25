@@ -217,13 +217,30 @@ func TestSlotsBoundConcurrencyAndReportBusy(t *testing.T) {
 	s := NewService(nil, 1)
 	ctx, cancel := contextWithTimeout(20 * time.Millisecond)
 	defer cancel()
-	if err := s.acquire(ctx); err != nil {
+	if err := s.acquire(ctx, s.slots); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.acquire(ctx); !errors.Is(err, ErrBusy) {
+	if err := s.acquire(ctx, s.slots); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second slot: %v", err)
 	}
 	if s.Stats().Busy != 1 {
 		t.Fatal(s.Stats())
+	}
+}
+
+func TestOptionsLaneIsNotBlockedBySlowDashboards(t *testing.T) {
+	s := NewService(nil, 2)
+	ctx, cancel := contextWithTimeout(20 * time.Millisecond)
+	defer cancel()
+	for range 2 {
+		if err := s.acquire(ctx, s.slots); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.acquire(ctx, s.light); err != nil {
+		t.Fatalf("options waited behind the dashboards: %v", err)
+	}
+	if err := s.acquire(ctx, s.light); !errors.Is(err, ErrBusy) {
+		t.Fatalf("the options lane is bounded too: %v", err)
 	}
 }

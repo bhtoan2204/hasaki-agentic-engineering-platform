@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { runEvents } from "./events.ts";
 import { observe } from "../runtimeMetrics.ts";
 import { recordDecision, savingsFrom } from "./decisions.ts";
@@ -48,21 +49,36 @@ type CheckpointSource = Pick<
   verification: unknown;
 };
 
-type ExecutionCheckpoint = {
-  version: 1;
-  milestone: string;
-  data_digest: string;
-  binding: ReturnType<typeof bindingOf>;
-  workspace_fingerprint: string | null;
-  workspace_unavailable: boolean;
-  workspace_artifact_id: number | null;
-  workspace_artifact_digest: string | null;
-  artifact_ids: number[];
-  completed_actions: string[];
-  remaining_actions: string[];
-  verification: { digest: string; artifact_ids: number[] } | null;
-  result: Extract<ExecResult, { kind: "completed" }> | null;
-};
+const completedResult = z.object({ kind: z.literal("completed"), output: z.unknown() });
+const id = z.number().int().positive();
+const executionCheckpoint = z.object({
+  version: z.literal(1),
+  milestone: z.string(),
+  data_digest: z.string(),
+  binding: z.strictObject({
+    run_id: id,
+    step_id: id,
+    attempt_id: id,
+    generation: z.number().int().nonnegative(),
+    job_id: id.nullable(),
+    fencing_token: z.number().int().nonnegative().nullable(),
+    snapshot_id: id.nullable(),
+    context_hash: z.string().nullable(),
+    input_hash: z.string(),
+    provider: z.string().nullable(),
+  }),
+  workspace_fingerprint: z.string().nullable(),
+  workspace_unavailable: z.boolean(),
+  workspace_artifact_id: id.nullable(),
+  workspace_artifact_digest: z.string().nullable(),
+  artifact_ids: z.array(id),
+  completed_actions: z.array(z.string()),
+  remaining_actions: z.array(z.string()),
+  verification: z.object({ digest: z.string(), artifact_ids: z.array(id) }).nullable(),
+  result: completedResult.nullable(),
+});
+
+type ExecutionCheckpoint = z.infer<typeof executionCheckpoint>;
 
 function bindingOf(source: CheckpointSource) {
   return {
@@ -102,10 +118,9 @@ async function insertCheckpoint(
 ) {
   const normalized =
     result?.kind === "completed"
-      ? (JSON.parse(JSON.stringify({ kind: "completed", output: result.output ?? {} })) as Extract<
-          ExecResult,
-          { kind: "completed" }
-        >)
+      ? completedResult.parse(
+          JSON.parse(JSON.stringify({ kind: "completed", output: result.output ?? {} })),
+        )
       : null;
   const proof =
     normalized?.output &&
@@ -155,10 +170,15 @@ async function insertCheckpoint(
         ? normalized
         : null,
   };
-  const stored = await one<{ bytes: number | null }>(
+  // RETURNING also reports how many executor_returned checkpoints the step had BEFORE this row (the statement's snapshot
+  // excludes it), so retention below only runs a DELETE when something can actually be retired.
+  const stored = await one<{ bytes: number | null; previous: number | null }>(
     db,
     `INSERT INTO workflow_checkpoints(run_id,step_id,attempt_id,reason,data,execution,execution_digest,workspace_artifact_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING octet_length(execution::text) AS bytes`,
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING octet_length(execution::text) AS bytes,
+       CASE WHEN $4='executor_returned'
+         THEN (SELECT count(*)::int FROM workflow_checkpoints WHERE step_id=$2 AND reason='executor_returned') END AS previous`,
     [
       source.run_id,
       source.step_id,
@@ -171,7 +191,7 @@ async function insertCheckpoint(
     ],
   );
   // bytes: the envelope as PostgreSQL stores it (jsonb text), returned by the INSERT instead of read back.
-  return { execution, bytes: Number(stored?.bytes ?? 0) };
+  return { execution, bytes: Number(stored?.bytes ?? 0), previous: Number(stored?.previous ?? 0) };
 }
 
 /** The caller owns the run lock and the status transition that makes this checkpoint recoverable. */
@@ -211,9 +231,12 @@ export async function recordExecutorReturn(
       [job.run_id, config.instanceId],
     );
     if (!run || !(await ownsInstance(db))) return false;
-    const live = await one(
+    // `recorded`: this attempt's executor_returned checkpoint already exists (answered in the same read as the fence).
+    const live = await one<{ id: number; recorded: boolean }>(
       db,
-      `SELECT j.id FROM workflow_jobs j JOIN workflow_step_attempts a ON a.job_id=j.id
+      `SELECT j.id,
+              EXISTS (SELECT 1 FROM workflow_checkpoints c WHERE c.attempt_id=a.id AND c.reason='executor_returned') AS recorded
+         FROM workflow_jobs j JOIN workflow_step_attempts a ON a.job_id=j.id
          JOIN workflow_steps s ON s.id=a.step_id AND s.run_id=a.run_id
         WHERE j.id=$1 AND j.fencing_token=$2 AND j.status='running' AND j.lease_expires_at>clock_timestamp()
           AND j.run_id=$4 AND j.lease_owner=$5
@@ -224,14 +247,7 @@ export async function recordExecutorReturn(
       [job.id, job.fencing_token, attemptId, job.run_id, job.lease_owner],
     );
     if (!live) return false;
-    if (
-      await one(
-        db,
-        "SELECT id FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='executor_returned'",
-        [attemptId],
-      )
-    )
-      return true;
+    if (live.recorded) return true;
 
     const source = await sourceOf(db, attemptId);
     if (!source) return false;
@@ -290,10 +306,19 @@ export async function recordExecutorReturn(
       [attemptId, json(replay?.fingerprint ?? null), replay?.reusedFrom ?? null],
     );
     if (replay?.reusedFrom != null) {
-      await runEvents.add(db, source.run_id, "system", "Reused compatible execution result",
-        source.step_id, attemptId, {
-          action: "REUSE", source_attempt_id: replay.reusedFrom, fingerprint: replay.fingerprint.digest,
-        });
+      await runEvents.add(
+        db,
+        source.run_id,
+        "system",
+        "Reused compatible execution result",
+        source.step_id,
+        attemptId,
+        {
+          action: "REUSE",
+          source_attempt_id: replay.reusedFrom,
+          fingerprint: replay.fingerprint.digest,
+        },
+      );
       await recordDecision(db, {
         runId: source.run_id,
         stepId: source.step_id,
@@ -309,16 +334,18 @@ export async function recordExecutorReturn(
         details: { fingerprint: replay.fingerprint.digest },
       });
     }
-    await q(
-      db,
-      `WITH retired AS (
+    // At most RETURNED_RETENTION per step are kept: nothing to retire until the step already holds that many.
+    if (size.previous >= RETURNED_RETENTION)
+      await q(
+        db,
+        `WITH retired AS (
       DELETE FROM workflow_checkpoints WHERE id IN (
         SELECT id FROM workflow_checkpoints WHERE step_id=$1 AND reason='executor_returned'
         ORDER BY id DESC OFFSET $2
       ) RETURNING workspace_artifact_id
     ) DELETE FROM workflow_artifacts WHERE kind=$3 AND id IN (SELECT workspace_artifact_id FROM retired)`,
-      [source.step_id, RETURNED_RETENTION, EXECUTION_WORKSPACE_ARTIFACT],
-    );
+        [source.step_id, RETURNED_RETENTION, EXECUTION_WORKSPACE_ARTIFACT],
+      );
     return true;
   });
 }
@@ -329,24 +356,26 @@ type CheckpointData = Record<string, unknown> & {
 };
 type CheckpointRow = {
   data: CheckpointData;
-  execution: ExecutionCheckpoint | null;
+  execution: unknown;
   execution_digest: string | null;
   workspace_artifact_id: number | null;
 };
 
 async function validate(db: Db, row: CheckpointRow, attemptId: number, milestone: string) {
+  const parsed = executionCheckpoint.safeParse(row.execution);
+  if (!parsed.success) return;
+  const execution = parsed.data;
   if (
-    row.execution?.version !== 1 ||
-    row.execution.milestone !== milestone ||
+    execution.milestone !== milestone ||
     checkpointHash(row.execution) !== row.execution_digest ||
-    checkpointHash(row.data) !== row.execution.data_digest ||
-    row.workspace_artifact_id !== row.execution.workspace_artifact_id
+    checkpointHash(row.data) !== execution.data_digest ||
+    row.workspace_artifact_id !== execution.workspace_artifact_id
   )
     return;
   const source = await sourceOf(db, attemptId);
   if (
     !source?.context_hash ||
-    checkpointHash(row.execution.binding) !== checkpointHash(bindingOf(source))
+    checkpointHash(execution.binding) !== checkpointHash(bindingOf(source))
   )
     return;
   if (row.workspace_artifact_id != null) {
@@ -361,10 +390,10 @@ async function validate(db: Db, row: CheckpointRow, attemptId: number, milestone
         EXECUTION_WORKSPACE_ARTIFACT,
       ],
     );
-    if (!artifact || checkpointHash(artifact.content) !== row.execution.workspace_artifact_digest)
+    if (!artifact || checkpointHash(artifact.content) !== execution.workspace_artifact_digest)
       return;
   }
-  return row.execution;
+  return execution;
 }
 
 export async function readExecutionCheckpoint(db: Db, attemptId: number) {
@@ -439,7 +468,7 @@ export async function latestWaitCheckpoint(db: Db, attemptId: number | null) {
       WHERE attempt_id=$1 AND reason IN ('waiting_input','waiting_approval') ORDER BY id DESC LIMIT 1`,
     [attemptId],
   );
-  if (!row?.execution) return row;
+  if (row?.execution == null) return row;
   const execution = await validate(db, row, attemptId, row.reason);
   if (!execution) throw new HttpError(409, "Execution checkpoint failed integrity validation");
   if (row.data.recovery && !row.data.execution)

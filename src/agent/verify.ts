@@ -14,7 +14,7 @@ import {
   type EvidenceStats,
 } from "./verifyEvidence.ts";
 import { execFile } from "node:child_process";
-import { mkdtemp, realpath, rm, stat, readFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, stat, readFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
 import { promisify } from "node:util";
@@ -55,6 +55,8 @@ export interface VerifyConfig {
   /** Hard test-weakening signals (removed/skipped/disabled tests) fail verification unless explicitly allowed. */
   allowTestWeakening: boolean;
   requiredTests?: string[];
+  /** Required tests that run under the Go race detector (`go test -race`). */
+  raceTests?: string[];
   contractRevision?: string;
   /**
    * Explicit, workflow-defined policy under which a change without executable tests (docs, config) is NOT_APPLICABLE
@@ -270,9 +272,13 @@ export function environmentUnavailable(code: number | null, output: string): str
  */
 export function platformEnvironmentError(code: number | null, output: string): string | null {
   if (code !== 128) return null;
-  const line = output.split("\n").find((l) =>
-    /^fatal: (?:not a git repository|gitfile does not point to a valid repository)/.test(l.trim()),
-  );
+  const line = output
+    .split("\n")
+    .find((l) =>
+      /^fatal: (?:not a git repository|gitfile does not point to a valid repository)/.test(
+        l.trim(),
+      ),
+    );
   return line
     ? `the verification environment could not read the worktree's git metadata (${line.trim().slice(0, 300)}) — a platform/workspace problem, not a code failure`
     : null;
@@ -288,7 +294,9 @@ export function transientEnvironmentFailure(code: number | null, output: string)
   const tail = output.slice(-20_000);
   const m =
     /npm (?:ERR!|error) Exit handler never called!/.exec(tail) ??
-    /npm (?:ERR!|error) code (?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ENOSPC|EAI_FAIL)\b/.exec(tail) ??
+    /npm (?:ERR!|error) code (?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ENOSPC|EAI_FAIL)\b/.exec(
+      tail,
+    ) ??
     /\bENOSPC\b|no space left on device/i.exec(tail);
   return m ? m[0].slice(0, 200) : null;
 }
@@ -394,7 +402,8 @@ export function failureSignature(repos: RepoVerification[]): string {
             .sort()
             .join(",")}`
         : "";
-      return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}${slop}}`;
+      const required = r.note?.startsWith("Required test") ? `|${r.note}` : "";
+      return `${r.repo}{${r.status === "error" ? `ERROR:${r.error ?? ""}` : ""}${reg.join(";")}${opaque}${r.timed_out ? "TIMEOUT" : ""}${r.weakened.length ? `|weakened:${r.weakened.join(",")}` : ""}${slop}${required}}`;
     })
     .sort();
   return parts.join(" ");
@@ -403,8 +412,35 @@ export function failureSignature(repos: RepoVerification[]): string {
 const ASSERTION =
   /\bt\.(Error|Errorf|Fatal|Fatalf|Fail|FailNow)\(|\b(assert|require)\.\w+\(|\.Expect\(|\bgomock\.|\bt\.Run\(/;
 
+/** Assertions in JS/TS (expect/assert), Python (assert, self.assert*) and Java (assertEquals, assertThat, ...). */
+const OTHER_ASSERTION =
+  /\bexpect\(|\bassert(?:Equals|True|False|That|Throws|NotNull|Null|Equal\w*|\.\w+)?\s*\(|^[-+]\s*assert\s|\bself\.assert\w+\(/;
+/** Test files of every supported language (the Go rules below keep their own patterns). */
+const WEAKENABLE_TEST_FILE =
+  /_test\.go$|\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]+\.py$|_test\.py$|(?:Test|Tests)\.java$|(?:^|\/)__tests__\//;
+/** Markers that skip, focus (and so silently drop the rest) or disable tests outside Go. */
+/** Conditional or expected-failure markers with a stated reason: a human judges them (soft). */
+const CONDITIONAL_MARKERS: Array<[RegExp, string]> = [
+  [/^\+\s*@pytest\.mark\.(?:skipif|xfail)\b/, "conditional pytest skip/xfail added"],
+  [/^\+.*\b(?:it|test|describe)\.skipIf\(/, "conditional skip added"],
+];
+/** Vendored/third-party code is not this change's test suite. */
+const THIRD_PARTY = /(^|\/)(vendor|node_modules|third_party|external)\//;
+const DISABLE_MARKERS: Array<[RegExp, string]> = [
+  [/^\+.*\b(?:it|test|describe|context|suite)\.skip\(/, "test skipped (.skip)"],
+  [/^\+\s*x(?:it|test|describe|context)\(/, "test disabled (x-prefix)"],
+  [
+    /^\+.*\b(?:it|test|describe|context|suite)\.only\(/,
+    ".only() focuses one test and drops the others",
+  ],
+  [/^\+\s*@pytest\.mark\.skip\b(?!if)/, "pytest skip marker added"],
+  [/^\+\s*@unittest\.(?:skip\w*|expectedFailure)\b/, "unittest skip marker added"],
+  [/^\+.*\b(?:pytest\.skip|self\.skipTest)\(/, "test skipped at runtime"],
+  [/^\+\s*@(?:Disabled|Ignore)\b/, "JUnit test disabled"],
+];
+
 /**
- * Obvious test-weakening signals in a unified diff of *_test.go files (branch vs base). Regex heuristics: they catch
+ * Obvious test-weakening signals in a unified diff of test files (branch vs base): Go, JS/TS, Python, Java. Regex heuristics: they catch
  * blatant cases (deleted/skipped/disabled tests) and flag suspicious ones for a human; they cannot prove test integrity.
  */
 export function testWeakeningSignals(diff: string): { hard: string[]; soft: string[] } {
@@ -413,6 +449,8 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
   const hard: string[] = [];
   const soft: string[] = [];
   const assertDelta = new Map<string, number>();
+  const otherRemoved = new Set<string>();
+  const otherAdded = new Set<string>();
   let file = "";
   let oldFile = "";
   for (const line of diff.split("\n")) {
@@ -423,7 +461,11 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
     }
     const minus = line.match(/^--- a\/(.+)$/);
     if (minus) oldFile = minus[1];
-    if (line === "+++ /dev/null" && /_test\.go$/.test(oldFile))
+    if (
+      line === "+++ /dev/null" &&
+      WEAKENABLE_TEST_FILE.test(oldFile) &&
+      !THIRD_PARTY.test(oldFile)
+    )
       hard.push(`${oldFile}: test file deleted`);
     const plus = line.match(/^\+\+\+ b\/(.+)$/);
     if (plus) file = plus[1];
@@ -436,10 +478,30 @@ export function testWeakeningSignals(diff: string): { hard: string[]; soft: stri
     if (/^\+\s*\/\/(go:build| \+build)\s.*\bignore\b/.test(line))
       hard.push(`${file}: build tag disables the file`);
     if (/^\+\s*if\s+false\s*\{/.test(line)) soft.push(`${file}: "if false" block added`);
-    if (/^[-+]/.test(line) && !/^(\+\+\+|---)/.test(line) && ASSERTION.test(line))
+    if (!/_test\.go$/.test(file) && WEAKENABLE_TEST_FILE.test(file) && !THIRD_PARTY.test(file)) {
+      for (const [re, what] of DISABLE_MARKERS) if (re.test(line)) hard.push(`${file}: ${what}`);
+      for (const [re, what] of CONDITIONAL_MARKERS)
+        if (re.test(line)) soft.push(`${file}: ${what}`);
+      // By name across files: a test moved to another file is not removed; a renamed one is for a human to judge.
+      const rn =
+        line.match(/^-\s*(?:it|test)\(\s*(["'`])(.+?)\1/) ??
+        line.match(/^-\s*(?:async\s+)?def\s+(test_\w+)\(()/);
+      if (rn) otherRemoved.add(rn[2] || rn[1]);
+      const an =
+        line.match(/^\+\s*(?:it|test)\(\s*(["'`])(.+?)\1/) ??
+        line.match(/^\+\s*(?:async\s+)?def\s+(test_\w+)\(()/);
+      if (an) otherAdded.add(an[2] || an[1]);
+    }
+    if (
+      /^[-+]/.test(line) &&
+      !/^(\+\+\+|---)/.test(line) &&
+      (/_test\.go$/.test(file) ? ASSERTION : OTHER_ASSERTION).test(line)
+    )
       assertDelta.set(file, (assertDelta.get(file) ?? 0) + (line.startsWith("+") ? 1 : -1));
   }
   for (const t of removed) if (!added.has(t)) hard.push(`${t} removed`);
+  for (const t of otherRemoved)
+    if (!otherAdded.has(t)) soft.push(`test "${t.slice(0, 80)}" removed or renamed`);
   for (const [f, d] of assertDelta) if (d <= -3) soft.push(`${f}: ${-d} assertion line(s) removed`);
   return { hard: [...new Set(hard)], soft: [...new Set(soft)] };
 }
@@ -500,7 +562,14 @@ export async function authorizeWorkspace(path: string, allowedRoots: string[]): 
 
 const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-type RequiredTestTarget = { id: string; selector: string; format: "go" | "node"; command: string };
+type RequiredTestTarget = {
+  id: string;
+  selector: string;
+  format: "go" | "node";
+  command: string;
+  /** Run under the Go race detector (a concurrency / data-integrity regression test). */
+  race?: boolean;
+};
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 const directGoJson = (command: string) =>
   /^go[ \t]+test[ \t]+-json(?:[ \t]+[-\w./=,*]+)*[ \t]*$/.test(command.trim());
@@ -516,10 +585,29 @@ async function plannedPath(path: string, allowMissing: boolean): Promise<string 
 }
 
 /** Resolve ownership before execution. Ambiguous IDs need an explicit repository:: selector. */
+const FOREIGN_RUNNER = "repository runner is incompatible with the Node structured test runner";
+
+/**
+ * The regression test a fix remediation names, as a required test: a malformed id then fails verification and goes
+ * through the repair loop instead of leaving the proof "unmeasured". Null when no fix is claimed, or when only a foreign
+ * test runner could execute the test (that stays a documented verification limitation).
+ */
+export async function fixRegressionTest(
+  workspaces: Array<{ repo: string; path: string }>,
+  remediation: Pick<import("./rootCause.ts").Remediation, "kind" | "regression_test"> | null,
+): Promise<string | null> {
+  const name = remediation?.regression_test?.name;
+  if (!name || (remediation.kind !== "ROOT_CAUSE_FIX" && remediation.kind !== "PARTIAL_FIX"))
+    return null;
+  const { targets, problems } = await requiredTestTargets(workspaces, [name]);
+  return !targets.size && problems.some((p) => p.endsWith(FOREIGN_RUNNER)) ? null : name;
+}
+
 export async function requiredTestTargets(
   workspaces: Array<{ repo: string; path: string }>,
   ids: string[],
   beforeApproval = false,
+  race: string[] = [],
 ) {
   const targets = new Map<string, RequiredTestTarget[]>();
   const problems: string[] = [];
@@ -544,9 +632,7 @@ export async function requiredTestTargets(
           await readFile(resolve(workspace.path, "package.json"), "utf8").catch(() => "{}"),
         );
         if (/\b(jest|vitest|mocha|ava)\b/.test(String(manifest.scripts?.test ?? ""))) {
-          problems.push(
-            `${id}: repository runner is incompatible with the Node structured test runner`,
-          );
+          problems.push(`${id}: ${FOREIGN_RUNNER}`);
           continue;
         }
         if (
@@ -603,7 +689,8 @@ export async function requiredTestTargets(
             id,
             selector,
             format: "go",
-            command: `go test -json -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}`,
+            command: `go test -json${race.includes(id) ? " -race" : ""} -run ${shellQuote(`^${pattern}$`)} ${shellQuote(packagePath)}`,
+            ...(race.includes(id) ? { race: true } : {}),
           },
         });
       }
@@ -649,13 +736,16 @@ function requiredTestStatus(
         )
       )
         next =
-          event.failed > 0
-            ? "failed"
-            : event.skipped > 0
-              ? "skipped"
-              : event.passed > 0
-                ? "passed"
-                : null;
+          // The file did not load or exited abnormally: whatever else it reported, it did not run to a verdict.
+          Number(event.errored) > 0
+            ? "not_executed"
+            : event.failed > 0
+              ? "failed"
+              : event.skipped > 0
+                ? "skipped"
+                : event.passed > 0
+                  ? "passed"
+                  : null;
       if (next && status !== "failed" && status !== "skipped") status = next;
     } catch {
       /* Logs, including test stdout, are never passing evidence. */
@@ -665,15 +755,18 @@ function requiredTestStatus(
 }
 
 /**
- * Before/after regression proof. The fix's non-test files are reverted to the merge base in a throw-away detached worktree
- * (tests kept), the named test runs there and then on the fixed worktree. Verified only when it fails at test level
- * before (an assertion, not a build or infrastructure failure: "not_executed") and passes after. Never touches the run's
- * worktree; the temporary one is removed.
+ * Before/after regression proof, both measured on the committed HEAD in throw-away detached worktrees (the run's worktree,
+ * and any uncommitted change in it, is never used or touched). "Before": the fix's non-test files reverted to the merge
+ * base, tests kept. Verified only when the named test fails at test level before — a test verdict, not a load, build or
+ * infrastructure failure ("not_executed") — on TWO consecutive runs (a flaky failure is not attributable to the defect),
+ * and passes after. The repository's installed node_modules, if any, is linked into both worktrees so a missing
+ * dependency cannot pose as a reproduction. Temporary worktrees are removed.
  */
 export async function beforeAfterProof(
   w: { repo: string; path: string; baseBranch: string },
   testId: string,
   run: (command: string, cwd: string) => Promise<{ code: number | null; output: string }>,
+  race = false,
 ): Promise<import("./rootCause.ts").RegressionProof> {
   const git = async (cwd: string, ...args: string[]) =>
     (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout.trim();
@@ -684,7 +777,8 @@ export async function beforeAfterProof(
     repo: w.repo,
     test_id: id,
   });
-  const after = await requiredTestTargets([w], [id]);
+  const raced = race ? [id] : [];
+  const after = await requiredTestTargets([w], [id], false, raced);
   const target = after.targets.get(w.repo)?.[0];
   if (!target) return unmeasured(after.problems.join("; ") || "not an executable test id");
   let head: string, base: string, changed: string[];
@@ -701,8 +795,23 @@ export async function beforeAfterProof(
   if (!reverted.length) return unmeasured("the change has no non-test file to revert");
   const dir = await mkdtemp(resolve(tmpdir(), "regression-proof-"));
   const tmp = resolve(dir, "wt");
+  const fixed = resolve(dir, "fixed");
+  // Installed dependencies are untracked: without them every Node test would fail to load in a fresh worktree.
+  const linkDependencies = async (into: string) => {
+    const modules = resolve(w.path, "node_modules");
+    if (
+      (await stat(modules)
+        .then((x) => x.isDirectory())
+        .catch(() => false)) &&
+      !(await stat(resolve(into, "node_modules")).catch(() => null))
+    )
+      await symlink(modules, resolve(into, "node_modules"), "dir");
+  };
   try {
     await git(w.path, "worktree", "add", "--detach", "-q", tmp, head);
+    await git(w.path, "worktree", "add", "--detach", "-q", fixed, head);
+    await linkDependencies(tmp);
+    await linkDependencies(fixed);
     const atBase = new Set(
       (await git(tmp, "ls-tree", "-r", "--name-only", base, "--", ...reverted))
         .split("\n")
@@ -711,12 +820,19 @@ export async function beforeAfterProof(
     if (atBase.size) await git(tmp, "checkout", base, "--", ...atBase);
     const added = reverted.filter((f) => !atBase.has(f));
     if (added.length) await git(tmp, "rm", "-q", "--", ...added);
-    const before = (await requiredTestTargets([{ repo: w.repo, path: tmp }], [id])).targets.get(
-      w.repo,
-    )?.[0];
+    const before = (
+      await requiredTestTargets([{ repo: w.repo, path: tmp }], [id], false, raced)
+    ).targets.get(w.repo)?.[0];
     if (!before) return unmeasured("the test cannot be resolved on the pre-fix source");
+    const fixedTarget = (
+      await requiredTestTargets([{ repo: w.repo, path: fixed }], [id], false, raced)
+    ).targets.get(w.repo)?.[0];
+    if (!fixedTarget) return unmeasured("the test cannot be resolved on the fixed commit");
     const b = requiredTestStatus((await run(before.command, tmp)).output, before);
-    const a = requiredTestStatus((await run(target.command, w.path)).output, target);
+    // Attribution: the failure must reproduce. A second pre-fix run only when the first one failed.
+    const b2 =
+      b === "failed" ? requiredTestStatus((await run(before.command, tmp)).output, before) : null;
+    const a = requiredTestStatus((await run(fixedTarget.command, fixed)).output, fixedTarget);
     const proof = {
       repo: w.repo,
       test_id: id,
@@ -725,10 +841,15 @@ export async function beforeAfterProof(
       reverted_files: reverted,
       command: target.command,
       before: b,
+      before_repeat: b2,
       after: a,
     };
-    if (b === "failed" && a === "passed")
-      return { ...proof, status: "verified", reason: "fails before the fix, passes after" };
+    if (b === "failed" && b2 === "failed" && a === "passed")
+      return {
+        ...proof,
+        status: "verified",
+        reason: "fails before the fix (2 of 2 runs), passes after, both on the committed source",
+      };
     return {
       ...proof,
       status: "invalid",
@@ -736,13 +857,17 @@ export async function beforeAfterProof(
         b === "passed"
           ? "the test already passes without the fix: it does not reproduce the defect"
           : b !== "failed"
-            ? `the test did not run to an assertion before the fix (${b}): a build or infrastructure failure is not a reproduction`
-            : `the test does not pass with the fix (${a})`,
+            ? `the test did not run to an assertion before the fix (${b}): a load, build or infrastructure failure is not a reproduction`
+            : b2 !== "failed"
+              ? `the pre-fix failure did not repeat (${b2} on the second run): a flaky failure is not attributable to the defect`
+              : `the test does not pass with the fix on the committed source (${a})`,
     };
   } catch (e) {
     return unmeasured(`proof workspace: ${(e as Error).message.slice(0, 200)}`);
   } finally {
-    await exec("git", ["-C", w.path, "worktree", "remove", "--force", tmp]).catch(() => {});
+    for (const t of [tmp, fixed])
+      await exec("git", ["-C", w.path, "worktree", "remove", "--force", t]).catch(() => {});
+    await exec("git", ["-C", w.path, "worktree", "prune"]).catch(() => {});
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
@@ -759,7 +884,12 @@ export async function verifyWorkspaces(
 ): Promise<VerificationRound> {
   const t0 = Date.now();
   const repos: RepoVerification[] = [];
-  const required = await requiredTestTargets(workspaces, cfg.requiredTests ?? []);
+  const required = await requiredTestTargets(
+    workspaces,
+    cfg.requiredTests ?? [],
+    false,
+    cfg.raceTests ?? [],
+  );
   for (const w of workspaces) {
     if (w.skip) {
       await deps.log?.(`■ verify ${w.repo}: SKIPPED (${w.skip})`, {
@@ -1031,7 +1161,8 @@ export async function verifyWorkspaces(
                   if (x.buildErrors.length || !x.tests.length) explained = false;
                   for (const t of x.tests) {
                     if (excluded.includes(t.split("/")[0])) continue;
-                    if (baseTests.has(t) || baseTests.has(t.split("/")[0])) fresh.add(t.split("/")[0]);
+                    if (baseTests.has(t) || baseTests.has(t.split("/")[0]))
+                      fresh.add(t.split("/")[0]);
                     else explained = false;
                   }
                 }
@@ -1085,7 +1216,7 @@ export async function verifyWorkspaces(
         const results: NonNullable<RepoVerification["required_tests"]> = {};
         for (const target of required.targets.get(w.repo) ?? []) {
           let status =
-            target.format === "go" && directGoJson(cfg.command)
+            target.format === "go" && !target.race && directGoJson(cfg.command)
               ? requiredTestStatus(r.output, target)
               : "not_executed";
           if (
@@ -1245,7 +1376,10 @@ async function evidenceParts(
     base_tip: tip,
     contract_revision: cfg.contractRevision ?? "",
     command: cfg.command,
-    selectors: [...(cfg.requiredTests ?? [])].sort().join("\n"),
+    selectors: [...(cfg.requiredTests ?? [])]
+      .map((id) => (cfg.raceTests?.includes(id) ? `${id} -race` : id))
+      .sort()
+      .join("\n"),
     policy: canonicalJson({
       allowTestWeakening: cfg.allowTestWeakening,
       notApplicable: cfg.notApplicable,
@@ -1373,6 +1507,10 @@ export function repairPrompt(
                 `- ${g.package}: ${[...g.tests, ...g.build_errors].slice(0, 12).join("; ") || "(package fails)"}`,
             )
             .join("\n"),
+      );
+    if (x.note?.startsWith("Required test"))
+      parts.push(
+        `${x.note}\nRequired tests are executable test ids (Go \`<module>/<package>/TestName\`, Node \`<repo>::path/file.test.js\`) and must pass with structured evidence. For a regression test named in remediation.regression_test.name, correct the id there and call submit_result again.`,
       );
     if (x.weakened.length)
       parts.push(
@@ -1559,9 +1697,30 @@ export async function diffAgainstBase(path: string, baseBranch: string) {
 }
 
 export async function diffTestsAgainstBase(path: string, baseBranch: string) {
+  // Against the merge base (this branch's own changes, including uncommitted ones): tests added on the base after the
+  // branch was cut are not "removed" by this change.
+  const mergeBase = await exec("git", ["-C", path, "merge-base", `origin/${baseBranch}`, "HEAD"])
+    .then((r) => r.stdout.trim())
+    .catch(() => `origin/${baseBranch}`);
   const { stdout } = await exec(
     "git",
-    ["-C", path, "diff", "--no-color", `origin/${baseBranch}`, "--", "*_test.go"],
+    [
+      "-C",
+      path,
+      "diff",
+      "--no-color",
+      mergeBase,
+      "--",
+      "*_test.go",
+      "*.test.*",
+      "*.spec.*",
+      "*_test.py",
+      "test_*.py",
+      "*/test_*.py",
+      "*Test.java",
+      "*Tests.java",
+      "*/__tests__/*",
+    ],
     { maxBuffer: 16 * 1024 * 1024 },
   );
   return stdout;

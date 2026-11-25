@@ -83,6 +83,11 @@ export const CONTEXT_TOOLS = [
     { query, limit },
   ),
   definition(
+    "search_causal_memory",
+    "Search the run owner's causal engineering memory for this step's repositories: earlier incidents with their verified root cause, fix and regression tests, and approaches that FAILED (cautions to challenge a plan, not rules). Only VERIFIED records are authoritative.",
+    { query, limit },
+  ),
+  definition(
     "get_work_item",
     "Read this run's owned work item and its requirements, without unrelated tasks or credentials.",
     {},

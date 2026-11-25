@@ -1,4 +1,9 @@
-import { continuationEvidence, latestWaitCheckpoint, readExecutionCheckpoint, saveExecutionPause } from "./checkpoints.ts";
+import {
+  continuationEvidence,
+  latestWaitCheckpoint,
+  readExecutionCheckpoint,
+  saveExecutionPause,
+} from "./checkpoints.ts";
 import { traceLog } from "./trace.ts";
 import type pg from "pg";
 import { config } from "../config.ts";
@@ -20,6 +25,7 @@ import { isolationEnforced } from "../agent/isolation.ts";
 import { workspacesOf } from "../git/provider.ts";
 import { executionWorkspace } from "../git/workspaceCheckpoint.ts";
 import { livePolicy } from "./autonomy.ts";
+import { logError } from "../logging.ts";
 import {
   diagnoseFailure,
   failureSignature,
@@ -58,9 +64,18 @@ export async function releaseAttempt(
       "SELECT * FROM workflow_step_attempts WHERE id = $1 FOR UPDATE",
       [attemptId],
     ))!;
-    if (attempt.status !== "RUNNING" || !j || j.status !== "running" || j.fencing_token !== token ||
-        attempt.fencing_token !== token || attempt.job_id !== j.id || attempt.run_id !== j.run_id ||
-        attempt.step_id !== j.step_id || attempt.generation !== j.generation) return false;
+    if (
+      attempt.status !== "RUNNING" ||
+      !j ||
+      j.status !== "running" ||
+      j.fencing_token !== token ||
+      attempt.fencing_token !== token ||
+      attempt.job_id !== j.id ||
+      attempt.run_id !== j.run_id ||
+      attempt.step_id !== j.step_id ||
+      attempt.generation !== j.generation
+    )
+      return false;
     const step = (await one<StepRow>(c, "SELECT * FROM workflow_steps WHERE id = $1 FOR UPDATE", [
       attempt.step_id,
     ]))!;
@@ -125,7 +140,11 @@ async function recoverInterrupted(
   await q(
     c,
     "UPDATE workflow_step_attempts SET status = $2, error = $3, finished_at = now() WHERE id = $1",
-    [attempt.id, safe || resumes ? "STALE" : "WAITING_INPUT", json({ message: reason, interrupted: true })],
+    [
+      attempt.id,
+      safe || resumes ? "STALE" : "WAITING_INPUT",
+      json({ message: reason, interrupted: true }),
+    ],
   );
   const pending = {
     ...(step.pending_input ?? {}),
@@ -146,15 +165,18 @@ async function recoverInterrupted(
   if (!safe && !resumes) {
     const en = outputLocale(run) === "en";
     const missing = auto?.missing.length
-      ? (en ? "\nNot proven automatically: " : "\nPlatform chưa chứng minh được: ") + auto.missing.join("; ")
+      ? (en ? "\nNot proven automatically: " : "\nPlatform chưa chứng minh được: ") +
+        auto.missing.join("; ")
       : "";
     const question = {
       question: en
         ? `Interrupted ${step.name}: reconcile before continuing.`
         : `Bước ${step.name} bị gián đoạn: cần đối soát trước khi tiếp tục.`,
-      context: (en
-        ? "Inspect existing worktrees, checkpoints, provider session and external effects (push/PR/API). Continuing authorizes retry/resume with this state; never discard local changes."
-        : "Kiểm tra worktree, checkpoint, phiên agent và tác động bên ngoài (push/PR/API). Tiếp tục cho phép thử lại/khôi phục từ trạng thái này; không xóa thay đổi cục bộ.") + missing,
+      context:
+        (en
+          ? "Inspect existing worktrees, checkpoints, provider session and external effects (push/PR/API). Continuing authorizes retry/resume with this state; never discard local changes."
+          : "Kiểm tra worktree, checkpoint, phiên agent và tác động bên ngoài (push/PR/API). Tiếp tục cho phép thử lại/khôi phục từ trạng thái này; không xóa thay đổi cục bộ.") +
+        missing,
       options: en
         ? ["Reconciled — continue", "Stop here"]
         : ["Đã đối soát — tiếp tục", "Dừng ở đây"],
@@ -167,14 +189,15 @@ async function recoverInterrupted(
     );
     checkpoint.recovery.question_id = row!.id;
   }
-  const sealed = execution ? {
-    ...checkpoint,
-    execution: { ...continuationEvidence(execution), workspace_reconciliation_required: true },
-  } : checkpoint;
+  const sealed = execution
+    ? {
+        ...checkpoint,
+        execution: { ...continuationEvidence(execution), workspace_reconciliation_required: true },
+      }
+    : checkpoint;
   const pause = await saveExecutionPause(c, attempt.id, "waiting_input", sealed);
-  pending.resume.checkpoint = !execution && pause
-    ? { ...sealed, execution: continuationEvidence(pause) }
-    : sealed;
+  pending.resume.checkpoint =
+    !execution && pause ? { ...sealed, execution: continuationEvidence(pause) } : sealed;
   await setStepStatus(
     c,
     step,
@@ -279,10 +302,18 @@ const alive = (pid: number) => {
 /** HEAD branch and any git operation left half-done (a crash mid-commit/merge/rebase). */
 async function worktreeState(path: string) {
   try {
-    const branch = (await exec("git", ["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim();
+    const branch = (
+      await exec("git", ["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
+    ).stdout.trim();
     const head = (await exec("git", ["-C", path, "rev-parse", "HEAD"])).stdout.trim();
     let busy: string | null = null;
-    for (const marker of ["index.lock", "MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD"]) {
+    for (const marker of [
+      "index.lock",
+      "MERGE_HEAD",
+      "rebase-merge",
+      "rebase-apply",
+      "CHERRY_PICK_HEAD",
+    ]) {
       const p = (await exec("git", ["-C", path, "rev-parse", "--git-path", marker])).stdout.trim();
       if (existsSync(isAbsolute(p) ? p : join(path, p))) busy = marker;
     }
@@ -321,13 +352,16 @@ async function automaticRecovery(
     const pid = owner.startsWith(`${config.instanceId}:`)
       ? Number(owner.slice(config.instanceId.length + 1).split(":")[0])
       : NaN;
-    if (!Number.isInteger(pid) || pid <= 0) missing.push("the interrupted worker process is unknown");
-    else if (pid === process.pid) missing.push("the interrupted executor runs in this process and may still be active");
+    if (!Number.isInteger(pid) || pid <= 0)
+      missing.push("the interrupted worker process is unknown");
+    else if (pid === process.pid)
+      missing.push("the interrupted executor runs in this process and may still be active");
     else if (alive(pid)) missing.push(`the interrupted worker process ${pid} is still alive`);
     const inside = await processesInside(workspaces.map((w) => w.path));
     evidence.processes_in_worktree = inside;
     if (inside === null) missing.push("processes in the worktree cannot be inspected on this host");
-    else if (inside.length) missing.push(`processes still run in the worktree (pid ${inside.slice(0, 5).join(", ")})`);
+    else if (inside.length)
+      missing.push(`processes still run in the worktree (pid ${inside.slice(0, 5).join(", ")})`);
   }
   // 2. Each worktree is ours, on the run branch, with no git operation half done.
   const heads: Record<string, string> = {};
@@ -336,7 +370,8 @@ async function automaticRecovery(
     if (!state) missing.push(`${w.repo}: worktree unreadable`);
     else {
       heads[w.repo] = state.head;
-      if (state.branch !== w.branch) missing.push(`${w.repo}: worktree is on ${state.branch}, not ${w.branch}`);
+      if (state.branch !== w.branch)
+        missing.push(`${w.repo}: worktree is on ${state.branch}, not ${w.branch}`);
       if (state.busy) missing.push(`${w.repo}: interrupted git operation (${state.busy})`);
     }
   }
@@ -358,14 +393,17 @@ async function automaticRecovery(
     missing.push("the workspace changed after the checkpoint was sealed");
   // An unattended resume of an agent is unattended write work: only inside the enforced OS sandbox.
   if (action === "RESUME" && !(await isolationEnforced()))
-    missing.push("agents do not run in the enforced OS sandbox (isolation.mode): no unattended resume");
+    missing.push(
+      "agents do not run in the enforced OS sandbox (isolation.mode): no unattended resume",
+    );
   // 4. No uncertain external effect: agents act through the enforced tool policy (no push, no network unless allowed);
   //    a PR step only calls the host's query-then-update operation, keyed by source and target branch.
   if (action === "RESUME") {
     const provider = attempt.agent_provider ?? run.agent_provider ?? "claude";
     if (!GUARANTEES[provider]?.includes("pre_tool_policy"))
       missing.push(`${provider} cannot enforce the tool policy: external effects are unknown`);
-    if (step.config?.network === true) missing.push("the step may use the network: external effects are unknown");
+    if (step.config?.network === true)
+      missing.push("the step may use the network: external effects are unknown");
   }
   if (
     await one(
@@ -489,14 +527,22 @@ export async function recoveryForFailure(
     ? await readExecutionCheckpoint(c, attempt.id)
     : undefined;
   const fingerprint = execution?.workspace_fingerprint ?? null;
-  const prev = await one<{ occurrences: number; last_fingerprint: string | null; notified_at: string | null }>(
+  const prev = await one<{
+    occurrences: number;
+    last_fingerprint: string | null;
+    notified_at: string | null;
+  }>(
     c,
     "SELECT occurrences, last_fingerprint, notified_at FROM recovery_episodes WHERE run_id=$1 AND step_id=$2 AND signature=$3 FOR UPDATE",
     [run.id, step.id, signature],
   );
   const policy = await livePolicy(c, run);
   const enforce =
-    !!policy && policy.mode !== "MANUAL" && !policy.paused && policy.gates.includes("recovery") && !policy.shadow;
+    !!policy &&
+    policy.mode !== "MANUAL" &&
+    !policy.paused &&
+    policy.gates.includes("recovery") &&
+    !policy.shadow;
   let out = decision;
   let proposal: FailureDecision | null = null;
   if (decision.action === "retry") {
@@ -574,8 +620,13 @@ export async function markEscalationNotified(c: pg.PoolClient, runId: number, st
  * A reaper can run anywhere; only the owning instance can execute the resulting work.
  */
 type ApplyCompleted = (
-  db: pg.PoolClient, run: RunRow, step: StepRow, attempt: AttemptRow,
-  jobId: number, result: Extract<ExecResult, { kind: "completed" }>, afterCommit: AfterCommit,
+  db: pg.PoolClient,
+  run: RunRow,
+  step: StepRow,
+  attempt: AttemptRow,
+  jobId: number,
+  result: Extract<ExecResult, { kind: "completed" }>,
+  afterCommit: AfterCommit,
 ) => Promise<void>;
 
 export async function reapExpiredLeases(applyCompleted: ApplyCompleted) {
@@ -585,15 +636,14 @@ export async function reapExpiredLeases(applyCompleted: ApplyCompleted) {
   );
   let reaped = 0;
   for (const job of expired) {
-    await withTx(async (c, afterCommit) => {
+    reaped += await withTx(async (c, afterCommit) => {
       const run = await lockRun(c, job.run_id);
       const j = await one<JobRow>(
         c,
         "SELECT * FROM workflow_jobs WHERE id = $1 AND status = 'running' AND lease_expires_at < now() FOR UPDATE",
         [job.id],
       );
-      if (!j) return;
-      reaped++;
+      if (!j) return 0;
       const attempt = await one<AttemptRow>(
         c,
         "SELECT * FROM workflow_step_attempts WHERE job_id = $1 AND status = 'RUNNING' FOR UPDATE",
@@ -616,7 +666,7 @@ export async function reapExpiredLeases(applyCompleted: ApplyCompleted) {
           [j.id],
         );
         noteCommitted(c, JOBS_RUNNABLE);
-        return;
+        return 1;
       }
       void traceLog({
         runId: run.id,
@@ -626,24 +676,57 @@ export async function reapExpiredLeases(applyCompleted: ApplyCompleted) {
         event: "lease.expired",
         status: "RECOVERING",
         message: `worker lease expired (${j.lease_owner}); recovering attempt ${attempt.id}`,
-        data: { job_id: j.id, fencing_token: j.fencing_token, lease_expires_at: j.lease_expires_at },
+        data: {
+          job_id: j.id,
+          fencing_token: j.fencing_token,
+          lease_expires_at: j.lease_expires_at,
+        },
       });
       // Only pure control results can commit without operator reconciliation or local workspace access.
-      if ((step.type === "condition" || (step.type === "integration" && step.config?.action === "noop")) &&
-          step.status === "RUNNING" && step.generation === attempt.generation &&
-          j.generation === attempt.generation && j.fencing_token === attempt.fencing_token &&
-          attempt.executor_stopped_at && run.status !== "CANCELED") {
+      if (
+        (step.type === "condition" ||
+          (step.type === "integration" && step.config?.action === "noop")) &&
+        step.status === "RUNNING" &&
+        step.generation === attempt.generation &&
+        j.generation === attempt.generation &&
+        j.fencing_token === attempt.fencing_token &&
+        attempt.executor_stopped_at &&
+        run.status !== "CANCELED"
+      ) {
         const checkpoint = await readExecutionCheckpoint(c, attempt.id);
-        if (checkpoint?.result?.kind === "completed" && !checkpoint.workspace_fingerprint &&
-            !checkpoint.workspace_unavailable &&
-            !(await one(c, "SELECT 1 FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'", [attempt.id]))) {
+        if (
+          checkpoint?.result?.kind === "completed" &&
+          !checkpoint.workspace_fingerprint &&
+          !checkpoint.workspace_unavailable &&
+          !(await one(
+            c,
+            "SELECT 1 FROM provider_handoffs WHERE source_attempt_id=$1 AND status='STOPPING'",
+            [attempt.id],
+          ))
+        ) {
           await applyCompleted(c, run, step, attempt, j.id, checkpoint.result, afterCommit);
-          await runEvents.add(c, run.id, "system", "Recovered sealed executor result", step.id, attempt.id);
-          return;
+          await runEvents.add(
+            c,
+            run.id,
+            "system",
+            "Recovered sealed executor result",
+            step.id,
+            attempt.id,
+          );
+          return 1;
         }
       }
       await recoverInterrupted(c, run, step, attempt, j, `worker lease expired (${j.lease_owner})`);
       await advance(c, run.id, afterCommit);
+      return 1;
+    }).catch((error) => {
+      logError("workflow.lease_recovery_failed", "Expired job recovery failed", error, {
+        job_id: job.id,
+        run_id: job.run_id,
+        step_id: job.step_id,
+        worker_id: job.lease_owner,
+      });
+      return 0;
     });
   }
   return reaped;

@@ -414,3 +414,138 @@ for (const [size, steps, extra, events] of SIZES.filter(
       `state change reloads the run once: ${r.state_change.run_reloads}`,
     );
   });
+
+async function mockEvents(page: Page, path: string) {
+  type Response = { status: number; json: unknown };
+  const pendingResponse = () => {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  let response = pendingResponse();
+  const cursors: string[] = [];
+  await page.route(
+    (url) => url.pathname === path,
+    (route) => {
+      const after = new URL(route.request().url()).searchParams.get("after") ?? "";
+      cursors.push(after);
+      return response.promise.then(({ status, json }) =>
+        route.fulfill({
+          status,
+          json: Array.isArray(json) ? json.filter((row) => row.id > Number(after)) : json,
+        }),
+      );
+    },
+  );
+  return {
+    cursors,
+    hold: () => (response = pendingResponse()),
+    respond: (json: unknown, status = 200) => response.resolve({ status, json }),
+  };
+}
+
+test("run timeline distinguishes loading, failure and a successful empty retry", async () => {
+  const run = await seedRun("run-detail-timeline-states", 1, 0, 0);
+  const context = await signedIn();
+  try {
+    await context.addInitScript(() => localStorage.setItem("hasaki.uiLocale", "en"));
+    const page = await context.newPage();
+    const endpoint = await mockEvents(page, `/api/runs/${run.runId}/events`);
+    await page.goto(`${base}/#/runs/${run.runId}`);
+    const timeline = page.locator(".rv-sec").filter({
+      has: page.getByText("Timeline", { exact: true }),
+    });
+    const loading = timeline.getByRole("status").getByText("Loading…");
+    const empty = timeline.getByText("No events yet.", { exact: true });
+    await loading.waitFor();
+    assert.equal(await empty.count(), 0);
+    endpoint.respond({ error: "Timeline temporarily unavailable" }, 503);
+    await timeline.getByText("Timeline temporarily unavailable").waitFor();
+    assert.equal(await empty.count(), 0);
+
+    endpoint.hold();
+    await timeline.getByRole("button", { name: "Retry", exact: true }).click();
+    await loading.waitFor();
+    endpoint.respond([]);
+    await empty.waitFor();
+    assert.equal(await timeline.getByText("Timeline temporarily unavailable").count(), 0);
+    assert.ok(endpoint.cursors.length >= 2);
+    assert.ok(endpoint.cursors.every((after) => after === "0"));
+  } finally {
+    await context.close();
+  }
+});
+
+for (const [type, tab, kind] of [
+  ["agent", "Claude", "agent"],
+  ["command", "Live output", "log"],
+] as const) {
+  test(`${type} execution keeps existing output and retries from the last event`, async () => {
+    const key = `run-detail-${type}-events`;
+    registerExecutor("command", { execute: async () => ({ kind: "completed", output: {} }) });
+    await definitions.create({
+      key,
+      spec: {
+        name: key,
+        steps: [
+          { key: "work", type, config: type === "command" ? { command: "echo example" } : {} },
+        ],
+      },
+    });
+    const run = await startRun({ definitionKey: key, ownerId, agentProvider: "claude" });
+    await drain();
+    const [attempt] = await q<{ id: number; step_id: number }>(
+      pool,
+      "SELECT id, step_id FROM workflow_step_attempts WHERE run_id=$1",
+      [run.id],
+    );
+    const context = await signedIn();
+    try {
+      await context.addInitScript(() => localStorage.setItem("hasaki.uiLocale", "en"));
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      const path = `/api/attempts/${attempt.id}/transcript`;
+      const endpoint = await mockEvents(page, path);
+      await page.goto(`${base}/#/runs/${run.id}/work`);
+      const inspector = page.locator(".rv-inspector");
+      await inspector.getByRole("button", { name: tab, exact: true }).click();
+      await inspector.getByRole("status").getByText("Loading…").waitFor();
+      const line = (id: number, content: string) => ({
+        id,
+        content,
+        kind,
+        data: {},
+        created_at: new Date().toISOString(),
+      });
+      const first = "First recorded line";
+      endpoint.respond([line(101, first)]);
+      await inspector.getByText(first).waitFor();
+      if (type === "agent") {
+        await inspector.getByRole("button", { name: "Errors", exact: true }).click();
+        await inspector.getByText("No events match this filter.").waitFor();
+        await inspector.getByRole("button", { name: "All", exact: true }).click();
+      }
+
+      endpoint.hold();
+      endpoint.respond({ error: "Execution output temporarily unavailable" }, 503);
+      await runEvents.add(pool, run.id, kind, "live notification", attempt.step_id, attempt.id);
+      await inspector.getByText("Execution output temporarily unavailable").waitFor();
+      assert.ok(await inspector.getByText(first).isVisible());
+
+      endpoint.hold();
+      const retry = page.waitForRequest((request) => new URL(request.url()).pathname === path);
+      await inspector.getByRole("button", { name: "Retry", exact: true }).click();
+      assert.equal(new URL((await retry).url()).searchParams.get("after"), "101");
+      endpoint.respond([line(102, "Second recorded line")]);
+      await inspector.getByText("Second recorded line").waitFor();
+      assert.ok(await inspector.getByText(first).isVisible());
+      assert.equal(await inspector.getByText("Execution output temporarily unavailable").count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+}

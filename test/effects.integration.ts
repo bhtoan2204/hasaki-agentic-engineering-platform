@@ -83,3 +83,33 @@ test("effect rows committed without a worker survive until dispatch, then a seco
   );
   assert.equal(await dispatchRunEffects(), 0);
 });
+
+test("a failed summary write logs the original cause once and stays queued for retry", async (t) => {
+  const run = await startRun({ definitionKey: "effects-probe" });
+  await pool.query("INSERT INTO workflow_run_effects (run_id, kind) VALUES ($1, 'summary')", [
+    run.id,
+  ]);
+  const query = pool.query;
+  const write = t.mock.method(pool, "query", function (this: typeof pool, ...args: unknown[]) {
+    if (typeof args[0] === "string" && args[0].startsWith("UPDATE workflow_runs SET summary"))
+      return Promise.reject(new Error("summary write failed"));
+    return Reflect.apply(query, this, args);
+  });
+  const logged = t.mock.method(console, "error", () => {});
+  assert.equal(await dispatchRunEffects(), 1);
+  assert.equal(logged.mock.callCount(), 1);
+  const { level, event, error, run_id, effect_kind } = JSON.parse(
+    String(logged.mock.calls[0].arguments[0]),
+  );
+  assert.deepEqual([level, event, error, run_id, effect_kind], [
+    "ERROR",
+    "workflow.effect_failed",
+    "summary write failed",
+    run.id,
+    "summary",
+  ]);
+
+  write.mock.restore();
+  assert.equal(await dispatchRunEffects(), 1);
+  assert.equal(await dispatchRunEffects(), 0);
+});

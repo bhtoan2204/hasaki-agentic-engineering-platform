@@ -50,6 +50,7 @@ import {
   SearchInput,
   Segmented,
   SkeletonRows,
+  Tabs,
   time,
 } from "../ui.tsx";
 import { RunsTable } from "./Runs.tsx";
@@ -437,18 +438,25 @@ export function WorkItemsPage({ query }: { query: string }) {
       statusF: params.get("status") || "",
     };
   });
+  const [view, setViewState] = useState<"items" | "intake">(() =>
+    new URLSearchParams(query).get("view") === "intake" ? "intake" : "items",
+  );
 
-  const syncUrl = useCallback((newSource: string, newStatus: string, newQ: string) => {
-    const p = new URLSearchParams();
-    if (newSource) p.set("source", newSource);
-    if (newStatus) p.set("status", newStatus);
-    if (newQ.trim()) p.set("q", newQ.trim());
-    const qs = p.toString();
-    const newHash = `#/work-items${qs ? `?${qs}` : ""}`;
-    if (location.hash !== newHash) {
-      history.replaceState(null, "", newHash);
-    }
-  }, []);
+  const syncUrl = useCallback(
+    (newSource: string, newStatus: string, newQ: string, newView = "") => {
+      const p = new URLSearchParams();
+      if (newView === "intake") p.set("view", newView);
+      if (newSource) p.set("source", newSource);
+      if (newStatus) p.set("status", newStatus);
+      if (newQ.trim()) p.set("q", newQ.trim());
+      const qs = p.toString();
+      const newHash = `#/work-items${qs ? `?${qs}` : ""}`;
+      if (location.hash !== newHash) {
+        history.replaceState(null, "", newHash);
+      }
+    },
+    [],
+  );
 
   const setSource = (s: string) => {
     setFilters({ source: s, statusF, q });
@@ -462,6 +470,11 @@ export function WorkItemsPage({ query }: { query: string }) {
     setFilters({ source, statusF, q: queryText });
     syncUrl(source, statusF, queryText);
   };
+  const setView = (v: "items" | "intake") => {
+    setViewState(v);
+    syncUrl(source, statusF, q, v);
+  };
+  const intake = useApi<unknown[]>("/api/intake/items");
 
   const { data, error, loading, refreshing, reload } = useApi<WorkItemRow[]>(
     `/api/work-items${source ? `?source=${source}` : ""}`,
@@ -537,122 +550,151 @@ export function WorkItemsPage({ query }: { query: string }) {
         }
       />
 
-      <div className="wi-layout">
-        <div className="wi-main">
-          <div className="wi-toolbar">
-            <SearchInput
-              value={q}
-              onChange={setQ}
-              placeholder={t("wi.search")}
-              width="min(320px, 100%)"
-            />
-            <div className="wi-scroll">
-              <Segmented<string>
-                label={t("wi.source")}
-                value={source}
-                onChange={setSource}
-                options={[
-                  ["", t("wi.allSources")],
-                  ...["manual", "hasaki_work"].map(
-                    (s) => [s, sourceLabel(t, s)] as [string, string],
-                  ),
-                ]}
-              />
-            </div>
-          </div>
-          <div className="wi-statusbar" role="group" aria-label={t("wi.filterStatus")}>
-            {(
-              [
-                ["", t("wi.all"), data?.length ?? 0],
-                ...Object.keys(WI_STATUS_KEY).map((k) => [k, t(WI_STATUS_KEY[k]), counts[k] ?? 0]),
-              ] as Array<[string, string, number]>
-            ).map(([k, label, n]) => (
-              <button
-                key={k || "all"}
-                type="button"
-                className={`wi-sf${statusF === k ? " on" : ""}`}
-                aria-pressed={statusF === k}
-                onClick={() => setStatusF(k)}
-              >
-                {k && <i className={`wi-dot wi-dot-${k}`} />}
-                {label}
-                <span className="wi-sf-n">{n}</span>
-              </button>
-            ))}
-          </div>
+      <Tabs<"items" | "intake">
+        value={view}
+        onChange={setView}
+        tabs={[
+          [
+            "items",
+            <>
+              {t("wi.title")}
+              {data && <span className="wi-tab-n">{data.length}</span>}
+            </>,
+          ],
+          [
+            "intake",
+            <>
+              {t("in.queue")}
+              {intake.data && <span className="wi-tab-n">{intake.data.length}</span>}
+            </>,
+          ],
+        ]}
+      />
 
-          {loading && !data ? (
-            <SkeletonRows rows={6} />
-          ) : error ? (
-            <ErrorBox error={error} onRetry={reload} />
-          ) : !data?.length ? (
-            <EmptyState
-              icon={ListTodo}
-              title={t("wi.empty")}
-              action={
-                <button onClick={() => setPanel("create")}>
-                  <Plus size={16} strokeWidth={2.2} />
-                  {t("wi.first")}
+      {view === "intake" ? (
+        <IntakeQueue />
+      ) : (
+        <div className="wi-layout">
+          <div className="wi-main">
+            <div className="wi-toolbar">
+              <SearchInput
+                value={q}
+                onChange={setQ}
+                placeholder={t("wi.search")}
+                width="min(320px, 100%)"
+              />
+              <div className="wi-scroll">
+                <Segmented<string>
+                  label={t("wi.source")}
+                  value={source}
+                  onChange={setSource}
+                  options={[
+                    ["", t("wi.allSources")],
+                    ...["manual", "hasaki_work"].map(
+                      (s) => [s, sourceLabel(t, s)] as [string, string],
+                    ),
+                  ]}
+                />
+              </div>
+            </div>
+            <div className="wi-statusbar" role="group" aria-label={t("wi.filterStatus")}>
+              {(
+                [
+                  ["", t("wi.all"), data?.length ?? 0],
+                  ...Object.keys(WI_STATUS_KEY).map((k) => [
+                    k,
+                    t(WI_STATUS_KEY[k]),
+                    counts[k] ?? 0,
+                  ]),
+                ] as Array<[string, string, number]>
+              ).map(([k, label, n]) => (
+                <button
+                  key={k || "all"}
+                  type="button"
+                  className={`wi-sf${statusF === k ? " on" : ""}`}
+                  aria-pressed={statusF === k}
+                  onClick={() => setStatusF(k)}
+                >
+                  {k && <i className={`wi-dot wi-dot-${k}`} />}
+                  {label}
+                  <span className="wi-sf-n">{n}</span>
                 </button>
-              }
-            >
-              {t("wi.emptyBody")}
-            </EmptyState>
-          ) : !shown.length ? (
-            <EmptyState icon={ScanSearch} title={t("wi.noMatch")}>
-              {t("wi.noMatchBody")}
-            </EmptyState>
-          ) : (
-            <div className="wi-list">
-              {shown.map((w) => (
-                <a key={w.id} className="wi-row" href={`#/work-items/${w.id}`}>
-                  <i className={`wi-bar wi-dot-${w.status}`} aria-hidden />
-                  <div className="wi-row-main">
-                    <div className="wi-row-meta">
-                      <span className="mono wi-code">{w.code}</span>
-                      <span className="wi-src">{sourceLabel(t, w.source)}</span>
-                      {w.project && (
-                        <span className="wi-proj">
-                          <FolderGit2 size={12} strokeWidth={2} />
-                          {w.project}
-                        </span>
-                      )}
-                    </div>
-                    <div className="wi-row-title">{w.title}</div>
-                  </div>
-                  <div className="wi-row-side">
-                    <WiStatus s={w.status} />
-                    <div className="wi-row-runs">
-                      <span className="muted small">
-                        <Workflow size={12} strokeWidth={2} /> {t("wi.runs", { n: w.run_count })}
-                      </span>
-                      {w.last_run_status && <Badge s={w.last_run_status} label />}
-                      {w.cost?.cost_usd != null && (
-                        <span className="small">
-                          <CostCell cost={w.cost} />
-                        </span>
-                      )}
-                    </div>
-                    <span className="muted small wi-row-time">
-                      <Clock size={12} strokeWidth={2} />
-                      {t("wi.ago", { ago: ago(w.updated_at) })}
-                    </span>
-                  </div>
-                  <ChevronRight size={18} strokeWidth={1.9} className="wi-chev" aria-hidden />
-                </a>
               ))}
             </div>
-          )}
-        </div>
 
-        <aside className="wi-aside">
-          <HasakiPanel onImported={reload} />
-          <div className="wi-note">
-            <Zap size={15} strokeWidth={2} />
-            <span>{t("wi.note")}</span>
+            {loading && !data ? (
+              <SkeletonRows rows={6} />
+            ) : error ? (
+              <ErrorBox error={error} onRetry={reload} />
+            ) : !data?.length ? (
+              <EmptyState
+                icon={ListTodo}
+                title={t("wi.empty")}
+                action={
+                  <button onClick={() => setPanel("create")}>
+                    <Plus size={16} strokeWidth={2.2} />
+                    {t("wi.first")}
+                  </button>
+                }
+              >
+                {t("wi.emptyBody")}
+              </EmptyState>
+            ) : !shown.length ? (
+              <EmptyState icon={ScanSearch} title={t("wi.noMatch")}>
+                {t("wi.noMatchBody")}
+              </EmptyState>
+            ) : (
+              <div className="wi-list">
+                {shown.map((w) => (
+                  <a key={w.id} className="wi-row" href={`#/work-items/${w.id}`}>
+                    <i className={`wi-bar wi-dot-${w.status}`} aria-hidden />
+                    <div className="wi-row-main">
+                      <div className="wi-row-meta">
+                        <span className="mono wi-code">{w.code}</span>
+                        <span className="wi-src">{sourceLabel(t, w.source)}</span>
+                        {w.project && (
+                          <span className="wi-proj">
+                            <FolderGit2 size={12} strokeWidth={2} />
+                            {w.project}
+                          </span>
+                        )}
+                      </div>
+                      <div className="wi-row-title">{w.title}</div>
+                    </div>
+                    <div className="wi-row-side">
+                      <WiStatus s={w.status} />
+                      <div className="wi-row-runs">
+                        <span className="muted small">
+                          <Workflow size={12} strokeWidth={2} /> {t("wi.runs", { n: w.run_count })}
+                        </span>
+                        {w.last_run_status && <Badge s={w.last_run_status} label />}
+                        {w.cost?.cost_usd != null && (
+                          <span className="small">
+                            <CostCell cost={w.cost} />
+                          </span>
+                        )}
+                      </div>
+                      <span className="muted small wi-row-time">
+                        <Clock size={12} strokeWidth={2} />
+                        {t("wi.ago", { ago: ago(w.updated_at) })}
+                      </span>
+                    </div>
+                    <ChevronRight size={18} strokeWidth={1.9} className="wi-chev" aria-hidden />
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
-        </aside>
-      </div>
+
+          <aside className="wi-aside">
+            <HasakiPanel onImported={reload} />
+            <div className="wi-note">
+              <Zap size={15} strokeWidth={2} />
+              <span>{t("wi.note")}</span>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {panel === "create" && (
         <Drawer title={t("wi.createTitle")} onClose={() => setPanel("")}>
@@ -715,7 +757,6 @@ export function WorkItemsPage({ query }: { query: string }) {
           </div>
         </Drawer>
       )}
-      <IntakeQueue />
     </div>
   );
 }
@@ -837,9 +878,10 @@ export function RunSummaryCard({ runs }: { runs: Array<{ id: number; status: str
     data: s,
     error,
     loading,
-  } = useApi<RunSummary>(current ? `/api/runs/${current}/summary${refresh ? "?refresh=1" : ""}` : null, [
-    refresh,
-  ]);
+  } = useApi<RunSummary>(
+    current ? `/api/runs/${current}/summary${refresh ? "?refresh=1" : ""}` : null,
+    [refresh],
+  );
   if (!finished.length) return null;
   return (
     <section className="card wi-sum">
@@ -901,12 +943,8 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
         {s.changes.length > 0 && (
           <span>
             <b>{s.changes.reduce((n, c) => n + c.files.length, 0)}</b> {t("sum.files")}{" "}
-            <span className="wi-sum-add">
-              +{s.changes.reduce((n, c) => n + c.additions, 0)}
-            </span>{" "}
-            <span className="wi-sum-del">
-              −{s.changes.reduce((n, c) => n + c.deletions, 0)}
-            </span>
+            <span className="wi-sum-add">+{s.changes.reduce((n, c) => n + c.additions, 0)}</span>{" "}
+            <span className="wi-sum-del">−{s.changes.reduce((n, c) => n + c.deletions, 0)}</span>
           </span>
         )}
         {s.totals.cost_usd != null && (

@@ -209,6 +209,8 @@ function emptyFile() {
   const dir = mkdtempSync(join(tmpdir(), "ctp-mask-"));
   empty = join(dir, "empty");
   writeFileSync(empty, "", { mode: 0o444 });
+  writeFileSync(join(dir, ".owner-pid"), String(process.pid));
+  process.once("exit", () => rmSync(dir, { recursive: true, force: true }));
   return empty;
 }
 

@@ -8,7 +8,7 @@ import {
   telegramUrl,
   type StepWaiting,
 } from "../telegram.ts";
-import { botKey, textLimit, safeTelegramText } from "./client.ts";
+import { botKey, preview, safeTelegramText } from "./client.ts";
 import { opaqueId, preferences, queue } from "./store.ts";
 
 export const contextHash = (
@@ -99,7 +99,7 @@ export async function makeAction(
                   ? context.locale === "en"
                     ? "Reply with answer"
                     : "Trả lời bằng tin nhắn"
-                  : textLimit(safeTelegramText(value), 60),
+                  : preview(safeTelegramText(value), 60),
     callback_data: `a:${id}`,
   };
 }
@@ -161,11 +161,9 @@ export async function sendInteractiveWaiting(w: StepWaiting, dedupeKey: string):
       const base = buildStepMessage({
         ...w,
         locale: en ? "en" : "vi",
-        runTitle: textLimit(safeTelegramText(run.title), 160),
-        stepName: textLimit(safeTelegramText(step.name), 100),
-        detail: question
-          ? textLimit(safeTelegramText(question.question), 800)
-          : textLimit(safeTelegramText(w.detail), 300),
+        runTitle: run.title,
+        stepName: step.name,
+        detail: question?.question ?? w.detail,
       });
       const keyboard: { text: string; callback_data?: string; url?: string }[][] = [];
       // Selection/branch forms and fenced provider handoffs require their existing full UI.
@@ -203,16 +201,12 @@ export async function sendInteractiveWaiting(w: StepWaiting, dedupeKey: string):
       const ids = keyboard
         .flat()
         .flatMap((b) => (b.callback_data ? [b.callback_data.slice(2)] : []));
-      const text =
-        base.text +
-        `\n${en ? "Provider" : "Nhà cung cấp"}: ${textLimit(run.agent_provider ?? "—", 40)}\n${w.status}`;
       await queue(
         db,
         key,
         "sendMessage",
         {
           ...base,
-          text,
           chat_id: binding.chat_id,
           ...(keyboard.length ? { reply_markup: { inline_keyboard: keyboard } } : {}),
         },
@@ -226,10 +220,14 @@ export async function sendInteractiveWaiting(w: StepWaiting, dedupeKey: string):
 }
 export async function decisionMessage(db: Db, a: Action, label: string) {
   const step = await one(db, "SELECT key,name FROM workflow_steps WHERE id=$1", [a.step_id]);
-  const user = await one(db, "SELECT username FROM users WHERE id=$1", [a.user_id]);
-  const en = a.locale === "en",
-    nav = navigation(a.run_id, step!.key, a.locale);
-  const text = `${label}\nRun #${a.run_id} · ${textLimit(safeTelegramText(step!.name), 100)}\n${en ? "By" : "Bởi"}: ${textLimit(user!.username, 80)} (#${a.user_id})\n${new Date().toISOString()}\n${en ? "Decision saved; execution follows the assigned worker." : "Đã lưu quyết định; worker được chỉ định sẽ tiếp tục xử lý."}${nav.text ? `\n${telegramUrl(stepLink(a.run_id, step!.key))}` : ""}`;
+  const nav = navigation(a.run_id, step!.key, a.locale);
+  const text = [
+    label,
+    `Run #${a.run_id} · ${preview(safeTelegramText(step!.name), 100)}`,
+    nav.text ? telegramUrl(stepLink(a.run_id, step!.key)) : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   if (a.message_id)
     await queue(
       db,
@@ -252,7 +250,7 @@ export async function notifyTelegramRun(runId: number, status: string) {
   )
     return;
   const run = await one(pool, "SELECT * FROM workflow_runs WHERE id=$1", [runId]);
-  if (!run?.owner_id) return;
+  if (!run?.owner_id || run.status !== status || !run.finished_at) return;
   const binding = await one(
     pool,
     "SELECT * FROM telegram_bindings WHERE user_id=$1 AND bot_key=$2",
@@ -261,18 +259,31 @@ export async function notifyTelegramRun(runId: number, status: string) {
   const pref = await preferences(run.owner_id);
   if (!binding || !(status === "FAILED" ? pref.failures : pref.completions)) return;
   const en = pref.locale === "en";
-  // No error logs, code or credentials leave the platform in terminal notifications.
+  const nav = navigation(runId, "", String(pref.locale));
+  const label =
+    status === "FAILED"
+      ? en
+        ? "❌ Workflow failed"
+        : "❌ Workflow thất bại"
+      : en
+        ? "✅ Workflow completed"
+        : "✅ Workflow hoàn tất";
+  // finished_at is set with the status transition and survives unrelated run edits.
   await queue(
     pool,
-    `run:${runId}:${status}:${run.updated_at.toISOString()}`,
+    `run:${runId}:${status}:${run.finished_at.toISOString()}`,
     "sendMessage",
     {
       chat_id: binding.chat_id,
-      text: `${status === "FAILED" ? "❌" : "✅"} Run #${runId} — ${textLimit(safeTelegramText(run.title), 160)}\n${status === "FAILED" ? (en ? "Workflow failed. Open the run for details." : "Workflow thất bại. Mở run để xem chi tiết.") : en ? "Workflow completed." : "Workflow hoàn tất."}
-${telegramUrl(stepLink(runId, ""))}`,
-      ...(navigation(runId, "", String(pref.locale)).reply_markup
-        ? { reply_markup: navigation(runId, "", String(pref.locale)).reply_markup }
-        : {}),
+      text: [
+        label,
+        `Run #${runId} · ${preview(safeTelegramText(run.title), 160)}`,
+        nav.text ? telegramUrl(stepLink(runId, "")) : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      disable_web_page_preview: true,
+      ...(nav.reply_markup ? { reply_markup: nav.reply_markup } : {}),
     },
     [],
     undefined,

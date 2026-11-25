@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 export const CLUSTER_ENV = "CTP_TEST_PG_CLUSTER";
+/** The system temp directory (test/env.ts redirects TMPDIR into a per-process root, removed at exit). */
+const systemTmp = () => process.env.CTP_SYSTEM_TMPDIR || tmpdir();
 
 export const adminUrl = (cluster: string) =>
   `postgres://platform_test@localhost/postgres?host=${encodeURIComponent(cluster)}`;
@@ -19,7 +21,7 @@ export function sharedTestCluster(): string | null {
   if (!cluster) return null;
   if (
     !isAbsolute(cluster) ||
-    dirname(cluster) !== tmpdir() ||
+    dirname(cluster) !== systemTmp() ||
     !basename(cluster).startsWith("ctp-pg-") ||
     !existsSync(join(cluster, "data", "PG_VERSION"))
   )
@@ -29,7 +31,7 @@ export function sharedTestCluster(): string | null {
 
 export function startTestCluster(): string {
   // Never connect to an inherited database, even on localhost: another application may own it.
-  const cluster = mkdtempSync(join(tmpdir(), "ctp-pg-"));
+  const cluster = mkdtempSync(join(systemTmp(), "ctp-pg-"));
   const clusterData = join(cluster, "data");
   let clusterStarted = false;
   function stopCluster() {

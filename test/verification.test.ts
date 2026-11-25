@@ -501,7 +501,7 @@ test("published feature and bug templates enable a bounded independent review re
   const bugReview = bug.steps.find((s) => s.key === "review")!;
   assert.equal(bugReview.config.independent, true);
   assert.equal(bugReview.config.max_repairs, 2);
-  assert.deepEqual(bugReview.depends_on, ["regression_test"]);
+  assert.deepEqual(bugReview.depends_on, ["regression_test", "impact"]); // + cross-repository impact for the reviewer
   assert.equal(bug.feedback_step, "implement");
 
   for (const key of ["refactoring", "code-review"]) {

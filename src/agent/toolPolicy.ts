@@ -296,6 +296,14 @@ const READ_ONLY = [
   // -outputdir. Those stay refused unless they point at /tmp or /dev/null.
   /^go\s+test\b(?!.*\s-c(\s|$))(?!.*\s-(o|coverprofile|cpuprofile|memprofile|blockprofile|mutexprofile|trace|outputdir)(=|\s+)(?!\/tmp\/|\/dev\/null))/,
   /^(node|npm)\s+(-v|--version|ls)\b/,
+  // Static analysers that only report. Anything that writes is refused: fixes, output files, profiles, servers.
+  /^staticcheck\b(?!.*\s-debug\.)/,
+  /^golangci-lint\s+run\b(?!.*\s--fix\b)(?!.*\s--(out|output)[-.\w]*(=|\s+)(?!(stdout|stderr)\b))/,
+  /^golangci-lint\s+(version|--version|linters|help)\b/,
+  /^govulncheck\b(?!.*\s-(o|output)(=|\s))/,
+  /^deadcode\b(?!.*\s-(o|output|cpuprofile|memprofile)\b)/,
+  // pprof reads a profile in /tmp as text (top, list, peek, traces); no web UI, no rendered files.
+  /^go\s+tool\s+pprof\s+(-(top|list|peek|traces|text|nodecount|cum|lines|functions|files|unit|sample_index)\b(=\S+|\s+(?!\/)\S+)?\s+)+\/tmp\/\S+\s*$/,
 ];
 
 export interface ShellParse {
@@ -523,6 +531,8 @@ function readOnlyViolation(
   const bad = p.redirects.find((r) => !harmlessRedirect(r.target));
   if (bad) return `output redirection writes files (> ${bad.target})`;
   const commands: Array<{ seg: string; s: string }> = [];
+  let groups = 0;
+  const arithmetic = /\(\(/.test(command);
   for (const seg of p.segments) {
     // $(...) substitutions run commands too: check each one, then treat it as an opaque word.
     const { text, inner } = extractSubstitutions(seg);
@@ -531,13 +541,33 @@ function readOnlyViolation(
       const v = readOnlyViolation(body);
       if (v) return v;
     }
-    let s = text;
+    // `( … )` and `{ …; }` only group commands: drop balanced brackets and judge what they contain. Arithmetic
+    // `(( … ))` is not a group: it is left to the loop check, which refuses it.
+    let s = text.trim();
+    if (!arithmetic) {
+      const keyword = s.match(/^(do|then|else)\s+/)?.[0] ?? "";
+      s = s.slice(keyword.length);
+      while (/^\((?!\()|^\{\s/.test(s)) {
+        groups++;
+        s = s.slice(1).trim();
+      }
+      while (/\)$|(^|\s)\}$/.test(s)) {
+        if (--groups < 0) return "cannot parse safely: unbalanced ( ) or { }";
+        s = s.slice(0, -1).trim();
+      }
+      s = (keyword + s).trim();
+    }
+    if (!s) continue;
+    // A module mode that may rewrite go.mod / go.sum is not read-only, whether set by flag or GOFLAGS.
+    if (/(^|\s|=)-mod=mod\b|(^|\s)-modfile\b/.test(s) && /(^|\s)go\s/.test(` ${s}`))
+      return `"${s.slice(0, 80)}" may rewrite go.mod/go.sum (-mod=mod): not read-only; drop it (the default -mod=readonly reads only)`;
     // VAR=value only sets a shell variable; VAR=value cmd ... runs cmd
     if (/^([A-Za-z_]\w*=\S*\s*)+$/.test(s)) continue;
     s = s.replace(/^([A-Za-z_]\w*=\S*\s+)+/, "");
     if (/`/.test(s.replace(/'[^']*'/g, ""))) return "backtick command substitution";
     commands.push({ seg, s });
   }
+  if (groups !== 0) return "cannot parse safely: unbalanced ( ) or { }";
   const loop = loopStructure(commands.map((c) => c.s));
   if ("error" in loop) return loopUnsupported(loop.error);
   for (const cmd of loop.commands) {
@@ -547,6 +577,7 @@ function readOnlyViolation(
     // `timeout 30 <cmd>` only bounds how long a read-only command may run: judge the wrapped command.
     const s = cmd
       .replace(/^([A-Za-z_]\w*=\S*\s+)+/, "")
+      .replace(/^time(\s+-p)?\s+/, "")
       .replace(/^timeout\s+(-[ks]\s+\S+\s+|--?[a-z-]+(=\S+)?\s+)*\d+(\.\d+)?[smhd]?\s+/, "")
       .replace(/^cd\s+\S+\s*$/, "pwd");
     if (!READ_ONLY.some((re) => re.test(s)))

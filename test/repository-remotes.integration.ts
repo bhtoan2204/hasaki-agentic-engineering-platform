@@ -377,7 +377,7 @@ test("legacy dry-run and repeatable apply preserve IDs, references, local overri
     "configured",
   );
   assert.equal(
-    git(local, "remote", "get-url", "origin"),
+    git(local, "config", "--local", "--no-includes", "--get", "remote.origin.url"),
     "git@bitbucket.org:other-team/discovered.git",
   );
 });

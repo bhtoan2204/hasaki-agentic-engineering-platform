@@ -5,7 +5,7 @@ import { config } from "../../../config.ts";
 import { one, pool, q } from "../../../db/pool.ts";
 import { workspaceBase } from "../../../git/provider.ts";
 import { repositoryBaseBranch, workspaceBaseBranch } from "../../../repos/service.ts";
-import { resolveSlopSettings, blocking as slopBlocking } from "../../../slop/policy.ts";
+import { resolveSlopSettings } from "../../../slop/policy.ts";
 import { scanWorkspace } from "../../../slop/scan.ts";
 import { goBaseline, knownBaseFailures } from "../../../workflow/executors/baseline.ts";
 import { runVerificationCommand as runCommand } from "../../../workflow/executors/builtin.ts";
@@ -27,8 +27,12 @@ import {
   independentSubmissionGap,
   normalizeVerdict,
   repairTargetFor,
+  reviewEvidenceKey,
+  reviewStall,
+  testDigestOf,
   unresolvedScope,
 } from "../../independentReview.ts";
+import { approvedScopeIn } from "../../evidence.ts";
 import { outputLocale } from "../../language.ts";
 import { changedFiles, collectScopeState } from "../../scopeGuard.ts";
 import { selectVerificationScope } from "../../verificationScope.ts";
@@ -37,6 +41,7 @@ import {
   beforeAfterProof,
   diffAgainstBase,
   diffTestsAgainstBase,
+  fixRegressionTest,
   repairPrompt,
   restoreConflictSkips,
   sourceUnchangedSince,
@@ -55,6 +60,32 @@ import {
   rootCauseDepth,
   symptomFixSignals,
 } from "../../rootCause.ts";
+
+/** Finding categories whose regression test must run under the Go race detector to demonstrate the fix. */
+const RACE_CATEGORIES = ["CONCURRENCY", "DATA_INTEGRITY"];
+
+/** The category of the finding a codebase-improvement run fixes: chosen by a person, else selected by the assessment. */
+function raceRequired(s: Pick<LifecycleState, "ctx">) {
+  const chosen = (s.ctx.run.inputs as { finding?: { kind?: unknown } } | null)?.finding?.kind;
+  const selected = Object.values(s.ctx.input.upstream)
+    .map((u) => (u.output as { selected?: { kind?: unknown } } | null)?.selected?.kind)
+    .find(Boolean);
+  return RACE_CATEGORIES.includes(String(chosen ?? selected ?? "").toUpperCase());
+}
+
+/** Keys only the platform may write on a coding step's output (see rootCause.ts codingEvidence, proofOfFix.ts). */
+export const PLATFORM_EVIDENCE_KEYS = [
+  "regression_proof",
+  "tested_heads",
+  "symptom_signals",
+  "verification",
+] as const;
+export function withoutPlatformEvidence<T>(o: T): T {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return o;
+  const copy = { ...(o as Record<string, unknown>) };
+  for (const k of PLATFORM_EVIDENCE_KEYS) delete copy[k];
+  return copy as T;
+}
 
 /** Deterministic verification: the independent verdict gates, or the bounded verify-and-repair loop for implementation steps. */
 export async function verifyStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -78,7 +109,9 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
     terminalCodingFailure,
     restoreWorkspaces,
   } = s;
-  let output = s.output;
+  // Platform evidence is written by the platform only: an implementer's submission can never supply (forge) a
+  // regression proof, tested heads, symptom signals or a verification summary — they are recomputed below or absent.
+  let output = independent ? s.output : withoutPlatformEvidence(s.output);
   if (independent) {
     const gap = independentSubmissionGap(s.submitted, {
       toolNames: Object.keys(metrics.tool_calls),
@@ -124,6 +157,56 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         verdict: "BLOCKED",
         blocked_reason: `the verdict no longer matches the code: ${drift.join("; ")}`,
       };
+    // The material evidence this verdict judged. Recorded on every verdict (FAIL included) so that a repeat of the same
+    // FAIL on the same evidence — a repair that changed nothing — is recognised instead of being repaired again.
+    const scopeNow = approvedScopeIn(ctx.input.upstream);
+    const evidenceKey = evidence
+      ? reviewEvidenceKey({
+          heads: evidence.heads,
+          baseTips,
+          diffText: evidence.text,
+          tests: testDigestOf(ctx.input.upstream),
+          scope: scopeNow
+            ? [
+                scopeNow.proposal_hash,
+                Object.values(ctx.input.upstream).map(
+                  (u) => u.output?.scope_check?.reapproved?.revision ?? null,
+                ),
+              ]
+            : null,
+        })
+      : undefined;
+    if (v.verdict === "FAIL" && evidenceKey && evidence) {
+      const prior = await one<{ id: number; output: unknown }>(
+        pool,
+        `SELECT a.id, a.output FROM workflow_step_attempts a
+          WHERE a.step_id = $1 AND a.output->>'verdict' IS NOT NULL AND ${SINCE_HUMAN_REEXECUTE}
+          ORDER BY a.id DESC LIMIT 1`,
+        [ctx.step.id, ctx.run.id],
+      );
+      const stall = reviewStall(prior, v, { heads: evidence.heads, baseTips, evidenceKey });
+      if (stall) {
+        v = { ...v, verdict: "BLOCKED", blocked_reason: stall.reason };
+        await ctx.log("system", `independent verification: ${stall.reason}`, {
+          verdict: "BLOCKED",
+          no_progress: true,
+          prior_attempt: prior!.id,
+        });
+        await noteDecision({
+          runId: ctx.run.id,
+          stepId: ctx.step.id,
+          attemptId: ctx.attempt.id,
+          generation: ctx.attempt.generation,
+          kind: "recovery",
+          action: "STOP",
+          outcome: "applied",
+          reason:
+            "review → repair made no progress: same findings on unchanged source and evidence",
+          sourceAttemptId: prior!.id,
+          details: { evidence_key: evidenceKey },
+        });
+      }
+    }
     const repairsUsed = (await one<{ n: number }>(
       pool,
       // Repair budget restarts when a human re-executes (re-run / instructions / rejection): automatic repair rounds
@@ -153,6 +236,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       heads: evidence?.heads ?? {},
       baseTips,
       incrementalFrom: incremental?.attemptId,
+      evidenceKey,
     });
     if (decided.kind === "completed" && reviewKey)
       decided.output = {
@@ -211,6 +295,8 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       (w) =>
         !ctx.run.selected_repositories.length || ctx.run.selected_repositories.includes(w.repo),
     );
+    // prepare_branch creates the worktrees during the turn: the list preflight captured predates them.
+    s.ws = trees;
     const assessMicroScope = async (): Promise<
       { escalate: false } | { escalate: true; result: ExecResult }
     > => {
@@ -339,7 +425,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
           profile: ctx.run.profile,
           signal: ctx.signal,
         });
-        return { ...report, mode: settings.mode, blocking: slopBlocking(report, settings) };
+        return { ...report, mode: settings.mode };
       },
       artifact: (name, content, data) =>
         ctx.artifact("log", name, content, { ...data, verification: true }),
@@ -356,6 +442,21 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
           }),
     };
     let accepted = output;
+    const depth = rootCauseDepth(ctx.run, ctx.step);
+    const contractTests = vcfg.requiredTests ?? [];
+    const requireFixTest = async (submitted: unknown) => {
+      const remediation =
+        depth === "light"
+          ? null
+          : normalizeRemediation(
+              (submitted as { remediation?: unknown } | null)?.remediation,
+              depth,
+            );
+      const id = await fixRegressionTest(trees, remediation);
+      vcfg.requiredTests = [...new Set([...contractTests, ...(id ? [id] : [])])];
+      vcfg.raceTests = id && raceRequired(s) ? [id] : [];
+    };
+    await requireFixTest(accepted);
     const loop = await verificationLoop<ExecResult>({
       cfg: vcfg,
       prior: [...rounds], // rounds keeps the full history (prior + new) for the pause checkpoint
@@ -445,7 +546,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
           ];
           const state = sessionStateBlock({
             reason: pressure.reason,
-            worktree: await worktreeState(ws),
+            worktree: await worktreeState(s.ws),
             verification: failed.repos.map((x) => ({
               repo: x.repo,
               status: x.status,
@@ -486,7 +587,10 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         if (await openQuestions()) return pause(r.text);
         const terminalRepair = terminalCodingFailure(s.submitted);
         if (terminalRepair) return terminalRepair;
-        if (s.submitted) accepted = s.submitted;
+        if (s.submitted) {
+          accepted = withoutPlatformEvidence(s.submitted);
+          await requireFixTest(accepted);
+        }
         if (ctx.run.profile === "MICRO") {
           const check = await assessMicroScope();
           if (check.escalate) return check.result;
@@ -544,7 +648,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
                       ", ",
                     )}${x.slop.blocking.length > 8 ? ` (+${x.slop.blocking.length - 8} more)` : ""}; `
                 : ""
-            }${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
+            }${x.weakened.length ? `tests weakened (${x.weakened.join(", ")})` : x.regressions.map((g) => [g.package.split("/").slice(-2).join("/"), ...g.tests, ...g.build_errors].slice(0, 4).join(" ")).join("; ") || (x.note?.startsWith("Required test") ? x.note : x.timed_out ? "timeout" : `exit ${x.exit_code}`)}`,
         );
       const why =
         loop.outcome === "no_progress"
@@ -624,6 +728,7 @@ async function rootCauseEvidence(s: LifecycleState, accepted: unknown) {
             verifyConfig(s.ctx.step.config, TEST_COMMAND)?.timeoutMs ?? 600_000,
             s.ctx.signal,
           ),
+        raceRequired(s),
       );
       if (regression_proof.status !== "unmeasured" || scoped) break;
     }

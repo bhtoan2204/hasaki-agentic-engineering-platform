@@ -646,7 +646,8 @@ test("hook denies git push and escalation in a real turn; secrets stay out of th
   });
   assert.equal(r.isError, false);
   assert.equal(t.metrics.cost_usd, null);
-  assert.equal(t.metrics.tokens?.input, 120);
+  // The fake CLI reports input 120 of which 100 cached: input is the uncached part, so input + cache_read is 120.
+  assert.deepEqual([t.metrics.tokens?.input, t.metrics.tokens?.cache_read], [20, 100]);
   assert.equal(t.metrics.tokens?.reasoning_output, 3);
   assert.ok(t.metrics.denied.some((d) => /pushing/.test(d.reason)));
   assert.equal(t.metrics.model, "gpt-test", "actual model from the hook payload");
@@ -722,7 +723,7 @@ test("a Codex run completes through MCP submit_result, records codex session/met
   assert.equal(a.metrics.prompt_context.measurement, "character_estimate_not_provider_usage");
   assert.equal(a.metrics.prompt_context.session_history_tokens, null);
   assert.equal(a.metrics.cost_usd, null);
-  assert.equal(a.metrics.tokens?.input, 120);
+  assert.deepEqual([a.metrics.tokens?.input, a.metrics.tokens?.cache_read], [20, 100]);
   const s = (await one<{ provider: string; session_id: string }>(
     pool,
     "SELECT * FROM agent_sessions WHERE attempt_id = $1",

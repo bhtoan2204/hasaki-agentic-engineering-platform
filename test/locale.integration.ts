@@ -137,10 +137,10 @@ test("prompts follow the run output locale and keep machine-readable contracts",
     detail: "2 questions",
     locale: "en",
   });
-  assert.match(viMsg.text, /CẦN BẠN TRẢ LỜI/);
-  assert.match(enMsg.text, /NEEDS YOUR ANSWER/);
-  assert.match(enMsg.text, /Step: <b>Ask<\/b>/);
-  assert.doesNotMatch(enMsg.text, /CẦN BẠN/);
+  assert.match(viMsg.text, /Cần bạn trả lời/);
+  assert.match(enMsg.text, /Needs your answer/);
+  assert.match(enMsg.text, /Step · Ask/);
+  assert.doesNotMatch(enMsg.text, /Cần bạn/);
 });
 
 test("a run keeps its output locale across pause and resume", async () => {

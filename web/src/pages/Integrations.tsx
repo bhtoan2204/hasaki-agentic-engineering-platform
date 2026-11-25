@@ -1219,8 +1219,27 @@ type BitbucketStatus = {
   reviewers: string[];
 };
 type GithubStatus = { configured: boolean; source: string; personal: boolean; token: string };
-type TelegramPrefKey = "approvals" | "questions" | "failures" | "completions" | "interactive";
-type TelegramPrefs = Partial<Record<TelegramPrefKey, boolean>> & { locale?: string };
+const TELEGRAM_PREF_KEYS = [
+  "approvals",
+  "questions",
+  "failures",
+  "completions",
+  "interactive",
+  "chat",
+  "blocked",
+  "recoveries",
+  "pull_requests",
+  "autonomy",
+  "intake",
+] as const;
+type TelegramPrefKey = (typeof TELEGRAM_PREF_KEYS)[number];
+type TelegramPrefs = Partial<Record<TelegramPrefKey, boolean>> & {
+  locale?: string;
+  level?: string;
+  quiet_start?: number | null;
+  quiet_end?: number | null;
+  timezone?: string;
+};
 type TelegramStatus = {
   configured: boolean;
   canManage: boolean;
@@ -1870,18 +1889,48 @@ function Telegram(p: { open: boolean; onToggle: (id: string) => void }) {
             )}
           </div>
           <div className="ig-grid">
-            {(["approvals", "questions", "failures", "completions", "interactive"] as const).map(
-              (key) => (
-                <label className="row tight small" key={key}>
-                  <input
-                    type="checkbox"
-                    checked={prefs[key] ?? st.preferences?.[key] ?? true}
-                    onChange={(e) => setPrefs((v) => ({ ...v, [key]: e.target.checked }))}
-                  />
-                  {t(`ig.tg.pref.${key}`)}
-                </label>
-              ),
-            )}
+            {TELEGRAM_PREF_KEYS.map((key) => (
+              <label className="row tight small" key={key}>
+                <input
+                  type="checkbox"
+                  checked={prefs[key] ?? st.preferences?.[key] ?? true}
+                  onChange={(e) => setPrefs((v) => ({ ...v, [key]: e.target.checked }))}
+                />
+                {t(`ig.tg.pref.${key}`)}
+              </label>
+            ))}
+            <Field label={t("ig.tg.level")}>
+              <select
+                aria-label={t("ig.tg.level")}
+                value={prefs.level ?? st.preferences?.level ?? "important"}
+                onChange={(e) => setPrefs((v) => ({ ...v, level: e.target.value }))}
+              >
+                {(["all", "important", "critical"] as const).map((l) => (
+                  <option key={l} value={l}>
+                    {t(`ig.tg.level.${l}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {(["quiet_start", "quiet_end"] as const).map((key) => (
+              <Field label={t(`ig.tg.${key}`)} key={key}>
+                <select
+                  aria-label={t(`ig.tg.${key}`)}
+                  value={String((key in prefs ? prefs[key] : st.preferences?.[key]) ?? "")}
+                  onChange={(e) =>
+                    setPrefs((v) => ({
+                      ...v,
+                      [key]: e.target.value === "" ? null : Number(e.target.value),
+                    }))
+                  }
+                >
+                  <option value="">—</option>
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>{`${String(h).padStart(2, "0")}:00`}</option>
+                  ))}
+                </select>
+              </Field>
+            ))}
             <Field label={t("ig.tg.language")}>
               <select
                 aria-label={t("ig.tg.language")}

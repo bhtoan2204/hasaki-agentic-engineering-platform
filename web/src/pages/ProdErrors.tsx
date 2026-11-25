@@ -33,6 +33,7 @@ import {
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 import { ScanProgressCard, type Progress } from "./ScanProgress.tsx";
 import { BugHunterInline } from "./prodErrors/BugHunter.tsx";
+import { IncidentWorkbench } from "./prodErrors/IncidentWorkbench.tsx";
 import { ACTIVE_HUNT, usePolling } from "./prodErrors/bugHuntParts.tsx";
 import "./ProdErrors.css";
 
@@ -595,6 +596,7 @@ function GroupRow({
       </button>
       {open && (
         <div className="pe-body">
+          <IncidentWorkbench fingerprint={g.fingerprint} onHunt={onHunt} />
           {g.reasons.length > 0 && (
             <div>
               {g.reasons.map((r) => (

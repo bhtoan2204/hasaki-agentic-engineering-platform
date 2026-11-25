@@ -188,8 +188,9 @@ if (!goToolchain()) {
     }
     const stats = await (await retrievalService("/internal/v1/analytics/stats")).json();
     assert.ok(ajv.validate("analytics-v1#/$defs/Stats", stats), ajv.errorsText());
-    // Analytics has its own read-only pool, as large as its slots: it never takes a retrieval/indexing connection.
-    assert.equal(stats.pool.max, stats.max_concurrent);
+    // Analytics has its own read-only pool: one connection per dashboard slot plus one for the options lane, so it never
+    // takes a retrieval/indexing connection and the filter options never wait behind slow dashboards.
+    assert.equal(stats.pool.max, stats.max_concurrent + 1);
     const ro = await retrievalService("/internal/v1/analytics/usage", request, 10_000);
     assert.equal(ro.status, 200);
   });

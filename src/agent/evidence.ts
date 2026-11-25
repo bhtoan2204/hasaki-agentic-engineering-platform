@@ -513,9 +513,60 @@ export function assessFix(raw: unknown, output: unknown, notes: string[]): FixAs
   };
 }
 
+export interface BlastRadius {
+  /** What the proposal declares: ESTABLISHED only when every affected caller and consumer is known. */
+  status: "ESTABLISHED" | "PARTIAL" | "UNKNOWN";
+  confirmed: string[];
+  uncertain: string[];
+  /** The platform's own cross-repository analysis of the targeted files (impact_analysis with `from`), if it ran. */
+  platform: { established: boolean; reasons: string[] } | null;
+  established: boolean;
+}
+
+/**
+ * A proposal's blast radius: established only when the proposal says so AND the platform's deterministic analysis (when
+ * one ran upstream) found nothing it could not see. Null when neither exists (workflows that do not assess it).
+ */
+export function assessBlastRadius(
+  raw: unknown,
+  upstream: Record<string, unknown>,
+  notes: string[],
+): BlastRadius | null {
+  const platformRaw = Object.values(upstream)
+    .map((o) => record(record(o).blast_radius))
+    .find((b) => typeof b.established === "boolean");
+  if (!raw && !platformRaw) return null;
+  const r = record(raw);
+  const declared = String(r.status ?? "").toUpperCase();
+  const status =
+    (["ESTABLISHED", "PARTIAL", "UNKNOWN"] as const).find((x) => x === declared) ?? "UNKNOWN";
+  const platform = platformRaw
+    ? { established: platformRaw.established === true, reasons: list(platformRaw.reasons, 10) }
+    : null;
+  if (status === "ESTABLISHED" && platform && !platform.established)
+    notes.push(
+      `blast radius declared ESTABLISHED but the platform analysis was incomplete: ${platform.reasons.slice(0, 3).join("; ")}`,
+    );
+  return {
+    status,
+    confirmed: list(r.confirmed, 30),
+    uncertain: list(r.uncertain, 30),
+    platform,
+    established: status === "ESTABLISHED" && (platform?.established ?? true),
+  };
+}
+
 /** What each risk level must show before it may proceed. LOW may proceed with an unconfirmed root cause. */
-export function evidenceGate(root: RootCauseStatus, fix: FixAssessment): EvidenceGate {
+export function evidenceGate(
+  root: RootCauseStatus,
+  fix: FixAssessment,
+  blast: BlastRadius | null = null,
+): EvidenceGate {
   const missing: string[] = [];
+  if (blast && !blast.established)
+    missing.push(
+      `blast radius not established (${blast.status}${blast.platform && !blast.platform.established ? `; platform: ${blast.platform.reasons.slice(0, 3).join("; ")}` : ""})`,
+    );
   if (!answered(fix.explanation))
     missing.push("explanation of why the change is correct independently of the root cause");
   if (fix.risk !== "LOW") {
@@ -636,7 +687,9 @@ export function normalizeInvestigationOutput<R extends EvidenceRole>(
   if (role === "fix_proposal" && out.root_cause_assessment) {
     const fix = assessFix(output.fix_assessment, output, notes);
     out.fix_assessment = fix;
-    out.evidence_gate = evidenceGate(out.root_cause_assessment.status, fix);
+    const blast = assessBlastRadius(output.blast_radius, upstream, notes);
+    if (blast) out.blast_radius = blast;
+    out.evidence_gate = evidenceGate(out.root_cause_assessment.status, fix, blast);
     out.prohibited_assumptions = list(output.prohibited_assumptions, 15);
     out.required_tests = list(output.required_tests, 15);
   }

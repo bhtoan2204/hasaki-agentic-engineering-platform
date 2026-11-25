@@ -76,7 +76,7 @@ const RCA_CONTRACT =
 
 const REVIEW_CHECK =
   "root_cause_check: { remediation_kind (the kind the diff actually is — never upgrade the author's), addresses_root_cause: boolean, symptom_only_changes: [{ file, line, explanation }], " +
-  "justified_signals: [{ signal, justification }] (one per platform symptom-fix signal you accept), observability_reduced: boolean, regression_test_demonstrates_fix: boolean|null, limitations? }";
+  "justified_signals: [{ signal: '<file>:<line> <kind>' copied from the platform's symptom_signals entry, justification }] (one per platform symptom-fix signal you accept), observability_reduced: boolean, regression_test_demonstrates_fix: boolean|null, limitations? }";
 
 /** System-prompt lines for this depth and role; empty when the policy does not apply. One source for every provider. */
 export function rootCausePolicy(depth: RcaDepth, role: PolicyRole | null): string[] {
@@ -89,7 +89,7 @@ export function rootCausePolicy(depth: RcaDepth, role: PolicyRole | null): strin
       `- ${GUARDRAILS}`,
       ...(role === "review"
         ? [
-            `- When the platform lists symptom-fix signals for this diff, add root_cause_check: { justified_signals: [{ signal, justification }], symptom_only_changes: [] } to submit_result; an unjustified signal turns a PASS into FAIL.`,
+            `- When the platform lists symptom-fix signals for this diff, add root_cause_check: { justified_signals: [{ signal: "<file>:<line> <kind>" copied from the symptom_signals entry, justification }], symptom_only_changes: [] } to submit_result; an unjustified signal turns a PASS into FAIL.`,
           ]
         : []),
     ];
@@ -142,7 +142,9 @@ export type SignalKind =
   | "observability_removed"
   | "limit_raised"
   | "suppression_added"
-  | "check_removed";
+  | "check_removed"
+  | "retry_added"
+  | "error_swallowed";
 
 export interface SymptomSignal {
   kind: SignalKind;
@@ -161,7 +163,18 @@ const LIMIT_LINE = /(?:timeout|deadline|retr(?:y|ies)|attempts?|backoff|max\w*|l
 const SUPPRESSION =
   /@ts-ignore|@ts-expect-error|eslint-disable|\/\/\s*nolint|\/\/\s*lint:ignore|#\s*type:\s*ignore|#\s*noqa|pylint:\s*disable|@SuppressWarnings|#nosec|\bas\s+any\b|\bas\s+unknown\s+as\b|\/\/\s*@ts-nocheck/;
 const CHECK =
-  /\b(?:if|return|throw|assert|require|guard|unless)\b.*\b(?:valid\w*|validate\w*|authori[sz]\w*|permission\w*|allowed|forbidden|isAdmin|verify\w*|check\w*Permission|invariant\w*|ErrInvalid\w*|ErrForbidden\w*|ErrUnauthori[sz]ed\w*)/i;
+  /\b(?:if|return|throw|assert|require|guard|unless)\b.*\b(?:(?:is|has)?valid\w*|validate\w*|authori[sz]\w*|permission\w*|allowed|forbidden|isAdmin|verify\w*|check\w*Permission|invariant\w*|ErrInvalid\w*|ErrForbidden\w*|ErrUnauthori[sz]ed\w*)/i;
+/** A retry/backoff construct (library, decorator, loop or option); a numeric change of an existing one is limit_raised. */
+const RETRY =
+  /\b(?:with_?[Rr]etry|retry(?:When|On|Async)?|backoff\w*)\s*\(|@Retryable\b|@retry\b|\btenacity\b|['"](?:p-retry|async-retry)['"]|\bnew\s+Retry(?:Template|Policy)\b|\bfor\s+(?:attempt|retry|try)\w*\b|\bfor\s+\w+\s*:?=\s*0\s*;\s*\w+\s*<\s*\w*(?:retr|attempt)\w*/;
+/** One-line catch-and-continue: an empty catch/except body or a handler that returns a success value. */
+const SWALLOW_LINE =
+  /catch\s*(?:\([^)]*\))?\s*\{\s*(?:return\s*(?:null|undefined|true|false|nil|\{\}|\[\]|0|""|'')?\s*;?\s*)?\}|\.catch\(\s*(?:\(\s*\w*\s*\)|\w+)\s*=>\s*(?:\{\s*\}|null|undefined|\[\]|\{\s*\}|true|false)\s*\)|\bexcept\b(?:\s*\(?\s*(?:Base)?Exception\b[^:]*)?:\s*(?:pass|return(?:\s+None)?|continue)\s*$|if\s+err\s*!=\s*nil\s*\{\s*return(?:\s+nil)?\s*\}|^\s*_\s*=\s*err\s*$/;
+/** A handler opening whose next added line silently continues (multi-line form of SWALLOW_LINE). */
+const HANDLER_OPEN =
+  /(?:\bcatch\s*(?:\([^)]*\))?\s*\{|\bexcept\b(?:\s*\(?\s*(?:Base)?Exception\b[^:]*)?:|if\s+err\s*!=\s*nil\s*\{)\s*$/;
+const SILENT_BODY =
+  /^\s*(?:pass|continue;?|return(?:\s+(?:nil|null|None|undefined|true|\{\}|\[\]))?;?|\})\s*$/;
 const TEST_PATH =
   /(^|\/)(test|tests|__tests__|testdata)\/|_test\.go$|\.(test|spec)\.[cm]?[jt]sx?$|_test\.py$|Test\.java$/;
 const COMMENT = /^\s*(?:\/\/|#|\*|\/\*|--)/;
@@ -300,6 +313,41 @@ export function symptomFixSignals(diff: string, max = 30): SymptomSignal[] {
           line: a.line,
           detail: `suppression added: "${normalized(a.text).slice(0, 120)}"`,
         });
+    // A retry/backoff construct with no counterpart among the removed lines (a changed count is limit_raised).
+    const removedShapes = new Set(removedAll.map((r) => withoutNumbers(r.text)));
+    const retry = addedAll.find(
+      (a) => RETRY.test(a.text) && !removedShapes.has(withoutNumbers(a.text)),
+    );
+    if (retry && !removedAll.some((r) => RETRY.test(r.text)))
+      add({
+        kind: "retry_added",
+        file,
+        line: retry.line,
+        detail: `retry/backoff added: "${normalized(retry.text).slice(0, 120)}" — show the failure is transient and retryable`,
+      });
+    // Errors handled by continuing silently (empty handler, or one returning a success value).
+    for (const h of hs) {
+      const added = h.added.filter((a) => !COMMENT.test(a.text));
+      for (const [i, a] of added.entries()) {
+        const next = added[i + 1];
+        // Unchanged handler lines are not new; a handler whose body changed to a silent one is.
+        const oneLine = SWALLOW_LINE.test(a.text) && !removedShapes.has(withoutNumbers(a.text));
+        const twoLines =
+          !oneLine &&
+          HANDLER_OPEN.test(a.text) &&
+          !!next &&
+          next.line === a.line + 1 &&
+          SILENT_BODY.test(next.text) &&
+          !removedShapes.has(withoutNumbers(next.text));
+        if (oneLine || twoLines)
+          add({
+            kind: "error_swallowed",
+            file,
+            line: a.line,
+            detail: `error handled by continuing silently: "${normalized(a.text).slice(0, 80)}${twoLines ? ` ${normalized(next!.text).slice(0, 40)}` : ""}"`,
+          });
+      }
+    }
     for (const r of removedAll)
       if (CHECK.test(r.text) && !addedSet.has(normalized(r.text)))
         add({
@@ -450,6 +498,8 @@ export interface RegressionProof {
   reverted_files?: string[];
   command?: string;
   before?: string;
+  /** Second pre-fix run (only after a first failure): attribution needs the failure to repeat. */
+  before_repeat?: string | null;
   after?: string;
 }
 
@@ -463,13 +513,33 @@ export function proofProblem(proof: RegressionProof | null, tested: Record<strin
   return null;
 }
 
-/** A signal is justified when the reviewer accepted it (or the author justified it and the reviewer did not reject). */
-function justified(s: SymptomSignal & { repo?: string }, entries: Array<{ signal?: unknown }>) {
+/**
+ * Whether an accepted-signal entry written by the independent reviewer names this platform signal. Accepted forms:
+ * the full path (optionally `repo:path`) with the kind or the line — or, unambiguously, `<file name>:<line>` together
+ * with the kind (reviewers often shorten `app/usecases/invoice.go:719` to `invoice.go:719`). Only the reviewer's
+ * root_cause_check entries are ever passed here: the author cannot accept its own signals.
+ */
+export function signalAccepted(
+  s: Pick<SymptomSignal, "file" | "line" | "kind">,
+  entries: Array<{ signal?: unknown }>,
+) {
+  const base = s.file.split("/").pop() ?? s.file;
+  const short = new RegExp(
+    `(?:^|[\\s/:'"(\`])${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${s.line}(?!\\d)`,
+  );
   return entries.some((j) => {
     const t = String(j?.signal ?? "");
-    return t.includes(s.file) && (t.includes(s.kind) || t.includes(String(s.line)));
+    if (t.includes(s.file) && (t.includes(s.kind) || t.includes(String(s.line)))) return true;
+    return s.line != null && t.includes(s.kind) && short.test(t);
   });
 }
+/** The exact text a reviewer lists in root_cause_check.justified_signals to accept a platform signal. */
+export const signalId = (s: Pick<SymptomSignal, "file" | "line" | "kind">) =>
+  `${s.file}:${s.line} ${s.kind}`;
+
+/** A signal is justified when the independent reviewer accepted it. */
+const justified = (s: SymptomSignal & { repo?: string }, entries: Array<{ signal?: unknown }>) =>
+  signalAccepted(s, entries);
 
 const finding = (
   file: string,
@@ -536,20 +606,33 @@ export function enforceRootCauseReview(
     ? (c.justified_signals as Array<{ signal?: unknown }>)
     : [];
   const unjustified = signals.filter((s) => !justified(s, accepted));
-  if (unjustified.length)
-    return fail(
-      unjustified
-        .slice(0, 10)
-        .map((s) =>
-          finding(
-            `${s.repo}:${s.file}`,
-            s.line,
-            `symptom-fix pattern (${s.kind}) without an accepted justification: fix the cause, or keep it only if expected behaviour requires it and explain that in remediation.justifications with evidence`,
-            s.detail,
+  if (unjustified.length) {
+    // What the reviewer actually listed, so a repeat of this FAIL can say why none of it matched.
+    const submitted = accepted
+      .map((j) => String(j?.signal ?? "").slice(0, 200))
+      .filter(Boolean)
+      .slice(0, 10);
+    return {
+      ...fail(
+        unjustified
+          .slice(0, 10)
+          .map((s) =>
+            finding(
+              `${s.repo}:${s.file}`,
+              s.line,
+              `symptom-fix pattern (${s.kind}) without an accepted justification: fix the cause, or keep it only if expected behaviour requires it and explain that in remediation.justifications with evidence. Only the independent reviewer can accept it: it must list "${signalId(s)}" in root_cause_check.justified_signals`,
+              s.detail,
+            ),
           ),
-        ),
-      `${unjustified.length} symptom-fix signal(s) not justified`,
-    );
+        `${unjustified.length} symptom-fix signal(s) not justified`,
+      ),
+      unjustified_signals: unjustified.slice(0, 10).map((s) => ({
+        repo: s.repo,
+        signal: signalId(s),
+        submitted,
+      })),
+    };
+  }
   const symptomOnly = (
     Array.isArray(c?.symptom_only_changes) ? c!.symptom_only_changes : []
   ).filter((x: unknown) => String(loose(x)?.explanation ?? x ?? "").trim());

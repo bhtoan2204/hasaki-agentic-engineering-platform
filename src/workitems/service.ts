@@ -19,9 +19,10 @@ export const workItems = {
   byCode: workItemRepository.byCode,
   update: workItemRepository.update,
 
-  async detail(id: number) {
+  async detail(id: number, authorize?: (item: WorkItemRow) => Promise<void>) {
     const wi = await workItemRepository.get(id);
     if (!wi) return undefined;
+    await authorize?.(wi);
     const [runs, prs] = await Promise.all([
       listRuns({ workItemId: id }),
       workItemRepository.pullRequests(id),

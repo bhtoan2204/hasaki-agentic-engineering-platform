@@ -9,7 +9,8 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { pool, q } from "../src/db/pool.ts";
+import { setTimeout as sleep } from "node:timers/promises";
+import { one, pool, q } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
 import { repositories } from "../src/repos/service.ts";
@@ -47,6 +48,11 @@ const start = (mode: string, extra: Record<string, string> = {}) => {
 };
 const versions = async () =>
   Number((await q(pool, "SELECT count(*)::int AS n FROM knowledge_versions"))[0].n);
+
+// pg_locks is cluster-wide. The same advisory key can be held independently by another test database.
+const publicationLocks = `FROM pg_locks
+  WHERE locktype='advisory' AND classid=0 AND objid=727007 AND objsubid=1
+    AND database=(SELECT oid FROM pg_database WHERE datname=current_database())`;
 
 let go: Awaited<ReturnType<typeof startPlatformGo>>;
 before(async () => {
@@ -93,12 +99,23 @@ test("a process killed while holding the lock: the lock is released, its complet
     "# C0\n\nedited while locked\n",
   );
   const before = await versions();
-  let done = false;
-  const waiting = importFromRepositories().then((r) => ((done = true), r));
-  await new Promise((r) => setTimeout(r, 500));
-  assert.equal(done, false, "blocked by the other process's lock");
-  holder.p.kill("SIGKILL");
-  await holder.exit;
+  const waiting = importFromRepositories();
+  void waiting.catch(() => {}); // The result is asserted after releasing the lock.
+  try {
+    const deadline = performance.now() + 5_000;
+    for (;;) {
+      const blocked = await one(pool, `SELECT pid ${publicationLocks} AND NOT granted`);
+      if (blocked) break;
+      assert.ok(
+        performance.now() < deadline,
+        "the second import must wait on the publication lock",
+      );
+      await sleep(10);
+    }
+  } finally {
+    holder.p.kill("SIGKILL");
+    await holder.exit;
+  }
   const r = await waiting;
   assert.equal(r.updated, 1);
   assert.equal(await versions(), before + 1);
@@ -111,16 +128,24 @@ test("a process killed while holding the lock: the lock is released, its complet
   assert.deepEqual(orphans, [], "no item without its current version");
 });
 
-test("an import that loses its lock connection stops writing", async () => {
+test("an import that loses its lock connection stops writing", async ({ mock }) => {
   await assert.rejects(
     serializedImport(false, async () => {
       await importGuard(); // held
-      await q(
-        pool,
-        "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND objid = 727007 AND granted",
+      assert.deepEqual(
+        await q(
+          pool,
+          `SELECT pg_terminate_backend(pid, 5000) AS terminated ${publicationLocks} AND granted`,
+        ),
+        [{ terminated: true }],
       );
-      await new Promise((r) => setTimeout(r, 1100)); // the guard probes at most once a second
-      await importGuard();
+      const nextProbe = Date.now() + 1_000;
+      const clock = mock.method(Date, "now", () => nextProbe);
+      try {
+        await importGuard();
+      } finally {
+        clock.mock.restore();
+      }
       assert.fail("wrote without its lock");
     }),
     /publication lock was lost/,

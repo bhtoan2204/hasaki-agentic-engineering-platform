@@ -37,6 +37,24 @@ test("concurrent handoff reconciliation shares one scan and the next call scans 
   assert.equal(sequential.query_calls, 2);
 });
 
+test("a failed shared handoff scan logs once and rejects all callers", async (t) => {
+  const error = new Error("handoff database unavailable");
+  t.mock.method(pool, "query", async () => {
+    throw error;
+  });
+  const logged = t.mock.method(console, "error", () => {});
+  const results = await Promise.allSettled([reconcileAutomaticHandoff(), reconcileAutomaticHandoff()]);
+  assert.deepEqual(results, [
+    { status: "rejected", reason: error },
+    { status: "rejected", reason: error },
+  ]);
+  assert.equal(logged.mock.callCount(), 1);
+  const entry = JSON.parse(String(logged.mock.calls[0].arguments[0]));
+  assert.equal(entry.level, "ERROR");
+  assert.equal(entry.event, "scheduler.automatic_handoff_failed");
+  assert.equal(entry.error, error.message);
+});
+
 test("heartbeat executes one query to extend the lease and check stopping handoff", async () => {
   const observed = await measureQueries(pool, async () => {
     assert.equal(await heartbeat(999999, 1, 30, 999999), false);

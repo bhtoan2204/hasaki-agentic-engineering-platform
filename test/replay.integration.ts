@@ -211,3 +211,41 @@ test("changed knowledge invalidates the replay fingerprint and a forced step get
     audited[1].execution_fingerprint.parts.knowledge,
   );
 });
+
+test("executor-returned checkpoints are retained per step: only the newest eight survive, none are lost early", async () => {
+  registerExecutor("agent", {
+    async execute(ctx) {
+      return { kind: "completed", output: { n: ctx.step.generation } };
+    },
+  });
+  await definitions.create({
+    key: "checkpoint-retention",
+    spec: { name: "Checkpoint retention", steps: [{ key: "work", type: "agent" }] },
+  });
+  const run = await startRun({ definitionKey: "checkpoint-retention" });
+  await drain();
+  const kept = () =>
+    q<{ attempt_id: number }>(
+      pool,
+      `SELECT c.attempt_id FROM workflow_checkpoints c JOIN workflow_steps s ON s.id=c.step_id
+        WHERE s.run_id=$1 AND c.reason='executor_returned' ORDER BY c.id`,
+      [run.id],
+    );
+  assert.equal((await kept()).length, 1);
+  for (let i = 2; i <= 12; i++) {
+    await reexecuteStep(run.id, "work");
+    await drain();
+    assert.equal((await kept()).length, Math.min(i, 8), `after execution ${i}`);
+  }
+  const rows = await kept();
+  const latest = await q<{ id: number }>(
+    pool,
+    "SELECT id FROM workflow_step_attempts WHERE run_id=$1 ORDER BY id DESC LIMIT 8",
+    [run.id],
+  );
+  assert.deepEqual(
+    rows.map((r) => Number(r.attempt_id)).sort((a, b) => a - b),
+    latest.map((r) => Number(r.id)).sort((a, b) => a - b),
+    "the retained checkpoints belong to the eight newest attempts",
+  );
+});

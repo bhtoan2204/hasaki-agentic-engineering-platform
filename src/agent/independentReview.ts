@@ -34,13 +34,18 @@ export interface VerdictOutput {
   blocked_reason?: string;
   /** Scope review (evidence-gated workflows): the verifier's check of the diff against the approved scope. */
   scope_check?: Record<string, unknown>;
+  /** Root Cause First gate: platform signals the reviewer's PASS did not accept, and what it listed instead. */
+  unjustified_signals?: Array<{ repo: string; signal: string; submitted: string[] }>;
 }
 
-export const isIndependent = (cfg: Record<string, unknown> | undefined) => cfg?.independent === true;
+export const isIndependent = (cfg: Record<string, unknown> | undefined) =>
+  cfg?.independent === true;
 
 /** Ancestor steps whose outputs, attempts and artifacts this step must not see (`config.withhold`). */
 export const withheldSteps = (cfg: Record<string, unknown> | null | undefined): string[] =>
-  Array.isArray(cfg?.withhold) ? cfg.withhold.filter((k): k is string => typeof k === "string") : [];
+  Array.isArray(cfg?.withhold)
+    ? cfg.withhold.filter((k): k is string => typeof k === "string")
+    : [];
 
 /**
  * Upstream outputs an independent verifier may see. Coding steps contribute ONLY their platform-generated
@@ -57,7 +62,10 @@ export function independentUpstream<T extends { output: unknown }>(
   while (grew) {
     grew = false;
     for (const s of graph)
-      if (!afterCoding.has(s.key) && s.depends_on.some((d) => coding.has(d) || afterCoding.has(d))) {
+      if (
+        !afterCoding.has(s.key) &&
+        s.depends_on.some((d) => coding.has(d) || afterCoding.has(d))
+      ) {
         afterCoding.add(s.key);
         grew = true;
       }
@@ -319,10 +327,13 @@ export function enforceVerdict(
     heads: Record<string, string>;
     baseTips?: Record<string, string>;
     incrementalFrom?: number;
+    /** reviewEvidenceKey of what this verdict judged (recorded on every verdict, FAIL included, to detect a stalled loop). */
+    evidenceKey?: string;
   },
 ): ExecResult {
   const output = {
     ...v,
+    ...(opts.evidenceKey ? { review_evidence_key: opts.evidenceKey } : {}),
     verified_heads: opts.heads,
     ...(opts.baseTips ? { verified_base_tips: opts.baseTips } : {}),
     ...(opts.incrementalFrom ? { incremental_from_attempt: opts.incrementalFrom } : {}),
@@ -614,6 +625,88 @@ export function verificationKey(input: {
     .digest("hex");
 }
 
+/**
+ * Identity of the material evidence a verdict judged — the commits, base tips, the diff, the platform's test evidence and
+ * the approved scope — and nothing about how it was judged (provider, step configuration, policy version). Two verdicts
+ * with the same key looked at exactly the same thing.
+ */
+export function reviewEvidenceKey(input: {
+  heads: Record<string, string>;
+  baseTips: Record<string, string>;
+  diffText: string;
+  tests: unknown;
+  scope: unknown;
+}) {
+  const sorted = (o: Record<string, string>) =>
+    Object.keys(o)
+      .sort()
+      .map((k) => [k, o[k]]);
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        sorted(input.heads),
+        sorted(input.baseTips),
+        createHash("sha256").update(input.diffText).digest("hex"),
+        input.tests,
+        input.scope,
+      ]),
+    )
+    .digest("hex");
+}
+
+const findingKey = (f: Finding) =>
+  `${f.file}|${f.line ?? ""}|${f.explanation.replace(/\s+/g, " ").trim().slice(0, 200)}`;
+const seriousKeys = (findings: Finding[]) => {
+  const serious = findings.filter((f) => f.severity !== "low");
+  return [...new Set((serious.length ? serious : findings).map(findingKey))].sort();
+};
+
+/**
+ * No-progress detection for the review → repair loop. A FAIL that repeats the previous FAIL's findings on exactly the same
+ * material evidence (same commits, diff, tests and scope: the repair changed nothing the reviewer or the gate can see)
+ * cannot be fixed by another automatic repair round. Returns the precise unresolved reason, or null when anything
+ * changed — or when the history cannot prove it (a prior verdict without an evidence key never counts).
+ */
+export function reviewStall(
+  prior: { output: unknown } | null | undefined,
+  current: VerdictOutput,
+  now: { heads: Record<string, string>; baseTips: Record<string, string>; evidenceKey: string },
+): { reason: string } | null {
+  const o = record(prior?.output);
+  if (current.verdict !== "FAIL" || o.verdict !== "FAIL" || o.independent !== true) return null;
+  if (!now.evidenceKey || o.review_evidence_key !== now.evidenceKey) return null;
+  const was = (o.verified_heads as Record<string, string> | undefined) ?? {};
+  if (Object.keys(was).sort().join("\0") !== Object.keys(now.heads).sort().join("\0")) return null;
+  if (Object.entries(now.heads).some(([repo, sha]) => was[repo] !== sha)) return null;
+  const before = seriousKeys(Array.isArray(o.findings) ? (o.findings as Finding[]) : []);
+  const after = seriousKeys(current.findings);
+  if (!after.length || before.join("\n") !== after.join("\n")) return null;
+  const listed = (
+    current.findings.some((f) => f.severity !== "low")
+      ? current.findings.filter((f) => f.severity !== "low")
+      : current.findings
+  )
+    .slice(0, 3)
+    .map((f) => `${f.file}${f.line ? `:${f.line}` : ""} — ${f.explanation.slice(0, 300)}`);
+  const heads = Object.entries(now.heads)
+    .map(([repo, sha]) => `${repo}@${sha.slice(0, 12)}`)
+    .join(", ");
+  const gate = (current.unjustified_signals ?? []).slice(0, 5);
+  const why = gate.length
+    ? ` The reviewer's PASS was downgraded by the Root Cause First gate: ${gate
+        .map(
+          (g) =>
+            `${g.repo} "${g.signal}" is not accepted — the reviewer listed ${g.submitted.length ? g.submitted.map((s) => `"${s}"`).join(", ") : "no justified_signals"}; an entry must name ${g.signal.split(" ")[0]} with its kind (or its line) to match`,
+        )
+        .join(
+          "; ",
+        )}. Either a human accepts it, or the reviewer must re-submit with root_cause_check.justified_signals containing "${gate[0].signal}".`
+    : "";
+  return {
+    reason: `no progress: the repair left the source unchanged (${heads}) and the independent review reports the same unresolved finding(s): ${listed.join(" | ")}.${why} Automatic repair stopped; the verdict stays unresolved (no PASS was recorded).`,
+  };
+}
+
 /** A prior PASS may be reused only for the identical key AND identical verified commits. */
 export function reusablePass(
   prior: { output: unknown } | null | undefined,
@@ -646,7 +739,12 @@ export function incrementalCheckpoint(
   baseTips: Record<string, string>,
 ) {
   const o = record(prior?.output);
-  if (!prior?.output || o.verdict !== "FAIL" || o.independent !== true || !Array.isArray(o.findings))
+  if (
+    !prior?.output ||
+    o.verdict !== "FAIL" ||
+    o.independent !== true ||
+    !Array.isArray(o.findings)
+  )
     return null;
   const was = (o.verified_heads as Record<string, string> | undefined) ?? {};
   const tips = o.verified_base_tips as Record<string, string> | undefined;

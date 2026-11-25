@@ -8,6 +8,7 @@
 import { before, after, test } from "node:test";
 import assert from "node:assert/strict";
 import { pool } from "../src/db/pool.ts";
+import { registerInstance } from "../src/instances.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
 import { createUser, type PublicUser } from "../src/auth/users.ts";
@@ -27,6 +28,8 @@ const actor = () => ({ ...user, active: true });
 
 before(async () => {
   await migrate();
+  // Polling can see a claimed turn before the process has entered its local active-turn map.
+  await registerInstance();
   user = await createUser({
     username: `pair-${Date.now()}`,
     password: "pairing-pass",
@@ -110,9 +113,16 @@ test("concurrent Direct and CodeAct samples and an ordinary conversation cannot 
     assert.equal(d.codeact_executions, 0);
   }
   for (const c of [codeact, codeact2]) {
-    assert.equal(c.codeact_offered, true);
-    assert.equal(c.codeact_executions, 1);
-    assert.equal(c.correct, true);
+    const diagnostic = JSON.stringify({
+      repetition: c.repetition,
+      status: c.turn_status,
+      failures: c.codeact_failures,
+      grading: c.grading,
+    });
+    assert.equal(c.turn_status, "completed", diagnostic);
+    assert.equal(c.codeact_offered, true, diagnostic);
+    assert.equal(c.codeact_executions, 1, diagnostic);
+    assert.equal(c.correct, true, diagnostic);
   }
   assert.equal(
     ordinaryOffered,

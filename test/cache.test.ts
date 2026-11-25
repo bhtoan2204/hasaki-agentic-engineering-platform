@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { deferred } from "./fixtures/deferred.ts";
 import { EventEmitter } from "node:events";
+import { setImmediate } from "node:timers/promises";
 import {
   CacheAside,
   StaleWhileRevalidate,
@@ -18,8 +20,6 @@ import {
  * isolation of returned values, table invalidation, listener notifications, bypass while the listener is down.
  */
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 class FakeListener extends EventEmitter {
   queries: string[] = [];
   failConnect = false;
@@ -33,21 +33,32 @@ class FakeListener extends EventEmitter {
   async end() {}
 }
 
-test("CacheAside: one load for concurrent misses, TTL expiry, no stale write-back, clones", async () => {
+test("CacheAside: one load for concurrent misses, TTL expiry, no stale write-back, clones", async ({
+  mock,
+}) => {
+  mock.timers.enable({ apis: ["Date"] });
   let loads = 0;
   const c = new CacheAside<{ n: number }>("t.basic", ["t_basic"], 80);
-  const load = async () => (loads++, await sleep(30), { n: loads });
-  const [a, b, d] = await Promise.all([c.get("k", load), c.get("k", load), c.get("k", load)]);
+  const firstLoad = deferred<void>();
+  const load = async () => {
+    const n = ++loads;
+    await firstLoad.promise;
+    return { n };
+  };
+  const results = Promise.all([c.get("k", load), c.get("k", load), c.get("k", load)]);
+  firstLoad.resolve();
+  const [a, b, d] = await results;
   assert.equal(loads, 1, "singleflight per key");
   assert.deepEqual([a.n, b.n, d.n], [1, 1, 1]);
   a.n = 999; // callers get clones: mutating one never corrupts the cache
   assert.equal((await c.get("k", load)).n, 1);
-  await sleep(100);
+  mock.timers.tick(80);
   assert.equal((await c.get("k", load)).n, 2, "expired after TTL");
   // Invalidation while a load is in flight: the result is returned but not kept (it may predate the write).
-  const slow = c.get("x", async () => (await sleep(40), { n: 7 }));
-  await sleep(5);
+  const pending = deferred<{ n: number }>();
+  const slow = c.get("x", () => pending.promise);
   c.clear();
+  pending.resolve({ n: 7 });
   assert.equal((await slow).n, 7);
   assert.equal(
     (await c.get("x", async () => ({ n: 8 }))).n,
@@ -56,21 +67,27 @@ test("CacheAside: one load for concurrent misses, TTL expiry, no stale write-bac
   );
 });
 
-test("singleflight and stale-while-revalidate", async () => {
+test("singleflight and stale-while-revalidate", async ({ mock }) => {
+  mock.timers.enable({ apis: ["Date"] });
   let n = 0;
-  const f = () => singleflight("same", async () => (await sleep(20), ++n));
+  const f = () => singleflight("same", async () => ++n);
   assert.deepEqual(await Promise.all([f(), f(), f()]), [1, 1, 1]);
   assert.equal(await f(), 2, "a finished flight is not reused");
   let v = 0;
   const swr = new StaleWhileRevalidate<number>("t.swr", 30, 10_000);
   assert.equal(await swr.get("k", async () => ++v), 1);
-  await sleep(40);
+  mock.timers.tick(30);
+  const refresh = deferred<void>();
   assert.equal(
-    await swr.get("k", async () => (await sleep(20), ++v)),
+    await swr.get("k", async () => {
+      await refresh.promise;
+      return ++v;
+    }),
     1,
     "stale value served at once",
   );
-  await sleep(40);
+  refresh.resolve();
+  await setImmediate();
   assert.equal(await swr.get("k", async () => ++v), 2, "refreshed in the background");
 });
 

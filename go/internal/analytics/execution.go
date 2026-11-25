@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-// Parameters $1..$13 match the TypeScript filterParams order (src/api/analytics/filters.ts), so the SQL below and
-// the TypeScript SQL stay comparable line by line.
 func (r *Request) executionParams() []any {
 	f, s := r.Filters, r.Scope
 	return []any{f.From, f.To, f.Timezone, f.Bucket, s.OwnerID, s.All, f.Provider, f.Model, f.User, f.Workflow,
@@ -21,8 +19,8 @@ const boundsSQL = `bounds AS (SELECT $4::text AS bucket,
 func bucketSQL(field string) string { return "date_trunc($4::text, " + field + ", $3)" }
 
 // executionCTE is the cohort shared by every engineering dashboard: runs created in [from,to) visible in scope, their
-// telemetry attempts, and one row per provider invocation. Same semantics as the TypeScript executionCte; it projects
-// only the columns the dashboards read instead of r.* and t.*, so the materialized CTEs carry no unused JSONB
+// telemetry attempts, and one row per provider invocation. It projects only the columns the dashboards read
+// instead of r.* and t.*, so the materialized CTEs carry no unused JSONB
 // (run inputs, graph, learning) and the telemetry view's unused derived columns (provenance, cost availability,
 // terminal status) are never computed. runSummary adds workflow_runs.summary for the health incident links.
 func executionCTE(runSummary bool) string { return executionCTEWith(runSummary, true, false) }

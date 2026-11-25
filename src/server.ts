@@ -1,4 +1,8 @@
 import { startTelegramTransport } from "./telegram/transport.ts";
+import { enforceAutonomyTimeouts } from "./chat/autonomy.ts";
+import { radarTick } from "./radar/scan.ts";
+import { dispatchDelegations } from "./workflow/delegationDispatch.ts";
+import { invalidateCausalMemories } from "./memory/causal.ts";
 import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
 import { repositories } from "./repos/service.ts";
 import { background, settleBackground } from "./workflow/background.ts";
@@ -97,9 +101,22 @@ console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanc
 
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 // Policy-controlled intake rides the scheduler's reconcile tick: re-triage and start eligible items (no-op without a policy).
-registerReconcileTask(() => dispatchIntake());
+registerReconcileTask("intake", () => dispatchIntake());
 // PR delivery lifecycle (no-op while prLifecycle.mode is "off"): bounded polling with per-PR backoff.
-registerReconcileTask(() => syncPullRequestLifecycles());
+registerReconcileTask("pull_request_lifecycle", syncPullRequestLifecycles);
+// Chat autonomy: runs started by an autonomy policy that outlive its timeout are paused for the owner.
+registerReconcileTask("chat_autonomy", enforceAutonomyTimeouts);
+// Engineering Radar: interval-gated deterministic detection over stored signals → findings → Intake Queue.
+registerReconcileTask("engineering_radar", radarTick);
+// Workflow-to-workflow delegation: spawn queued children, record finished ones, resume waiting parents, cascade cancels.
+registerReconcileTask("workflow_delegation", dispatchDelegations);
+// Causal memory: records whose cited files changed on the base become "outdated" (bounded, every 30 minutes).
+let causalCheckedAt = 0;
+registerReconcileTask("causal_memory", async () => {
+  if (Date.now() - causalCheckedAt < 30 * 60_000) return;
+  causalCheckedAt = Date.now();
+  await invalidateCausalMemories();
+});
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
 const goService = startGoService();

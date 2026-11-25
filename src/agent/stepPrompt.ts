@@ -215,6 +215,17 @@ export function buildSystemAppend(
       "Domain integrations (Splunk, project QC databases, Kafka, Vault, Argo CD, Hasaki Work, Bitbucket, repository registry, this run's history/changes) are not loaded up front:",
       "mcp__platform__list_tools to discover them, mcp__platform__describe_tool for the full contract, mcp__platform__call_tool to use one.",
     );
+  const children = step.config?.child_workflows as { workflows?: string[]; modes?: string[] } | undefined;
+  if (children?.workflows?.length)
+    lines.push(
+      "",
+      "## Child workflows (exception, not default)",
+      "Do the work in THIS step whenever you can. Only when you find INDEPENDENT work that needs its own workflow (separate execution, verification or deliverable), " +
+        "add to your submit_result output: child_workflows: [{ workflow, title, request, reason, mode?, repositories? }]. The platform starts them; you cannot.",
+      `Allowed workflows: ${children.workflows.join(", ")}. Modes: ${(children.modes?.length ? children.modes : ["propose", "blocking", "parallel", "detached"]).join(", ")} ` +
+        "(propose = a human decides; blocking = this step waits for the result; parallel = the run continues and waits at the end; detached = nobody waits).",
+      "`reason` must say why it cannot be done here. `request` must be self-contained. Repositories must be within this run's. Requests that break a rule are refused and listed in your output.",
+    );
   if (run.profile !== "MICRO" && step.config?.delegation?.enabled)
     lines.push(
       "",

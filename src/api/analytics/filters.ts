@@ -114,25 +114,3 @@ export function parseAnalyticsFilters(p: URLSearchParams, now = new Date()): Ana
     pageSize: integer("page_size", 25, 100),
   };
 }
-/** Date-only boundaries use the requested timezone; timestamp boundaries keep their explicit offset. [from,to). */
-export const boundsSql = `bounds AS (SELECT $4::text AS bucket,
-  CASE WHEN length($1::text)=10 THEN $1::timestamp AT TIME ZONE $3 ELSE $1::timestamptz END AS lo,
-  CASE WHEN length($2::text)=10 THEN $2::timestamp AT TIME ZONE $3 ELSE $2::timestamptz END AS hi)`;
-export const bucketSql = (field: string) => `date_trunc($4::text, ${field}, $3)`;
-export function filterParams(f: AnalyticsFilters, s: AnalyticsScope): unknown[] {
-  return [
-    f.from,
-    f.to,
-    f.timezone,
-    f.bucket,
-    s.ownerId,
-    s.all,
-    f.provider,
-    f.model,
-    f.user,
-    f.workflow,
-    f.repository,
-    f.project,
-    f.service,
-  ];
-}

@@ -416,31 +416,31 @@ test("surfaces: workflow navigate_code and Chat code.navigate answer within thei
   )) as NavResult;
   assert.equal(outside.status, "unauthorized");
 
-  const tool = toolsForMode("ASK").find((t) => t.name === "code.navigate")!;
+  const tool = toolsForMode("ASK").find((t) => t.name === "code.navigate");
+  assert.ok(tool);
   const ctx = {
-    binding: { userId: 1, conversationId: 1, turnId: 1, mode: "ASK", repositories: [] },
+    binding: { userId: 1, conversationId: 1, turnId: 1, mode: "ASK" as const, repositories: [] },
     readable: ["lsp-ts"],
     scoped: [],
     signal: new AbortController().signal,
-  } as never;
-  const chatAnswer = (await tool.run(
-    tool.args.parse({
-      repository: "lsp-ts",
-      path: "src/a.ts",
-      operation: "references",
-      symbol: "compute",
-    }),
-    ctx,
-  )) as { data: NavResult };
-  assert.equal(chatAnswer.data.status, "ok");
-  assert.equal(chatAnswer.data.locations.length, 6);
-  await assert.rejects(
-    tool.run(
-      tool.args.parse({ repository: "lsp-go", path: "main.go", operation: "document_symbols" }),
-      ctx,
-    ),
-    /not accessible/,
-  );
+  };
+  const prepared = tool.prepare({
+    repository: "lsp-ts",
+    path: "src/a.ts",
+    operation: "references",
+    symbol: "compute",
+  });
+  assert.ok(prepared.ok);
+  const chatAnswer = (await prepared.run(ctx)).data as NavResult;
+  assert.equal(chatAnswer.status, "ok");
+  assert.equal(chatAnswer.locations.length, 6);
+  const unrelated = tool.prepare({
+    repository: "lsp-go",
+    path: "main.go",
+    operation: "document_symbols",
+  });
+  assert.ok(unrelated.ok);
+  await assert.rejects(unrelated.run(ctx), /not accessible/);
 
   config.lsp.enabled = false;
   try {

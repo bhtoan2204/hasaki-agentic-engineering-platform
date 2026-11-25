@@ -1420,7 +1420,8 @@ test("server shutdown kills detached command process groups (no orphaned go test
     execSync(`ps -eo args | grep -c "^bash .*[s]leep 30; echo ${marker}" || true`)
       .toString()
       .trim();
-  for (let i = 0; i < 25 && alive() === "0"; i++) await new Promise((r) => setTimeout(r, 200));
+  // While the login profile is sourced, its command substitutions fork copies of that bash (same args): wait them out.
+  for (let i = 0; i < 50 && alive() !== "1"; i++) await new Promise((r) => setTimeout(r, 200));
   assert.equal(alive(), "1", "command is running");
   childGroups.killAll(); // what the SIGINT/SIGTERM handler and process exit do
   await worker;
@@ -1935,7 +1936,7 @@ test("profiles: manual override and high-risk fallback; FAST keeps the Task Resu
     start: false,
   });
   assert.equal(std.profile, "STANDARD");
-  assert.equal(std.steps.length, 12);
+  assert.equal(std.steps.length, 14); // + impact, proof (cross-repository impact, Proof-of-Fix)
   const pay = (
     await importHasakiTask({
       data: {
@@ -2218,10 +2219,10 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     );
     assert.equal(msgs[0].path, "/botTEST:TOKEN/sendMessage");
     assert.equal(msgs[0].chat_id, "42");
-    assert.match(msgs[0].text, /CẦN BẠN TRẢ LỜI/);
+    assert.match(msgs[0].text, /Cần bạn trả lời/);
     assert.match(msgs[0].text, /<b>HSK-1: Thiếu &lt;ZIP&gt;<\/b>/, "HTML-escaped task name");
-    assert.match(msgs[0].text, new RegExp(`Run: #${run.id}`));
-    assert.match(msgs[0].text, /Bước: <b>Hỏi rule<\/b> · <code>ask<\/code>/);
+    assert.match(msgs[0].text, new RegExp(`Run #${run.id}`));
+    assert.match(msgs[0].text, /Bước · Hỏi rule/);
     assert.match(msgs[0].text, /2 câu hỏi cần trả lời/);
     assert.equal(msgs[0].reply_markup, undefined, "local publicUrl → no URL button");
     assert.ok(msgs[0].text.includes(`/#/runs/${run.id}/ask`), "local link as text");
@@ -2235,7 +2236,7 @@ test("telegram: one message per step entering WAITING_INPUT / WAITING_APPROVAL, 
     await answerQuestions(Object.fromEntries(qs.map((x) => [x.id, "ok"])));
     await drain();
     assert.equal(msgs.length, 2, "WAITING_APPROVAL → one more message");
-    assert.match(msgs[1].text, /CẦN BẠN DUYỆT/);
+    assert.match(msgs[1].text, /Cần bạn duyệt/);
     assert.match(msgs[1].text, /Duyệt kế hoạch fix/);
     assert.deepEqual(msgs[1].reply_markup!.inline_keyboard[0][0], {
       text: "Mở để duyệt",

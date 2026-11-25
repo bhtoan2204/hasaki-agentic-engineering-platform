@@ -3,6 +3,9 @@ import { test } from "node:test";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
+import { existsSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import pg from "pg";
+import { adminUrl, sharedTestCluster } from "../pg-cluster.ts";
 import { config } from "../../src/config.ts";
 import { platformTrustedRoots } from "../../src/retrieval/goService.ts";
 
@@ -23,17 +26,49 @@ export function requireGoToolchain(suite: string) {
     });
 }
 
-/**
- * Builds platform-go from go/ and runs it against this process's DATABASE_URL on a free loopback port; the
- * platform's Go client (config.retrieval.semantic.url + RETRIEVAL_INTERNAL_TOKEN) is pointed at it.
- */
-export async function startPlatformGo(env: Record<string, string> = {}) {
-  const bin = join(process.env.TEST_ROOT!, "platform-go");
-  const build = spawnSync("go", ["build", "-o", bin, "./cmd/platform-go"], {
-    cwd: resolve(import.meta.dirname, "../../go"),
-    stdio: "inherit",
+function buildPlatformGo(bin: string, directory: string) {
+  const temporary = mkdtempSync(join(directory, "platform-go-build-"));
+  try {
+    const output = join(temporary, "platform-go");
+    const build = spawnSync("go", ["build", "-o", output, "./cmd/platform-go"], {
+      cwd: resolve(import.meta.dirname, "../../go"),
+      stdio: "inherit",
+    });
+    if (build.error) throw build.error;
+    if (build.status !== 0) throw new Error("platform-go build failed");
+    renameSync(output, bin);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+async function platformGoBinary() {
+  const cluster = sharedTestCluster();
+  const directory = cluster ?? process.env.TEST_ROOT!;
+  const bin = join(directory, "platform-go");
+  if (existsSync(bin)) return bin;
+  if (!cluster) {
+    buildPlatformGo(bin, directory);
+    return bin;
+  }
+  // Only the binary is shared within the private cluster. The session lock releases even if a test process exits.
+  const client = new pg.Client({
+    connectionString: adminUrl(cluster),
+    connectionTimeoutMillis: 5000,
   });
-  if (build.status !== 0) throw new Error("platform-go build failed");
+  await client.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext('test/fixtures/platformGo.ts'), 1)");
+    if (!existsSync(bin)) buildPlatformGo(bin, directory);
+    return bin;
+  } finally {
+    await client.end();
+  }
+}
+
+/** Run a fresh platform-go instance for this test's database, credentials and loopback endpoint. */
+export async function startPlatformGo(env: Record<string, string> = {}) {
+  const bin = await platformGoBinary();
   const port = await new Promise<number>((done) => {
     const s = createServer().listen(0, "127.0.0.1", () => {
       const { port } = s.address() as { port: number };
@@ -62,19 +97,27 @@ export async function startPlatformGo(env: Record<string, string> = {}) {
   child.stdout!.on("data", keep);
   child.stderr!.on("data", (b: Buffer) => (process.stderr.write(b), keep(b)));
   const url = `http://127.0.0.1:${port}`;
-  for (let i = 0; ; i++) {
-    if (
-      await fetch(`${url}/readyz`).then(
-        (r) => r.ok,
-        () => false,
+  let spawnError: Error | undefined;
+  child.once("error", (error) => (spawnError = error));
+  try {
+    for (let i = 0; ; i++) {
+      if (spawnError) throw spawnError;
+      if (i > 100 || child.exitCode !== null || child.signalCode !== null)
+        throw new Error(
+          `platform-go did not become ready (exit ${child.exitCode ?? child.signalCode ?? "none"}): ${logTail.trim().split("\n").slice(-3).join(" | ")}`,
+        );
+      if (
+        await fetch(`${url}/readyz`, { signal: AbortSignal.timeout(1000) }).then(
+          (r) => r.ok,
+          () => false,
+        )
       )
-    )
-      break;
-    if (i > 100 || child.exitCode !== null)
-      throw new Error(
-        `platform-go did not become ready (exit ${child.exitCode ?? "none"}): ${logTail.trim().split("\n").slice(-3).join(" | ")}`,
-      );
-    await new Promise((r) => setTimeout(r, 100));
+        break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } catch (error) {
+    child.kill("SIGTERM");
+    throw error;
   }
   process.env.RETRIEVAL_INTERNAL_TOKEN = token;
   config.retrieval.semantic.url = url;

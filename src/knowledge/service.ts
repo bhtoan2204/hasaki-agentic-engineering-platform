@@ -54,20 +54,44 @@ function check(x: Partial<KnowledgeInput>) {
     throw new Error(`scope ${x.scope_type} needs scope_ref`);
 }
 
+type KnowledgeListFilter = {
+  category?: string;
+  scope?: string;
+  search?: string;
+  ownerId?: number;
+  all?: boolean;
+  summary?: boolean;
+  updatedAtOrder?: "newest" | "oldest";
+};
+
+type KnowledgePageFilter = Pick<
+  KnowledgeListFilter,
+  "scope" | "search" | "ownerId" | "all" | "updatedAtOrder"
+>;
+const listPageCache = new CacheAside<Awaited<ReturnType<typeof q>>>(
+  "knowledge.list-page",
+  ["knowledge_items", "knowledge_versions"],
+  60_000,
+  32,
+);
+
 export const knowledge = {
+  /** Reuse summaries across pagination and category changes. Repository permissions are checked per request. */
+  listPageSummaries(filter: KnowledgePageFilter) {
+    const { ownerId, all, scope, search, updatedAtOrder } = filter;
+    return listPageCache.get(
+      JSON.stringify([all ? null : ownerId, !!all, scope, search, updatedAtOrder]),
+      () => knowledge.list({ ...filter, summary: true }),
+    );
+  },
+
   /** `summary`: without the version content and applicability (list views; the item route has them). */
-  list(
-    filter: {
-      category?: string;
-      scope?: string;
-      search?: string;
-      ownerId?: number;
-      all?: boolean;
-      summary?: boolean;
-    } = {},
-    db: Db = pool,
-  ) {
+  list(filter: KnowledgeListFilter = {}, db: Db = pool) {
     const scoped = filter.ownerId != null || filter.all === true;
+    const order = {
+      newest: "i.updated_at DESC, i.id DESC",
+      oldest: "i.updated_at ASC, i.id ASC",
+    };
     return q(
       db,
       `SELECT i.*, ${filter.summary ? "" : "v.content, v.applicability, "}v.metadata, v.effective_from, v.created_at AS version_created_at
@@ -81,7 +105,7 @@ export const knowledge = {
           AND ($6::text IS NULL OR i.scope_type = $6)
           AND ($7::text IS NULL OR i.title ILIKE $7 OR i.key ILIKE $7 OR i.scope_ref ILIKE $7
                OR v.metadata->>'description' ILIKE $7)
-        ORDER BY i.category, i.scope_type, i.owner_id NULLS FIRST, i.key`,
+        ORDER BY ${filter.updatedAtOrder ? order[filter.updatedAtOrder] : "i.category, i.scope_type, i.owner_id NULLS FIRST, i.key"}`,
       [
         filter.category ?? null,
         !scoped,
@@ -682,6 +706,127 @@ export const KNOWLEDGE_SEEDS: KnowledgeInput[] = [
       required_tools: ["Read", "Grep", "Glob"],
       output_contract:
         "{ reuse_decision: { found: string[], choice: 'reuse'|'extend'|'extract'|'adapter'|'separate', why: string, shared_core?: string, provider_specific?: string } }",
+    },
+  },
+  {
+    key: "minimal-comments",
+    conflict_key: "engineering.comments",
+    category: "coding_standard",
+    scope_type: "GLOBAL",
+    title: "Minimal comments: self-documenting code",
+    content: [
+      "Prefer self-documenting code (names, types, small functions) over comments. The goal is no unnecessary comment,",
+      "not a removal quota.",
+      "- Do not comment obvious code, control flow or implementation details; no redundant docstrings that restate the",
+      "  signature, no decorative section/banner comments, no commented-out code.",
+      "- Keep a comment only for what the code cannot say: a non-obvious business invariant, a security constraint, a",
+      "  concurrency guarantee, an external limitation (API quirk, vendor bug, platform limit) or architectural rationale.",
+      "  One or two lines, stating why.",
+      "- Keep required documentation (public API docs the project or tooling requires, license headers), compiler and tool",
+      "  directives (`// @ts-expect-error`, `//go:build`, `# noqa`, `eslint-disable`, pragmas) and generated-code markers.",
+      "- Prefer enforcing a rule with types, tests, lint rules or structure over an instructional comment.",
+      "- In code you modify, remove comments that are redundant or no longer true. Do not sweep untouched files.",
+      "",
+      "Applies when implementing, refactoring and cleaning up slop (only within the change), and in code review: report",
+      "a comment that narrates the code or is misleading as a low finding with the line; never reject a change for",
+      "comments alone unless a comment is misleading about behaviour.",
+    ].join("\n"),
+    applicability: {
+      step_keys: [
+        "implement",
+        "fix",
+        "refactor",
+        "fix_test",
+        "regression_test",
+        "review",
+        "self_review",
+      ],
+    },
+    metadata: {
+      mandatory: true,
+      description:
+        "Self-documenting code over comments: keep only comments for non-obvious invariants, security, concurrency, external limits or rationale; keep required docs, directives and generated markers; remove redundant or wrong comments in modified code.",
+    },
+  },
+  {
+    key: "codebase-gardening",
+    conflict_key: "engineering.gardening",
+    category: "coding_standard",
+    scope_type: "GLOBAL",
+    title: "Codebase gardening: leave patterns worth copying",
+    content: [
+      "The code you leave is the example the next agent copies: a workaround, a needless abstraction or a wrong pattern",
+      "spreads through later changes. Reuse is decided by reuse-first-development and comments by minimal-comments; in",
+      "addition:",
+      "- Before copying an existing pattern, check it is correct for this case (its callers, tests, known bugs). If it is",
+      "  wrong, do not replicate it: fix it at its source when the task touches it, otherwise report it with the evidence.",
+      "- Fix the root cause, not the symptom (a retry, a larger timeout, a special case at one caller).",
+      "- Within the code the task touches, remove what it made obsolete: dead code, abstractions left with one use,",
+      "  temporary workarounds whose reason is gone. Nothing outside the task: no speculative refactoring or cleanup.",
+      "- When the same harmful pattern recurs, prefer preventing it deterministically with what the repository already",
+      "  has (a type, a test, a lint rule, an architecture check) over a note or comment; propose it if it is out of scope.",
+      "- Call code technical debt or slop only with concrete evidence: file:line plus the defect, the existing helper it",
+      "  duplicates, the invariant it re-checks or the error it loses. No evidence, no finding.",
+    ].join("\n"),
+    applicability: {
+      step_keys: [
+        "implement",
+        "fix",
+        "refactor",
+        "fix_test",
+        "regression_test",
+        "review",
+        "self_review",
+      ],
+    },
+    metadata: {
+      mandatory: true,
+      description:
+        "Code is the context agents copy: validate a pattern before reusing it, fix root causes, remove obsolete code and workarounds the task touches (no unrelated cleanup), prevent recurring harm with types/tests/lint/architecture, and require file:line evidence before calling code debt or slop.",
+    },
+  },
+  {
+    key: "verification-recipes",
+    category: "agent_skill",
+    scope_type: "GLOBAL",
+    title: "Verification recipes per finding kind",
+    content: [
+      "A finding is fixed only when a test fails on the current code and passes after the change; the platform runs it on",
+      "both. Recipes per kind (Go, standard library and toolchain only):",
+      "- CONCURRENCY: drive the shared code from N goroutines (sync.WaitGroup, a start barrier). Data race: the platform runs",
+      "  this test with -race. Deadlock: run the scenario in a goroutine and fail if it has not returned within a deadline",
+      "  (select on done vs time.After).",
+      "- MEMORY: repeat the operation K times, runtime.GC(), and assert runtime.ReadMemStats HeapInuse (or the cache's",
+      "  length) stays under a bound that the leak exceeds; per-call allocation: testing.AllocsPerRun.",
+      "- RESOURCE: goroutines: runtime.NumGoroutine before and after (wait briefly for exits); connections: sql.DB.Stats()",
+      "  OpenConnections/InUse back to the baseline; file descriptors: count /proc/self/fd entries before and after.",
+      "- DATABASE: count statements through the test double or a counting driver/pgx tracer: N+1 shows as 1+N queries for N",
+      "  rows; assert the fixed count. Missing transaction: inject a failure after the first write, assert nothing persisted.",
+      "- PERFORMANCE: a budget test (testing.AllocsPerRun, or a deadline with generous margin around a fake slow dependency",
+      "  for blocking I/O); measure with go test -bench -benchmem and go tool pprof -top on a profile in /tmp, quote numbers.",
+      "- CODE_QUALITY: dead code: deadcode / staticcheck output before vs after; duplication or unused dependency: the",
+      "  existing tests keep passing and the analyser finding disappears (report it, there is no failing test).",
+      "- RELIABILITY: missing timeout: a fake dependency (httptest.Server, net.Pipe) that never answers; assert the call",
+      "  returns an error within the configured timeout. Retry storm: count attempts against an always-failing fake.",
+      "  Cancellation: cancel the context mid-call and assert a prompt return and that the dependency saw the cancel.",
+      "- DATA_INTEGRITY: run the conflicting operations concurrently (under -race) or interleaved, then assert the invariant",
+      "  (final balance, single processing, only allowed state transitions).",
+      "- SECURITY: injection: a hostile input that would change the query or command, assert it is passed as a parameter;",
+      "  SSRF: a private/loopback/metadata address is refused; sensitive data: capture logs/responses and assert no PII.",
+      "  govulncheck for vulnerable dependencies.",
+      "- BUSINESS_LOGIC: reproduce the exact input of the defect (from the production error or ticket) and assert the domain",
+      "  invariant from Knowledge, not just the absence of an error.",
+      "- DISTRIBUTED: idempotency: deliver the same message twice, assert one side effect; message loss: fail the step",
+      "  between consume and commit, assert redelivery or a durable record; inconsistent state: fail the second write.",
+      "Keep the test deterministic (no sleeps as synchronisation, fixed seeds) and name it after the behaviour it protects.",
+    ].join("\n"),
+    applicability: {
+      step_keys: ["assess", "proposal", "implement", "fix", "review"],
+    },
+    metadata: {
+      description:
+        "Per finding kind (concurrency, memory, resource, database, performance, code quality, reliability, data integrity, security, business logic, distributed): which deterministic test fails before the fix and passes after, with standard library and Go toolchain only.",
+      required_tools: ["Read", "Grep", "Bash"],
     },
   },
   {

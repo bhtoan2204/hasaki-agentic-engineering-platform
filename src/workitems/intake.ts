@@ -18,7 +18,7 @@ import { workItems } from "./service.ts";
  * autonomy AUTOPILOT policy (task 01) AND the enforced OS sandbox (task 04), otherwise it is deferred.
  */
 
-export const INTAKE_SOURCES = ["hasaki_work", "prod_errors"] as const;
+export const INTAKE_SOURCES = ["hasaki_work", "prod_errors", "radar"] as const;
 export type IntakeSource = (typeof INTAKE_SOURCES)[number];
 export const INTAKE_MODES = ["OFF", "SHADOW", "AUTOPILOT"] as const;
 export type IntakeMode = (typeof INTAKE_MODES)[number];
@@ -152,7 +152,8 @@ export function triage(i: TriageInput): TriageDecision {
     return d("superseded", ["ALREADY_HANDLED_NO_RECURRENCE"]);
   if (now.getTime() - i.lastSeen.getTime() > i.policy.stale_hours * 3_600_000)
     return d("rejected", ["STALE"]);
-  if (i.source === "prod_errors" && rank(i.severity) < rank(i.policy.min_severity))
+  // Incident-like sources (production errors, Engineering Radar findings): severity floor, read-only workflows only.
+  if (i.source !== "hasaki_work" && rank(i.severity) < rank(i.policy.min_severity))
     return d("rejected", [`BELOW_SEVERITY_${i.policy.min_severity.toUpperCase()}`]);
   if (i.source === "hasaki_work") {
     if (!i.assigned) return d("deferred", ["NEEDS_TRIAGE: not assigned to the owner"]);
@@ -168,7 +169,7 @@ export function triage(i: TriageInput): TriageDecision {
   if (isAmbiguous(candidates)) return d("deferred", ["REPOSITORY_AMBIGUOUS"]);
   const repo = candidates[0].repo;
   const workflow =
-    i.source === "prod_errors"
+    i.source !== "hasaki_work"
       ? (i.policy.workflows.find((w) => READ_ONLY_WORKFLOWS.includes(w)) ?? null)
       : (i.policy.workflows[0] ?? null);
   if (!workflow) return d("deferred", ["NO_PERMITTED_WORKFLOW"], null, repo);
@@ -229,7 +230,7 @@ export async function saveIntakePolicy(
   if (!INTAKE_MODES.includes(mode)) throw bad("invalid mode");
   if (input.min_severity && !SEVERITIES.includes(input.min_severity))
     throw bad("invalid min_severity");
-  if (input.source === "prod_errors" && mode === "AUTOPILOT" && input.owner_id == null)
+  if (input.source !== "hasaki_work" && mode === "AUTOPILOT" && input.owner_id == null)
     throw bad("a production-incident policy that starts runs needs a domain owner (owner_id)");
   const names = (await repositories.list()).map((r) => r.name);
   const repos = [...new Set((input.repositories ?? []).map(String))];
@@ -708,7 +709,9 @@ async function startEligible(it: ItemRow, p: IntakePolicy, now: Date) {
       inputs: {
         intake_key: key,
         intake_item_id: String(it.id),
-        ...(it.source === "prod_errors" ? { environment: "production" } : {}),
+        ...(it.source === "prod_errors" || (it.source === "radar" && it.incident_fingerprint)
+          ? { environment: "production" }
+          : {}),
       },
     });
     await q(

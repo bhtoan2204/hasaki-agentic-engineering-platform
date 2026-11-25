@@ -158,36 +158,6 @@ export async function recoverScans() {
   return { recovered: failed.length };
 }
 
-/** Fenced terminal update. False when the lease was lost: nothing is written. */
-export async function finishScan(
-  job: Pick<ScanJob, "id" | "fencing_token">,
-  r: {
-    status: "succeeded" | "failed" | "canceled";
-    error: string | null;
-    groups?: number;
-    events?: number;
-    notified?: number;
-  },
-) {
-  const row = await one(
-    pool,
-    `UPDATE prod_error_scans SET status=$3, ok=($3='succeeded'), finished_at=now(), error=$4,
-       groups=COALESCE($5, groups), events=COALESCE($6, events), notified=COALESCE($7, notified),
-       lease_owner=NULL, lease_expires_at=NULL, progress=NULL
-     WHERE id=$1 AND fencing_token=$2 AND status='running' RETURNING id`,
-    [
-      job.id,
-      job.fencing_token,
-      r.status,
-      r.error,
-      r.groups ?? null,
-      r.events ?? null,
-      r.notified ?? null,
-    ],
-  );
-  return !!row;
-}
-
 /** Request cancellation: a queued scan is canceled at once, a running one by its worker at its next heartbeat. */
 export async function cancelScan(id: number) {
   const row = await one<{ status: string }>(

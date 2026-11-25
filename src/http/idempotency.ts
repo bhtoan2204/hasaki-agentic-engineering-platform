@@ -9,8 +9,8 @@ import { pool, one, q, json } from "../db/pool.ts";
  *   same key again  → stored response replayed (same status and body), nothing runs twice
  *   while running   → 409 "already in progress" (the client keeps its button busy until the first one answers)
  *   different body  → 422: a key belongs to exactly one request
- *   handler error   → 5xx/transport failures release the key so the same action can be retried; 4xx are stored
- *                      (the same input fails the same way)
+ *   handler error   → 4xx are stored. Ordinary 5xx release the key. If a database disconnect makes the outcome
+ *                      uncertain, store the response so replaying the same key cannot repeat a committed write.
  * Keys are per user. Finished rows older than a day are pruned. An in-progress row (status NULL) is kept:
  * deleting it would let a retry after a crash create a second run.
  */
@@ -23,6 +23,7 @@ export const IDEMPOTENT_ROUTES: RegExp[] = [
   /^\/api\/work\/pick\/\d+$/,
   /^\/api\/prod-errors\/(scan|[0-9a-f]{20}\/investigate)$/,
   /^\/api\/prod-errors\/[0-9a-f]{20}\/bug-hunts$/,
+  /^\/api\/prod-errors\/[0-9a-f]{20}\/workbench\/(runtime|bug-hunt|both|fix)$/,
   /^\/api\/bug-hunts\/\d+\/findings\/\d+\/fix-task$/,
   /^\/api\/chat\/conversations$/,
   /^\/api\/chat\/conversations\/\d+\/messages$/,
@@ -37,7 +38,11 @@ const KEY_RE = /^[A-Za-z0-9._:-]{8,128}$/;
 export type Claim =
   | {
       kind: "run";
-      finish: (status: number, body: unknown) => Promise<void>;
+      finish: (
+        status: number,
+        body: unknown,
+        options?: { outcomeUncertain: boolean },
+      ) => Promise<void>;
       release: () => Promise<void>;
     }
   | { kind: "replay"; status: number; body: unknown }
@@ -81,8 +86,8 @@ export async function claimIdempotency(
   if (inserted) {
     return {
       kind: "run",
-      finish: async (status, out) => {
-        if (status >= 500)
+      finish: async (status, out, options) => {
+        if (status >= 500 && !options?.outcomeUncertain)
           await q(pool, "DELETE FROM http_idempotency WHERE actor_id = $1 AND key = $2", [
             actorId,
             key,

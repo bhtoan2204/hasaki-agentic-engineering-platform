@@ -10,28 +10,6 @@ import { coarser, formatDuration, type Precision } from "./time.ts";
  * and events are related only through shared identifiers — never because they are close in time.
  */
 
-export const EVENT_TYPES = [
-  "OUTBOUND_MESSAGE_CREATED",
-  "MESSAGE_PUBLISHED",
-  "MESSAGE_CONSUMED",
-  "PARTNER_REQUEST_SENT",
-  "PARTNER_REQUEST_ACCEPTED",
-  "PARTNER_RESPONSE_RECEIVED",
-  "PARTNER_CALLBACK_RECEIVED",
-  "TRACKING_NUMBER_RECEIVED",
-  "TRACKING_NUMBER_PERSISTED",
-  "SHIPPING_LABEL_REQUESTED",
-  "SHIPPING_LABEL_URL_GENERATED",
-  "SHIPPING_LABEL_URL_OBSERVED",
-  "SHIPPING_LABEL_URL_PERSISTED",
-  "STATE_CHANGED",
-  "RETRY_SCHEDULED",
-  "REQUEST_TIMEOUT",
-  "PROVIDER_BUSINESS_REJECTION",
-  "ERROR",
-  "OTHER",
-] as const;
-
 export type Confidence = "confirmed" | "inferred" | "unknown";
 
 export interface EventLabel {

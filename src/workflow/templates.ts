@@ -358,7 +358,7 @@ const REVIEW = {
     "approved plan or fix proposal, coding standards and security policies in your context. For every finding include a precise file/line, " +
     "the relevant code or test evidence, why it violates a requirement, and a concrete repair suggestion. " +
     "Also check the added lines for AI slop (load skill ai-slop if available): guards for states that cannot happen, re-validation of already validated input, " +
-    "swallowed or double-logged errors, comments that narrate the code, placeholder/TODO stubs, helpers that duplicate an existing one in the repo, " +
+    "swallowed or double-logged errors, comments the minimal-comments standard rejects, placeholder/TODO stubs, helpers that duplicate an existing one in the repo, " +
     "unrequested backward-compat shims, single-use abstractions, tests that assert nothing, and edits outside the task. Prefix such findings with [slop], " +
     "cite the evidence (the invariant, the existing helper, the lost error) and keep them low unless they hide a defect (a swallowed error is medium or high); " +
     "low [slop] findings alone do not reject the change. Report findings; do not modify code.",
@@ -411,7 +411,10 @@ const INCIDENT_INVESTIGATE = {
     "{ summary, hypotheses: string[], next_steps: string[], missing_evidence?: string[], " +
     ROOT_CAUSE_CONTRACT +
     ", " +
-    CLAIMS_CONTRACT.replace("contradicts?: string[] }]", "contradicts?: string[], observed?: { pointer, equals?, count?, includes? } }]") +
+    CLAIMS_CONTRACT.replace(
+      "contradicts?: string[] }]",
+      "contradicts?: string[], observed?: { pointer, equals?, count?, includes? } }]",
+    ) +
     " }",
 };
 
@@ -488,6 +491,103 @@ const BUG_REVIEW = {
     "FAIL with findings for fixable defects, BLOCKED when evidence or human approval is missing.",
   output_contract:
     "{ verdict: 'PASS'|'FAIL'|'BLOCKED', findings: [{ severity, file, line, explanation, evidence }], summary, blocked_reason?, scope_check: { in_scope: boolean, unsupported_assumptions: string[], unintended_state_transitions: string[], invariants_preserved: boolean|null, tests_cover_failure_paths: boolean, diagnosis_uncertainty_preserved: boolean|null } }",
+};
+
+/**
+ * Codebase improvement: a proactive assessment that may end with "no changes needed". Built from the evidence-gated
+ * bug-fix machinery: the selected finding is the root cause (claims checked for provenance), the proposal carries the
+ * fix risk and a blast radius checked against the platform's own impact analysis, and the implementation is held to
+ * Root Cause First at strict depth, so a change ships only with a platform-run test that fails before and passes after.
+ */
+const IMPROVE_WHEN = { step: "assess", path: "decision", equals: "IMPROVE" };
+const ASSESS_SIGNALS =
+  "(1) Orient from what the platform already knows: repository metadata, the codebase map and knowledge in your context, platform.get_production_errors for the services, and inputs.focus if given. " +
+  "(2) Collect deterministic signals before reading code: production errors and latencies, failing or skipped tests, lint or vet output you can run read-only, code_intelligence searches. " +
+  "(3) Read only the hotspots those signals point to (search_code, get_symbol, find_dependencies, targeted Read). This is a repository-wide assessment from signals, not a file-by-file review: say what you did not inspect. " +
+  "Report only findings backed by evidence: a confirmed defect, a measured bottleneck, a security risk, or a maintainability issue with a concrete consequence. Never invent improvements or propose speculative refactoring. " +
+  "A finding is implementable only when a platform-runnable test can demonstrate it: it fails on the current code and passes once the finding is fixed (for performance, the test asserts the measured budget: allocations, query count, complexity bound or a time budget with margin). " +
+  "Classify each finding into one kind: CONCURRENCY (race, deadlock), MEMORY (leak, unbounded cache), RESOURCE (goroutine, connection or file descriptor leak), DATABASE (N+1, redundant query, missing transaction), " +
+  "PERFORMANCE (blocking I/O, needless serialization, excessive allocation), CODE_QUALITY (dead code, unused dependency, duplicated logic), RELIABILITY (missing timeout, retry storm, ignored cancellation), " +
+  "DATA_INTEGRITY (lost update, duplicate processing, invalid state transition), SECURITY (injection, SSRF, sensitive data exposure), BUSINESS_LOGIC (edge case, wrong condition, missing validation), DISTRIBUTED (missing idempotency, inconsistent state, message loss). " +
+  "Use the read-only analysers when they fit: go vet, go test -race, staticcheck, golangci-lint run, govulncheck, deadcode, benchmarks with -benchmem, and go tool pprof -top/-list on a profile written to /tmp. " +
+  "Load the verification-recipes skill: it says, per kind, which test demonstrates the finding. " +
+  "Give each finding the repository its code is in (`repo`) and, in `related_repos`, the other selected repositories with the same defect or affected by it. " +
+  "Give each finding a `title` of at most 80 characters naming the defect, and the `symbol` (function, method or type) its code is in: findings are tracked across scans by repo, category, file and symbol. " +
+  "Confirm every finding with the code index yourself (platform search_code, get_symbol, find_dependencies or navigate_code) before reporting it: the platform marks a finding as unverified unless one of YOUR code-intelligence calls in this step returned its file, and an unverified finding cannot be fixed. ";
+const FINDING_KINDS =
+  "'CONCURRENCY'|'MEMORY'|'RESOURCE'|'DATABASE'|'PERFORMANCE'|'CODE_QUALITY'|'RELIABILITY'|'DATA_INTEGRITY'|'SECURITY'|'BUSINESS_LOGIC'|'DISTRIBUTED'";
+const FINDINGS_CONTRACT =
+  "findings: [{ id, kind: " +
+  FINDING_KINDS +
+  ", severity: 'high'|'medium'|'low', title?, repo, file, line, symbol?, issue, evidence, implementable: boolean, why_not?, related_repos?: string[] }]";
+const IMPROVE_ASSESS = {
+  evidence: "root_cause",
+  code_evidence: "required",
+  instructions:
+    "Assess the selected repositories for ONE improvement worth making, in stages, and stop as soon as the evidence decides. " +
+    ASSESS_SIGNALS +
+    "When inputs.finding is set (a person chose it from an assessment), work on exactly that finding: re-check it against the current code, and select it if it still holds or answer NO_CHANGES_NEEDED with why; never switch to another finding. " +
+    "When inputs.decision is also set, a person has decided what the correct behaviour is (it was report-only because that decision was missing): treat it as a requirement, so the finding is implementable when a test can demonstrate the decided behaviour. " +
+    "Otherwise select at most one implementable finding. Give the selected finding as `selected` with its `target` (repo, files, symbols) and set decision IMPROVE; keep the other findings listed for separate runs. " +
+    "When nothing qualifies, set decision NO_CHANGES_NEEDED: that is a valid result. root_cause_assessment rates the selected finding (CONFIRMED only on verified facts). " +
+    EVIDENCE_RULES,
+  output_contract:
+    "{ decision: 'IMPROVE'|'NO_CHANGES_NEEDED'|'UNVERIFIED', summary, " +
+    FINDINGS_CONTRACT +
+    ", selected?: { finding_id, kind: " +
+    FINDING_KINDS +
+    ", expected_benefit }, target?: { repo, files: string[], symbols: string[] }, coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
+    ROOT_CAUSE_CONTRACT +
+    ", " +
+    CLAIMS_CONTRACT +
+    " }",
+};
+/** The read-only assessment a person picks findings from: every evidence-backed finding, none selected or changed. */
+const IMPROVE_SCAN = {
+  evidence: "analysis",
+  code_evidence: "required",
+  instructions:
+    "Assess the selected repositories in stages and list every evidence-backed finding (at most 20, most severe first). Nothing is changed and nothing is selected here: a person picks the findings to fix. " +
+    ASSESS_SIGNALS +
+    "Set decision FINDINGS when you report at least one finding, NO_CHANGES_NEEDED when nothing qualifies (a valid result). " +
+    EVIDENCE_RULES,
+  output_contract:
+    "{ decision: 'FINDINGS'|'NO_CHANGES_NEEDED', summary, " +
+    FINDINGS_CONTRACT +
+    ", coverage: { inspected: string[], signals: string[], not_inspected: string[] }, missing_evidence?: string[], " +
+    CLAIMS_CONTRACT.replace("claims:", "claims?:") +
+    " }",
+};
+const IMPROVE_PROPOSAL = {
+  ...BUG_FIX_PROPOSAL,
+  instructions:
+    "Propose the smallest change that fixes the selected finding of the assessment and nothing else. " +
+    "Establish its blast radius before any code changes: callers and dependencies (find_dependencies, search_code), entry points, business flows, API and data contracts, and cross-repository consumers from the blast_radius step (its confirmed links are static; uncertain ones are inferred). " +
+    "blast_radius.status is ESTABLISHED only when every affected caller and consumer is known; otherwise PARTIAL or UNKNOWN with what is uncertain. An unestablished blast radius is not a failure, but a human must acknowledge it before anything is implemented. " +
+    "State the expected benefit as a measurable quantity with its current value, and the verification plan. required_tests names the ONE executable test that fails on the current code and passes after the change (it is run by the platform on both). " +
+    "Changes must preserve business behaviour, public contracts and architectural boundaries unless the finding is exactly that defect. " +
+    "When inputs.decision is set, the change implements exactly that decision of a person, nothing broader. " +
+    BUG_FIX_PROPOSAL.instructions,
+  output_contract: BUG_FIX_PROPOSAL.output_contract.replace(
+    "{ summary,",
+    "{ summary, finding_id, blast_radius: { status: 'ESTABLISHED'|'PARTIAL'|'UNKNOWN', confirmed: string[], uncertain: string[] }, expected_benefit: { metric, current, target }, verification_plan: string[],",
+  ),
+};
+const IMPROVE_IMPLEMENT = {
+  ...BUG_IMPLEMENT,
+  root_cause_depth: "strict",
+  instructions:
+    BUG_IMPLEMENT.instructions +
+    " Write the regression test named in required_tests first and keep it in the repository: it is the durable evidence. " +
+    "Never commit audit reports, notes, temporary verification scripts, screenshots, videos or generated evidence: the platform stores evidence as run artifacts.",
+};
+const IMPROVE_REVIEW = {
+  ...BUG_REVIEW,
+  root_cause_depth: "strict",
+  instructions:
+    BUG_REVIEW.instructions +
+    " Also compare the cross-repository impact of the actual diff (impact step) with the blast radius approved before implementation: a consumer or contract the approval did not cover is BLOCKED, not PASS. " +
+    "Do not claim the absence of regressions beyond what the tests and analyses actually covered.",
 };
 
 /**
@@ -824,7 +924,12 @@ export const PRODUCTION_BUG_HUNT = {
     request: { description: "the incident, as the investigation's request", required: true },
   },
   steps: [
-    { key: "context", type: "integration", name: "Incident Context", config: { action: "bug_hunt_context" } },
+    {
+      key: "context",
+      type: "integration",
+      name: "Incident Context",
+      config: { action: "bug_hunt_context" },
+    },
     {
       key: "scope",
       type: "integration",
@@ -1080,6 +1185,19 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
             objectives: { required_sources: ["trace", "log", "code"], require_root_cause: true },
           },
         },
+        {
+          key: "proof",
+          type: "integration",
+          name: "Proof of Diagnosis",
+          depends_on: ["report"],
+          // Read-only: records the diagnosis verdict (no fix), never blocks the report.
+          config: {
+            action: "proof_of_fix",
+            root_cause_from: "investigate",
+            report_from: "report",
+            block_on: [],
+          },
+        },
       ],
     },
   },
@@ -1153,17 +1271,39 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           },
         },
         {
+          key: "impact",
+          type: "integration",
+          name: "Cross-Repository Impact",
+          depends_on: ["implement"],
+          // Read-only: dependencies and breaking changes in other repositories, for the reviewer and the PR.
+          config: { action: "impact_analysis" },
+        },
+        {
           key: "review",
           type: "agent",
           name: "Code Review",
-          depends_on: ["regression_test"],
+          depends_on: ["regression_test", "impact"],
           config: BUG_REVIEW,
+        },
+        {
+          key: "proof",
+          type: "integration",
+          name: "Proof of Fix",
+          depends_on: ["review"],
+          // Deterministic verdict from the recorded evidence; FAILED blocks the PR (agent/proofOfFix.ts).
+          config: {
+            action: "proof_of_fix",
+            root_cause_from: "root_cause",
+            implement_from: "implement",
+            test_from: "regression_test",
+            review_from: "review",
+          },
         },
         {
           key: "pr",
           type: "git_pull_request",
           name: "Pull Request",
-          depends_on: ["review"],
+          depends_on: ["proof"],
           config: { mode: "approval", content_from: "implement" },
         },
         qcMerge("pr"),
@@ -1366,6 +1506,168 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
         },
         qcMerge("pr"),
         cleanup("qc_merge"),
+      ],
+    },
+  },
+  {
+    key: "codebase-assessment",
+    spec: {
+      name: "Codebase Assessment",
+      description:
+        "Read-only: an agent assesses the repository and lists evidence-backed findings with their severity; a person picks the ones to fix (codebase-improvement)",
+      execution_mode: "read_only",
+      inputs: {
+        repositories: { description: "repositories to assess", required: true },
+        focus: { description: "area or signal to start from (optional)", required: false },
+      },
+      steps: [
+        {
+          key: "select",
+          type: "integration",
+          name: "Select Repository",
+          config: { action: "select_repositories" },
+        },
+        {
+          key: "assess",
+          type: "agent",
+          name: "Repository Assessment",
+          depends_on: ["select"],
+          config: IMPROVE_SCAN,
+        },
+        {
+          key: "report",
+          type: "integration",
+          name: "Assessment Report",
+          depends_on: ["assess"],
+          config: { action: "publish_report", from: ["assess"], title: "Codebase assessment" },
+        },
+      ],
+    },
+  },
+  {
+    key: "codebase-improvement",
+    spec: {
+      name: "Codebase Improvement",
+      description:
+        "Repository assessment → (no changes needed, or) blast radius → proposal → approval → fix with a regression test → regression tests → impact → independent review → proof → PR",
+      feedback_step: "implement",
+      replan_step: "assess",
+      inputs: {
+        repositories: { description: "repositories to assess", required: true },
+        focus: { description: "area or signal to start from (optional)", required: false },
+      },
+      steps: [
+        {
+          key: "select",
+          type: "integration",
+          name: "Select Repository",
+          config: { action: "select_repositories" },
+        },
+        {
+          key: "assess",
+          type: "agent",
+          name: "Repository Assessment",
+          depends_on: ["select"],
+          config: IMPROVE_ASSESS,
+        },
+        {
+          key: "report",
+          type: "integration",
+          name: "Assessment Report",
+          depends_on: ["assess"],
+          config: { action: "publish_report", from: ["assess"], title: "Codebase assessment" },
+        },
+        {
+          key: "blast_radius",
+          type: "integration",
+          name: "Blast Radius",
+          depends_on: ["assess"],
+          run_if: IMPROVE_WHEN,
+          config: { action: "impact_analysis", from: "assess" },
+        },
+        {
+          key: "proposal",
+          type: "agent",
+          name: "Improvement Proposal",
+          depends_on: ["blast_radius"],
+          run_if: IMPROVE_WHEN,
+          config: IMPROVE_PROPOSAL,
+        },
+        {
+          key: "approve",
+          type: "human_approval",
+          name: "Approve Improvement",
+          depends_on: ["proposal"],
+          run_if: IMPROVE_WHEN,
+          config: {
+            show_outputs: ["assess", "blast_radius", "proposal"],
+            approve_scope_from: "proposal",
+            on_reject: { reexecute: "proposal" },
+          },
+        },
+        {
+          key: "implement",
+          type: "coding_agent",
+          name: "Implementation",
+          depends_on: ["approve"],
+          run_if: IMPROVE_WHEN,
+          config: IMPROVE_IMPLEMENT,
+          max_attempts: 2,
+        },
+        {
+          key: "regression_test",
+          type: "command",
+          name: "Regression Testing",
+          depends_on: ["implement"],
+          run_if: IMPROVE_WHEN,
+          config: {
+            command: TEST_COMMAND,
+            timeout_seconds: 1800,
+            baseline_compare: "go",
+            on_failure: "ask",
+          },
+        },
+        {
+          key: "impact",
+          type: "integration",
+          name: "Cross-Repository Impact",
+          depends_on: ["implement"],
+          run_if: IMPROVE_WHEN,
+          config: { action: "impact_analysis" },
+        },
+        {
+          key: "review",
+          type: "agent",
+          name: "Independent Review",
+          depends_on: ["regression_test", "impact"],
+          run_if: IMPROVE_WHEN,
+          config: IMPROVE_REVIEW,
+        },
+        {
+          key: "proof",
+          type: "integration",
+          name: "Proof of Improvement",
+          depends_on: ["review"],
+          run_if: IMPROVE_WHEN,
+          // Only a platform-verified improvement may be published: missing proof is unverified, not a pass.
+          config: {
+            action: "proof_of_fix",
+            root_cause_from: "assess",
+            implement_from: "implement",
+            test_from: "regression_test",
+            review_from: "review",
+            block_on: ["FAILED", "INCONCLUSIVE", "PARTIAL"],
+          },
+        },
+        {
+          key: "pr",
+          type: "git_pull_request",
+          name: "Pull Request",
+          depends_on: ["proof"],
+          run_if: IMPROVE_WHEN,
+          config: { mode: "approval", content_from: "implement" },
+        },
+        cleanup("pr", "report"),
       ],
     },
   },

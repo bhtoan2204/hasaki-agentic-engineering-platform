@@ -33,6 +33,7 @@ import { deferIfBranchBusy } from "./branchLeases.ts";
 import { settleBackground } from "./background.ts";
 import type { ExecResult, ExecutionFingerprint, JobRow } from "./types.ts";
 import { noteDecision } from "./decisions.ts";
+import { logError } from "../logging.ts";
 
 /**
  * WorkflowScheduler: PostgreSQL-backed job claiming. No in-memory queue: any number of processes can run
@@ -90,11 +91,16 @@ const reconcileTasks: Array<() => Promise<unknown>> = [];
  * Extra periodic work run on the scheduler's existing reconcile tick (no new timer). Each task is single-flight: a tick
  * that finds the previous call still running skips it.
  */
-export function registerReconcileTask(task: () => Promise<unknown>) {
+export function registerReconcileTask(name: string, task: () => Promise<unknown>) {
   let running: Promise<unknown> | null = null;
   reconcileTasks.push(() => {
     if (running) return Promise.resolve();
-    running = task().finally(() => (running = null));
+    running = Promise.resolve()
+      .then(task)
+      .catch((error) => {
+        logError("scheduler.reconcile_failed", "Reconcile task failed", error, { task: name });
+      })
+      .finally(() => (running = null));
     return running;
   });
 }
@@ -154,9 +160,14 @@ let automaticHandoff: Promise<void> | null = null;
  */
 export function reconcileAutomaticHandoff(): Promise<void> {
   if (automaticHandoff) return automaticHandoff;
-  const run = processAutomaticHandoff().finally(() => {
-    if (automaticHandoff === run) automaticHandoff = null;
-  });
+  const run = processAutomaticHandoff()
+    .catch((error) => {
+      logError("scheduler.automatic_handoff_failed", "Automatic handoff reconciliation failed", error);
+      throw error;
+    })
+    .finally(() => {
+      if (automaticHandoff === run) automaticHandoff = null;
+    });
   automaticHandoff = run;
   return run;
 }
@@ -277,7 +288,13 @@ async function runJob(
         ac.abort();
     } catch (e) {
       ac.abort();
-      console.error(`heartbeat job ${job.id}:`, (e as Error).message);
+      logError("scheduler.heartbeat_failed", "Job heartbeat failed", e, {
+        job_id: job.id,
+        run_id: job.run_id,
+        step_id: job.step_id,
+        attempt_id: begun.attempt.id,
+        worker_id: workerId,
+      });
     }
   }, opts.heartbeatSeconds * 1000);
   const executionAbort = new AbortController();
@@ -556,19 +573,28 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     loops.push(
       (async () => {
         while (!stopped) {
+          // The shared handoff promise logs its own failure once. Each lane still backs off.
+          if (!(await reconcileAutomaticHandoff().then(() => true, () => false))) {
+            await sleep(opts.pollMs * 5);
+            continue;
+          }
+          let job: JobRow | undefined;
           try {
-            await reconcileAutomaticHandoff();
             const seen = runnableSignals;
-            const job = await claimJob(workerId, opts.leaseSeconds, lane.types);
+            job = await claimJob(workerId, opts.leaseSeconds, lane.types);
             if (job) {
               wakeIdle([lane.types ? "light" : "general"]); // more may be runnable: let the next idle worker look
               await processJob(job, workerId, opts);
-            }
-            else if (!lane.types && (await runIndexOnce(indexAbort.signal))) {
+            } else if (!lane.types && (await runIndexOnce(indexAbort.signal))) {
               /* optional idle indexing */
             } else await idleWait(lane.types ? "light" : "general", opts.pollMs, seen);
           } catch (e) {
-            console.error(`worker ${workerId}:`, (e as Error).message);
+            logError("scheduler.worker_failed", "Scheduler worker failed", e, {
+              worker_id: workerId,
+              job_id: job?.id,
+              run_id: job?.run_id,
+              step_id: job?.step_id,
+            });
             await sleep(opts.pollMs * 5);
           }
         }
@@ -576,10 +602,11 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     );
   }
   const reconcile = () => {
-    for (const task of reconcileTasks) task().catch((e) => console.error("reconcile task:", e.message));
+    for (const task of reconcileTasks) void task();
     reapExpiredLeases().catch((e) => console.error("reaper:", e.message));
     dispatchRunEffects().catch((e) => console.error("run effects:", e.message));
-    reconcileAutomaticHandoff().catch((e) => console.error("automatic handoff:", e.message));
+    // The shared promise has already logged any failure.
+    void reconcileAutomaticHandoff().catch(() => {});
     purgeDebugEventsThrottled().catch((e) => console.error("trace retention:", e.message));
   };
   const reaper = setInterval(reconcile, Math.max(5, opts.leaseSeconds / 2) * 1000);

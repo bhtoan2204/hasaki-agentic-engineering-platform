@@ -7,45 +7,80 @@ import { botKey, telegramCall } from "./client.ts";
 
 export const opaqueId = () => randomBytes(18).toString("base64url");
 const tokenHash = (s: string) => createHash("sha256").update(s).digest("hex");
+/** Boolean subscriptions: interactive buttons, the chat gateway and one switch per notification kind. */
+const TOGGLES = [
+  "approvals",
+  "questions",
+  "failures",
+  "completions",
+  "interactive",
+  "chat",
+  "blocked",
+  "recoveries",
+  "pull_requests",
+  "autonomy",
+  "intake",
+] as const;
 export const defaults = {
   approvals: true,
   questions: true,
   failures: true,
   completions: true,
   interactive: true,
+  chat: true,
+  blocked: true,
+  recoveries: true,
+  pull_requests: true,
+  autonomy: true,
+  intake: true,
   locale: "vi",
+  /** all | important | critical: the lowest severity still sent (approvals/questions/failures are critical). */
+  level: "important",
+  quiet_start: null as number | null,
+  quiet_end: null as number | null,
+  timezone: "Asia/Ho_Chi_Minh",
 };
-export async function preferences(userId: number, db: Db = pool) {
-  return {
-    ...defaults,
-    ...(await one(db, "SELECT * FROM telegram_preferences WHERE user_id=$1", [userId])),
-  };
+export type TelegramPreferences = typeof defaults;
+export async function preferences(userId: number, db: Db = pool): Promise<TelegramPreferences> {
+  const row = await one(db, "SELECT * FROM telegram_preferences WHERE user_id=$1", [userId]);
+  return { ...defaults, ...(row ?? {}) };
 }
+const validTimezone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return /^[A-Za-z0-9_+\-/]{1,64}$/.test(tz);
+  } catch {
+    return false;
+  }
+};
 export async function savePreferences(userId: number, input: Record<string, unknown>) {
   const old = await preferences(userId);
-  for (const k of ["approvals", "questions", "failures", "completions", "interactive"] as const) {
+  for (const k of TOGGLES)
     if (input[k] !== undefined && typeof input[k] !== "boolean")
       throw new HttpError(400, `Invalid ${k}`);
-  }
   if (input.locale !== undefined && !["vi", "en"].includes(String(input.locale)))
     throw new HttpError(400, "Invalid language");
+  if (input.level !== undefined && !["all", "important", "critical"].includes(String(input.level)))
+    throw new HttpError(400, "Invalid level");
+  for (const k of ["quiet_start", "quiet_end"] as const)
+    if (
+      input[k] !== undefined &&
+      input[k] !== null &&
+      !(Number.isInteger(input[k]) && Number(input[k]) >= 0 && Number(input[k]) <= 23)
+    )
+      throw new HttpError(400, `Invalid ${k}`);
+  if (input.timezone !== undefined && !validTimezone(String(input.timezone)))
+    throw new HttpError(400, "Invalid timezone");
   const value = {
     ...old,
     ...Object.fromEntries(Object.entries(input).filter(([k]) => Object.keys(defaults).includes(k))),
-  };
+  } as TelegramPreferences;
+  const columns = [...TOGGLES, "locale", "level", "quiet_start", "quiet_end", "timezone"] as const;
   await q(
     pool,
-    `INSERT INTO telegram_preferences(user_id,approvals,questions,failures,completions,interactive,locale) VALUES($1,$2,$3,$4,$5,$6,$7)
-    ON CONFLICT(user_id) DO UPDATE SET approvals=$2,questions=$3,failures=$4,completions=$5,interactive=$6,locale=$7`,
-    [
-      userId,
-      value.approvals,
-      value.questions,
-      value.failures,
-      value.completions,
-      value.interactive,
-      value.locale,
-    ],
+    `INSERT INTO telegram_preferences(user_id,${columns.join(",")}) VALUES($1,${columns.map((_, i) => `$${i + 2}`).join(",")})
+    ON CONFLICT(user_id) DO UPDATE SET ${columns.map((c, i) => `${c}=$${i + 2}`).join(",")}`,
+    [userId, ...columns.map((c) => value[c])],
   );
   return preferences(userId);
 }
@@ -193,6 +228,22 @@ export async function disconnect(userId: number) {
       "UPDATE telegram_conversations SET status='canceled' WHERE action_id IN (SELECT action_id FROM telegram_actions WHERE user_id=$1)",
       [userId],
     );
+    for (const row of await q(
+      db,
+      "UPDATE telegram_chat_actions SET status='canceled' WHERE user_id=$1 AND status IN ('pending','armed') RETURNING bot_key,action_id,chat_id,message_id",
+      [userId],
+    ))
+      if (row.message_id && row.bot_key === botKey())
+        await queue(db, `disconnect_chat:${row.action_id}`, "editMessageReplyMarkup", {
+          chat_id: row.chat_id,
+          message_id: row.message_id,
+          reply_markup: { inline_keyboard: [] },
+        });
+    await q(db, "DELETE FROM telegram_chat_links WHERE user_id=$1", [userId]);
+    await q(db, "UPDATE telegram_run_watch SET watched=false WHERE user_id=$1", [userId]);
+    await q(db, "DELETE FROM telegram_notifications WHERE user_id=$1 AND sent_at IS NULL", [
+      userId,
+    ]);
     await q(db, "DELETE FROM telegram_bindings WHERE user_id=$1", [userId]);
     await q(db, "DELETE FROM telegram_bind_tokens WHERE user_id=$1", [userId]);
     await q(db, "DELETE FROM user_secrets WHERE user_id=$1 AND kind='telegram_chat'", [userId]);
@@ -208,10 +259,12 @@ export async function queue(
   actionIds: string[] = [],
   conversation?: string,
   userId?: number,
+  extra: { link?: OutboxLink; chatActionIds?: string[]; delaySeconds?: number } = {},
 ) {
   await q(
     db,
-    `INSERT INTO telegram_outbox(bot_key,dedupe_key,method,payload,action_ids,conversation_action_id,user_id) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+    `INSERT INTO telegram_outbox(bot_key,dedupe_key,method,payload,action_ids,conversation_action_id,user_id,link,chat_action_ids,next_at)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,now()+make_interval(secs=>$10)) ON CONFLICT DO NOTHING`,
     [
       botKey(),
       key,
@@ -220,8 +273,18 @@ export async function queue(
       actionIds,
       conversation ?? null,
       userId ?? null,
+      extra.link ? JSON.stringify(extra.link) : null,
+      extra.chatActionIds ?? [],
+      extra.delaySeconds ?? 0,
     ],
   );
+}
+/** What a sent message is about: recorded in telegram_messages once Telegram returns its id (replies, edits). */
+export interface OutboxLink {
+  kind: "turn_status" | "answer" | "operation" | "run_status" | "notice";
+  conversation_id?: number | null;
+  turn_id?: number | null;
+  run_id?: number | null;
 }
 /** One session-level Postgres lock coordinates BOTH update transports and legacy chat discovery. */
 export function advisoryKey(key = botKey()) {

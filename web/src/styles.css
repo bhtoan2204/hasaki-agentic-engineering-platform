@@ -1189,29 +1189,6 @@ tr.click:hover td {
   gap: 10px;
 }
 
-.updating-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--brand), transparent);
-  background-size: 200% 100%;
-  animation: updating-shimmer 1.5s infinite linear;
-  z-index: 10;
-  pointer-events: none;
-}
-
-@keyframes updating-shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-
-  100% {
-    background-position: 200% 0;
-  }
-}
-
 /* ---------------------------------------------------------------- overlays: drawer / dialog / tooltip */
 .scrim {
   position: fixed;
@@ -2431,4 +2408,23 @@ details>summary {
   display: grid;
   gap: var(--sp-3, 12px);
   justify-items: start;
+}
+
+/* Pager (ui.tsx) */
+.kn-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  padding-top: var(--sp-2);
+}
+
+.kn-pager-total,
+.kn-pager-gap {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.kn-pager-total {
+  margin-right: auto;
 }

@@ -62,6 +62,7 @@ import {
 import { stepTypeIcon } from "../graph.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import { Transcript } from "./Transcript.tsx";
+import { useRunEvents } from "./useRunEvents.ts";
 import { ReportPanel, type ReportArtifact, type ReportSpec, type TaskReport } from "./Report.tsx";
 import { InvestigationOutput } from "./Investigations.tsx";
 import "./RunView.css";
@@ -196,7 +197,7 @@ export interface StepRow {
   current_attempt_id: number | null;
   config: StepConfig;
   agent_override?: { provider?: string; model?: string | null; [key: string]: unknown } | null;
-  pending_input?: { provider_handoff?: StepHandoff } | null;
+  pending_input?: { provider_handoff?: StepHandoff; child_workflows?: number[] } | null;
   approval?: { request?: ApprovalRequest; gate?: boolean; granted?: boolean } | null;
   output?: StepOutput | null;
   error: string | null;
@@ -2038,24 +2039,13 @@ function CommandLog({
   startedAt: string;
 }) {
   const { t } = useI18n();
-  const [events, setEvents] = useState<TranscriptEvent[]>([]);
-  const last = useRef(0);
+  const { events, error, loading, reload } = useRunEvents<TranscriptEvent>(
+    `/api/attempts/${attemptId}/transcript`,
+    tick,
+  );
   const box = useRef<HTMLPreElement>(null);
   const [follow, setFollow] = useState(true);
   const [, force] = useState(0);
-  useEffect(() => {
-    setEvents([]);
-    last.current = 0;
-  }, [attemptId]);
-  useEffect(() => {
-    api<TranscriptEvent[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then(
-      (rows) => {
-        if (!rows.length) return;
-        last.current = rows[rows.length - 1].id;
-        setEvents((p) => [...p, ...rows]);
-      },
-    );
-  }, [attemptId, tick]);
   useEffect(() => {
     if (!live) return;
     const t = setInterval(() => force((x) => x + 1), 1000);
@@ -2067,8 +2057,12 @@ function CommandLog({
   const text = events.map((e) => (e.kind === "log" ? e.content : `\n${e.content}\n`)).join("");
   const lastAt = events.length ? events[events.length - 1].created_at : startedAt;
   const quiet = live ? Math.round((Date.now() - new Date(lastAt).getTime()) / 1000) : 0;
+  if (!events.length && loading) return <Loading />;
+  if (!events.length && error) return <ErrorBox error={error} onRetry={reload} />;
   return (
     <div>
+      {error && <ErrorBox error={error} onRetry={reload} />}
+      {loading && <Loading />}
       <div className="rv-toolrow">
         <span
           className="small muted grow"

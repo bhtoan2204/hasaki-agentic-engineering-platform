@@ -358,19 +358,17 @@ test("policy: blocking only under enforcement for new/worsened at severity and c
     confidence,
     fingerprint: status + severity + confidence,
   });
-  const report = {
-    findings: [
-      f("new", "high", 0.95),
-      f("worsened", "high", 0.9),
-      f("existing", "high", 0.95),
-      f("new", "medium", 0.95),
-      f("new", "high", 0.6),
-      f("suppressed", "high", 0.95),
-    ],
-  } as never;
-  assert.deepEqual(blocking(report, settings()), []);
+  const findings = [
+    f("new", "high", 0.95),
+    f("worsened", "high", 0.9),
+    f("existing", "high", 0.95),
+    f("new", "medium", 0.95),
+    f("new", "high", 0.6),
+    f("suppressed", "high", 0.95),
+  ] as never;
+  assert.deepEqual(blocking(findings, settings()), []);
   assert.deepEqual(
-    blocking(report, settings({ mode: "enforcement" })).map((x) => x.status),
+    blocking(findings, settings({ mode: "enforcement" })).map((x) => x.status),
     ["new", "worsened"],
   );
   const small = { files: 2, lines: 40 };
@@ -499,6 +497,42 @@ test("scan: a grammar that fails to load is an explicit error, never zero findin
   }
 });
 
+test("scan FAST auto: counts untracked files and lines at the micro limits", async (t) => {
+  for (const [files, lines, expected] of [
+    [4, 1, "standard"],
+    [1, 151, "standard"],
+    [1, 150, "micro"],
+  ] as const) {
+    await t.test(`${files} untracked file(s) of ${lines} line(s)`, async () => {
+      const { dir, g } = repo();
+      try {
+        const worktree = join(dir, "linked");
+        g("worktree", "add", "-q", "--detach", worktree, "main");
+        for (let i = 0; i < files; i++) {
+          writeFileSync(join(worktree, `new${i}.ts`), "// a line\n".repeat(lines));
+        }
+        const opts = {
+          path: worktree,
+          baseRef: "main",
+          settings: settings({ level: "auto" }),
+          profile: "FAST",
+        };
+        const result = await scanWorkspace(opts);
+        assert.equal(result.status, "ok");
+        assert.equal(result.level, expected);
+        if (lines === 150) {
+          g("-C", worktree, "add", "new0.ts");
+          assert.equal((await scanWorkspace(opts)).level, "micro", "staged lines count once");
+          writeFileSync(join(worktree, "extra.ts"), "// no trailing newline");
+          assert.equal((await scanWorkspace(opts)).level, "standard", "staged and untracked lines add up");
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 // ---------------------------------------------------------------- verification harness (fake deps, no model)
 const CFG: VerifyConfig = {
   command: "make verify",
@@ -525,6 +559,41 @@ execFileSync("git", [
 const WS = [{ repo: "svc", path: WT }];
 const never = new AbortController().signal;
 const PASS: VerifyDeps["run"] = async () => ({ code: 0, output: "ℹ pass 3\n", timedOut: false });
+
+test("verify: enforcement blocks a worsened finding beyond the 200-finding report limit", async () => {
+  const { dir, g, write } = repo();
+  try {
+    write("metric.ts", branchy(16));
+    g("add", "metric.ts");
+    g("commit", "-qm", "base metric");
+    const baseRef = g("rev-parse", "HEAD").trim();
+    write("metric.ts", branchy(30));
+    write("todos.ts", "// TODO: follow up\n".repeat(200));
+    const s = settings({
+      mode: "enforcement",
+      level: "standard",
+      minSeverity: "low",
+      blockSeverity: "high",
+      minConfidence: 0.6,
+    });
+    const scan = await scanWorkspace({ path: dir, baseRef, settings: s });
+    assert.equal(scan.status, "ok");
+    assert.equal(scan.findings.length, 200);
+    assert.ok(scan.findings.every((f) => f.status === "new" && f.severity === "low"));
+    assert.equal(scan.counts.worsened, 1);
+
+    const round = await verifyWorkspaces([{ repo: "svc", path: dir }], [dir], CFG, 1, never, {
+      run: PASS,
+      slop: async () => ({ ...scan, mode: s.mode }),
+    });
+    assert.equal(round.passed, false);
+    assert.deepEqual(round.repos[0].slop?.blocking.map((f) => [f.status, f.severity, f.confidence]), [
+      ["worsened", "high", 0.6],
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 const finding = (fp: string) => ({
   rule: "silent-error",
   category: "error-handling",

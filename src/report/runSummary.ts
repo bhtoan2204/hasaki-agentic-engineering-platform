@@ -6,6 +6,7 @@ import { pool, q, one, json } from "../db/pool.ts";
 import { repoPath, repositories } from "../repos/service.ts";
 import type { AttemptRow } from "../workflow/types.ts";
 import type { Classification } from "../workflow/executors/baseline.ts";
+import { logError } from "../logging.ts";
 
 /**
  * "What did this run do?" — a detailed, factual summary of a finished run, shown on the work item page.
@@ -541,16 +542,11 @@ export function renderRunSummaryMarkdown(s: RunSummary, en: boolean): string {
   return out.join("\n");
 }
 
-/** Build and store the snapshot on the run (called when the run finishes; failures are logged, never thrown). */
+/** Build and store the snapshot on the run. The caller handles failures according to its retry policy. */
 export async function storeRunSummary(runId: number) {
-  try {
-    const s = await buildRunSummary(runId);
-    await q(pool, "UPDATE workflow_runs SET summary = $2 WHERE id = $1", [runId, json(s)]);
-    return s;
-  } catch (e) {
-    console.error(`run ${runId} summary: ${(e as Error).message}`);
-    return null;
-  }
+  const s = await buildRunSummary(runId);
+  await q(pool, "UPDATE workflow_runs SET summary = $2 WHERE id = $1", [runId, json(s)]);
+  return s;
 }
 
 /** Stored snapshot of a finished run, or a live build (running runs, old runs, or `refresh`). */
@@ -564,6 +560,12 @@ export async function getRunSummary(runId: number, refresh = false): Promise<Run
   const finished = ["COMPLETED", "FAILED", "CANCELED"].includes(row.status);
   if (!refresh && row.summary?.version === SUMMARY_VERSION && row.summary.run.status === row.status)
     return row.summary;
-  if (finished) return (await storeRunSummary(runId)) ?? buildRunSummary(runId);
+  if (finished) {
+    try {
+      return await storeRunSummary(runId);
+    } catch (error) {
+      logError("workflow.summary_failed", "Run summary snapshot failed", error, { run_id: runId });
+    }
+  }
   return buildRunSummary(runId);
 }

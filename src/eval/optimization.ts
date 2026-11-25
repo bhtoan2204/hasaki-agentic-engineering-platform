@@ -70,11 +70,27 @@ export async function applyOptimizationDefaults(
   explicitProvider: boolean,
   profile: "MICRO" | "FAST" | "STANDARD" | "DEEP" = "STANDARD",
   complexity: string | null = null,
+  defaultProvider: string | null = null,
+  workflow = "",
 ) {
   const category = typeof inputs.task_category === "string" ? inputs.task_category : null;
   const graph = structuredClone(spec);
   const decisions: Array<Record<string, unknown>> = [];
-  if (!category || explicitProvider) return { graph, decisions };
+  // A provider chosen for the run is an explicit override: neither recommendations nor routing change it.
+  if (explicitProvider) return { graph, decisions };
+  if (!category) {
+    await applyAdaptiveRouting(
+      db,
+      owner,
+      graph,
+      decisions,
+      profile,
+      complexity,
+      defaultProvider,
+      workflow,
+    );
+    return { graph, decisions };
+  }
   const policies = await q(
     db,
     `SELECT p.*,r.version,r.evidence_hash,r.decision,r.expires_at,r.owner_id AS recommendation_owner FROM agent_optimization_policies p JOIN agent_recommendations r ON r.id=p.recommendation_id WHERE p.owner_id=$1 AND p.category=$2 AND p.enabled`,
@@ -142,5 +158,107 @@ export async function applyOptimizationDefaults(
     step.config.optimization_decision = provenance;
     decisions.push({ step_key: step.key, ...provenance });
   }
+  await applyAdaptiveRouting(
+    db,
+    owner,
+    graph,
+    decisions,
+    profile,
+    complexity,
+    defaultProvider,
+    workflow,
+  );
   return { graph, decisions };
+}
+
+/**
+ * Evaluation-driven routing (routing/adaptive.ts) for the agent steps nothing else configured: no explicit agent or
+ * model, no benchmark-recommendation policy applied. Opt-in per owner; every considered step records its decision.
+ */
+async function applyAdaptiveRouting(
+  db: Db,
+  owner: number,
+  graph: WorkflowSpec,
+  decisions: Array<Record<string, unknown>>,
+  profile: "MICRO" | "FAST" | "STANDARD" | "DEEP",
+  complexity: string | null,
+  defaultProvider: string | null,
+  workflow: string,
+) {
+  const { routingPreference, cachedOutcomes, eligibility, decideRoute } =
+    await import("../routing/adaptive.ts");
+  const pref = await routingPreference(owner, db);
+  if (!pref?.enabled) return;
+  const steps = graph.steps.filter((step) => {
+    const c = step.config as Record<string, unknown> & { agent?: StepAgentConfig };
+    return (
+      ["agent", "coding_agent"].includes(step.type) &&
+      !c.agent?.provider &&
+      // An explicit step model or effort is a choice routing must not replace.
+      !c.agent?.model &&
+      !c.agent?.reasoning_effort &&
+      !c.model &&
+      !c.codex_model &&
+      // A step a benchmark-recommendation policy already decided on (applied or not) keeps that single decision.
+      !c.optimization_decision
+    );
+  });
+  if (!steps.length) return;
+  // Read outside the run-start transaction (pool, cached): it is a heavy read-only aggregate.
+  const samples = await cachedOutcomes();
+  const { isolationEnforced } = await import("../agent/isolation.ts");
+  const enforce = config.isolation.mode === "enforce";
+  const isolation = { enforce, runtimeAvailable: enforce ? await isolationEnforced() : false };
+  for (const step of steps) {
+    const { eligible, excluded } = eligibility({ stepType: step.type, complexity, isolation });
+    const current = resolveStepAgent({ agent_provider: defaultProvider ?? undefined, profile }, step);
+    const fallback = current?.provider ?? "claude";
+    const decision = decideRoute({
+      samples,
+      stepType: step.type,
+      workflow,
+      defaultProvider: fallback,
+      // The exact configuration the step would otherwise run with (provider, configured model and effort).
+      incumbent: {
+        provider: fallback,
+        model: current?.model ?? null,
+        effort: current?.reasoning_effort ?? null,
+      },
+      eligible,
+      excluded,
+      preference: pref.preference,
+      minSamples: pref.min_samples,
+    });
+    const original = step.config as Record<string, unknown> & {
+      agent?: StepAgentConfig;
+      delegation?: { enabled?: boolean };
+    };
+    if (decision.applied && decision.chosen) {
+      try {
+        if (decision.chosen.provider !== "claude" && original.delegation?.enabled)
+          throw new Error("Delegation permission cannot be enforced by target provider");
+        const cfg = {
+          ...original,
+          agent: {
+            ...original.agent,
+            provider: decision.chosen.provider as StepAgentConfig["provider"],
+            model: decision.chosen.model ?? null,
+            reasoning_effort: decision.chosen.reasoning_effort ?? null,
+          },
+        };
+        const effective = resolveStepAgent(
+          { agent_provider: fallback, profile },
+          { ...step, config: cfg },
+        )!;
+        const ready = await handoffReadiness(effective);
+        if (!ready.ok) throw new Error(ready.error ?? "Provider unavailable");
+        step.config = cfg;
+      } catch (error) {
+        decision.applied = false;
+        decision.reason = `chosen configuration not usable now (${(error as Error).message}); default kept`;
+      }
+    }
+    step.config.routing_decision = decision as unknown as Record<string, unknown>;
+    decisions.push({ step_key: step.key, ...decision });
+  }
 }

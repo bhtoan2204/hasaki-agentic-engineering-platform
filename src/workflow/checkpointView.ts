@@ -1,3 +1,7 @@
+import type { CheckpointArtifactInput, CheckpointAttemptInput, CheckpointRowInput } from "./types.ts";
+
+export type { CheckpointRowInput } from "./types.ts";
+
 /**
  * Read-only presentation of execution checkpoints for the run view and step inspector. Recoverable checkpoints carry a
  * validated execution envelope (executor return and the wait/approval/handoff pauses); everything else is an
@@ -14,30 +18,6 @@ export const RECOVERABLE_REASONS = [
 
 export type CheckpointCompatibility =
   "compatible" | "stale_generation" | "invalidated" | "workspace_changed" | "legacy" | "unknown";
-
-export interface CheckpointRowInput {
-  id: number;
-  attempt_id: number | null;
-  reason: string;
-  data?: Record<string, unknown> | null;
-  execution?: {
-    version?: number;
-    milestone?: string;
-    binding?: {
-      attempt_id?: number;
-      generation?: number;
-      snapshot_id?: number | null;
-      context_hash?: string | null;
-    };
-    workspace_fingerprint?: string | null;
-    workspace_unavailable?: boolean;
-    workspace_artifact_id?: number | null;
-    verification?: { digest: string; artifact_ids: number[] } | null;
-    artifact_ids?: number[];
-    completed_actions?: string[];
-  } | null;
-  created_at: string | Date;
-}
 
 export interface CheckpointView {
   id: number;
@@ -70,13 +50,8 @@ export function checkpointView(
   row: CheckpointRowInput,
   ctx: {
     stepGeneration: number;
-    attempts: Array<{
-      id: number;
-      generation: number;
-      invalidated_at?: unknown;
-      metrics?: { verification?: { passed?: boolean } } | null;
-    }>;
-    artifacts: Array<{ id: number; size?: number | string | null }>;
+    attempts: CheckpointAttemptInput[];
+    artifacts: CheckpointArtifactInput[];
     /** Applied reconcile decisions of the step (workspace drift detected at dispatch), with their time. */
     reconciledAt: Array<{ created_at: string | Date }>;
   },

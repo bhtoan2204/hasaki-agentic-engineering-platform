@@ -275,7 +275,7 @@ test("valid approval uses the existing engine once, edits its message after comm
   const a = await action(run.id, "approve");
   assert.ok(a?.message_id);
   const sent = calls.find(
-    (c) => c.method === "sendMessage" && c.body.text?.includes(`Run: #${run.id}`),
+    (c) => c.method === "sendMessage" && c.body.text?.includes(`Run #${run.id}`),
   );
   assert.ok(sent);
   assert.equal(sent.body.chat_id, "101");
@@ -303,13 +303,16 @@ test("valid approval uses the existing engine once, edits its message after comm
     ))!.n,
     1,
   );
+  const decision = calls.find(
+    (c) =>
+      c.method === "editMessageText" &&
+      c.body.message_id === a.message_id &&
+      c.body.text!.includes("Approved"),
+  );
+  assert.ok(decision);
   assert.ok(
-    calls.some(
-      (c) =>
-        c.method === "editMessageText" &&
-        c.body.message_id === a.message_id &&
-        c.body.text!.includes("Approved"),
-    ),
+    !decision.body.reply_markup?.inline_keyboard.flat().some((button) => button.callback_data),
+    "the decision removes actionable callbacks",
   );
   assert.equal(
     (await one(

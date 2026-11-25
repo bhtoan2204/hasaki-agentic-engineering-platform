@@ -444,7 +444,7 @@ test("shared executor routes a Claude-default run to the real Codex CLI adapter"
     assert.equal(attempt.agent_provider, "codex");
     assert.equal(attempt.metrics.provider, "codex");
     assert.equal(attempt.metrics.cost_usd, null);
-    assert.equal(attempt.metrics.tokens.input, 120);
+    assert.equal(attempt.metrics.tokens.input, 20); // codex input 120 includes the 100 cached
     assert.equal(attempt.metrics.tokens.cache_read, 100);
     const calls = readFileSync(logfile, "utf8")
       .trim()

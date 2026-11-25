@@ -8,7 +8,6 @@ export type EffortStrategy = "auto" | "provider_default" | "manual";
 export type TitleSource = "none" | "fallback" | "generated" | "manual";
 
 export type TurnStatus = "queued" | "running" | "completed" | "failed" | "canceled";
-export const ACTIVE_TURN: TurnStatus[] = ["queued", "running"];
 
 export type ChatEventKind =
   | "turn.started"

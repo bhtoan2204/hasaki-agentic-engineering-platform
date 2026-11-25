@@ -18,6 +18,24 @@ import {
   disconnect as disconnectTelegram,
   savePreferences,
 } from "../telegram/store.ts";
+import { fixProofOf } from "../workflow/proofOfFixStep.ts";
+import { latestCoverage, listFindings, radarScan, setFindingStatus } from "../radar/scan.ts";
+import { analyzeImpact } from "../impact/analyze.ts";
+import { causalHistory, recallCausal, rollbackCausal, setCausalStatus } from "../memory/causal.ts";
+import {
+  eligibility,
+  loadOutcomes,
+  replayEvaluation,
+  routingPreference,
+  saveRoutingPreference,
+} from "../routing/adaptive.ts";
+import {
+  listChatPolicies,
+  ownerAutonomySummary,
+  revokeChatPolicy,
+  saveChatPolicy,
+  type ChatPolicyInput,
+} from "../chat/autonomy.ts";
 import { evaluationAnalytics } from "../eval/analytics.ts";
 import {
   createRecommendation,
@@ -116,6 +134,14 @@ import {
   startBugHunt,
 } from "../bugHunt/service.ts";
 import {
+  getWorkbench,
+  rcaVersion,
+  startRuntime,
+  startHunt,
+  startBoth,
+  createFix as createIncidentFix,
+} from "../incidents/unified.ts";
+import {
   bitbucketStatus,
   clearBitbucket,
   clearGithub,
@@ -136,6 +162,7 @@ import {
   testTelegram,
 } from "../integrations/accounts.ts";
 import { HttpError } from "../http/error.ts";
+import { positiveId as num, queryInteger } from "../http/params.ts";
 import { chat } from "../chat/service.ts";
 import {
   disconnectSignoz,
@@ -253,6 +280,14 @@ import {
   setAutonomyPaused,
 } from "../workflow/autonomy.ts";
 import { runEvents } from "../workflow/events.ts";
+import { currentBaseCommits, reusableScan } from "../workflow/codeScans.ts";
+import {
+  DISPLAY_STATUSES,
+  findingDetail,
+  ingestPendingScans,
+  listFindings as listCodeFindings,
+  setFindingStatus as setCodeFindingStatus,
+} from "../workflow/codeFindings.ts";
 import { buildTrace, isTraceLevel, searchLogs } from "../workflow/trace.ts";
 import { diagnoseTrace } from "../workflow/traceDiagnosis.ts";
 import {
@@ -262,6 +297,7 @@ import {
   expandSubtasks,
   cancelRun,
   EngineError,
+  listCodeScans,
   listRuns,
   openQuestions,
   openApprovals,
@@ -332,18 +368,16 @@ const budgetOf = (body: { budget_usd?: unknown } | null | undefined) => {
 };
 const mine = (c: Ctx) => ({ ownerId: c.actor.id, all: support(c) });
 
-const num = (s: string) => {
-  const n = Number(s);
-  if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, `invalid id "${s}"`);
-  return n;
-};
 const must = <T>(v: T | undefined | null, what: string): T => {
   if (v == null) throw new HttpError(404, `${what} not found`);
   return v;
 };
 
-async function workItemWithAttachments(id: number) {
-  const w = must(await workItems.detail(id), "work item");
+async function workItemWithAttachments(c: Ctx, id: number) {
+  const w = await workItems.detail(id, (item) =>
+    requireOwner(c.actor, item.owner_id, support(c), "work_item", String(id)),
+  );
+  if (!w) throw new HttpError(404, "not found");
   const files =
     w.payload && typeof w.payload === "object" && "note_files" in w.payload
       ? w.payload.note_files
@@ -557,13 +591,11 @@ export const routes: Route[] = [
   [
     "GET",
     /^\/api\/work-items\/(\d+)$/,
-    async (c) => (
-      await requireWorkItem(c.actor, num(c.p[0]), support(c)),
-      {
-        ...(await workItemWithAttachments(num(c.p[0]))),
-        prod_errors: await groupsForWorkItem(num(c.p[0])),
-      }
-    ),
+    async (c) => {
+      const id = num(c.p[0]);
+      const item = await workItemWithAttachments(c, id);
+      return { ...item, prod_errors: await groupsForWorkItem(id) };
+    },
   ],
   [
     "POST",
@@ -781,6 +813,174 @@ export const routes: Route[] = [
     /^\/api\/metrics\/runs\/(\d+)$/,
     async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), runMetrics(num(c.p[0]))),
   ],
+  // Causal engineering memory (src/memory/causal.ts): the caller's own records only.
+  [
+    "GET",
+    /^\/api\/causal-memory$/,
+    (c) =>
+      recallCausal(c.actor.id, {
+        text: c.url.searchParams.get("q") ?? undefined,
+        repositories: c.url.searchParams.getAll("repository"),
+        files: c.url.searchParams.getAll("file"),
+        errorSignatures: c.url.searchParams.getAll("signature"),
+        services: c.url.searchParams.getAll("service"),
+        includeOutdated: c.url.searchParams.get("outdated") === "1",
+        limit: Number(c.url.searchParams.get("limit") ?? 5),
+      }),
+  ],
+  ["GET", /^\/api\/causal-memory\/(\d+)$/, (c) => causalHistory(c.actor.id, num(c.p[0]))],
+  [
+    "POST",
+    /^\/api\/causal-memory\/(\d+)\/status$/,
+    (c) =>
+      setCausalStatus(
+        c.actor.id,
+        num(c.p[0]),
+        String(c.body.status ?? "") as "verified",
+        String(c.body.reason ?? ""),
+      ),
+  ],
+  [
+    "POST",
+    /^\/api\/causal-memory\/(\d+)\/rollback$/,
+    (c) => rollbackCausal(c.actor.id, num(c.p[0]), Number(c.body.version)),
+  ],
+  // Evaluation-driven routing (src/routing): the owner's opt-in preference; replay evaluation for administrators.
+  [
+    "GET",
+    /^\/api\/routing\/preference$/,
+    async (c) =>
+      (await routingPreference(c.actor.id)) ?? {
+        enabled: false,
+        preference: "balanced",
+        min_samples: 10,
+      },
+  ],
+  ["POST", /^\/api\/routing\/preference$/, (c) => saveRoutingPreference(c.actor.id, c.body)],
+  [
+    "GET",
+    /^\/api\/routing\/evaluation$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const days = Math.min(90, Math.max(1, Number(c.url.searchParams.get("test_days") ?? 14)));
+      const preference = String(c.url.searchParams.get("preference") ?? "balanced");
+      if (!["quality_first", "balanced", "cost_first"].includes(preference))
+        throw new HttpError(400, "invalid preference");
+      const samples = await loadOutcomes({});
+      const { eligible } = eligibility({
+        stepType: "agent",
+        complexity: null,
+        isolation: {
+          enforce: config.isolation.mode === "enforce",
+          runtimeAvailable: config.isolation.mode === "enforce",
+        },
+      });
+      return replayEvaluation({
+        samples,
+        cutoff: new Date(Date.now() - days * 86_400_000),
+        defaults: await import("../agent/configurationStore.ts").then(async (m) => {
+          const d = (await m.loadAgentConfiguration()).default_provider;
+          return { agent: d, coding_agent: d };
+        }),
+        eligible,
+        preference: preference as "balanced",
+        minSamples: Math.max(3, Number(c.url.searchParams.get("min_samples") ?? 10)),
+      });
+    },
+  ],
+  // Cross-repository impact (src/impact): only repositories the caller can read are analysed and searched.
+  [
+    "POST",
+    /^\/api\/impact\/analyze$/,
+    (c) => {
+      const kinds = ["kafka_topic", "http_route", "grpc_service", "db_table", "shared_enum"];
+      const strs = (v: unknown, n: number) =>
+        Array.isArray(v)
+          ? v.filter((x): x is string => typeof x === "string").slice(0, n)
+          : undefined;
+      const contracts = Array.isArray(c.body.contracts)
+        ? (c.body.contracts as unknown[]).slice(0, 20).map((x) => {
+            const r = (x ?? {}) as { kind?: unknown; key?: unknown };
+            if (
+              !kinds.includes(String(r.kind)) ||
+              typeof r.key !== "string" ||
+              !r.key ||
+              r.key.length > 200
+            )
+              throw new HttpError(
+                400,
+                `contracts: kind must be one of ${kinds.join(", ")} with a key`,
+              );
+            return { kind: r.kind as "kafka_topic", key: r.key };
+          })
+        : undefined;
+      if (c.body.diff !== undefined && typeof c.body.diff !== "string")
+        throw new HttpError(400, "diff must be a string");
+      return analyzeImpact(c.actor.id, {
+        repository: String(c.body.repository ?? ""),
+        diff: c.body.diff as string | undefined,
+        files: strs(c.body.files, 200),
+        branch: typeof c.body.branch === "string" ? c.body.branch : undefined,
+        symbols: strs(c.body.symbols, 20),
+        contracts,
+      });
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/impact\/contracts\/([\w.-]+)$/,
+    async (c) => {
+      const { readableOf } = await import("../impact/analyze.ts");
+      if (!(await readableOf(c.actor.id)).includes(c.p[0])) throw new HttpError(404, "not found");
+      const { contractsOf, freshnessOf } = await import("../impact/index.ts");
+      return { freshness: await freshnessOf(c.p[0]), contracts: await contractsOf(c.p[0]) };
+    },
+  ],
+  // Engineering Radar findings (src/radar): administrators only (signatures come from production logs).
+  [
+    "GET",
+    /^\/api\/radar\/findings$/,
+    (c) => (
+      requireAdmin(c.actor),
+      listFindings({
+        status: c.url.searchParams.get("status") ?? undefined,
+        limit: queryInteger(c.url.searchParams, "limit") ?? 50,
+      })
+    ),
+  ],
+  // What the newest radar pass actually evaluated (skipped signatures, partial/stale coverage).
+  [
+    "GET",
+    /^\/api\/radar\/coverage$/,
+    async (c) => (requireAdmin(c.actor), (await latestCoverage()) ?? { coverage: null }),
+  ],
+  [
+    "POST",
+    /^\/api\/radar\/findings\/(\d+)\/status$/,
+    async (c) => {
+      requireAdmin(c.actor);
+      const status = c.body.status;
+      if (status !== "open" && status !== "resolved" && status !== "suppressed")
+        throw new HttpError(400, "status must be open, resolved or suppressed");
+      const result = await setFindingStatus(num(c.p[0]), status, c.actor.id);
+      if (!result.ok) throw new HttpError(404, "radar finding not found");
+      return result;
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/radar\/scan$/,
+    async (c) => (
+      requireAdmin(c.actor),
+      (await radarScan()) ?? { skipped: "another scan is running" }
+    ),
+  ],
+  // Proof-of-Fix report (agent/proofOfFix.ts): the run's current verdict and its history; access follows the run.
+  [
+    "GET",
+    /^\/api\/runs\/(\d+)\/proof-of-fix$/,
+    async (c) => (await requireRun(c.actor, num(c.p[0]), support(c)), fixProofOf(num(c.p[0]))),
+  ],
   [
     "GET",
     /^\/api\/tools$/,
@@ -795,16 +995,118 @@ export const routes: Route[] = [
     /^\/api\/runs$/,
     async (c) => {
       if (support(c)) await audit(c.actor.id, "support.list", "run", "*");
+      const workItemId = c.url.searchParams.get("work_item_id");
       return withCosts(
         await listRuns({
           status: c.url.searchParams.get("status") ?? undefined,
-          workItemId: c.url.searchParams.get("work_item_id")
-            ? Number(c.url.searchParams.get("work_item_id"))
-            : undefined,
+          workItemId: workItemId ? num(workItemId, "work_item_id") : undefined,
           ...mine(c),
         }),
         "run",
       );
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/code-scans$/,
+    async (c) => {
+      if (support(c)) await audit(c.actor.id, "support.list", "run", "code-scans");
+      return listCodeScans(mine(c));
+    },
+  ],
+  // Findings of every assessment, deduplicated across scans; completed assessments are ingested on read.
+  [
+    "GET",
+    /^\/api\/code-findings$/,
+    async (c) => {
+      const scope = mine(c);
+      if (scope.all) await audit(c.actor.id, "support.list", "code_finding", "*");
+      await ingestPendingScans(scope.all ? undefined : scope.ownerId);
+      const p = (k: string) => (c.url.searchParams.get(k) ?? "").trim().slice(0, 200);
+      const status = p("status");
+      if (status && !(DISPLAY_STATUSES as readonly string[]).includes(status))
+        throw new HttpError(400, "status: unknown finding status");
+      return listCodeFindings({
+        ...scope,
+        project: p("project"),
+        repo: p("repo"),
+        severity: p("severity"),
+        kind: p("kind"),
+        status,
+        q: p("q"),
+        scan: p("scan") ? num(p("scan")) : undefined,
+        page: Number(p("page")) || 1,
+        pageSize: Number(p("page_size")) || 25,
+      });
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/code-findings\/(\d+)$/,
+    async (c) => {
+      if (support(c)) await audit(c.actor.id, "support.read", "code_finding", c.p[0]);
+      return must(await findingDetail(num(c.p[0]), mine(c)), "finding");
+    },
+  ],
+  // The owner's lifecycle decision on a finding: resolved, dismissed (with why), or open again.
+  [
+    "POST",
+    /^\/api\/code-findings\/(\d+)\/status$/,
+    async ({ p, body, actor }) => {
+      const status = String(body.status ?? "");
+      if (!["open", "resolved", "dismissed"].includes(status))
+        throw new HttpError(400, "status: open, resolved or dismissed");
+      const note = typeof body.note === "string" ? body.note.trim().slice(0, 1000) : "";
+      if (status === "dismissed" && !note)
+        throw new HttpError(400, "note: say why it is dismissed");
+      const row = must(
+        await setCodeFindingStatus(
+          num(p[0]),
+          actor,
+          status as "open" | "resolved" | "dismissed",
+          note,
+        ),
+        "finding",
+      );
+      await audit(actor.id, "code_finding.status", "code_finding", p[0], { status, note });
+      return row;
+    },
+  ],
+  // Start an assessment unless an equivalent one is running or already analysed every repository's current base
+  // commit; `force` always starts a new one.
+  [
+    "POST",
+    /^\/api\/code-scans$/,
+    async ({ body, actor }) => {
+      const repos: string[] = [
+        ...new Set<string>(
+          (Array.isArray(body.repositories) ? (body.repositories as unknown[]) : []).map(String),
+        ),
+      ].sort();
+      if (!repos.length || repos.length > 30)
+        throw new HttpError(400, "repositories: 1 to 30 repository names");
+      const focus = typeof body.focus === "string" ? body.focus.trim().slice(0, 500) : "";
+      const project = typeof body.project === "string" ? body.project.trim().slice(0, 120) : "";
+      if (body.force !== true) {
+        const reuse = await reusableScan(actor.id, repos, focus, (r) =>
+          currentBaseCommits(actor.id, r),
+        );
+        if (reuse) return reuse;
+      }
+      const run = await startRun({
+        definitionKey: "codebase-assessment",
+        repositories: repos,
+        inputs: {
+          repositories: repos,
+          ...(project ? { project } : {}),
+          ...(focus ? { focus } : {}),
+        },
+        title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
+        outputLocale: localeOf(body),
+        agentProvider: providerOf(body),
+        ownerId: actor.id,
+      });
+      return { started: true, run_id: run.id };
     },
   ],
   [
@@ -856,7 +1158,7 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/events$/,
     async (c) => (
       await requireRun(c.actor, num(c.p[0]), support(c)),
-      runEvents.list(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0))
+      runEvents.list(num(c.p[0]), queryInteger(c.url.searchParams, "after") ?? 0)
     ),
   ],
   [
@@ -872,26 +1174,19 @@ export const routes: Route[] = [
       const sp = c.url.searchParams;
       const level = sp.get("level");
       if (level && !isTraceLevel(level)) throw new HttpError(400, "invalid level");
-      const id = (k: string) => {
-        const raw = sp.get(k);
-        if (raw == null || raw === "") return undefined;
-        const n = Number(raw);
-        if (!Number.isInteger(n) || n < 0) throw new HttpError(400, `invalid ${k}`);
-        return n;
-      };
       for (const k of ["from", "to"])
         if (sp.get(k) && Number.isNaN(Date.parse(sp.get(k)!)))
           throw new HttpError(400, `invalid ${k}`);
       return searchLogs(num(c.p[0]), {
-        stepId: id("step"),
-        attemptId: id("attempt"),
+        stepId: queryInteger(sp, "step"),
+        attemptId: queryInteger(sp, "attempt"),
         provider: sp.get("provider") ?? undefined,
         event: sp.get("event") ?? undefined,
         level: level && isTraceLevel(level) ? level : undefined,
         from: sp.get("from") ?? undefined,
         to: sp.get("to") ?? undefined,
-        afterId: id("after"),
-        limit: id("limit"),
+        afterId: queryInteger(sp, "after"),
+        limit: queryInteger(sp, "limit"),
       });
     },
   ],
@@ -1483,7 +1778,7 @@ export const routes: Route[] = [
     /^\/api\/attempts\/(\d+)\/transcript$/,
     async (c) => (
       await requireAttempt(c.actor, num(c.p[0]), support(c)),
-      runEvents.transcript(num(c.p[0]), Number(c.url.searchParams.get("after") ?? 0))
+      runEvents.transcript(num(c.p[0]), queryInteger(c.url.searchParams, "after") ?? 0)
     ),
   ],
   [
@@ -1579,13 +1874,14 @@ export const routes: Route[] = [
       const paged = sp.has("page");
       const rows = await visibleKnowledge(
         c.actor.id,
-        await knowledge.list({
-          category: paged ? undefined : category,
-          scope: paged ? sp.get("scope") || undefined : undefined,
-          search: paged ? sp.get("q")?.trim() || undefined : undefined,
-          summary: true,
-          ...mine(c),
-        }),
+        paged
+          ? knowledge.listPageSummaries({
+              scope: sp.get("scope") || undefined,
+              search: sp.get("q")?.trim() || undefined,
+              updatedAtOrder: sp.get("sort") === "oldest" ? "oldest" : "newest",
+              ...mine(c),
+            })
+          : knowledge.list({ category, summary: true, ...mine(c) }),
       );
       if (!paged) return rows;
       const counts: Record<string, number> = { "": rows.length };
@@ -2505,6 +2801,49 @@ export const routes: Route[] = [
     /^\/api\/bug-hunts\/(\d+)\/findings\/(\d+)\/fix-task$/,
     (c) => createFixTask(num(c.p[0]), num(c.p[1]), c.actor),
   ],
+  // Unified Incident Workbench: the actor's (incident, owner) workspace; admins in support mode may read another owner's.
+  [
+    "GET",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench$/,
+    (c) => {
+      const owner = c.url.searchParams.get("owner");
+      return getWorkbench(c.p[0], c.actor, {
+        support: support(c),
+        ownerId: owner ? num(owner) : undefined,
+      });
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/rca\/(\d+)$/,
+    (c) => {
+      const owner = c.url.searchParams.get("owner");
+      return rcaVersion(c.p[0], c.actor, num(c.p[1]), {
+        support: support(c),
+        ownerId: owner ? num(owner) : undefined,
+      });
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/runtime$/,
+    (c) => startRuntime(c.p[0], c.actor, c.body),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/bug-hunt$/,
+    (c) => startHunt(c.p[0], c.actor, c.body),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/both$/,
+    (c) => startBoth(c.p[0], c.actor, c.body),
+  ],
+  [
+    "POST",
+    /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/fix$/,
+    (c) => createIncidentFix(c.p[0], c.actor, c.body),
+  ],
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/link$/,
@@ -2557,6 +2896,26 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/integrations\/telegram\/clear$/,
     ({ actor }) => (requireAdmin(actor), clearTelegram()),
+  ],
+  // Chat autonomy policies (chat/autonomy.ts): administrators manage global/repository/workflow scopes, every user
+  // only their own owner scope. Revocation and pause are immediate.
+  [
+    "GET",
+    /^\/api\/chat\/autonomy\/policies$/,
+    async ({ actor }) => ({
+      policies: await listChatPolicies(actor),
+      summary: await ownerAutonomySummary(actor.id),
+    }),
+  ],
+  [
+    "POST",
+    /^\/api\/chat\/autonomy\/policies$/,
+    ({ actor, body }) => saveChatPolicy(body as unknown as ChatPolicyInput, actor),
+  ],
+  [
+    "POST",
+    /^\/api\/chat\/autonomy\/policies\/(\d+)\/revoke$/,
+    ({ actor, p }) => revokeChatPolicy(Number(p[0]), actor),
   ],
   // Background Git sync by consent (repos/backgroundGit.ts): the caller's own switch, stored with the caller's secrets.
   ["GET", /^\/api\/integrations\/background-git$/, ({ actor }) => backgroundGitStatus(actor.id)],
@@ -2734,7 +3093,7 @@ export const routes: Route[] = [
       chat.list(c.actor, {
         search: c.url.searchParams.get("q") ?? undefined,
         archived: c.url.searchParams.get("archived") === "1",
-        limit: Number(c.url.searchParams.get("limit") || 100) || 100,
+        limit: queryInteger(c.url.searchParams, "limit") || 100,
       }),
   ],
   ["POST", /^\/api\/chat\/conversations$/, (c) => chat.create(c.actor, c.body)],
@@ -2755,8 +3114,7 @@ export const routes: Route[] = [
     "GET",
     /^\/api\/chat\/conversations\/(\d+)\/events$/,
     async (c) => {
-      const after = Number(c.url.searchParams.get("after") ?? "0");
-      if (!Number.isSafeInteger(after) || after < 0) throw new HttpError(400, "invalid after");
+      const after = queryInteger(c.url.searchParams, "after") ?? 0;
       return chat.events(c.actor, num(c.p[0]), after);
     },
   ],
@@ -2802,14 +3160,6 @@ function providerOf(body: { agent_provider?: unknown }) {
   } catch (e) {
     throw new HttpError(400, (e as Error).message);
   }
-}
-
-export function errorStatus(e: unknown) {
-  if (e instanceof HttpError || e instanceof EngineError) return e.status;
-  const code = (e as { code?: unknown } | null | undefined)?.code;
-  if (code === "23505") return 409; // unique violation
-  if (code === "23503" || code === "23514" || code === "22P02") return 400;
-  return 400;
 }
 
 /**

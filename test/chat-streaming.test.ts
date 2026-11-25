@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stallGuard, visibleAnswer } from "../src/chat/streaming.ts";
+import { stallGuard, TurnStream, visibleAnswer } from "../src/chat/streaming.ts";
+import { setImmediate } from "node:timers/promises";
+import { chatRepository } from "../src/chat/repository.ts";
 import { codexProgress, type CodexItem } from "../src/agent/codex/stream.ts";
 import { mayFallback } from "../src/chat/admission.ts";
 import { applyChatEvent, seedFromTurn, type LiveTurn } from "../web/src/pages/chatStream.ts";
@@ -15,9 +17,14 @@ test("visible answer: tool-call blocks and their prefixes never stream as text; 
   assert.equal(visibleAnswer("Plain answer", true), "Plain answer");
 });
 
-test("stall guard: no first response or a long silence aborts with a fallback-eligible failure; activity keeps it alive", async () => {
+test("stall guard: no first response or a long silence aborts with a fallback-eligible failure; activity keeps it alive", ({
+  mock,
+}) => {
+  mock.timers.enable({ apis: ["setTimeout"] });
   const first = stallGuard(30, 1000);
-  await new Promise((r) => setTimeout(r, 60));
+  mock.timers.tick(29);
+  assert.equal(first.signal.aborted, false);
+  mock.timers.tick(1);
   assert.equal(first.signal.aborted, true);
   assert.equal(first.failure?.code, "FIRST_RESPONSE_TIMEOUT");
   assert.equal(mayFallback(first.failure!, "auto", true), true);
@@ -29,17 +36,58 @@ test("stall guard: no first response or a long silence aborts with a fallback-el
 
   const idle = stallGuard(1000, 40);
   idle.touch();
-  await new Promise((r) => setTimeout(r, 25));
+  mock.timers.tick(25);
   idle.touch();
-  await new Promise((r) => setTimeout(r, 25));
+  mock.timers.tick(25);
   assert.equal(idle.signal.aborted, false, "activity resets the idle timer");
-  await new Promise((r) => setTimeout(r, 40));
+  mock.timers.tick(40);
   assert.equal(idle.failure?.code, "IDLE_TIMEOUT");
 
   const done = stallGuard(20, 20);
   done.dispose();
-  await new Promise((r) => setTimeout(r, 40));
+  mock.timers.tick(40);
   assert.equal(done.signal.aborted, false);
+});
+
+test("TurnStream emits the leading delta immediately and coalesces the next flush window", async ({
+  mock,
+}) => {
+  mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+  const emitted: Array<[string, unknown, unknown]> = [];
+  mock.method(
+    chatRepository,
+    "insertEvent",
+    async (event: Parameters<typeof chatRepository.insertEvent>[0]) => {
+      emitted.push([event.kind, event.data.offset, event.data.text]);
+    },
+  );
+  mock.method(chatRepository, "setStream", async () => []);
+  mock.method(chatRepository, "dropStreamEvents", async () => []);
+  const stream = new TurnStream({ conversationId: 1, ownerId: 2, turnId: 3 });
+  await stream.begin(0, 0, false);
+
+  stream.onEvent({ type: "text", text: "first " });
+  mock.timers.tick(0);
+  await setImmediate();
+  assert.deepEqual(emitted, [["response.delta", 0, "first "]]);
+
+  stream.onEvent({ type: "text", text: "first a" });
+  mock.timers.tick(100);
+  stream.onEvent({ type: "text", text: "first ab" });
+  mock.timers.tick(99);
+  await setImmediate();
+  assert.deepEqual(
+    emitted,
+    [["response.delta", 0, "first "]],
+    "no second emission before the 200 ms boundary",
+  );
+  mock.timers.tick(1);
+  await setImmediate();
+  assert.deepEqual(emitted, [
+    ["response.delta", 0, "first "],
+    ["response.delta", 6, "ab"],
+  ]);
+  await stream.close();
 });
 
 test("codex progress: real reasoning items, commands and messages map to stream events; nothing is invented", () => {

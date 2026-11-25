@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { entryHashes, planContextDelivery } from "../src/context/delivery.ts";
 import { compactToolResults, deltaPrompt } from "../src/chat/context.ts";
-import { compressToolOutput } from "../src/agent/toolRegistry.ts";
+import { capResult, compressToolOutput } from "../src/agent/toolRegistry.ts";
 import { addUsage } from "../src/chat/runtime.ts";
 import type { ContextPack, ContextEntry } from "../src/context/pack.ts";
 
@@ -128,9 +128,32 @@ test("tool output compression keeps errors and source locations and points to th
   assert.match(out, /full output: read_artifact \{"artifact_id": 9\}/);
   assert.equal(
     compressToolOutput({ a: 1 }, 100),
-    JSON.stringify({ a: 1 }, null, 2),
-    "small results are untouched",
+    JSON.stringify({ a: 1 }),
+    "a result that fits is sent whole, without indentation",
   );
+});
+
+test("tool results are compact JSON: the same data, far fewer characters, and oversized ones are still compressed by line", () => {
+  const value = {
+    total: 40,
+    records: Array.from({ length: 40 }, (_, i) => ({
+      level: i % 7 ? "info" : "error",
+      message:
+        i % 7
+          ? `order ${90000 + i} updated`
+          : `NullPointerException at app/order/Handler.java:${100 + i}`,
+      attrs: { shop: `HCM-${i % 12}`, tags: ["oms", "shipping"] },
+    })),
+  };
+  const pretty = JSON.stringify(value, null, 2);
+  for (const out of [capResult(value), compressToolOutput(value, 40_000)]) {
+    assert.deepEqual(JSON.parse(out), value, "lossless");
+    assert.ok(out.length < pretty.length * 0.75, `${out.length} vs ${pretty.length}`);
+  }
+  // Too big even when compact: line-based compression still keeps errors and source locations.
+  const big = compressToolOutput({ ...value, pad: "x\n".repeat(30_000) }, 8_000);
+  assert.match(big, /compressed:/);
+  assert.match(big, /NullPointerException at app\/order\/Handler\.java:107/);
 });
 
 test("chat usage keeps provider-reported cache tokens apart; unknown stays unknown", () => {

@@ -118,6 +118,16 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
           break;
         await ensureJob(c, s);
       }
-  await setRunStatus(c, run, deriveRunStatus(run.status, steps), afterCommit);
+  let next = deriveRunStatus(run.status, steps);
+  // Parallel child workflows: the run waits for them before it completes (workflow/delegation.ts joins it).
+  if (
+    next === "COMPLETED" &&
+    (await c.query(
+      "SELECT 1 FROM workflow_delegations WHERE parent_run_id=$1 AND mode='parallel' AND status IN ('queued','started','proposed') LIMIT 1",
+      [runId],
+    )).rowCount
+  )
+    next = "WAITING";
+  await setRunStatus(c, run, next, afterCommit);
   return run;
 }

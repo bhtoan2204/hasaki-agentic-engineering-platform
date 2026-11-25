@@ -25,6 +25,7 @@ import {
   Ban,
   Clock,
   Split,
+  Network,
   type LucideIcon,
 } from "lucide-react";
 import { STATUS_COLORS } from "./api.ts";
@@ -172,6 +173,10 @@ export type StepNodeData = {
   preview?: string;
   /** Open this step on pointerdown. A click is often swallowed by node drag. */
   onPick?: (key: string) => void;
+  /** Child workflows this step delegated (workflow-to-workflow delegation). */
+  childWorkflows?: { total: number; done: number; failed: number; active: number };
+  /** The step is on hold until its blocking child workflows finish (not waiting for the user). */
+  waitingChildren?: boolean;
 };
 
 function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
@@ -198,7 +203,7 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
   const isAgent = ["agent", "coding_agent"].includes(step.type);
   const provider = step.effective_agent?.provider ?? step.config?.agent?.provider;
   const TypeIcon = stepTypeIcon(step.type);
-  const StIcon = statusIcon(status);
+  const StIcon = data.waitingChildren ? Network : statusIcon(status);
   const merged: string[] = Array.isArray(step.config?.merged_from) ? step.config.merged_from : [];
   return (
     <div
@@ -220,7 +225,12 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
         </span>
         <div className="gn-titles">
           <div className="t">{step.name || step.key}</div>
-          {data.transition && <div className="sub" title={data.transition.reason}>{data.transition.from} → {data.transition.to} · r{data.transition.revision}: {data.transition.reason}</div>}
+          {data.transition && (
+            <div className="sub" title={data.transition.reason}>
+              {data.transition.from} → {data.transition.to} · r{data.transition.revision}:{" "}
+              {data.transition.reason}
+            </div>
+          )}
           <div className="sub">
             {step.key} · {step.type}
           </div>
@@ -243,6 +253,7 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
         (data.generation ?? 1) > 1 ||
         step.requires_approval ||
         !!step.run_if ||
+        !!data.childWorkflows ||
         merged.length > 0) && (
         <div className="flags">
           {isAgent && (
@@ -272,7 +283,10 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
             </span>
           )}
           {step.subtask_id && (
-            <span className="gn-pill" title={t("graph.subtaskOf", { parent: step.parent_step_key ?? "" })}>
+            <span
+              className="gn-pill"
+              title={t("graph.subtaskOf", { parent: step.parent_step_key ?? "" })}
+            >
               <Split size={10} strokeWidth={2.4} />
               {step.subtask_id}
               {Array.isArray(step.config?.subtask?.target_repos)
@@ -290,7 +304,20 @@ function StepNodeImpl({ data }: NodeProps<Node<StepNodeData>>) {
               isolated
             </span>
           )}
-          {status && <span className="gn-pill gn-pill-st">{statusName(status)}</span>}
+          {status && (
+            <span className="gn-pill gn-pill-st">
+              {data.waitingChildren ? t("graph.waitingChildren") : statusName(status)}
+            </span>
+          )}
+          {data.childWorkflows && (
+            <span
+              className={`gn-pill gn-pill-children${data.childWorkflows.failed ? " has-failed" : ""}`}
+              title={t("graph.childWorkflows", data.childWorkflows)}
+            >
+              <Network size={10} strokeWidth={2.4} />
+              {data.childWorkflows.done}/{data.childWorkflows.total}
+            </span>
+          )}
           {data.replan === "rerun" && (
             <span className="gn-pill gn-pill-wait" title={t("graph.rerun")}>
               <RefreshCw size={10} strokeWidth={2.4} />
@@ -383,7 +410,10 @@ export function useStableById<T extends { id: string }>() {
       const fns = callbacksOf(item);
       const old = prev.current.get(item.id);
       const kept =
-        old && old.sig === sig && old.fns.length === fns.length && old.fns.every((f, i) => f === fns[i])
+        old &&
+        old.sig === sig &&
+        old.fns.length === fns.length &&
+        old.fns.every((f, i) => f === fns[i])
           ? old.item
           : item;
       next.set(item.id, { item: kept, sig, fns });

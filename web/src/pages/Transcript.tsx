@@ -19,9 +19,9 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
-import { api } from "../api.ts";
-import { Badge, Copy, dur, ago, Markdown, time } from "../ui.tsx";
+import { Badge, Copy, dur, ago, ErrorBox, Loading, Markdown, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
+import { useRunEvents } from "./useRunEvents.ts";
 import "./RunView.css";
 
 interface ToolInput {
@@ -183,27 +183,14 @@ export function Transcript({
 }) {
   const { t } = useI18n();
   const agent = t(agentKey(provider, true));
-  const [events, setEvents] = useState<Ev[]>([]);
+  const { events, error, loading, reload } = useRunEvents<Ev>(
+    `/api/attempts/${attemptId}/transcript`,
+    tick,
+  );
   const [filter, setFilter] = useState<Filter>("all");
   const [follow, setFollow] = useState(true);
-  const last = useRef(0);
   const box = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setEvents([]);
-    last.current = 0;
-  }, [attemptId]);
-  useEffect(() => {
-    let stop = false;
-    api<Ev[]>(`/api/attempts/${attemptId}/transcript?after=${last.current}`).then((rows) => {
-      if (stop || !rows.length) return;
-      last.current = rows[rows.length - 1].id;
-      setEvents((prev) => [...prev, ...rows]);
-    });
-    return () => {
-      stop = true;
-    };
-  }, [attemptId, tick]);
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [events, follow, filter]);
@@ -269,8 +256,13 @@ export function Transcript({
     }
   });
 
+  if (!events.length && loading) return <Loading />;
+  if (!events.length && error) return <ErrorBox error={error} onRetry={reload} />;
+
   return (
     <div>
+      {error && <ErrorBox error={error} onRetry={reload} />}
+      {loading && <Loading />}
       <div className="tr-stats">
         <StatTile icon={FolderSearch} n={filesRead.length} label={t("tr.filesRead")}>
           <div className="mono" title={filesRead.join("\n")}>
@@ -353,7 +345,9 @@ export function Transcript({
             agent={agent}
           />
         ))}
-        {!events.length && <div className="muted small">{t("tr.empty")}</div>}
+        {!visible.length && !loading && !error && (
+          <div className="muted small">{t(events.length ? "tr.noMatches" : "tr.empty")}</div>
+        )}
         {live && (
           <div className="msg live">
             <span className="spinner" /> {t("tr.working", { name: agent })}{" "}

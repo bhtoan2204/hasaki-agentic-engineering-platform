@@ -1,6 +1,5 @@
 /**
- * The code intelligence suite (code-intelligence.integration.ts) again: indexing
- * jobs run in a real platform-go built from go/ against this file's database. Fails without a Go toolchain
+ * Index publishing and lease fencing through the Go API against this file's database. Fails without a Go toolchain
  * (PLATFORM_ALLOW_MISSING_GO=1 skips it explicitly outside CI).
  */
 import { test, after } from "node:test";
@@ -101,6 +100,4 @@ if (!goToolchain()) {
     );
     assert.equal(wrong.status, 409, "an index version this extractor does not produce is refused");
   });
-
-  // Registered after the suite, so it runs last: the queued jobs above went through platform-go.
 }

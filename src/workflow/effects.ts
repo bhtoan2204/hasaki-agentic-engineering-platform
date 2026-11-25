@@ -6,6 +6,7 @@ import { observeRun } from "../learning/observations.ts";
 import { extractLessons } from "../learning/lessons.ts";
 import { storeRunSummary } from "../report/runSummary.ts";
 import type { RunStatus } from "./types.ts";
+import { logError } from "../logging.ts";
 
 /** Work that must survive a crash between COMMIT and the in-process background task. */
 export type EffectKind = "summary" | "outcome" | "memory" | "learning";
@@ -31,8 +32,7 @@ export async function enqueueRunEffects(c: Db, runId: number, status: RunStatus)
 
 async function perform(kind: EffectKind, runId: number) {
   if (kind === "summary") {
-    // storeRunSummary swallows errors. A missing snapshot must stay queued for the next claim.
-    if (!(await storeRunSummary(runId))) throw new Error("summary was not stored");
+    await storeRunSummary(runId);
     return;
   }
   if (kind === "outcome") {
@@ -87,7 +87,10 @@ export async function dispatchRunEffects(limit = 8) {
         "UPDATE workflow_run_effects SET claimed_until = NULL WHERE run_id = $1 AND kind = $2",
         [row.run_id, row.kind],
       ).catch(() => {});
-      console.error(`run effect ${row.kind} #${row.run_id}: ${(e as Error).message}`);
+      logError("workflow.effect_failed", "Run effect failed", e, {
+        run_id: row.run_id,
+        effect_kind: row.kind,
+      });
     }
   }
   return rows.length;
