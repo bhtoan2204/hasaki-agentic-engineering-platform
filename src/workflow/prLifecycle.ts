@@ -14,6 +14,7 @@ import { diagnoseFailure, jittered } from "./failures.ts";
 import { livePolicy } from "./autonomy.ts";
 import { reexecuteStep } from "./engine.ts";
 import type { RunRow } from "./types.ts";
+import { log } from "../logging.ts";
 
 /**
  * Delivery lifecycle of a published pull request, kept apart from run completion. Remote state is the authority for
@@ -471,7 +472,7 @@ async function save(
   // Outcome learning (task 07): one observation per state and head; a closed PR may become a negative lesson.
   await observePullRequest(row, s.state, head, s.reasons)
     .then((id) => (id && terminal && row.run_id ? extractLessons(Number(row.run_id)) : null))
-    .catch((e) => console.error(`learning (pr ${row.id}):`, (e as Error).message));
+    .catch((e) => log.error(`learning (pr ${row.id}):`, (e as Error).message));
   await notifyTransition(row, s, head);
 }
 

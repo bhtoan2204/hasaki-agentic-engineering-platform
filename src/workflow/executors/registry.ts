@@ -4,6 +4,7 @@ import { questionRow } from "../questionOptions.ts";
 import type { ResolvedContext, StepInput } from "../context.ts";
 import type { AgentProvider } from "../../agent/provider.ts";
 import type { AttemptRow, ExecResult, RunRow, StepRow, StepType } from "../types.ts";
+import { log } from "../../logging.ts";
 
 /** What an executor gets. Side-effect helpers are bound to the current run/step/attempt. */
 export interface ExecutionContext {
@@ -72,7 +73,7 @@ export function makeContext(
         () => runEvents.add(pool, run.id, kind, content, step.id, attempt.id, data ?? null),
         `log ${kind} (run ${run.id})`,
       ).catch((e) => {
-        console.error(
+        log.error(
           `run ${run.id} ${step.key}: could not record a ${kind} event: ${(e as Error).message}`,
         );
       }),

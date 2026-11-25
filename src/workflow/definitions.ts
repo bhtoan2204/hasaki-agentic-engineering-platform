@@ -5,6 +5,7 @@ import { validateSpec } from "./graph.ts";
 import { TEMPLATES } from "./templates.ts";
 import type { WorkflowSpec } from "./types.ts";
 import { definitionRepository, type DefinitionVersion } from "./definitionRepository.ts";
+import { log } from "../logging.ts";
 
 export type { DefinitionVersion } from "./definitionRepository.ts";
 
@@ -165,10 +166,7 @@ export async function seedTemplates() {
       try {
         next = validateSpec(mergeTemplateSpec(d.template_base, latest.spec, spec));
       } catch (err) {
-        console.warn(
-          `Template "${t.key}" update not applied: merge with local edits is invalid`,
-          err,
-        );
+        log.warn(`Template "${t.key}" update not applied: merge with local edits is invalid`, err);
         return;
       }
       if (hashOf(next) !== latest.spec_hash) {

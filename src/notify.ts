@@ -1,6 +1,7 @@
 import { isEvaluationRun } from "./eval/scope.ts";
 import { config } from "./config.ts";
 import { sendTelegramStepWaiting, type StepWaiting } from "./telegram.ts";
+import { log } from "./logging.ts";
 
 /** Fire-and-forget chat notification. Body {text} works for Google Chat and Slack incoming webhooks. */
 /** `target` is a UI route ("/runs/12"). */
@@ -17,7 +18,7 @@ export async function notify(message: string, target?: string) {
       signal: AbortSignal.timeout(5000),
     });
   } catch (e) {
-    console.error("notify failed:", (e as Error).message);
+    log.error("notify failed:", (e as Error).message);
   }
 }
 

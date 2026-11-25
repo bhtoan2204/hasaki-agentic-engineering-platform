@@ -19,6 +19,7 @@ import { repositoryRemote } from "./remote.ts";
 import { alignCheckoutToBase } from "./checkoutBase.ts";
 import { ensureFreshBase, ensureFreshLocalBase, lastFreshness } from "./freshness.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
+import { log } from "../logging.ts";
 
 const exec = promisify(execFile);
 
@@ -143,7 +144,7 @@ export async function prepareRepository(
       // remote HEAD: chat reads its working tree and the index diffs it against that base.
       const aligned = await alignCheckoutToBase(path, branch);
       if (aligned.status === "skipped")
-        console.warn(`[repos] ${repo.name}: checkout not moved to ${branch}: ${aligned.reason}`);
+        log.warn(`[repos] ${repo.name}: checkout not moved to ${branch}: ${aligned.reason}`);
       failures.delete(failureKey(repo));
       return await validateCheckout(repo);
     } catch (e) {

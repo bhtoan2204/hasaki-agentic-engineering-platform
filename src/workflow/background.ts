@@ -1,4 +1,5 @@
 import { liveRuntime } from "../eval/liveRuntime.ts";
+import { log } from "../logging.ts";
 /**
  * Post-commit side effects that must not hold up the caller: chat notifications (Telegram / webhook over the network),
  * the run summary snapshot (git + several queries) and memory extraction. An API call such as "approve" commits and
@@ -13,7 +14,7 @@ export function background(label: string, fn: () => unknown) {
     .exit(() => Promise.resolve().then(fn))
     .then(
       () => {},
-      (e) => console.error(`${label}: ${(e as Error)?.message ?? e}`),
+      (e) => log.error(`${label}: ${(e as Error)?.message ?? e}`),
     )
     .finally(() => pending.delete(p));
   pending.add(p);

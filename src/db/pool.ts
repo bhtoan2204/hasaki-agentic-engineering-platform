@@ -2,6 +2,7 @@ import type { Untyped } from "../untyped.ts";
 import pg from "pg";
 import { config } from "../config.ts";
 import { count, observe, registerGauge } from "../runtimeMetrics.ts";
+import { log } from "../logging.ts";
 
 // BIGINT ids/counters fit in a JS number for this platform; returning numbers keeps API payloads simple.
 pg.types.setTypeParser(20, (v) => Number(v));
@@ -29,7 +30,7 @@ export function watchPoolErrors(target: pg.Pool) {
   target.on("error", (err: NodeJS.ErrnoException) => {
     // 57P01 is the backend being closed on purpose (administrator shutdown / DROP ... FORCE).
     if (err.code === "57P01") return;
-    console.error("postgres idle client error:", err.message);
+    log.error("postgres idle client error:", err.message);
   });
   return target;
 }
@@ -82,7 +83,7 @@ export async function retryTransient<T>(
       return await fn();
     } catch (e) {
       if (!isTransientDbError(e) || i >= delaysMs.length) throw e;
-      console.warn(
+      log.warn(
         `${label}: database connection dropped (${(e as Error).message}); retrying in ${delaysMs[i]}ms`,
       );
       await new Promise((r) => setTimeout(r, delaysMs[i]));
@@ -110,7 +111,7 @@ function emitWrites(tables: Set<string>) {
     try {
       fn(tables);
     } catch (e) {
-      console.error("write listener failed:", (e as Error).message);
+      log.error("write listener failed:", (e as Error).message);
     }
   }
 }
@@ -247,7 +248,7 @@ export async function withTx<T>(
     try {
       await cb();
     } catch (e) {
-      console.error("afterCommit hook failed:", (e as Error).message);
+      log.error("afterCommit hook failed:", (e as Error).message);
     }
   }
   return out;

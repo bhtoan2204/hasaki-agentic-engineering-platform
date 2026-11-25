@@ -1,4 +1,10 @@
-import { attachWorkspace, findReplayResult, fingerprintExecution, replayOutputHash, safeReplayOutput } from "./replay.ts";
+import {
+  attachWorkspace,
+  findReplayResult,
+  fingerprintExecution,
+  replayOutputHash,
+  safeReplayOutput,
+} from "./replay.ts";
 import { executionWorkspace, inspectHandoffWorkspace } from "../git/workspaceCheckpoint.ts";
 import type { WorkspaceCheckpoint } from "./checkpoints.ts";
 import { recordExecutorReturn } from "./checkpoints.ts";
@@ -33,7 +39,7 @@ import { deferIfBranchBusy } from "./branchLeases.ts";
 import { settleBackground } from "./background.ts";
 import type { ExecResult, ExecutionFingerprint, JobRow } from "./types.ts";
 import { noteDecision } from "./decisions.ts";
-import { logError } from "../logging.ts";
+import { log, logError } from "../logging.ts";
 
 /**
  * WorkflowScheduler: PostgreSQL-backed job claiming. No in-memory queue: any number of processes can run
@@ -82,8 +88,10 @@ export async function purgeDebugEventsThrottled(now = Date.now()) {
   await purgeVerificationEvidence(
     Number.isFinite(evidenceDays) && evidenceDays > 0 ? evidenceDays : 30,
     pool,
-  ).catch((e) => console.error("verification evidence retention:", e.message));
-  return purgeDebugEvents(Number.isFinite(days) && days > 0 ? days : TRACE_LIMITS.debugRetentionDays);
+  ).catch((e) => log.error("verification evidence retention:", e.message));
+  return purgeDebugEvents(
+    Number.isFinite(days) && days > 0 ? days : TRACE_LIMITS.debugRetentionDays,
+  );
 }
 
 const reconcileTasks: Array<() => Promise<unknown>> = [];
@@ -125,7 +133,10 @@ const wakeIdle = (kinds: LaneKind[] = ["general", "light"]) => {
 };
 let busyWorkers = 0;
 registerGauge("scheduler.busy_workers", () => busyWorkers);
-registerGauge("scheduler.idle_workers", () => idleWorkers.general.length + idleWorkers.light.length);
+registerGauge(
+  "scheduler.idle_workers",
+  () => idleWorkers.general.length + idleWorkers.light.length,
+);
 const wakeAllIdle = () => {
   for (const kind of ["general", "light"] as const)
     for (const wake of idleWorkers[kind].splice(0)) wake();
@@ -162,7 +173,11 @@ export function reconcileAutomaticHandoff(): Promise<void> {
   if (automaticHandoff) return automaticHandoff;
   const run = processAutomaticHandoff()
     .catch((error) => {
-      logError("scheduler.automatic_handoff_failed", "Automatic handoff reconciliation failed", error);
+      logError(
+        "scheduler.automatic_handoff_failed",
+        "Automatic handoff reconciliation failed",
+        error,
+      );
       throw error;
     })
     .finally(() => {
@@ -198,7 +213,10 @@ export async function claimJob(
   if (job) {
     count("scheduler.claims");
     if (job.available_at)
-      observe("scheduler.queue_wait_ms", Math.max(0, Date.now() - new Date(job.available_at).getTime()));
+      observe(
+        "scheduler.queue_wait_ms",
+        Math.max(0, Date.now() - new Date(job.available_at).getTime()),
+      );
   } else count("scheduler.claims_empty");
   // Fire-and-forget: tracing must never delay or fail a claim.
   if (job)
@@ -208,7 +226,12 @@ export async function claimJob(
       level: "DEBUG",
       event: "job.claimed",
       message: `job ${job.id} claimed by ${workerId}`,
-      data: { job_id: job.id, fencing_token: job.fencing_token, claims: job.claims, lease_seconds: leaseSeconds },
+      data: {
+        job_id: job.id,
+        fencing_token: job.fencing_token,
+        claims: job.claims,
+        lease_seconds: leaseSeconds,
+      },
     });
   return job;
 }
@@ -282,9 +305,7 @@ async function runJob(
   localJobs.register(job.id, ac);
   const hb = setInterval(async () => {
     try {
-      if (
-        !(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds, begun.attempt.id))
-      )
+      if (!(await heartbeat(job.id, job.fencing_token, opts.leaseSeconds, begun.attempt.id)))
         ac.abort();
     } catch (e) {
       ac.abort();
@@ -345,7 +366,8 @@ async function runJob(
           await loadPersonalIntegrations();
           const prior = begun.input.pending?.resume?.checkpoint?.execution;
           const handoff = begun.input.pending?.provider_handoff;
-          const expected = handoff?.workspace_fingerprint ??
+          const expected =
+            handoff?.workspace_fingerprint ??
             (prior?.workspace_reconciliation_required ? prior.workspace_fingerprint : undefined);
           if (expected) {
             let fingerprint: string | undefined;
@@ -357,29 +379,50 @@ async function runJob(
               // A missing, moved or unreadable checkout requires the same reconciliation as changed bytes.
             }
             if (fingerprint !== expected) {
-              const artifactId = prior?.workspace_artifact_id ??
+              const artifactId =
+                prior?.workspace_artifact_id ??
                 handoff?.package?.execution_checkpoint?.workspace_artifact_id ??
                 handoff?.package?.workspace_artifact_id;
               await noteDecision({
-                runId: begun.run.id, stepId: begun.step.id, attemptId: begun.attempt.id,
-                generation: begun.attempt.generation, kind: "reconcile", action: "RECONCILE", outcome: "applied",
-                reason: fingerprint ? "workspace differs from the execution checkpoint" : "workspace could not be inspected",
-                details: { source: handoff ? "provider_handoff" : "execution_checkpoint", workspace_artifact_id: artifactId ?? null },
+                runId: begun.run.id,
+                stepId: begun.step.id,
+                attemptId: begun.attempt.id,
+                generation: begun.attempt.generation,
+                kind: "reconcile",
+                action: "RECONCILE",
+                outcome: "applied",
+                reason: fingerprint
+                  ? "workspace differs from the execution checkpoint"
+                  : "workspace could not be inspected",
+                details: {
+                  source: handoff ? "provider_handoff" : "execution_checkpoint",
+                  workspace_artifact_id: artifactId ?? null,
+                },
               });
               return {
                 kind: "waiting_input" as const,
                 checkpoint: { workspace_recovery: { artifact_id: artifactId ?? null } },
-                questions: [{
-                  question: "The workspace differs from the execution checkpoint. Reconcile it before continuing.",
-                  context: "Inspect the preserved changes before authorizing a fresh continuation.",
-                  options: ["Workspace reconciled — continue"],
-                }],
+                questions: [
+                  {
+                    question:
+                      "The workspace differs from the execution checkpoint. Reconcile it before continuing.",
+                    context:
+                      "Inspect the preserved changes before authorizing a fresh continuation.",
+                    options: ["Workspace reconciled — continue"],
+                  },
+                ],
               };
             }
           }
           const replayStarted = Date.now();
-          fingerprint = await fingerprintExecution(pool, begun.run, begun.step, begun.attempt,
-            begun.input, begun.context);
+          fingerprint = await fingerprintExecution(
+            pool,
+            begun.run,
+            begun.step,
+            begun.attempt,
+            begun.input,
+            begun.context,
+          );
           if (scope.changed) fingerprint = { ...fingerprint, reusable: false };
           const previous = await findReplayResult(pool, begun.step, fingerprint);
           if (previous) {
@@ -388,11 +431,18 @@ async function runJob(
             return { kind: "completed" as const, output: previous.output };
           }
           if (begun.step.replay_source_attempt_id != null) {
-            await ctx.log("system", "Replay candidate did not match current execution inputs",
-              { action: "REEXECUTE", source_attempt_id: begun.step.replay_source_attempt_id });
+            await ctx.log("system", "Replay candidate did not match current execution inputs", {
+              action: "REEXECUTE",
+              source_attempt_id: begun.step.replay_source_attempt_id,
+            });
             await noteDecision({
-              runId: begun.run.id, stepId: begun.step.id, attemptId: begun.attempt.id,
-              generation: begun.attempt.generation, kind: "replay", action: "REEXECUTE", outcome: "applied",
+              runId: begun.run.id,
+              stepId: begun.step.id,
+              attemptId: begun.attempt.id,
+              generation: begun.attempt.generation,
+              kind: "replay",
+              action: "REEXECUTE",
+              outcome: "applied",
               reason: "replay candidate did not match current execution inputs",
               sourceAttemptId: begun.step.replay_source_attempt_id,
               latencyMs: Date.now() - replayStarted,
@@ -428,15 +478,23 @@ async function runJob(
         },
       };
     let workspace: WorkspaceCheckpoint | undefined;
-    if (executorEntered && !ac.signal.aborted &&
-        ["agent", "coding_agent", "command", "git_pull_request"].includes(begun.step.type)) {
+    if (
+      executorEntered &&
+      !ac.signal.aborted &&
+      ["agent", "coding_agent", "command", "git_pull_request"].includes(begun.step.type)
+    ) {
       try {
-        workspace = await executionWorkspace(begun.run, begun.step,
-          ["coding_agent", "command"].includes(begun.step.type));
+        workspace = await executionWorkspace(
+          begun.run,
+          begun.step,
+          ["coding_agent", "command"].includes(begun.step.type),
+        );
       } catch {
         workspace = { fingerprint: "", unavailable: true };
         await traceLog({
-          ...attemptTrace, level: "WARN", event: "checkpoint.workspace_unavailable",
+          ...attemptTrace,
+          level: "WARN",
+          event: "checkpoint.workspace_unavailable",
           message: "Workspace evidence could not be captured within safety and storage limits",
         });
       }
@@ -450,7 +508,9 @@ async function runJob(
         ...(result.kind === "completed" && { output_hash: replayOutputHash(output) }),
       };
     }
-    const replay = fingerprint ? { fingerprint, reusedFrom, latencyMs: replayLatencyMs } : undefined;
+    const replay = fingerprint
+      ? { fingerprint, reusedFrom, latencyMs: replayLatencyMs }
+      : undefined;
     const recorded = await retryTransient(
       () => recordExecutorReturn(job, begun.attempt.id, result, workspace, replay),
       `record executor checkpoint ${job.id}`,
@@ -458,9 +518,12 @@ async function runJob(
     if (!recorded) {
       // Cancellation fences mutations to the step; the original executor can still confirm its own exit.
       await retryTransient(
-        () => q(pool,
-          "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2 AND job_id=$3",
-          [begun.attempt.id, job.fencing_token, job.id]),
+        () =>
+          q(
+            pool,
+            "UPDATE workflow_step_attempts SET executor_stopped_at=COALESCE(executor_stopped_at,now()) WHERE id=$1 AND fencing_token=$2 AND job_id=$3",
+            [begun.attempt.id, job.fencing_token, job.id],
+          ),
         `record canceled executor termination ${job.id}`,
       );
     }
@@ -493,7 +556,14 @@ async function runJob(
     }
     await retryTransient(
       () =>
-        finishAttempt(job.id, job.fencing_token, begun.attempt.id, result, handoff, begun.attempt.run_id),
+        finishAttempt(
+          job.id,
+          job.fencing_token,
+          begun.attempt.id,
+          result,
+          handoff,
+          begun.attempt.run_id,
+        ),
       `finish job ${job.id}`,
     );
     void traceLog({
@@ -528,7 +598,7 @@ async function runJob(
     localJobs.unregister(job.id);
   }
   await continueHealthyHandoffForAttempt(begun.attempt.id).catch((e) =>
-    console.error("healthy provider continuation:", (e as Error).message),
+    log.error("healthy provider continuation:", (e as Error).message),
   );
 }
 
@@ -574,7 +644,12 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
       (async () => {
         while (!stopped) {
           // The shared handoff promise logs its own failure once. Each lane still backs off.
-          if (!(await reconcileAutomaticHandoff().then(() => true, () => false))) {
+          if (
+            !(await reconcileAutomaticHandoff().then(
+              () => true,
+              () => false,
+            ))
+          ) {
             await sleep(opts.pollMs * 5);
             continue;
           }
@@ -603,15 +678,15 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
   }
   const reconcile = () => {
     for (const task of reconcileTasks) void task();
-    reapExpiredLeases().catch((e) => console.error("reaper:", e.message));
-    dispatchRunEffects().catch((e) => console.error("run effects:", e.message));
+    reapExpiredLeases().catch((e) => log.error("reaper:", e.message));
+    dispatchRunEffects().catch((e) => log.error("run effects:", e.message));
     // The shared promise has already logged any failure.
     void reconcileAutomaticHandoff().catch(() => {});
-    purgeDebugEventsThrottled().catch((e) => console.error("trace retention:", e.message));
+    purgeDebugEventsThrottled().catch((e) => log.error("trace retention:", e.message));
   };
   const reaper = setInterval(reconcile, Math.max(5, opts.leaseSeconds / 2) * 1000);
   void reconcile();
-  console.log(
+  log.info(
     `scheduler: ${opts.workers} worker(s) + ${opts.lightWorkers ?? 1} light worker(s) as ${processId}`,
   );
   return {

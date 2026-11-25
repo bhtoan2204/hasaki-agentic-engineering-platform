@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { config, instanceIdentityExplicit } from "./config.ts";
 import { pool, one, q, withTx, type Db } from "./db/pool.ts";
 import { localJobs } from "./workflow/local.ts";
+import { log } from "./logging.ts";
 
 export const instanceSession = randomUUID();
 let started = false;
@@ -185,12 +186,12 @@ export async function startInstanceHeartbeat(
       if (!r.length) {
         localJobs.abortAll();
         stopped = true;
-        console.error(
+        log.error(
           "Instance registration lost; workers fenced. Restart with a unique PLATFORM_INSTANCE.",
         );
       }
     } catch (e) {
-      console.warn("Instance heartbeat unavailable:", (e as Error).message);
+      log.warn("Instance heartbeat unavailable:", (e as Error).message);
     }
     if (!stopped) schedule();
   };

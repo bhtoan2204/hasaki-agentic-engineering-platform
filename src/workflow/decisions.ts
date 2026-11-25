@@ -1,6 +1,7 @@
 import { pool, q, one, json, insertDeferred, type Db } from "../db/pool.ts";
 import { countDecision } from "../runtimeMetrics.ts";
 import { redactSecrets } from "../integrations/redact.ts";
+import { log } from "../logging.ts";
 
 /**
  * Execution decision log (`execution_decisions`): every replay, recovery and reuse decision, planned or applied, with
@@ -124,7 +125,7 @@ export async function recordDecision(db: Db, d: Decision) {
 /** Best-effort recording outside a transaction: observability never fails the execution it describes. */
 export function noteDecision(d: Decision) {
   return recordDecision(pool, d).catch((error) =>
-    console.error(`execution decision not recorded: ${(error as Error).message}`),
+    log.error(`execution decision not recorded: ${(error as Error).message}`),
   );
 }
 

@@ -5,6 +5,7 @@ import { one, q, withTx } from "../db/pool.ts";
 import { importLegacyAgentPatch } from "../agent/configurationStore.ts";
 import { HttpError } from "../http/error.ts";
 import { clearOwned, own } from "./operatorState.ts";
+import { log } from "../logging.ts";
 
 /**
  * Operator policy edited on the Settings page and stored in `settings` (key `operator`).
@@ -53,9 +54,15 @@ const Patch = z
               .string()
               .trim()
               .toLowerCase()
-              .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "GitLab host must be a bare host name, e.g. gitlab.example.com"),
+              .regex(
+                /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/,
+                "GitLab host must be a bare host name, e.g. gitlab.example.com",
+              ),
             sshPort: z.number().int().min(1).max(65535).optional(),
-            sshHostKeys: z.array(z.string().trim().regex(SSH_HOST_KEY, "not an OpenSSH public host key")).max(10).optional(),
+            sshHostKeys: z
+              .array(z.string().trim().regex(SSH_HOST_KEY, "not an OpenSSH public host key"))
+              .max(10)
+              .optional(),
             caFile: z.string().trim().max(500).optional(),
           })
           .strict(),
@@ -181,21 +188,12 @@ export function captureOperatorFallback(): OperatorPatch {
     codex: {
       model: process.env.CODEX_MODEL ?? codex.model ?? "",
       reasoningEffort: (process.env.CODEX_REASONING_EFFORT ?? codex.reasoningEffort ?? "") as
-        | ""
-        | "low"
-        | "medium"
-        | "high"
-        | "xhigh",
+        "" | "low" | "medium" | "high" | "xhigh",
     },
     antigravity: {
       model: process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? agy.model ?? "",
       effort: (process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? agy.effort ?? "") as
-        | ""
-        | "low"
-        | "medium"
-        | "high"
-        | "xhigh"
-        | "max",
+        "" | "low" | "medium" | "high" | "xhigh" | "max",
       sandbox: envFlag("AGY_SANDBOX", "ANTIGRAVITY_SANDBOX") ?? agy.sandbox ?? true,
       maxConcurrent:
         Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? Math.floor(maxConcurrent) : 1,
@@ -203,11 +201,7 @@ export function captureOperatorFallback(): OperatorPatch {
     copilot: {
       model: process.env.COPILOT_MODEL ?? copilot.model ?? "",
       effort: (process.env.COPILOT_EFFORT ?? copilot.effort ?? "") as
-        | ""
-        | "low"
-        | "medium"
-        | "high"
-        | "xhigh",
+        "" | "low" | "medium" | "high" | "xhigh",
       sandbox:
         copilotSandbox === "true"
           ? true
@@ -263,8 +257,14 @@ function write(next: OperatorPatch) {
   own("models", Object.prototype.hasOwnProperty.call(next, "models"));
   config.fileBaseUrl = pick(next, "fileBaseUrl", "") || fb.fileBaseUrl || "";
   config.relatedProjects = structuredClone(pick(next, "relatedProjects", fb.relatedProjects ?? {}));
-  config.bitbucket.accessVerification = pick(next, "bitbucketAccess", fb.bitbucketAccess ?? "strict");
-  config.signoz.allowedInternalHosts = [...pick(next, "signozAllowedHosts", fb.signozAllowedHosts ?? [])];
+  config.bitbucket.accessVerification = pick(
+    next,
+    "bitbucketAccess",
+    fb.bitbucketAccess ?? "strict",
+  );
+  config.signoz.allowedInternalHosts = [
+    ...pick(next, "signozAllowedHosts", fb.signozAllowedHosts ?? []),
+  ];
   config.gitlab = gitlabConfig({
     ...config.gitlab,
     instances: structuredClone(pick(next, "gitlabInstances", fb.gitlabInstances ?? [])),
@@ -450,7 +450,7 @@ export async function loadOperatorSettings() {
     write(parse(JSON.parse(raw)));
   } catch (e) {
     if (e instanceof HttpError) {
-      console.warn(`operator settings ignored: ${e.message}`);
+      log.warn(`operator settings ignored: ${e.message}`);
       write({});
       return;
     }
@@ -467,13 +467,31 @@ export async function saveOperatorSettings(raw: unknown) {
   if (flags && PROVIDERS.every((p) => flags[p] === false))
     throw new HttpError(400, "At least one agent provider must stay on");
   await withTx(async (db) => {
-    const previous = await one<{ value: string }>(db, "SELECT value FROM settings WHERE key=$1 FOR UPDATE", [KEY]);
+    const previous = await one<{ value: string }>(
+      db,
+      "SELECT value FROM settings WHERE key=$1 FOR UPDATE",
+      [KEY],
+    );
     const old = previous?.value ? JSON.parse(previous.value) : {};
     const patch: Record<string, unknown> = {};
-    for (const key of ["model", "models", "maxTurns", "defaultProvider", "enabledProviders", "codex", "antigravity", "copilot"] as const)
-      if (Object.hasOwn(next, key) && JSON.stringify(next[key]) !== JSON.stringify(old[key])) patch[key] = next[key];
+    for (const key of [
+      "model",
+      "models",
+      "maxTurns",
+      "defaultProvider",
+      "enabledProviders",
+      "codex",
+      "antigravity",
+      "copilot",
+    ] as const)
+      if (Object.hasOwn(next, key) && JSON.stringify(next[key]) !== JSON.stringify(old[key]))
+        patch[key] = next[key];
     if (Object.keys(patch).length) await importLegacyAgentPatch(db, patch);
-    await q(db, "INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [KEY, JSON.stringify(next)]);
+    await q(
+      db,
+      "INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+      [KEY, JSON.stringify(next)],
+    );
   });
   write(next);
   return operatorView();
@@ -481,7 +499,9 @@ export async function saveOperatorSettings(raw: unknown) {
 
 export async function clearOperatorSettings() {
   // Restoring Settings defaults leaves the GitLab instances added on Integrations in place.
-  const keep: OperatorPatch = saved.gitlabInstances ? { gitlabInstances: saved.gitlabInstances } : {};
+  const keep: OperatorPatch = saved.gitlabInstances
+    ? { gitlabInstances: saved.gitlabInstances }
+    : {};
   await settings.set(KEY, Object.keys(keep).length ? JSON.stringify(keep) : "");
   write(keep);
   return operatorView();
@@ -512,5 +532,8 @@ export async function addGitlabInstance(input: unknown) {
 export async function removeGitlabInstance(input: unknown) {
   const host = gitlabHostFrom(input);
   const current = saved.gitlabInstances ?? structuredClone(config.gitlab.instances);
-  return saveOperatorSettings({ ...saved, gitlabInstances: current.filter((i) => i.host !== host) });
+  return saveOperatorSettings({
+    ...saved,
+    gitlabInstances: current.filter((i) => i.host !== host),
+  });
 }

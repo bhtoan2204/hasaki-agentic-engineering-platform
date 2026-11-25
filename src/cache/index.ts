@@ -1,6 +1,7 @@
 import pg from "pg";
 import { config } from "../config.ts";
 import { onCommittedWrite } from "../db/pool.ts";
+import { log } from "../logging.ts";
 
 /**
  * In-process caches for data that is read often and written rarely. Every read that hits saves a database round trip
@@ -191,7 +192,7 @@ export class StaleWhileRevalidate<V> {
       this.entries.delete(key);
       this.entries.set(key, e);
       stat(this.name).hits++;
-      refresh().catch((err) => console.error(`${this.name} refresh:`, (err as Error).message));
+      refresh().catch((err) => log.error(`${this.name} refresh:`, (err as Error).message));
       return e.value;
     }
     stat(this.name).misses++;
@@ -247,7 +248,7 @@ export async function startCacheInvalidation(
     listener = "down";
     flushAllCaches();
     if (stopped) return;
-    console.error(`cache invalidation listener lost (${why}); caches bypassed until it reconnects`);
+    log.error(`cache invalidation listener lost (${why}); caches bypassed until it reconnects`);
     retryTimer = setTimeout(
       () => void startCacheInvalidation(connectionString, makeClient).catch(() => {}),
       retryMs,

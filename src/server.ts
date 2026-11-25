@@ -39,6 +39,7 @@ import { stopChatStream } from "./chat/events.ts";
 import { recoverInstanceTurns } from "./chat/runtime.ts";
 import { childGroups } from "./workflow/local.ts";
 import { stopSupervised } from "./agent/process/supervisor.ts";
+import { log } from "./logging.ts";
 
 // The Claude Agent SDK (and detect-libc) call process.report.getReport() to tell glibc from musl. By default a report
 // resolves every open socket's peer with a SYNCHRONOUS reverse-DNS lookup on the main thread; over VPN each lookup
@@ -55,23 +56,22 @@ try {
   keyRing();
   writeFormat();
 } catch (e) {
-  console.error(`${(e as Error).message}. Refusing to start.`);
+  log.error(`${(e as Error).message}. Refusing to start.`);
   process.exit(1);
 }
 
 const applied = await migrate();
-if (applied.length) console.log(`migrations applied: ${applied.join(", ")}`);
+if (applied.length) log.info(`migrations applied: ${applied.join(", ")}`);
 const instanceHeartbeat = await startInstanceHeartbeat({
   waitForPrevious: true,
   onWait: (seconds) =>
-    console.log(
+    log.info(
       `Waiting ${seconds}s for the previous instance registration to expire. An active installation will remain protected.`,
     ),
 });
 await seedTemplates();
 await syncRepositoriesFromConfig();
-for (const warning of await validateLocalConfiguration())
-  console.warn(`Startup warning: ${warning}`);
+for (const warning of await validateLocalConfiguration()) log.warn(`Startup warning: ${warning}`);
 await seedKnowledge();
 await loadAccountSettings();
 await loadOperatorSettings();
@@ -94,7 +94,7 @@ await new Promise<void>((resolve, reject) => {
   // One shared installation. HOST=0.0.0.0 exposes it on the central machine; the default stays loopback.
   server.listen(config.port, process.env.HOST ?? "127.0.0.1", () => resolve());
 }).catch(async (e: NodeJS.ErrnoException) => {
-  console.error(
+  log.error(
     e.code === "EADDRINUSE"
       ? `port ${config.port} is already in use: another platform server is running. Not starting.`
       : `cannot listen: ${e.message}`,
@@ -102,7 +102,7 @@ await new Promise<void>((resolve, reject) => {
   await instanceHeartbeat.stop().catch(() => {});
   process.exit(1);
 });
-console.log(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
+log.info(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);
 
 // Durable scheduler: expired leases follow the persisted safe-retry/reconciliation policy.
 // Policy-controlled intake rides the scheduler's reconcile tick: re-triage and start eligible items (no-op without a policy).
@@ -140,19 +140,17 @@ if (config.codeIntelligence.enabled)
   });
 startPolling();
 startProdErrorSchedule();
-void recoverInstanceTurns().catch((e) =>
-  console.error("chat turn recovery:", (e as Error).message),
-);
+void recoverInstanceTurns().catch((e) => log.error("chat turn recovery:", (e as Error).message));
 
 // Graceful shutdown reconciles interrupted steps without consuming retries. A second Ctrl+C exits immediately.
 let shuttingDown = false;
 async function shutdown(reason: string, code: number) {
   if (shuttingDown) {
-    console.log("forced exit");
+    log.info("forced exit");
     process.exit(code || 1);
   }
   shuttingDown = true;
-  console.log(
+  log.info(
     `${reason}: stopping workers; interrupted steps will be reconciled (Ctrl+C again to force)`,
   );
   server.close();
@@ -168,11 +166,9 @@ async function shutdown(reason: string, code: number) {
     await scheduler.drain(reason);
     await settleBackground();
   } catch (e) {
-    console.error("shutdown:", (e as Error).message);
+    log.error("shutdown:", (e as Error).message);
   } finally {
-    await instanceHeartbeat
-      .stop()
-      .catch((e) => console.error("instance stop:", (e as Error).message));
+    await instanceHeartbeat.stop().catch((e) => log.error("instance stop:", (e as Error).message));
   }
   process.exit(code);
 }
@@ -181,14 +177,14 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => void shu
 // A stray rejected promise (typically a database timeout in fire-and-forget code) must not kill the server and
 // every step running in it. Log it with a timestamp so it can be traced.
 process.on("unhandledRejection", (reason) => {
-  console.error(
+  log.error(
     `[${new Date().toISOString()}] unhandled rejection (server kept running):`,
     reason instanceof Error ? reason.stack : reason,
   );
 });
 // A thrown exception leaves the process in an unknown state: log it, hand running steps back, then exit.
 process.on("uncaughtException", (e) => {
-  console.error(`[${new Date().toISOString()}] uncaught exception:`, e.stack ?? e);
+  log.error(`[${new Date().toISOString()}] uncaught exception:`, e.stack ?? e);
   void shutdown("uncaught exception", 1);
 });
 
@@ -198,7 +194,7 @@ loopDelay.enable();
 setInterval(() => {
   const maxMs = loopDelay.max / 1e6;
   if (maxMs > 2000)
-    console.warn(
+    log.warn(
       `[${new Date().toISOString()}] event loop blocked for up to ${(maxMs / 1000).toFixed(1)}s in the last minute`,
     );
   loopDelay.reset();

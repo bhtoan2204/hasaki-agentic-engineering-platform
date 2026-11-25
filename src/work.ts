@@ -7,6 +7,7 @@ import { normalizeTask, type HasakiTask } from "./prompt.ts";
 import { ingestWorkItem } from "./workitems/intake.ts";
 import { notify } from "./notify.ts";
 import { applyAutomationPolicy, workItems, type WorkItemRow } from "./workitems/service.ts";
+import { log } from "./logging.ts";
 
 const today = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD, local time
 
@@ -69,7 +70,7 @@ export async function importHasakiTask(
     ownerId,
   });
   // Policy-controlled intake (no-op without a policy): triage happens in the scheduler's dispatch, never here.
-  await ingestWorkItem(item).catch((e) => console.error("intake:", (e as Error).message));
+  await ingestWorkItem(item).catch((e) => log.error("intake:", (e as Error).message));
   return { item, created };
 }
 
@@ -118,7 +119,7 @@ export function startPolling() {
           }
         });
       } catch (e) {
-        console.error(`poll failed for user ${account.id}:`, (e as Error).message);
+        log.error(`poll failed for user ${account.id}:`, (e as Error).message);
       }
     }
   };
