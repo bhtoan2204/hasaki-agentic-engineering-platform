@@ -26,6 +26,35 @@ test("vault write target: production host is refused even when allowlisted", asy
     });
 });
 
+test("vault write target: default config allows any QC path and key, never production", () => {
+  assert.deepEqual(config.vault.writeAllow, [{ path: "*", keys: ["*"] }]);
+});
+
+test("vault write target: wildcard key still refuses production host and production path", async () => {
+  const any = [{ path: "*", keys: ["*"] }];
+  await withVault({ baseUrl: "https://vault.hasaki.vn", writeAllow: any }, async () => {
+    await assert.rejects(
+      vaultWriteTarget("payment/qc/app", "OTEL_ENDPOINT"),
+      /not a QC environment/,
+    );
+  });
+  await withVault({ baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: any }, async () => {
+    await assert.rejects(vaultWriteTarget("payment/prod/app", "OTEL_ENDPOINT"), /production/);
+  });
+});
+
+test("vault write target: wildcard key and path pass the allowlist step", async () => {
+  await withVault(
+    { baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [{ path: "*", keys: ["*"] }] },
+    async () => {
+      await assert.rejects(
+        vaultWriteTarget("payment/qc/app", "ANY_KEY"),
+        (e: Error) => !/allowlist|disabled/.test(e.message),
+      );
+    },
+  );
+});
+
 test("vault write target: empty allowlist disables writes", async () => {
   await withVault({ baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [] }, async () => {
     await assert.rejects(vaultWriteTarget("secret/payment/app", "OTEL_ENDPOINT"), /disabled/);

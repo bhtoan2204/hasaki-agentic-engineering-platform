@@ -318,7 +318,7 @@ export async function vaultWriteTarget(path: string, key: string) {
     throw new Error(`writing to production (${clean}) is never allowed from chat`);
   const ok = allow.some(
     (a) =>
-      a.keys.includes(key) &&
+      (a.keys.includes("*") || a.keys.includes(key)) &&
       (a.path.endsWith("*") ? clean.startsWith(a.path.slice(0, -1)) : a.path === clean),
   );
   if (!ok) throw new Error(`${clean} ${key} is not in the QC write allowlist`);

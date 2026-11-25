@@ -795,7 +795,7 @@ const defaults: Config = {
     pollMs: 1000,
   },
   argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
-  vault: { baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [] },
+  vault: { baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [{ path: "*", keys: ["*"] }] },
   qcHttp: {
     hosts: [],
     internalHosts: [],

@@ -23,7 +23,7 @@ Routing: yêu cầu vận hành (kafka, publish, topic, tạo đơn, bảo hành
 ## Vault set_key (QC)
 
 - Tool `vault.set_key {path, key, value}` (`setVaultKey` / `vaultWriteTarget` trong `src/integrations/vault.ts`): đổi đúng một key của một secret KV v2 đã tồn tại. `readOnly: false`, `confirm: true`, không preauthorized, nên chỉ chạy qua `chat_operations`.
-- Cấu hình `vault.writeAllow: [{path, keys}]`. Mặc định rỗng, tức ghi bị tắt. `path` kết thúc bằng `*` là prefix; `keys` khớp chính xác, phân biệt hoa thường.
+- Cấu hình `vault.writeAllow: [{path, keys}]`. Mặc định `[{path: "*", keys: ["*"]}]`: mọi path và key ở QC (Vault production vẫn bị chặn), mỗi lần ghi vẫn phải xác nhận. Đặt `[]` để tắt ghi, hoặc thu hẹp theo path/key. `path` kết thúc bằng `*` là prefix; `keys` khớp chính xác, phân biệt hoa thường, `"*"` là mọi key.
 - Chỉ QC: từ chối nếu host của `vault.baseUrl` không phải QC hoặc có dạng production, và từ chối path có dạng production hoặc chứa `..`. Vault production chỉ đọc (`vault.list`, `vault.keys`).
 - Ghi bằng `PATCH {mount}/data/{path}` (`application/merge-patch+json`) kèm `options.cas` là version vừa đọc, nên key khác không bị đụng và ghi đè do race bị chặn. Mount KV v1 và secret chưa tồn tại bị từ chối.
 - Preflight đọc version hiện tại của secret và đưa vào khoá idempotency (`operationKeyFor`), nên đổi A→B→A là ba operation khác nhau; gửi lặp khi version chưa đổi vẫn bị chặn là `duplicate`.
