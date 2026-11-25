@@ -25,10 +25,11 @@ Routing: yêu cầu vận hành (kafka, publish, topic, tạo đơn, bảo hành
 - Tool `vault.set_key {path, key, value}` (`setVaultKey` / `vaultWriteTarget` trong `src/integrations/vault.ts`): đổi đúng một key của một secret KV v2 đã tồn tại. `readOnly: false`, `confirm: true`, không preauthorized, nên chỉ chạy qua `chat_operations`.
 - Cấu hình `vault.writeAllow: [{path, keys}]`. Mặc định `[{path: "*", keys: ["*"]}]`: mọi path và key ở QC (Vault production vẫn bị chặn), mỗi lần ghi vẫn phải xác nhận. Đặt `[]` để tắt ghi, hoặc thu hẹp theo path/key. `path` kết thúc bằng `*` là prefix; `keys` khớp chính xác, phân biệt hoa thường, `"*"` là mọi key.
 - Chỉ QC: từ chối nếu host của `vault.baseUrl` không phải QC hoặc có dạng production, và từ chối path có dạng production hoặc chứa `..`. Vault production chỉ đọc (`vault.list`, `vault.keys`).
-- Ghi bằng `PATCH {mount}/data/{path}` (`application/merge-patch+json`) kèm `options.cas` là version vừa đọc, nên key khác không bị đụng và ghi đè do race bị chặn. Mount KV v1 và secret chưa tồn tại bị từ chối.
+- Ghi bằng đọc-gộp-ghi: đọc secret (version `v`), gộp key mới rồi `POST {mount}/data/{path}` kèm `options.cas = v`. Key khác giữ nguyên và ghi đè do race bị chặn. Token chỉ cần `create`/`update` trên `{mount}/data/*`, không cần `patch` (PATCH của KV v2 đòi capability `patch` riêng nên dễ bị 403). Mount KV v1 và secret chưa tồn tại bị từ chối.
 - Preflight đọc version hiện tại của secret và đưa vào khoá idempotency (`operationKeyFor`), nên đổi A→B→A là ba operation khác nhau; gửi lặp khi version chưa đổi vẫn bị chặn là `duplicate`.
+- Preflight hỏi `sys/capabilities-self` cho path dữ liệu: token không có `update` thì bị từ chối ngay lúc đề xuất, kèm danh sách quyền hiện có. Nếu không hỏi được (403/404) thì bỏ qua bước này.
 - Giá trị cũ không bao giờ được đọc ra kết quả. Kết quả: `written: true, version, downstream_verified: false`; service vẫn cần restart/sync để nhận giá trị mới. Model đọc lại bằng `vault.keys` rồi `operations.verify`.
-- Chưa chạy thử với Vault QC thật: PATCH và policy của token (cần `patch`/`update` trên path) chưa được xác minh.
+- Chưa chạy thử với Vault QC thật: policy của token (cần `create`/`update` trên path) chưa được xác minh.
 
 ## Argo CD restart (QC)
 

@@ -70,7 +70,7 @@ type VaultData = {
 async function call(
   path: string,
   token: string,
-  opts: { method?: "GET" | "POST" | "PATCH"; params?: Record<string, string>; body?: unknown } = {},
+  opts: { method?: "GET" | "POST"; params?: Record<string, string>; body?: unknown } = {},
 ) {
   const url = new URL(`${baseUrl()}/v1/${path.replace(/^\/+/, "")}`);
   for (const [k, v] of Object.entries(opts.params ?? {})) url.searchParams.set(k, v);
@@ -79,7 +79,7 @@ async function call(
     headers: {
       "X-Vault-Token": token,
       Accept: "application/json",
-      ...(opts.body === undefined ? {} : { "Content-Type": "application/merge-patch+json" }),
+      ...(opts.body === undefined ? {} : { "Content-Type": "application/json" }),
     },
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     signal: AbortSignal.timeout(15_000),
@@ -98,7 +98,7 @@ async function call(
   if (res.status === 404) return null;
   if (!res.ok)
     throw new Error(
-      `Vault ${res.status} ${path.split("/").slice(0, 2).join("/")}…: ${(j?.errors ?? []).join("; ") || "lỗi"}`,
+      `Vault ${res.status} ${opts.method ?? "GET"} ${path.split("/").slice(0, 2).join("/")}…: ${(j?.errors ?? []).join("; ") || "lỗi"}`,
     );
   return j;
 }
@@ -329,9 +329,26 @@ export async function vaultWriteTarget(path: string, key: string) {
   return { path: `${mount.path}/${rest}`, mount: mount.path, rest };
 }
 
+async function tokenCapabilities(token: string, path: string): Promise<string[] | null> {
+  try {
+    const j = (await call("sys/capabilities-self", token, {
+      method: "POST",
+      body: { paths: [path] },
+    })) as { capabilities?: string[]; data?: { capabilities?: string[] } } | null;
+    return j?.capabilities ?? j?.data?.capabilities ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function readWriteTarget(a: { path: string; key: string }) {
   const t = await vaultWriteTarget(a.path, a.key);
   const token = requireToken();
+  const caps = await tokenCapabilities(token, `${t.mount}/data/${t.rest}`);
+  if (caps && !caps.some((c) => ["update", "root", "sudo"].includes(c)))
+    throw new Error(
+      `Vault token has no update capability on ${t.mount}/data/${t.rest} (has: ${caps.join(", ") || "none"}); ask DevOps to grant create/update on ${t.mount}/data/*`,
+    );
   const cur = await call(`${t.mount}/data/${t.rest}`, token);
   if (!cur) throw new Error(`secret ${t.path} does not exist; creating secrets is not supported`);
   const cas = Number(cur.data?.metadata?.version);
@@ -339,7 +356,8 @@ async function readWriteTarget(a: { path: string; key: string }) {
     throw new Error(
       `secret ${t.path} has no readable version; refusing to write without check-and-set`,
     );
-  return { ...t, token, cas };
+  const data = (cur.data?.data ?? {}) as Record<string, unknown>;
+  return { ...t, token, cas, data };
 }
 
 /** What a write would target and the secret version it was read at (used by the confirmation and the idempotency key). */
@@ -348,19 +366,26 @@ export async function vaultSetKeyTarget(a: { path: string; key: string }) {
   return { path: t.path, key: a.key, version: t.cas };
 }
 
-/** Set one key of an existing KV v2 secret (merge-patch with check-and-set). The old value is never read into the result. */
+/**
+ * Set one key of an existing KV v2 secret: read it, merge the key and write it back with check-and-set, so the token
+ * needs create/update on the data path (not `patch`). The old values are never returned.
+ */
 export async function setVaultKey(a: { path: string; key: string; value: string }) {
   const t = await readWriteTarget(a);
-  const { token, cas } = t;
+  const { token, cas, data } = t;
   let j;
   try {
     j = await call(`${t.mount}/data/${t.rest}`, token, {
-      method: "PATCH",
-      body: { options: { cas }, data: { [a.key]: a.value } },
+      method: "POST",
+      body: { options: { cas }, data: { ...data, [a.key]: a.value } },
     });
   } catch (e) {
     if (/check-and-set/i.test(String(e)))
       throw new Error(`secret ${t.path} changed since it was read; read it again and retry`);
+    if (/Vault 403/.test(String(e)))
+      throw new Error(
+        `Vault refused the write to ${t.path}: the token's policy needs create/update on ${t.mount}/data/* (${String(e)})`,
+      );
     throw e;
   }
   if (!j) throw new Error(`secret ${t.path} was not written: Vault answered 404 to the patch`);

@@ -6,6 +6,7 @@ import { callTool, registerBuiltinTools } from "../src/agent/toolRegistry.ts";
 import { operationKey, operationKeyFor } from "../src/chat/operations.ts";
 import { memoryCandidates, memoryKey } from "../src/chat/memory.ts";
 import { routeChatIntent } from "../src/chat/routing.ts";
+import { splitOperations } from "../web/src/pages/chatOperationBatch.ts";
 import { reconcilePending, type PendingMessage } from "../web/src/pages/chatOptimistic.ts";
 
 const withKafka = async (k: Partial<typeof config.kafka>, fn: () => Promise<void>) => {
@@ -169,4 +170,17 @@ test("operation key includes the target version: restoring an earlier value is a
     operationKey(1, "kafka.publish", { topic: "t" }),
     "tools whose target has no version keep the plain key",
   );
+});
+
+test("operation batch: two or more pending operations are grouped, others stay individual", () => {
+  const op = (id: number, status: string) => ({ id, status });
+  assert.deepEqual(splitOperations([op(1, "pending"), op(2, "pending"), op(3, "succeeded")]), {
+    batch: [op(1, "pending"), op(2, "pending")],
+    rest: [op(3, "succeeded")],
+  });
+  assert.deepEqual(splitOperations([op(1, "pending"), op(3, "failed")]), {
+    batch: [],
+    rest: [op(1, "pending"), op(3, "failed")],
+  });
+  assert.deepEqual(splitOperations([]), { batch: [], rest: [] });
 });

@@ -35,6 +35,7 @@ import {
   type TraceItem,
 } from "./chatStream.ts";
 import { markPending, reconcilePending, type PendingMessage } from "./chatOptimistic.ts";
+import { splitOperations } from "./chatOperationBatch.ts";
 import { ChatImportReview, type ImportedProposal } from "./ChatImportReview.tsx";
 import { ChatDelegations } from "./ChatDelegations.tsx";
 import "./Chat.css";
@@ -408,6 +409,78 @@ function OperationCard({
   );
 }
 
+function OperationBatchCard({
+  ops,
+  onDecideMany,
+}: {
+  ops: Operation[];
+  onDecideMany: (ids: number[], d: "confirm" | "reject") => void;
+}) {
+  const { t } = useI18n();
+  const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const chosen = ops.filter((o) => !skipped.has(o.id)).map((o) => o.id);
+  const toggle = (id: number) =>
+    setSkipped((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  return (
+    <div className="chat-operation is-pending" role="alert">
+      <div className="chat-operation-head">
+        <strong>{t("chat.op.batch.title", { n: ops.length })}</strong>
+      </div>
+      {ops.map((op) => (
+        <label key={op.id} className="chat-operation-choice">
+          <input type="checkbox" checked={!skipped.has(op.id)} onChange={() => toggle(op.id)} />{" "}
+          <strong>#{op.id}</strong> {op.tool}{" "}
+          <span className="muted">
+            {Object.values(op.target ?? {})
+              .filter(Boolean)
+              .join(" / ")}
+          </span>
+        </label>
+      ))}
+      <div className="chat-failure-actions">
+        <button
+          className="sm"
+          disabled={!chosen.length}
+          onClick={() => onDecideMany(chosen, "confirm")}
+        >
+          {t("chat.op.batch.confirm", { n: chosen.length })}
+        </button>
+        <button
+          className="ghost sm"
+          disabled={!chosen.length}
+          onClick={() => onDecideMany(chosen, "reject")}
+        >
+          {t("chat.op.batch.reject", { n: chosen.length })}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Operations({
+  ops,
+  onDecide,
+  onDecideMany,
+}: {
+  ops: Operation[];
+  onDecide: (id: number, d: "confirm" | "reject") => void;
+  onDecideMany: (ids: number[], d: "confirm" | "reject") => void;
+}) {
+  const { batch, rest } = splitOperations(ops);
+  return (
+    <>
+      {batch.length > 0 && <OperationBatchCard ops={batch} onDecideMany={onDecideMany} />}
+      {rest.map((op) => (
+        <OperationCard key={op.id} op={op} onDecide={onDecide} />
+      ))}
+    </>
+  );
+}
+
 function liveLabel(status: LiveStatus, t: T) {
   return status ? t(`chat.status.${status}`) : "";
 }
@@ -436,6 +509,7 @@ type ChatActions = {
   regenerate: (turnId: number) => void;
   delegate: (kind: "task" | "delegate" | "investigation") => void;
   decide: (id: number, decision: "confirm" | "reject") => void;
+  decideMany: (ids: number[], decision: "confirm" | "reject") => void;
   retry: (turn: Turn) => void;
   retryOther: (turn: Turn) => void;
   refreshHealth: () => void;
@@ -562,11 +636,13 @@ const ChatMessages = memo(function ChatMessages({
                 </div>
               )}
             </article>
-            {m.role === "assistant" &&
-              m.turn_id != null &&
-              (opsByTurn.get(m.turn_id) ?? []).map((op) => (
-                <OperationCard key={op.id} op={op} onDecide={actions.decide} />
-              ))}
+            {m.role === "assistant" && m.turn_id != null && (
+              <Operations
+                ops={opsByTurn.get(m.turn_id) ?? []}
+                onDecide={actions.decide}
+                onDecideMany={actions.decideMany}
+              />
+            )}
             {m.role === "user" && turn?.status === "failed" && turn.failure && (
               <div className="chat-failure" role="alert">
                 <AlertTriangle size={16} />
@@ -1034,6 +1110,13 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     }
   };
 
+  const decideOperations = async (ids: number[], decision: "confirm" | "reject") => {
+    const ok = await act(async () => {
+      for (const id of ids) await api(`/api/chat/operations/${id}/${decision}`, {});
+    });
+    if (ok && activeId) await loadDetail(activeId);
+  };
+
   const updateMemory = async (key: string, body: Record<string, unknown>) => {
     if (await act(() => api(`/api/knowledge/${key}`, body))) void memories.reloadFresh();
   };
@@ -1246,6 +1329,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     regenerate,
     openDelegation,
     decideOperation,
+    decideOperations,
     retryTurn,
     setProvider,
     providers,
@@ -1255,6 +1339,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
     regenerate,
     openDelegation,
     decideOperation,
+    decideOperations,
     retryTurn,
     setProvider,
     providers,
@@ -1265,6 +1350,7 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
       regenerate: (turnId) => void latest.current.regenerate(turnId),
       delegate: (kind) => void latest.current.openDelegation(kind),
       decide: (id, decision) => void latest.current.decideOperation(id, decision),
+      decideMany: (ids, decision) => void latest.current.decideOperations(ids, decision),
       retry: (turn) => void latest.current.retryTurn(turn),
       retryOther: (turn) => {
         latest.current.setProvider("auto");
@@ -1469,13 +1555,11 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                     errors={im.errors}
                   />
                 ))}
-                {(opsByTurn.get(null) ?? []).map((op) => (
-                  <OperationCard
-                    key={op.id}
-                    op={op}
-                    onDecide={(id, d) => void decideOperation(id, d)}
-                  />
-                ))}
+                <Operations
+                  ops={opsByTurn.get(null) ?? []}
+                  onDecide={(id, d) => void decideOperation(id, d)}
+                  onDecideMany={(ids, d) => void decideOperations(ids, d)}
+                />
 
                 {visiblePending.map((p) => (
                   <div key={p.cid} className="chat-block">

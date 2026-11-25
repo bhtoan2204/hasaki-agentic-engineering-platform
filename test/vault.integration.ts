@@ -10,6 +10,7 @@ import {
   describeValue,
   parseVaultToken,
   setVaultKey,
+  vaultSetKeyTarget,
   setVaultToken,
   vaultKeys,
   vaultList,
@@ -22,12 +23,14 @@ const SECRET_VALUES = ["sk_live_REALSECRET", "postgres://u:p@db/x", "Zalo-Key-2-
 let server: Server;
 let valid = true;
 const reqs: Array<{ method: string; path: string }> = [];
-const patches: Array<{
+const writes: Array<{
   contentType: string;
   body: { options?: { cas?: number }; data?: unknown };
 }> = [];
 let forceCasMismatch = false;
 let vanishOnPatch = false;
+let denyWrite = false;
+let caps: string[] | "forbidden" | null = null;
 let noVersion = false;
 
 before(async () => {
@@ -64,13 +67,20 @@ before(async () => {
       });
     if (p === "/v1/secret/metadata/payment/" && url.searchParams.get("list") === "true")
       return json(200, { data: { keys: ["payment-zalopay", "payment-worker/"] } });
-    if (p === "/v1/secret/data/payment/payment-zalopay" && req.method === "PATCH") {
+    if (p === "/v1/sys/capabilities-self" && req.method === "POST") {
+      if (caps === null) return json(404, { errors: [] });
+      if (caps === "forbidden") return json(403, { errors: ["permission denied"] });
+      return json(200, { capabilities: caps, "secret/data/payment/payment-zalopay": caps });
+    }
+    if (p === "/v1/secret/data/payment/payment-zalopay" && req.method === "POST") {
       let raw = "";
       req.on("data", (c) => (raw += c));
       req.on("end", () => {
         const body = JSON.parse(raw);
         if (vanishOnPatch) return json(404, { errors: [] });
-        patches.push({ contentType: String(req.headers["content-type"]), body });
+        if (denyWrite)
+          return json(403, { errors: ["1 error occurred:\n\t* permission denied\n\n"] });
+        writes.push({ contentType: String(req.headers["content-type"]), body });
         if (forceCasMismatch || body.options?.cas !== 7)
           return json(400, {
             errors: ["check-and-set parameter did not match the current version"],
@@ -228,8 +238,8 @@ const write = {
   value: "http://otel-qc:4317",
 };
 
-test("setVaultKey sends one CAS-guarded merge-patch", async () => {
-  patches.length = 0;
+test("setVaultKey writes the merged secret with check-and-set", async () => {
+  writes.length = 0;
   await withWritableQc(async () => {
     const r = await setVaultKey(write);
     assert.deepEqual(r, {
@@ -240,12 +250,35 @@ test("setVaultKey sends one CAS-guarded merge-patch", async () => {
       downstream_verified: false,
     });
   });
-  assert.equal(patches.length, 1);
-  assert.equal(patches[0].contentType, "application/merge-patch+json");
-  assert.deepEqual(patches[0].body, {
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].contentType, "application/json");
+  assert.deepEqual(writes[0].body, {
     options: { cas: 7 },
-    data: { OTEL_ENDPOINT: "http://otel-qc:4317" },
+    data: {
+      PAYMENT_PROVIDER_ZALOPAY_TIME_OUT_IN_MINUTES: "15",
+      STRIPE_SECRET_KEY: SECRET_VALUES[0],
+      DATABASE_URL: SECRET_VALUES[1],
+      DEBUG: "true",
+      EMPTY_ONE: "",
+      OTEL_ENDPOINT: "http://otel-qc:4317",
+    },
   });
+});
+
+test("setVaultKey explains a 403 on write without leaking values", async () => {
+  denyWrite = true;
+  try {
+    await withWritableQc(async () => {
+      await assert.rejects(setVaultKey(write), (e: Error) => {
+        assert.match(e.message, /POST/);
+        assert.match(e.message, /create\/update/);
+        for (const s of SECRET_VALUES) assert.ok(!e.message.includes(s));
+        return true;
+      });
+    });
+  } finally {
+    denyWrite = false;
+  }
 });
 
 test("setVaultKey fails on CAS mismatch without leaking values", async () => {
@@ -276,7 +309,7 @@ test("setVaultKey does not report success when the secret vanishes before the pa
 
 test("setVaultKey refuses to write without a numeric secret version", async () => {
   noVersion = true;
-  patches.length = 0;
+  writes.length = 0;
   try {
     await withWritableQc(async () => {
       await assert.rejects(setVaultKey(write), /version/);
@@ -284,15 +317,46 @@ test("setVaultKey refuses to write without a numeric secret version", async () =
   } finally {
     noVersion = false;
   }
-  assert.equal(patches.length, 0);
+  assert.equal(writes.length, 0);
 });
 
 test("setVaultKey refuses a missing secret and a KV v1 mount", async () => {
-  patches.length = 0;
+  writes.length = 0;
   await withWritableQc(async () => {
     config.vault.writeAllow = [{ path: "*", keys: ["OTEL_ENDPOINT"] }];
     await assert.rejects(setVaultKey({ ...write, path: "secret/payment/nope" }), /does not exist/);
     await assert.rejects(setVaultKey({ ...write, path: "legacy/payment/zalopay" }), /KV v1/);
   });
-  assert.equal(patches.length, 0);
+  assert.equal(writes.length, 0);
+});
+
+test("vault write preflight reports a token without update capability before any confirmation", async () => {
+  caps = ["read", "list"];
+  writes.length = 0;
+  try {
+    await withWritableQc(async () => {
+      await assert.rejects(vaultSetKeyTarget(write), (e: Error) => {
+        assert.match(e.message, /no update capability/);
+        assert.match(e.message, /read, list/);
+        return true;
+      });
+      await assert.rejects(setVaultKey(write), /no update capability/);
+    });
+  } finally {
+    caps = null;
+  }
+  assert.equal(writes.length, 0);
+});
+
+test("vault write preflight passes with update and when capabilities cannot be checked", async () => {
+  try {
+    await withWritableQc(async () => {
+      for (const c of [["read", "update"], "forbidden", null] as const) {
+        caps = c as typeof caps;
+        assert.equal((await vaultSetKeyTarget(write)).version, 7);
+      }
+    });
+  } finally {
+    caps = null;
+  }
 });
