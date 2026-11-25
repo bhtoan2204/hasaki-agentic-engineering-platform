@@ -109,7 +109,7 @@
 
 .ov-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(500px, 1fr);
   gap: var(--sp-4);
   align-items: start;
 }
@@ -397,16 +397,34 @@
   background: var(--st-wait-bg);
 }
 
-.ts-days {
+.ov-timesheet .ts-days {
   margin-top: 8px;
-  max-height: 360px;
-  overflow: auto;
+  overflow: visible;
+}
+
+.ov-timesheet .ts-days select {
+  width: 100%;
+  min-width: 0;
+  max-width: 104px;
+  height: var(--control-h-xs, 28px);
+  min-height: 0;
+  padding: 0 22px 0 8px;
+  font-size: 12.5px;
+}
+
+.ov-timesheet .ts-days select.ts-edited {
+  border-color: var(--brand);
+  color: var(--brand-700);
+}
+
+.ts-hint {
+  margin: 8px 0 0;
 }
 
 .ts-days td,
 .ts-days th {
   white-space: nowrap;
-  padding: 6px 8px;
+  padding: 5px 6px;
   font-size: 12.5px;
 }
 

@@ -210,29 +210,28 @@ export function TimesheetCard() {
                             {dur(d.diff_seconds, true)}
                           </b>
                         )}{" "}
-                        <span className={`ts-kind ts-${d.in_progress ? "progress" : d.kind}`}>
-                          {kindText(d)}
-                        </span>
-                        {d.overridden && (
-                          <span
-                            className="ts-kind ts-edited"
-                            title={t("ts.editedHint", {
-                              auto: t(
-                                d.auto_kind === "half_leave"
-                                  ? "ts.kind.half_leave"
-                                  : "ts.kind.full",
-                              ),
-                            })}
-                          >
-                            {t("ts.edited")}
+                        {(d.in_progress || d.kind !== "full") && (
+                          <span className={`ts-kind ts-${d.in_progress ? "progress" : d.kind}`}>
+                            {kindText(d)}
                           </span>
                         )}
                       </td>
                       <td>
                         {d.date && !d.in_progress && d.auto_kind !== "missing_punch" ? (
                           <select
-                            className="sm"
+                            className={d.overridden ? "xs ts-edited" : "xs"}
                             aria-label={`${t("ts.col.kind")} ${dayLabel(d.date)}`}
+                            title={
+                              d.overridden
+                                ? t("ts.editedHint", {
+                                    auto: t(
+                                      d.auto_kind === "half_leave"
+                                        ? "ts.kind.half_leave"
+                                        : "ts.kind.full",
+                                    ),
+                                  })
+                                : undefined
+                            }
                             disabled={saving === d.date}
                             value={d.overridden ? d.kind : "auto"}
                             onChange={(e) =>
@@ -251,6 +250,7 @@ export function TimesheetCard() {
                   ))}
                 </tbody>
               </table>
+              <p className="muted small ts-hint">{t("ts.editHint")}</p>
             </div>
           )}
         </>
