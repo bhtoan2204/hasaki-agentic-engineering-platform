@@ -3,6 +3,7 @@ import {
   readExecutionCheckpoint,
   saveExecutionPause,
 } from "../checkpoints.ts";
+import type { Untyped } from "../../untyped.ts";
 import { stepsOf } from "../runRepository.ts";
 import { advance } from "../progression.ts";
 import { EngineError, lockRun, setStepStatus, ensureJob, type AfterCommit } from "../mutations.ts";
@@ -524,236 +525,311 @@ export async function resumeProviderHandoff(
       throw new EngineError("Stale handoff", 409);
     if (locked.status === "CANCELED") throw new EngineError("Run canceled", 409);
     if (h.status === "RESUMED") return { handoff: h, duplicate: true };
-    if (
-      h.status !== "READY" ||
-      s.status !== "WAITING_INPUT" ||
-      ["PAUSED", "CANCELED", "PENDING"].includes(locked.status)
-    )
-      throw new EngineError("Handoff is not ready or run is paused", 409);
-    const source = await one(
+    const ctx: ResumeContext = {
       c,
-      "SELECT executor_stopped_at FROM workflow_step_attempts WHERE id=$1",
-      [h.source_attempt_id],
-    );
-    if (
-      !source?.executor_stopped_at ||
-      (localJobs.activeIds().length &&
-        (await one(
-          c,
-          "SELECT id FROM workflow_step_attempts WHERE job_id=ANY($1::bigint[]) AND run_id=$2",
-          [localJobs.activeIds(), runId],
-        )))
-    )
-      throw new EngineError("Executor termination is not confirmed", 409);
-    if (
-      await one(
-        c,
-        "SELECT id FROM workflow_step_attempts WHERE run_id=$1 AND status='RUNNING' LIMIT 1",
-        [runId],
-      )
-    )
-      throw new EngineError("Conflicting running attempt", 409);
-    const workspace = await execution.run(
-      { userId: Number(locked.owner_id), runId: locked.id, kind: "run" },
-      () => inspectHandoffWorkspace(locked.id),
-    );
-    if (input.checkpoint_fingerprint !== h.workspace_fingerprint)
-      throw new EngineError("Checkpoint changed; review the latest handoff before confirming", 409);
-    if (workspace.fingerprint !== h.workspace_fingerprint)
-      throw new EngineError("Workspace changed after checkpoint; reconcile before continuing", 409);
-    if (s.requires_approval && !(s.approval?.granted && s.approval.generation === s.generation))
-      throw new EngineError("Existing approval gate is not granted", 409);
-    if (
-      s.approval?.actor_type === "machine" &&
-      !(await evaluateGate(c, locked, s, await stepsOf(c, locked.id), null))?.enforced
-    )
-      throw new EngineError(
-        "The machine approval no longer holds under the current autonomy policy",
-        409,
-      );
-    const repos = [
-      ...new Set([
-        ...locked.selected_repositories,
-        ...workspace.workspaces.map((w) => w.repository),
-      ]),
-    ];
-    if (repos.some((r) => !locked.allowed_repositories.includes(r)))
-      throw new EngineError("Repository scope changed; handoff is not authorized", 409);
-    const permitted = await q(
-      c,
-      "SELECT name FROM repositories WHERE name=ANY($1::text[]) AND enabled AND $2=ANY(allowed_actions)",
-      [repos, s.type === "coding_agent" ? "write" : "read"],
-    );
-    if (permitted.length !== repos.length)
-      throw new EngineError("Repository permissions no longer permit this step", 409);
-    if (input.provider !== "claude" && s.config.delegation?.enabled)
-      throw new EngineError(
-        "Target provider cannot enforce the approved delegation sandbox policy",
-        409,
-      );
-    const policy = fallbackPolicy(s);
-    const history = await q(
-      c,
-      "SELECT original_provider,target_provider FROM provider_handoffs WHERE step_id=$1 AND status='RESUMED'",
-      [s.id],
-    );
-    if (policy.mode === "disabled" || !policy.providers.includes(input.provider))
-      throw new EngineError("Fallback provider is disabled by workflow policy", 409);
-    // max_switches stops automatic failover. A person who confirms a switch is warned and allowed through.
-    const switches = history.filter((v) => v.target_provider !== v.original_provider).length;
-    const switchBudgetWarning =
-      input.provider !== h.original_provider && switches >= policy.max_switches
-        ? `Provider switch budget reached (${switches}/${policy.max_switches}); manual confirmation continues`
-        : null;
-    if (switchBudgetWarning && automatic)
-      throw new EngineError("Provider switch budget exhausted", 409);
-    const healthFailover =
-      policy.auto_health && ["AUTHENTICATION", "QUOTA_EXHAUSTED"].includes(h.failure_category);
-    if (automatic) {
-      if (
-        h.requested_by != null ||
-        (!healthFailover &&
-          (policy.mode !== "automatic" || !AUTOMATIC_FAILURES.includes(h.failure_category)))
-      )
-        throw new EngineError("Failure requires manual recovery", 409);
-      if (
-        [
-          h.original_provider,
-          ...history.flatMap((v) => [v.original_provider, v.target_provider]),
-        ].includes(input.provider)
-      )
-        throw new EngineError("Automatic provider loop prevented", 409);
-      const usage = healthFailover
-        ? []
-        : await q(
-            c,
-            "SELECT reported_cost_usd,input_tokens,output_tokens FROM execution_attempt_telemetry WHERE step_id=$1",
-            [s.id],
-          );
-      if (
-        !healthFailover &&
-        !policy.allow_unknown_cost &&
-        (usage.some((u) => u.reported_cost_usd == null) || ready.cost === "unknown")
-      )
-        throw new EngineError(
-          "Unknown provider cost requires explicit fallback policy permission",
-          409,
-        );
-      if (
-        !healthFailover &&
-        /budget|billing|credit|cost/i.test(h.reason) &&
-        !policy.allow_budget_failure
-      )
-        throw new EngineError("Budget failure requires explicit fallback policy permission", 409);
-      const cost = usage.reduce((n, u) => n + (u.reported_cost_usd ?? 0), 0),
-        tokens = usage.reduce((n, u) => n + (u.input_tokens ?? 0) + (u.output_tokens ?? 0), 0);
-      if (
-        policy.max_reported_cost_usd != null &&
-        (usage.some((u) => u.reported_cost_usd == null) || cost >= policy.max_reported_cost_usd)
-      )
-        throw new EngineError("Reported cost limit reached or coverage incomplete", 409);
-      if (
-        policy.max_reported_tokens != null &&
-        (usage.some((u) => u.input_tokens == null || u.output_tokens == null) ||
-          tokens >= policy.max_reported_tokens)
-      )
-        throw new EngineError("Reported token limit reached or coverage incomplete", 409);
-    }
-    const override = {
-      ...((s.agent_override ?? {}) as object),
-      provider: input.provider,
-      model: input.model ?? null,
-      reasoning_effort: null,
-    };
-    // Re-resolve inside the lock: settings may have changed while readiness was probed.
-    const effective = resolveStepAgent(locked, { ...s, agent_override: override });
-    if (JSON.stringify(effective) !== JSON.stringify(candidate))
-      throw new EngineError("Agent configuration changed; refresh", 409);
-    if (
-      await one(c, "SELECT id FROM workflow_questions WHERE step_id=$1 AND status='open' LIMIT 1", [
-        s.id,
-      ])
-    )
-      throw new EngineError("Answer pending human questions before confirming the handoff", 409);
-    await q(c, "UPDATE workflow_step_attempts SET resolved_at=now() WHERE id=$1", [
-      h.source_attempt_id,
-    ]);
-    await q(
-      c,
-      "UPDATE provider_handoffs SET status='RESUMED',target_provider=$2,resumed_at=now(),resumed_by=$3,automatic=$4,blocked_reason=NULL WHERE id=$1",
-      [h.id, input.provider, actorId, automatic],
-    );
-    await recordDecision(c, {
       runId,
-      stepId: s.id,
-      attemptId: h.source_attempt_id,
-      generation: s.generation,
-      kind: "recovery",
-      action: "HANDOFF",
-      outcome: "applied",
-      reason: `${h.original_provider} → ${input.provider}`,
-      sourceAttemptId: h.source_attempt_id,
-      latencyMs: h.created_at ? Date.now() - new Date(h.created_at).getTime() : null,
-      details: { handoff_id: h.id, automatic, human: !automatic },
-    });
-    await q(c, "UPDATE workflow_steps SET agent_override=$2 WHERE id=$1", [s.id, json(override)]);
-    const sealed = await readExecutionCheckpoint(c, h.source_attempt_id);
-    await setStepStatus(
-      c,
+      input,
+      locked,
       s,
-      "READY",
-      {
-        pending_input: {
-          provider_handoff: {
-            id: h.id,
-            source_attempt_id: h.source_attempt_id,
-            workspace_fingerprint: h.workspace_fingerprint,
-            package: sealed
-              ? {
-                  ...h.package,
-                  execution_checkpoint: continuationEvidence(sealed),
-                }
-              : h.package,
-          },
-        },
-        error: null,
-      },
-      "provider handoff confirmed",
-    );
-    await ensureJob(c, s);
-    if (actorId != null)
-      await q(
-        c,
-        "INSERT INTO audit_log(actor_id,action,resource_type,resource_id,detail) VALUES($1,'provider_handoff.resume','run',$2,$3)",
-        [
-          actorId,
-          String(runId),
-          json({
-            handoff_id: h.id,
-            original_provider: h.original_provider,
-            target_provider: input.provider,
-            warning: switchBudgetWarning,
-          }),
-        ],
-      );
-    await runEvents.add(
-      c,
-      runId,
-      "provider_handoff",
-      switchBudgetWarning
-        ? `${h.original_provider} → ${input.provider}; ${switchBudgetWarning}`
-        : `${h.original_provider} → ${input.provider}`,
-      s.id,
-      h.source_attempt_id,
-      { handoff_id: h.id, automatic, warning: switchBudgetWarning },
-    );
-    await advance(c, runId, afterCommit);
+      h,
+      automatic,
+      actorId,
+      afterCommit,
+      ready,
+      candidate,
+    };
+    await assertExecutorStopped(ctx);
+    await assertHandoffAuthorized(ctx);
+    const { policy, history, switchBudgetWarning, healthFailover } =
+      await resolveFallbackPolicy(ctx);
+    if (automatic) await assertAutomaticResume(ctx, policy, history, healthFailover);
+    const override = await assertAgentUnchanged(ctx);
+    await confirmHandoff(ctx, override, switchBudgetWarning);
     return {
       handoff: { ...h, status: "RESUMED", target_provider: input.provider },
       duplicate: false,
       warning: switchBudgetWarning,
     };
   });
+}
+
+interface ResumeContext {
+  c: pg.PoolClient;
+  runId: number;
+  input: z.infer<typeof ResumeHandoff>;
+  locked: RunRow;
+  s: StepRow;
+  h: Untyped;
+  automatic: boolean;
+  actorId: number | null;
+  afterCommit: AfterCommit;
+  ready: Awaited<ReturnType<typeof handoffReadiness>>;
+  candidate: ReturnType<typeof resolveStepAgent>;
+}
+
+/** The failed attempt's executor has stopped and nothing else of this run is running. */
+async function assertExecutorStopped(x: ResumeContext) {
+  const { c, runId, locked, s, h } = x;
+  if (
+    h.status !== "READY" ||
+    s.status !== "WAITING_INPUT" ||
+    ["PAUSED", "CANCELED", "PENDING"].includes(locked.status)
+  )
+    throw new EngineError("Handoff is not ready or run is paused", 409);
+  const source = await one(
+    c,
+    "SELECT executor_stopped_at FROM workflow_step_attempts WHERE id=$1",
+    [h.source_attempt_id],
+  );
+  if (
+    !source?.executor_stopped_at ||
+    (localJobs.activeIds().length &&
+      (await one(
+        c,
+        "SELECT id FROM workflow_step_attempts WHERE job_id=ANY($1::bigint[]) AND run_id=$2",
+        [localJobs.activeIds(), runId],
+      )))
+  )
+    throw new EngineError("Executor termination is not confirmed", 409);
+  if (
+    await one(
+      c,
+      "SELECT id FROM workflow_step_attempts WHERE run_id=$1 AND status='RUNNING' LIMIT 1",
+      [runId],
+    )
+  )
+    throw new EngineError("Conflicting running attempt", 409);
+}
+
+/** Workspace, approval, repository scope and delegation checks for the target provider (reads the workspace under the run's scope). */
+async function assertHandoffAuthorized(x: ResumeContext) {
+  const { c, input, locked, s, h } = x;
+  const workspace = await execution.run(
+    { userId: Number(locked.owner_id), runId: locked.id, kind: "run" },
+    () => inspectHandoffWorkspace(locked.id),
+  );
+  if (input.checkpoint_fingerprint !== h.workspace_fingerprint)
+    throw new EngineError("Checkpoint changed; review the latest handoff before confirming", 409);
+  if (workspace.fingerprint !== h.workspace_fingerprint)
+    throw new EngineError("Workspace changed after checkpoint; reconcile before continuing", 409);
+  if (s.requires_approval && !(s.approval?.granted && s.approval.generation === s.generation))
+    throw new EngineError("Existing approval gate is not granted", 409);
+  if (
+    s.approval?.actor_type === "machine" &&
+    !(await evaluateGate(c, locked, s, await stepsOf(c, locked.id), null))?.enforced
+  )
+    throw new EngineError(
+      "The machine approval no longer holds under the current autonomy policy",
+      409,
+    );
+  const repos = [
+    ...new Set([...locked.selected_repositories, ...workspace.workspaces.map((w) => w.repository)]),
+  ];
+  if (repos.some((r) => !locked.allowed_repositories.includes(r)))
+    throw new EngineError("Repository scope changed; handoff is not authorized", 409);
+  const permitted = await q(
+    c,
+    "SELECT name FROM repositories WHERE name=ANY($1::text[]) AND enabled AND $2=ANY(allowed_actions)",
+    [repos, s.type === "coding_agent" ? "write" : "read"],
+  );
+  if (permitted.length !== repos.length)
+    throw new EngineError("Repository permissions no longer permit this step", 409);
+  if (input.provider !== "claude" && s.config.delegation?.enabled)
+    throw new EngineError(
+      "Target provider cannot enforce the approved delegation sandbox policy",
+      409,
+    );
+}
+
+/** Workflow fallback policy, switch budget and health-failover facts for this confirmation. */
+async function resolveFallbackPolicy(x: ResumeContext): Promise<{
+  policy: ReturnType<typeof fallbackPolicy>;
+  history: Untyped[];
+  switchBudgetWarning: string | null;
+  healthFailover: boolean;
+}> {
+  const { c, input, s, h, automatic } = x;
+  const policy = fallbackPolicy(s);
+  const history = await q(
+    c,
+    "SELECT original_provider,target_provider FROM provider_handoffs WHERE step_id=$1 AND status='RESUMED'",
+    [s.id],
+  );
+  if (policy.mode === "disabled" || !policy.providers.includes(input.provider))
+    throw new EngineError("Fallback provider is disabled by workflow policy", 409);
+  // max_switches stops automatic failover. A person who confirms a switch is warned and allowed through.
+  const switches = history.filter((v) => v.target_provider !== v.original_provider).length;
+  const switchBudgetWarning =
+    input.provider !== h.original_provider && switches >= policy.max_switches
+      ? `Provider switch budget reached (${switches}/${policy.max_switches}); manual confirmation continues`
+      : null;
+  if (switchBudgetWarning && automatic)
+    throw new EngineError("Provider switch budget exhausted", 409);
+  const healthFailover =
+    policy.auto_health && ["AUTHENTICATION", "QUOTA_EXHAUSTED"].includes(h.failure_category);
+  return { policy, history, switchBudgetWarning, healthFailover };
+}
+
+/** Automatic failover only: loop, cost, budget and token guards. */
+async function assertAutomaticResume(
+  x: ResumeContext,
+  policy: ReturnType<typeof fallbackPolicy>,
+  history: Untyped[],
+  healthFailover: boolean,
+) {
+  const { c, input, s, h, ready } = x;
+  if (
+    h.requested_by != null ||
+    (!healthFailover &&
+      (policy.mode !== "automatic" || !AUTOMATIC_FAILURES.includes(h.failure_category)))
+  )
+    throw new EngineError("Failure requires manual recovery", 409);
+  if (
+    [
+      h.original_provider,
+      ...history.flatMap((v) => [v.original_provider, v.target_provider]),
+    ].includes(input.provider)
+  )
+    throw new EngineError("Automatic provider loop prevented", 409);
+  const usage = healthFailover
+    ? []
+    : await q(
+        c,
+        "SELECT reported_cost_usd,input_tokens,output_tokens FROM execution_attempt_telemetry WHERE step_id=$1",
+        [s.id],
+      );
+  if (
+    !healthFailover &&
+    !policy.allow_unknown_cost &&
+    (usage.some((u) => u.reported_cost_usd == null) || ready.cost === "unknown")
+  )
+    throw new EngineError(
+      "Unknown provider cost requires explicit fallback policy permission",
+      409,
+    );
+  if (
+    !healthFailover &&
+    /budget|billing|credit|cost/i.test(h.reason) &&
+    !policy.allow_budget_failure
+  )
+    throw new EngineError("Budget failure requires explicit fallback policy permission", 409);
+  const cost = usage.reduce((n, u) => n + (u.reported_cost_usd ?? 0), 0),
+    tokens = usage.reduce((n, u) => n + (u.input_tokens ?? 0) + (u.output_tokens ?? 0), 0);
+  if (
+    policy.max_reported_cost_usd != null &&
+    (usage.some((u) => u.reported_cost_usd == null) || cost >= policy.max_reported_cost_usd)
+  )
+    throw new EngineError("Reported cost limit reached or coverage incomplete", 409);
+  if (
+    policy.max_reported_tokens != null &&
+    (usage.some((u) => u.input_tokens == null || u.output_tokens == null) ||
+      tokens >= policy.max_reported_tokens)
+  )
+    throw new EngineError("Reported token limit reached or coverage incomplete", 409);
+}
+
+/** Settings may have changed while readiness was probed; open human questions block the confirmation. */
+async function assertAgentUnchanged(x: ResumeContext): Promise<object> {
+  const { c, input, locked, s, candidate } = x;
+  const override = {
+    ...((s.agent_override ?? {}) as object),
+    provider: input.provider,
+    model: input.model ?? null,
+    reasoning_effort: null,
+  };
+  // Re-resolve inside the lock: settings may have changed while readiness was probed.
+  const effective = resolveStepAgent(locked, { ...s, agent_override: override });
+  if (JSON.stringify(effective) !== JSON.stringify(candidate))
+    throw new EngineError("Agent configuration changed; refresh", 409);
+  if (
+    await one(c, "SELECT id FROM workflow_questions WHERE step_id=$1 AND status='open' LIMIT 1", [
+      s.id,
+    ])
+  )
+    throw new EngineError("Answer pending human questions before confirming the handoff", 409);
+  return override;
+}
+
+/** The writes of a confirmed handoff: resolve the source attempt, mark RESUMED, record the decision, ready the step, enqueue, audit and advance. */
+async function confirmHandoff(
+  x: ResumeContext,
+  override: object,
+  switchBudgetWarning: string | null,
+) {
+  const { c, runId, input, s, h, automatic, actorId, afterCommit } = x;
+  await q(c, "UPDATE workflow_step_attempts SET resolved_at=now() WHERE id=$1", [
+    h.source_attempt_id,
+  ]);
+  await q(
+    c,
+    "UPDATE provider_handoffs SET status='RESUMED',target_provider=$2,resumed_at=now(),resumed_by=$3,automatic=$4,blocked_reason=NULL WHERE id=$1",
+    [h.id, input.provider, actorId, automatic],
+  );
+  await recordDecision(c, {
+    runId,
+    stepId: s.id,
+    attemptId: h.source_attempt_id,
+    generation: s.generation,
+    kind: "recovery",
+    action: "HANDOFF",
+    outcome: "applied",
+    reason: `${h.original_provider} → ${input.provider}`,
+    sourceAttemptId: h.source_attempt_id,
+    latencyMs: h.created_at ? Date.now() - new Date(h.created_at).getTime() : null,
+    details: { handoff_id: h.id, automatic, human: !automatic },
+  });
+  await q(c, "UPDATE workflow_steps SET agent_override=$2 WHERE id=$1", [s.id, json(override)]);
+  const sealed = await readExecutionCheckpoint(c, h.source_attempt_id);
+  await setStepStatus(
+    c,
+    s,
+    "READY",
+    {
+      pending_input: {
+        provider_handoff: {
+          id: h.id,
+          source_attempt_id: h.source_attempt_id,
+          workspace_fingerprint: h.workspace_fingerprint,
+          package: sealed
+            ? {
+                ...h.package,
+                execution_checkpoint: continuationEvidence(sealed),
+              }
+            : h.package,
+        },
+      },
+      error: null,
+    },
+    "provider handoff confirmed",
+  );
+  await ensureJob(c, s);
+  if (actorId != null)
+    await q(
+      c,
+      "INSERT INTO audit_log(actor_id,action,resource_type,resource_id,detail) VALUES($1,'provider_handoff.resume','run',$2,$3)",
+      [
+        actorId,
+        String(runId),
+        json({
+          handoff_id: h.id,
+          original_provider: h.original_provider,
+          target_provider: input.provider,
+          warning: switchBudgetWarning,
+        }),
+      ],
+    );
+  await runEvents.add(
+    c,
+    runId,
+    "provider_handoff",
+    switchBudgetWarning
+      ? `${h.original_provider} → ${input.provider}; ${switchBudgetWarning}`
+      : `${h.original_provider} → ${input.provider}`,
+    s.id,
+    h.source_attempt_id,
+    { handoff_id: h.id, automatic, warning: switchBudgetWarning },
+  );
+  await advance(c, runId, afterCommit);
 }
 
 /** Continue a disconnected or quota-exhausted agent on the next healthy provider. No manual switch. */
