@@ -120,6 +120,7 @@ export async function commitHistory(
       "--all",
       "--source",
       "--shortstat",
+      "--diff-merges=first-parent",
       "--date-order",
       `--since=${new Date(since).toISOString()}`,
       `--max-count=${MAX_SCANNED}`,
@@ -158,4 +159,186 @@ export async function commitHistory(
 export async function lastFetch(root: string) {
   const s = await stat(join(root, ".git", "FETCH_HEAD")).catch(() => null);
   return s ? s.mtime.toISOString() : null;
+}
+
+const GIT = ["-c", "core.hooksPath=/dev/null"];
+const run = (root: string, args: string[], maxBuffer = 8 * 1024 * 1024) =>
+  exec("git", ["-C", root, ...GIT, ...args], { timeout: 30_000, maxBuffer }).then((r) => r.stdout);
+
+/** A revision, branch or tag name: never an option, a range or a path. */
+export function safeRev(rev: string | undefined) {
+  const value = rev?.trim() || "HEAD";
+  if (!/^[A-Za-z0-9_][A-Za-z0-9_./@^~+-]{0,199}$/.test(value) || value.includes(".."))
+    throw new Error(`invalid revision "${value.slice(0, 80)}": use a commit, branch or tag name`);
+  return value;
+}
+/** A path inside the repository: relative, no parent segments, never an option. */
+export function safePath(path: string) {
+  const p = path.replace(/^\.\//, "");
+  if (
+    !p ||
+    p.startsWith("/") ||
+    p.startsWith("-") ||
+    p.includes("\0") ||
+    p.split("/").includes("..")
+  )
+    throw new Error(
+      `invalid path "${path.slice(0, 120)}": use a path relative to the repository root`,
+    );
+  return p;
+}
+
+export interface FileCommit {
+  sha: string;
+  date: string;
+  author: string;
+  email: string;
+  subject: string;
+}
+/** Commits that changed one file, newest first, following renames (`git log --follow`). */
+export async function fileHistory(
+  root: string,
+  path: string,
+  o: { rev?: string; limit?: number; timeZone?: string } = {},
+) {
+  const limit = Math.min(Math.max(o.limit ?? 30, 1), 100);
+  const out = await run(root, [
+    "log",
+    "--follow",
+    `--max-count=${limit + 1}`,
+    "--format=%H\x1f%an\x1f%ae\x1f%aI\x1f%s",
+    safeRev(o.rev),
+    "--",
+    safePath(path),
+  ]);
+  const commits: FileCommit[] = out
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      const [sha, author, email, date, subject] = l.split("\x1f");
+      return {
+        sha: sha.slice(0, 12),
+        date: zonedIso(date, o.timeZone ?? "Asia/Ho_Chi_Minh"),
+        author,
+        email,
+        subject: (subject ?? "").slice(0, 300),
+      };
+    });
+  return { commits: commits.slice(0, limit), more: commits.length > limit };
+}
+
+export interface BlameLine {
+  line: number;
+  sha: string;
+  text: string;
+}
+/** `git blame` of a line range: each line's last commit; commit details are listed once per commit. */
+export async function blameLines(
+  root: string,
+  path: string,
+  o: { rev?: string; start?: number; end?: number; timeZone?: string } = {},
+) {
+  const start = Math.max(o.start ?? 1, 1);
+  const end = Math.min(o.end ?? start + 99, start + 199);
+  if (end < start) throw new Error("end_line must not be before start_line");
+  const out = await run(
+    root,
+    ["blame", "--porcelain", "-L", `${start},${end}`, safeRev(o.rev), "--", safePath(path)],
+    16 * 1024 * 1024,
+  );
+  const commits: Record<string, { author: string; date: string; summary: string }> = {};
+  const lines: BlameLine[] = [];
+  let current = "";
+  let finalLine = 0;
+  const meta: Record<string, string> = {};
+  for (const l of out.split("\n")) {
+    const head = /^([0-9a-f]{40}) \d+ (\d+)(?: \d+)?$/.exec(l);
+    if (head) {
+      current = head[1];
+      finalLine = Number(head[2]);
+      continue;
+    }
+    if (l.startsWith("\t")) {
+      const sha = current.slice(0, 12);
+      lines.push({ line: finalLine, sha, text: l.slice(1, 201) });
+      commits[sha] ??= {
+        author: meta[`${current}:author`] ?? "",
+        date: meta[`${current}:time`]
+          ? zonedIso(
+              new Date(Number(meta[`${current}:time`]) * 1000).toISOString(),
+              o.timeZone ?? "Asia/Ho_Chi_Minh",
+            )
+          : "",
+        summary: (meta[`${current}:summary`] ?? "").slice(0, 300),
+      };
+      continue;
+    }
+    const m = /^(author|author-time|summary) (.*)$/.exec(l);
+    if (m && current) {
+      const key = m[1] === "author-time" ? "time" : m[1];
+      meta[`${current}:${key}`] ??= m[2];
+    }
+  }
+  return { lines, commits };
+}
+
+export interface ChangedFile {
+  status: string;
+  path: string;
+  old_path?: string;
+}
+const MAX_FILES = 300;
+/**
+ * One commit: message, parents and the files it changed. A merge commit is compared with its first parent (what the
+ * merge brought into that branch) and lists the commits it merged, so it never looks empty.
+ */
+export async function commitDetail(root: string, rev: string, timeZone = "Asia/Ho_Chi_Minh") {
+  const sha = (await run(root, ["rev-parse", "--verify", "-q", `${safeRev(rev)}^{commit}`])).trim();
+  const head = (
+    await run(root, ["show", "--no-patch", "--format=%H\x1f%P\x1f%an\x1f%ae\x1f%aI\x1f%B", sha])
+  ).split("\x1f");
+  const parents = head[1].trim() ? head[1].trim().split(" ") : [];
+  const [names, shortstat] = await Promise.all([
+    run(root, ["show", "--diff-merges=first-parent", "-M", "--name-status", "--format=", sha]),
+    run(root, ["show", "--diff-merges=first-parent", "--shortstat", "--format=", sha]),
+  ]);
+  const all: ChangedFile[] = names
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      const [status, a, b] = l.split("\t");
+      return b ? { status: status[0], path: b, old_path: a } : { status: status[0], path: a };
+    });
+  const num = (re: RegExp) => Number(re.exec(shortstat)?.[1] ?? 0);
+  const merged =
+    parents.length > 1
+      ? (
+          await run(root, [
+            "log",
+            "--no-merges",
+            "--max-count=50",
+            "--format=%h %s",
+            `${parents[0]}..${parents[1]}`,
+          ])
+        )
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => l.slice(0, 300))
+      : undefined;
+  return {
+    sha: sha.slice(0, 12),
+    parents: parents.map((p) => p.slice(0, 12)),
+    merge: parents.length > 1,
+    compared_with: parents.length ? "first parent" : "empty tree",
+    date: zonedIso(head[4], timeZone),
+    author: head[2],
+    email: head[3],
+    message: head.slice(5).join("\x1f").trim().slice(0, 2000),
+    files_total: all.length,
+    files: all.slice(0, MAX_FILES),
+    ...(all.length > MAX_FILES ? { files_truncated: true } : {}),
+    insertions: num(/(\d+) insertions?\(\+\)/),
+    deletions: num(/(\d+) deletions?\(-\)/),
+    ...(merged ? { merged_commits: merged } : {}),
+  };
 }
