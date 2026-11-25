@@ -11,7 +11,7 @@
 import { repositoryBranch } from "../repos/remote.ts";
 
 const INTENT =
-  /(làm tiếp|tiếp tục|dùng lại|không\s+(checkout|tạo|cắt)[^.\n]*branch\s+mới|continue|keep working|reuse|work on (the )?existing|based on (the )?existing)/i;
+  /(làm tiếp|tiếp tục|dùng lại|không\s+(checkout|tạo|cắt)[^.\n]*branch\s+mới|continue|keep working|reuse|work on (the )?existing|based on (the )?existing|checkout\s+(từ|from)|(cắt|tách)\s+từ|branch\s+off|(cut|branched)\s+from)/i;
 const KEYWORD = /\b(?:branch|nhánh)\b/gi;
 /** Words that follow "branch" in prose but are never the branch itself. */
 const FILLER =
@@ -75,6 +75,8 @@ export function normalizeBranchMap(v: unknown, baseBranch: string): BranchMap | 
 }
 
 export const WORK_ITEM_BRANCH_SOURCE = "work item description";
+/** A developer decision made while the run was running: the run branch is cut from the named branch (stacked). */
+export const STACKED_BRANCH_SOURCE = "developer decision";
 
 /**
  * Branch to use for `repo` in a run: per-repo override, then "*", then `inputs.branch` (the branch a code review run
@@ -91,7 +93,11 @@ export function branchFor(
       ? run.inputs.branch.trim()
       : undefined;
   const mapped = m?.[repo] ?? m?.["*"];
-  if (mapped && run.inputs?.branches_source === WORK_ITEM_BRANCH_SOURCE)
+  if (
+    mapped &&
+    (run.inputs?.branches_source === WORK_ITEM_BRANCH_SOURCE ||
+      run.inputs?.branches_source === STACKED_BRANCH_SOURCE)
+  )
     return { branch: run.branch, existing: false, parent: mapped };
   const b = mapped ?? reviewed;
   return b ? { branch: b, existing: true } : { branch: run.branch, existing: false };

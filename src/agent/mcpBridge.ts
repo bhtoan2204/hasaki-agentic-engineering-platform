@@ -70,7 +70,18 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
     name: "prepare_branch",
     description:
       "Create or reuse the run branch for an allowed repo in an isolated git worktree and return its path. Automatically adds the repo to selected repositories after checking current write access; no manual selection update needed. Coding steps only.",
-    inputSchema: { type: "object", properties: { repo: { type: "string" } }, required: ["repo"] },
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: { type: "string" },
+        base: {
+          type: "string",
+          description:
+            "Existing remote branch to cut the run branch from instead of the default branch (the PR then targets it). A worktree without commits of its own is moved onto it by the platform; never run git merge/checkout/reset yourself.",
+        },
+      },
+      required: ["repo"],
+    },
   },
   {
     name: "read_knowledge",

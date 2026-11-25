@@ -35,7 +35,12 @@ import { repositories, repoPath } from "../repos/service.ts";
 import { pool, q, one } from "../db/pool.ts";
 import { outputLocale } from "./language.ts";
 import { citedArtifactIds, evidenceExcerpt, withheldSteps } from "./independentReview.ts";
-import { prepareWorkspace, WorkspaceConflictError, workspacesOf } from "../git/provider.ts";
+import {
+  prepareWorkspace,
+  stackRunBranch,
+  WorkspaceConflictError,
+  workspacesOf,
+} from "../git/provider.ts";
 import { fusedSearchOrder, scoreKnowledge } from "../context/plan.ts";
 import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import { externalNotice, isExternal } from "../knowledge/external.ts";
@@ -540,6 +545,18 @@ async function prepareBranch(args: ToolArgs, env: PlatformToolEnv): Promise<stri
   if (isolation.isolated && !isolation.subtaskId)
     return "ERROR: isolated_workspace requires a subtask id; refusing the shared run worktree";
   const run = await selectRepositoryForPreparation(env, repo);
+  const base = typeof args?.base === "string" ? args.base.trim() : "";
+  if (base) {
+    try {
+      run.inputs = await stackRunBranch(env.runId, repo, base);
+    } catch (e) {
+      return `ERROR: ${(e as Error).message}`;
+    }
+    await env.log(
+      "system",
+      `${repo}: the run branch is cut from ${base} (base chosen through prepare_branch)`,
+    );
+  }
   const step = await one<{
     holders: string[] | null;
     config: { micro_source_revision?: string; micro_hashes?: Record<string, string> };
@@ -1128,7 +1145,10 @@ const legacyInputs: Record<string, z.ZodType<ToolArgs>> = {
     output: z.record(z.string(), z.unknown()),
     skills_applied: z.array(z.string().max(300)).max(100).optional(),
   }),
-  prepare_branch: z.strictObject({ repo: z.string().min(1).max(160) }),
+  prepare_branch: z.strictObject({
+    repo: z.string().min(1).max(160),
+    base: z.string().min(1).max(200).optional(),
+  }),
   commit_changes: z.strictObject({
     repo: z.string().min(1).max(160),
     message: z.string().min(1).max(4000),

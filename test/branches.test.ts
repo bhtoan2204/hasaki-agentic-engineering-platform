@@ -4,7 +4,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../src/config.ts";
-import { branchFor, detectBranchDirectives, normalizeBranchMap } from "../src/workflow/branches.ts";
+import {
+  branchFor,
+  detectBranchDirectives,
+  normalizeBranchMap,
+  STACKED_BRANCH_SOURCE,
+} from "../src/workflow/branches.ts";
 import { prepareBranch } from "../src/git.ts";
 
 const REPOS = ["oms-api", "oms-background", "oms-frontend"];
@@ -174,5 +179,49 @@ test("branch directive: filler words after 'branch' are skipped — the branch-l
     detectBranchDirectives("reuse branch `develop` for this", ["oms-background"], "release/prod"),
     { "*": "develop" },
     "a quoted plain name is explicit",
+  );
+});
+
+test("detect: 'checkout từ branch X để sửa lỗi' stacks the run on X (run 187 regression); a bare mention still does not", () => {
+  const text =
+    "\nđây là bug từ task HSK-98F6LYK8\n\ncó branch là u1-HSK-98F6LYK8, checkout từ branch này để sửa lỗi";
+  assert.deepEqual(detectBranchDirectives(text, REPOS, "release/prod"), {
+    "*": "u1-HSK-98F6LYK8",
+  });
+  assert.deepEqual(
+    detectBranchDirectives(
+      "Checkout from branch feature/zip-code then fix the label",
+      REPOS,
+      "release/prod",
+    ),
+    { "*": "feature/zip-code" },
+  );
+  assert.deepEqual(
+    detectBranchDirectives("lỗi nằm ở branch u1-HSK-98F6LYK8", REPOS, "release/prod"),
+    {},
+  );
+  assert.deepEqual(
+    detectBranchDirectives("checkout từ branch release/prod", REPOS, "release/prod"),
+    {},
+  );
+});
+
+test("branchFor: a base chosen by a developer while the run is running stacks the run branch, like a work item directive", () => {
+  const run = {
+    branch: "u1-HSK-F82LGRJ3",
+    inputs: {
+      branches: { "oms-frontend": "u1-HSK-98F6LYK8" },
+      branches_source: STACKED_BRANCH_SOURCE,
+    },
+  };
+  assert.deepEqual(branchFor(run, "oms-frontend"), {
+    branch: "u1-HSK-F82LGRJ3",
+    existing: false,
+    parent: "u1-HSK-98F6LYK8",
+  });
+  assert.equal(
+    branchFor({ ...run, inputs: { ...run.inputs, branches_source: "set by toan" } }, "oms-frontend")
+      .existing,
+    true,
   );
 });

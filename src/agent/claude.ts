@@ -308,7 +308,15 @@ function platformServer(
       tool(
         "prepare_branch",
         `Create or reuse the branch "${ctx.run.branch}" for a repo in an isolated git worktree and return its path. Automatically selects the repo after checking current write access; no manual selection update needed. Allowed repos: ${ctx.run.allowed_repositories.join(", ")}`,
-        { repo: z.string().describe("repo directory name, e.g. oms-api") },
+        {
+          repo: z.string().describe("repo directory name, e.g. oms-api"),
+          base: z
+            .string()
+            .optional()
+            .describe(
+              "existing remote branch to cut the run branch from instead of the default branch (the PR then targets it); a worktree without commits of its own is moved onto it by the platform",
+            ),
+        },
         call("prepare_branch"),
       ),
     );

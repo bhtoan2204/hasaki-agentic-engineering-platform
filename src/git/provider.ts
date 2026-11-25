@@ -13,7 +13,13 @@ import { enqueue as enqueueIndex } from "../codeIntelligence/indexer.ts";
 import { config, codeIntelligenceEnabled } from "../config.ts";
 import { pool, q, one, type Db } from "../db/pool.ts";
 import { openPullRequest, pullRequestState } from "../bitbucket.ts";
-import { openGithubPullRequest, githubPullRequestState, getGithubPullRequest, githubChecks, githubReviewDiscussions } from "../github.ts";
+import {
+  openGithubPullRequest,
+  githubPullRequestState,
+  getGithubPullRequest,
+  githubChecks,
+  githubReviewDiscussions,
+} from "../github.ts";
 import {
   closeGitlabMergeRequest,
   commentOnGitlabMergeRequest,
@@ -50,7 +56,12 @@ import {
 } from "../git.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { unsafeRelativePath, validateCheckout } from "../repos/paths.ts";
-import { branchFor, subtaskBranchName } from "../workflow/branches.ts";
+import {
+  branchFor,
+  normalizeBranchMap,
+  STACKED_BRANCH_SOURCE,
+  subtaskBranchName,
+} from "../workflow/branches.ts";
 import type { ExecResult } from "../workflow/types.ts";
 
 const exec = promisify(execFile);
@@ -72,7 +83,10 @@ export { dependencyFingerprint, nodeModulesReady, recordDependencies } from "./n
  * last check, so readiness is decided by a full re-hash, never by the metadata fast path.
  */
 export async function installNodeDependencies(workspace: string): Promise<boolean> {
-  return ensureNodeDependencies(workspace, npmCacheDir(), { evidenceDir: dependencyEvidenceDir(), strict: true });
+  return ensureNodeDependencies(workspace, npmCacheDir(), {
+    evidenceDir: dependencyEvidenceDir(),
+    strict: true,
+  });
 }
 
 export type {
@@ -93,7 +107,12 @@ export type {
 export interface GitProvider {
   name: string;
   /** Push `branch` from a worktree; must refuse dirty trees / branches without commits. Returns the commit list. */
-  push(path: string, branch: string, base?: string, expectedSha?: string): Promise<{ commits: string; note?: string }>;
+  push(
+    path: string,
+    branch: string,
+    base?: string,
+    expectedSha?: string,
+  ): Promise<{ commits: string; note?: string }>;
   /** Idempotent: updates the open PR for source → target if there is one. */
   openOrUpdatePullRequest(pr: {
     repo: string;
@@ -224,11 +243,13 @@ export const gitlabProvider: GitProvider = {
   getPullRequest: (pr) => getGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url),
   pullRequestChanges: (pr, opts) =>
     gitlabMergeRequestChanges(gitlabRemoteOf(pr.remoteUrl), pr.url, opts),
-  pullRequestDiscussions: (pr) => gitlabMergeRequestDiscussions(gitlabRemoteOf(pr.remoteUrl), pr.url),
+  pullRequestDiscussions: (pr) =>
+    gitlabMergeRequestDiscussions(gitlabRemoteOf(pr.remoteUrl), pr.url),
   commentOnPullRequest: (pr, body) =>
     commentOnGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url, body),
   mergeReadiness: (pr) => gitlabMergeReadiness(gitlabRemoteOf(pr.remoteUrl), pr.url),
-  mergePullRequest: (pr, opts) => mergeGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url, opts),
+  mergePullRequest: (pr, opts) =>
+    mergeGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url, opts),
   closePullRequest: (pr) => closeGitlabMergeRequest(gitlabRemoteOf(pr.remoteUrl), pr.url),
   pipelines: (q) => gitlabPipelines(gitlabRemoteOf(q.remoteUrl), { ref: q.ref, url: q.url }),
   jobLog: (q) => gitlabJobLog(gitlabRemoteOf(q.remoteUrl), q.jobId, q.tail),
@@ -251,7 +272,9 @@ const hostOverrides = new Map<string, GitProvider>();
 export function registerGitProvider(host: string, p: GitProvider) {
   registry.set(host, p);
 }
-export const registeredGitProviders = () => [...new Set([...registry.keys(), ...hostOverrides.keys()])];
+export const registeredGitProviders = () => [
+  ...new Set([...registry.keys(), ...hostOverrides.keys()]),
+];
 
 /** When set, tests and benchmarks handle every host. Production dispatches by repository provider. */
 let override: GitProvider | null = null;
@@ -469,6 +492,74 @@ function remoteWorkspacePath(
  * Create (or reuse) one worktree for `repo` and record it. Never touches reposRoot checkouts.
  * `subtaskId` cuts a branch from the run workspace so two coding steps cannot check out the same branch.
  */
+/**
+ * Records that the run branch of `repo` is cut from the existing remote branch `base` (stacked: its PR targets `base`).
+ * Returns the run's updated inputs. A worktree that already exists is moved by prepareWorkspace, only when that loses
+ * nothing (see advanceToParent).
+ */
+export async function stackRunBranch(
+  runId: number,
+  repo: string,
+  base: string,
+): Promise<Record<string, unknown>> {
+  const map = normalizeBranchMap({ [repo]: base }, config.baseBranch);
+  if (!map) throw new Error("a base branch is required");
+  if (base === (await repositoryBaseBranch(repo).catch(() => config.baseBranch)))
+    throw new Error(`${base} is the default branch of ${repo}: there is nothing to stack on`);
+  const row = await one<{ inputs: Record<string, unknown> }>(
+    pool,
+    `UPDATE workflow_runs
+        SET inputs = jsonb_set(
+              jsonb_set(COALESCE(inputs, '{}'), '{branches}', COALESCE(inputs->'branches', '{}') || $2::jsonb),
+              '{branches_source}', to_jsonb($3::text)),
+            updated_at = now()
+      WHERE id = $1 AND status NOT IN ('COMPLETED', 'CANCELED')
+      RETURNING inputs`,
+    [runId, JSON.stringify(map), STACKED_BRANCH_SOURCE],
+  );
+  if (!row) throw new Error("the run is finished: its base cannot change");
+  return row.inputs;
+}
+
+/**
+ * A worktree cut before the run was stacked on `parent` moves onto it with `git merge --ff-only`: possible exactly when
+ * the worktree has no commits of its own (its HEAD is an ancestor of the parent), and it never discards a change.
+ * Returns the new HEAD, or null when nothing moved (already on the parent, or not movable: reported through `log`).
+ */
+async function advanceToParent(
+  path: string,
+  repo: string,
+  parent: string,
+  log?: (message: string) => Promise<void>,
+): Promise<string | null> {
+  const ok = (...args: string[]) =>
+    exec("git", ["-C", path, ...args]).then(
+      () => true,
+      () => false,
+    );
+  if (!(await ok("rev-parse", "--verify", "-q", `refs/remotes/origin/${parent}`))) {
+    await log?.(
+      `${repo}: origin/${parent} does not exist in the checkout; the worktree stays where it is`,
+    );
+    return null;
+  }
+  if (await ok("merge-base", "--is-ancestor", `origin/${parent}`, "HEAD")) return null;
+  try {
+    await exec("git", ["-C", path, "merge", "--ff-only", `origin/${parent}`]);
+  } catch (e) {
+    const why = String((e as { stderr?: string }).stderr || (e as Error).message).split("\n")[0];
+    await log?.(
+      `${repo}: the worktree has work of its own and cannot move onto origin/${parent} (${why})`,
+    );
+    return null;
+  }
+  const head = (await exec("git", ["-C", path, "rev-parse", "HEAD"])).stdout.trim();
+  await log?.(
+    `${repo}: moved the worktree without commits onto origin/${parent} (${head.slice(0, 8)})`,
+  );
+  return head;
+}
+
 export async function prepareWorkspace(
   run: { id: number; branch: string; inputs?: Record<string, unknown> | null },
   repo: string,
@@ -605,7 +696,11 @@ async function prepareLockedWorkspace(
     throw new Error(
       `${repo}: branch is checked out in the primary checkout; switch it before continuing`,
     );
-  const workspace = { repo, branch: b.branch, path: b.path, created_from: b.createdFrom };
+  let createdFrom = b.createdFrom;
+  const stackedOn = saved?.branch && !subtaskId ? branchFor(run, repo).parent : undefined;
+  if (stackedOn)
+    createdFrom = (await advanceToParent(b.path, repo, stackedOn, opts.log)) ?? createdFrom;
+  const workspace = { repo, branch: b.branch, path: b.path, created_from: createdFrom };
   await recordWorkspace(run.id, workspace, pool, subtaskId);
   return workspace;
 }
