@@ -57,10 +57,12 @@ jobs:
           curl -fsSLo "/tmp/$f" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$f"
           echo "${GITLEAKS_SHA256}  /tmp/$f" | sha256sum -c -
           tar -xzf "/tmp/$f" -C /tmp gitleaks
-      # Whole history on a push or schedule, only the pull request's commits on a PR. Config: .gitleaks.toml.
+      # Whole history on a push or schedule, only the pull request's commits on a PR. Config: .gitleaks.toml. The baseline lists the
+      # 76 findings that were in history when the scan was introduced (all fake credentials in tests and fixtures, or key
+      # names mistaken for secrets); anything not in it fails the job.
       - name: Scan pull request commits
         if: github.event_name == 'pull_request'
-        run: /tmp/gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" .
+        run: /tmp/gitleaks git --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --no-banner --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" .
       - name: Scan history
         if: github.event_name != 'pull_request'
-        run: /tmp/gitleaks git --config .gitleaks.toml --redact --no-banner .
+        run: /tmp/gitleaks git --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --no-banner .
