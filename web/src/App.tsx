@@ -191,6 +191,7 @@ export function App() {
   const pageRef = useRef<HTMLElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
   const [openQuestions, setOpenQuestions] = useState(0);
+  const [pendingProposals, setPendingProposals] = useState(0);
   const [me, setMe] = useState<SessionUser | null | undefined>(undefined);
   const [support, setSupport] = useState(false);
   const signedOut = (message = "") => {
@@ -198,6 +199,7 @@ export function App() {
     setMe(null);
     setSupport(false);
     setOpenQuestions(0);
+    setPendingProposals(0);
     setNavOpen(false);
     setNotice(message);
   };
@@ -206,8 +208,12 @@ export function App() {
     Promise.all([
       api<unknown[]>("/api/questions"),
       api<unknown[]>("/api/approvals").catch(() => []),
+      api<unknown[]>("/api/knowledge-proposals?status=pending").catch(() => []),
     ])
-      .then(([q, a]) => setOpenQuestions(q.length + a.length))
+      .then(([q, a, p]) => {
+        setOpenQuestions(q.length + a.length);
+        setPendingProposals(p.length);
+      })
       .catch(() => {});
   useEffect(() => {
     api<{ user: SessionUser; csrf: string }>("/api/auth/me")
@@ -228,6 +234,12 @@ export function App() {
   }, [me]);
   useEffect(() => {
     if (me) void refreshCount();
+  }, [me]);
+  useEffect(() => {
+    if (!me) return;
+    const changed = () => void refreshCount();
+    window.addEventListener("proposals:changed", changed);
+    return () => window.removeEventListener("proposals:changed", changed);
   }, [me]);
   useEffect(() => {
     if (me?.role === "member" && hash.startsWith("/users")) location.hash = "/overview";
@@ -296,6 +308,10 @@ export function App() {
   let page;
   let full = false;
   const section = parts[0] ?? "overview";
+  const waiting: Record<string, { n: number; labelKey: string }> = {
+    questions: { n: openQuestions, labelKey: "nav.questionsWaiting" },
+    knowledge: { n: pendingProposals, labelKey: "nav.proposalsPending" },
+  };
   switch (section) {
     case "runs":
       if (parts[1]) {
@@ -425,14 +441,12 @@ export function App() {
                 >
                   <I size={18} strokeWidth={1.9} />
                   <span>{t(labelKey)}</span>
-                  {key === "questions" && openQuestions > 0 && (
+                  {(waiting[key]?.n ?? 0) > 0 && (
                     <span
                       className="count"
-                      aria-label={t("nav.questionsWaiting", {
-                        n: openQuestions,
-                      })}
+                      aria-label={t(waiting[key].labelKey, { n: waiting[key].n })}
                     >
-                      {openQuestions}
+                      {waiting[key].n}
                     </span>
                   )}
                 </a>

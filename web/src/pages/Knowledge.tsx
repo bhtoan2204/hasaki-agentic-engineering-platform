@@ -452,7 +452,13 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
             {itemKey === "~audit" ? (
               <KnowledgeAuditPanel />
             ) : itemKey === "~proposals" ? (
-              <ProposalsPanel id={subKey} onChanged={reloadAll} />
+              <ProposalsPanel
+                id={subKey}
+                onChanged={() => (
+                  reloadAll(),
+                  window.dispatchEvent(new Event("proposals:changed"))
+                )}
+              />
             ) : itemKey ? (
               <KnowledgeEditor
                 itemKey={itemKey}
