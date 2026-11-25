@@ -42,7 +42,14 @@ import {
   splunkTestConnection,
   validateInvestigationSpl,
 } from "../integrations/splunk.ts";
-import { vaultConnected, vaultExpired, vaultKeys, vaultList } from "../integrations/vault.ts";
+import {
+  setVaultKey,
+  vaultConnected,
+  vaultExpired,
+  vaultKeys,
+  vaultList,
+  vaultSetKeyTarget,
+} from "../integrations/vault.ts";
 import {
   aggregateLogs,
   getTrace,
@@ -867,6 +874,25 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: vaultAvailable,
     handler: ({ path, expect }) => vaultKeys(path, expect),
+  });
+  registerIntegrationTool({
+    name: "vault.set_key",
+    summary:
+      "QC Vault: set ONE allowlisted key of an existing secret (e.g. OTEL_ENDPOINT). Needs the user's confirmation in chat.",
+    description:
+      "Mutating (QC only; production Vault is read-only). Sets `key` to `value` in the KV v2 secret at `path`; other keys are untouched and the secret must already exist. " +
+      "Only paths and keys in the QC write allowlist. The call never runs directly: it becomes an operation the user confirms. " +
+      "Success means Vault stored the value, NOT that the service picked it up (it still needs a restart/sync). Read back with vault.keys, then operations.verify.",
+    input: z.object({
+      path: z.string().min(1),
+      key: z.string().min(1).max(200),
+      value: z.string().min(1).max(4000),
+    }),
+    readOnly: false,
+    confirm: true,
+    available: vaultAvailable,
+    preflight: ({ path, key }) => vaultSetKeyTarget({ path, key }),
+    handler: (a) => setVaultKey(a),
   });
   registerIntegrationTool({
     name: "splunk.search",

@@ -396,7 +396,7 @@ export interface Config {
    */
   /** Kafka UI (kafbat, QC). Session cookie pasted in the UI. cluster: empty = the only online cluster. */
   /** Vault (QC). Token pasted in the UI; values are never returned to agents. */
-  vault: { baseUrl: string };
+  vault: { baseUrl: string; writeAllow: Array<{ path: string; keys: string[] }> };
   /**
    * QC business HTTP from chat (src/integrations/qcHttp.ts). `hosts`: exact hosts or "*.suffix" the platform may call;
    * empty = disabled. A production-looking host is always refused. `internalHosts`: hosts allowed to resolve to private
@@ -795,7 +795,7 @@ const defaults: Config = {
     pollMs: 1000,
   },
   argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
-  vault: { baseUrl: "https://vault-qc-v2.hasaki.dev" },
+  vault: { baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [] },
   qcHttp: {
     hosts: [],
     internalHosts: [],

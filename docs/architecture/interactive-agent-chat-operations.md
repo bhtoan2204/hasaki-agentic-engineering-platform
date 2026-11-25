@@ -20,6 +20,16 @@ Routing: yêu cầu vận hành (kafka, publish, topic, tạo đơn, bảo hành
 - Tool `kafka.publish`: `readOnly: false`, `confirm: true`, có `preflight`. `callTool` từ chối mọi lời gọi không mang `confirmedOperation`, nên agent workflow (coding) và MCP không thể publish; workflow catalog cũng không liệt kê tool này.
 - Kết quả: `published: true, downstream_verified: false` kèm lời nhắc kiểm tra consumer lag, DB hoặc log. Publish thành công không có nghĩa là nghiệp vụ đã xử lý xong.
 
+## Vault set_key (QC)
+
+- Tool `vault.set_key {path, key, value}` (`setVaultKey` / `vaultWriteTarget` trong `src/integrations/vault.ts`): đổi đúng một key của một secret KV v2 đã tồn tại. `readOnly: false`, `confirm: true`, không preauthorized, nên chỉ chạy qua `chat_operations`.
+- Cấu hình `vault.writeAllow: [{path, keys}]`. Mặc định rỗng, tức ghi bị tắt. `path` kết thúc bằng `*` là prefix; `keys` khớp chính xác, phân biệt hoa thường.
+- Chỉ QC: từ chối nếu host của `vault.baseUrl` không phải QC hoặc có dạng production, và từ chối path có dạng production hoặc chứa `..`. Vault production chỉ đọc (`vault.list`, `vault.keys`).
+- Ghi bằng `PATCH {mount}/data/{path}` (`application/merge-patch+json`) kèm `options.cas` là version vừa đọc, nên key khác không bị đụng và ghi đè do race bị chặn. Mount KV v1 và secret chưa tồn tại bị từ chối.
+- Preflight đọc version hiện tại của secret và đưa vào khoá idempotency (`operationKeyFor`), nên đổi A→B→A là ba operation khác nhau; gửi lặp khi version chưa đổi vẫn bị chặn là `duplicate`.
+- Giá trị cũ không bao giờ được đọc ra kết quả. Kết quả: `written: true, version, downstream_verified: false`; service vẫn cần restart/sync để nhận giá trị mới. Model đọc lại bằng `vault.keys` rồi `operations.verify`.
+- Chưa chạy thử với Vault QC thật: PATCH và policy của token (cần `patch`/`update` trên path) chưa được xác minh.
+
 ## Operation (migration 078)
 
 `chat_operations`: lưu `pending → executing → succeeded | failed | unknown | rejected | expired | duplicate`.

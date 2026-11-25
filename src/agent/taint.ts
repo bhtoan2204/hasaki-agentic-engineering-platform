@@ -28,6 +28,7 @@ export const SINKS: Record<string, SinkSpec> = {
     targets: ["cluster", "topic"],
     payload: ["value", "key", "headers", "partition"],
   },
+  "vault.set_key": { targets: ["path", "key"], payload: ["value"] },
   // `method` and `auth` are small operator-defined vocabularies, not free destinations: the method is governed by the
   // pre-authorized rules (DELETE never runs unconfirmed) and an auth profile is bound to its hosts by configuration
   // (checked by the tool). Matching them against free text would only produce noise.

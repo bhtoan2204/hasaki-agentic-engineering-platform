@@ -37,6 +37,7 @@ test("sinks are declared for every mutating registry tool", async () => {
     "runs.resume",
     "runs.retry_step",
     "runs.start",
+    "vault.set_key",
   ]);
   // Chat-level actions (not registry tools) that an autonomy policy may run unattended also declare their fields.
   const chatSinks = ["work.delegate"];

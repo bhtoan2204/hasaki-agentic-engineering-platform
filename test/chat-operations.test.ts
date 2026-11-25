@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { config } from "../src/config.ts";
 import { kafkaPublishTarget } from "../src/integrations/kafka.ts";
 import { callTool, registerBuiltinTools } from "../src/agent/toolRegistry.ts";
-import { operationKey } from "../src/chat/operations.ts";
+import { operationKey, operationKeyFor } from "../src/chat/operations.ts";
 import { memoryCandidates, memoryKey } from "../src/chat/memory.ts";
 import { routeChatIntent } from "../src/chat/routing.ts";
 import { reconcilePending, type PendingMessage } from "../web/src/pages/chatOptimistic.ts";
@@ -151,5 +151,22 @@ test("optimistic messages: shown until a persisted turn carries the same client 
   assert.deepEqual(
     reconcilePending(pending, 2, undefined).map((x) => x.cid),
     ["c"],
+  );
+});
+
+test("operation key includes the target version: restoring an earlier value is a new operation, a repeat at the same version is not", () => {
+  const args = { path: "secret/payment/app", key: "OTEL_ENDPOINT", value: "A" };
+  const at = (version: number) =>
+    operationKeyFor(1, "vault.set_key", args, {
+      path: "secret/payment/app",
+      key: "OTEL_ENDPOINT",
+      version,
+    });
+  assert.equal(at(7), at(7));
+  assert.notEqual(at(7), at(8));
+  assert.equal(
+    operationKeyFor(1, "kafka.publish", { topic: "t" }, { cluster: "c", topic: "t" }),
+    operationKey(1, "kafka.publish", { topic: "t" }),
+    "tools whose target has no version keep the plain key",
   );
 });

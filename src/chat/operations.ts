@@ -65,6 +65,19 @@ export const operationKey = (ownerId: number, tool: string, args: unknown) =>
     .update(`${ownerId}|${tool}|${JSON.stringify(canonical(args))}`)
     .digest("hex");
 
+/** A target that carries the version it was read at (Vault CAS) makes a restore to an earlier value a new operation. */
+export const operationKeyFor = (
+  ownerId: number,
+  tool: string,
+  args: Record<string, unknown>,
+  target: Record<string, unknown>,
+) =>
+  operationKey(
+    ownerId,
+    tool,
+    target.version === undefined ? args : { ...args, target_version: target.version },
+  );
+
 const mutatingTool = (name: string) =>
   integrationTools().find((t) => t.name === name && !t.readOnly);
 
@@ -177,7 +190,7 @@ export async function proposeOperation(
     throw new Error(
       `operation budget reached: at most ${config.qcHttp.maxOperationsPerTurn} operations per turn — report what was done and stop`,
     );
-  const key = operationKey(binding.userId, tool, args);
+  const key = operationKeyFor(binding.userId, tool, args, target);
   const done = await one<OperationRow>(
     pool,
     "SELECT * FROM chat_operations WHERE owner_id = $1 AND idempotency_key = $2 AND status IN ('executing', 'succeeded', 'unknown') LIMIT 1",

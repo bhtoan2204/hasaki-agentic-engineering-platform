@@ -7,8 +7,8 @@ import { parseCurl } from "./curl.ts";
  * HashiCorp Vault (QC) — lets an agent check which secrets/keys a service has, never their values.
  *
  * The developer logs in to the Vault UI (OIDC/Keycloak) and pastes the token from the user menu ("Copy token"). The
- * platform only reads (GET, `?list=true` for listings); the single write is renewing that same token (`renew-self`) so
- * it lives as long as Vault allows. Secret values are read server-side and reduced to presence/length before anything
+ * platform reads (GET, `?list=true` for listings); its writes are renewing that same token (`renew-self`) so it lives
+ * as long as Vault allows, and `vault.set_key` (QC only, allowlisted, user-confirmed, one key at a time). Secret values are read server-side and reduced to presence/length before anything
  * is returned; only short numbers/booleans under non-sensitive key names are shown as-is (e.g. a timeout of 15).
  */
 
@@ -64,18 +64,24 @@ type VaultData = {
   keys?: string[];
   data?: Record<string, unknown>;
   metadata?: { version?: number; created_time?: string };
+  version?: number;
 };
 
 async function call(
   path: string,
   token: string,
-  opts: { method?: "GET" | "POST"; params?: Record<string, string> } = {},
+  opts: { method?: "GET" | "POST" | "PATCH"; params?: Record<string, string>; body?: unknown } = {},
 ) {
   const url = new URL(`${baseUrl()}/v1/${path.replace(/^\/+/, "")}`);
   for (const [k, v] of Object.entries(opts.params ?? {})) url.searchParams.set(k, v);
   const res = await fetch(url, {
     method: opts.method ?? "GET",
-    headers: { "X-Vault-Token": token, Accept: "application/json" },
+    headers: {
+      "X-Vault-Token": token,
+      Accept: "application/json",
+      ...(opts.body === undefined ? {} : { "Content-Type": "application/merge-patch+json" }),
+    },
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     signal: AbortSignal.timeout(15_000),
   });
   const j: { errors?: string[]; data?: VaultData } = await res.json().catch(() => ({}));
@@ -288,6 +294,83 @@ export async function vaultKeys(path: string, expect?: string[]) {
     });
   }
   return out;
+}
+
+const PRODUCTION = /(^|[^a-z])(prod|production|live|prd)([^a-z]|$)/i;
+
+/** The KV v2 secret and key a write would target, or an error: QC allowlist only, production never. */
+export async function vaultWriteTarget(path: string, key: string) {
+  const host = new URL(baseUrl()).hostname;
+  if (!/(^|[.-])qc([.-]|\d|$)/i.test(host) || PRODUCTION.test(host))
+    throw new Error(`writing is refused: Vault ${host} is not a QC environment`);
+  const allow = config.vault.writeAllow ?? [];
+  if (!allow.length)
+    throw new Error("writing is disabled: no QC Vault path is allowlisted (vault.writeAllow)");
+  if (!/^[A-Za-z0-9_./-]+$/.test(path))
+    throw new Error(
+      `path "${path}" has unsupported characters (allowed: letters, digits, _ . - /)`,
+    );
+  const segments = path.split("/").filter(Boolean);
+  if (segments.some((s) => s === ".." || s === "."))
+    throw new Error(`path "${path}" must not contain ".." or "."`);
+  const clean = segments.join("/");
+  if (PRODUCTION.test(clean))
+    throw new Error(`writing to production (${clean}) is never allowed from chat`);
+  const ok = allow.some(
+    (a) =>
+      a.keys.includes(key) &&
+      (a.path.endsWith("*") ? clean.startsWith(a.path.slice(0, -1)) : a.path === clean),
+  );
+  if (!ok) throw new Error(`${clean} ${key} is not in the QC write allowlist`);
+  const { mount, rest } = split(await mounts(), clean);
+  if (!rest) throw new Error("need a path to a secret, not a mount");
+  if (mount.version !== 2)
+    throw new Error(`mount ${mount.path} is KV v1: only KV v2 can be written`);
+  return { path: `${mount.path}/${rest}`, mount: mount.path, rest };
+}
+
+async function readWriteTarget(a: { path: string; key: string }) {
+  const t = await vaultWriteTarget(a.path, a.key);
+  const token = requireToken();
+  const cur = await call(`${t.mount}/data/${t.rest}`, token);
+  if (!cur) throw new Error(`secret ${t.path} does not exist; creating secrets is not supported`);
+  const cas = Number(cur.data?.metadata?.version);
+  if (!Number.isInteger(cas))
+    throw new Error(
+      `secret ${t.path} has no readable version; refusing to write without check-and-set`,
+    );
+  return { ...t, token, cas };
+}
+
+/** What a write would target and the secret version it was read at (used by the confirmation and the idempotency key). */
+export async function vaultSetKeyTarget(a: { path: string; key: string }) {
+  const t = await readWriteTarget(a);
+  return { path: t.path, key: a.key, version: t.cas };
+}
+
+/** Set one key of an existing KV v2 secret (merge-patch with check-and-set). The old value is never read into the result. */
+export async function setVaultKey(a: { path: string; key: string; value: string }) {
+  const t = await readWriteTarget(a);
+  const { token, cas } = t;
+  let j;
+  try {
+    j = await call(`${t.mount}/data/${t.rest}`, token, {
+      method: "PATCH",
+      body: { options: { cas }, data: { [a.key]: a.value } },
+    });
+  } catch (e) {
+    if (/check-and-set/i.test(String(e)))
+      throw new Error(`secret ${t.path} changed since it was read; read it again and retry`);
+    throw e;
+  }
+  if (!j) throw new Error(`secret ${t.path} was not written: Vault answered 404 to the patch`);
+  return {
+    written: true as const,
+    path: t.path,
+    key: a.key,
+    version: Number(j?.data?.version),
+    downstream_verified: false as const,
+  };
 }
 
 /**
