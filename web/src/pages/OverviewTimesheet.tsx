@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react";
-import { useApi } from "../api.ts";
-import { ErrorBox, Skeleton } from "../ui.tsx";
+import { api, useApi } from "../api.ts";
+import { act, ErrorBox, Skeleton } from "../ui.tsx";
 import { uiLocale, useI18n } from "../i18n/index.tsx";
 
 type Kind = "full" | "half_leave" | "missing_punch";
@@ -11,6 +11,8 @@ interface Day {
   check_in: number | null;
   check_out: number | null;
   kind: Kind;
+  auto_kind: Kind;
+  overridden: boolean;
   missing: "in" | "out" | "both" | "invalid" | null;
   session: "morning" | "afternoon" | null;
   late_by: number | null;
@@ -71,6 +73,7 @@ export function TimesheetCard() {
   const { t } = useI18n();
   const [at, setAt] = useState(thisMonth);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
   const { data, error, loading, reload } = useApi<Sheet>(
     `/api/timesheet?year=${at.year}&month=${at.month}`,
   );
@@ -90,6 +93,13 @@ export function TimesheetCard() {
         : d.kind === "half_leave"
           ? t(`ts.half.${d.session ?? "morning"}`)
           : t("ts.full");
+
+  const setKind = async (date: string, kind: "auto" | "full" | "half_leave") => {
+    setSaving(date);
+    const ok = await act(() => api("/api/timesheet/day-kind", { date, kind }), t("ts.saved"));
+    setSaving(null);
+    if (ok) reload();
+  };
 
   return (
     <section className="card ov-timesheet">
@@ -178,6 +188,7 @@ export function TimesheetCard() {
                     <th>{t("ts.col.date")}</th>
                     <th>{t("ts.col.inOut")}</th>
                     <th>{t("ts.col.result")}</th>
+                    <th>{t("ts.col.kind")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -202,6 +213,39 @@ export function TimesheetCard() {
                         <span className={`ts-kind ts-${d.in_progress ? "progress" : d.kind}`}>
                           {kindText(d)}
                         </span>
+                        {d.overridden && (
+                          <span
+                            className="ts-kind ts-edited"
+                            title={t("ts.editedHint", {
+                              auto: t(
+                                d.auto_kind === "half_leave"
+                                  ? "ts.kind.half_leave"
+                                  : "ts.kind.full",
+                              ),
+                            })}
+                          >
+                            {t("ts.edited")}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {d.date && !d.in_progress && d.auto_kind !== "missing_punch" ? (
+                          <select
+                            className="sm"
+                            aria-label={`${t("ts.col.kind")} ${dayLabel(d.date)}`}
+                            disabled={saving === d.date}
+                            value={d.overridden ? d.kind : "auto"}
+                            onChange={(e) =>
+                              setKind(d.date!, e.target.value as "auto" | "full" | "half_leave")
+                            }
+                          >
+                            <option value="auto">{t("ts.kind.auto")}</option>
+                            <option value="full">{t("ts.kind.full")}</option>
+                            <option value="half_leave">{t("ts.kind.half_leave")}</option>
+                          </select>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                     </tr>
                   ))}

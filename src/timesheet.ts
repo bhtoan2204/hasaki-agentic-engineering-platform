@@ -1,5 +1,6 @@
 import { authStatus, workApi } from "./hasakiAuth.ts";
 import { HttpError } from "./http/error.ts";
+import { pool, q } from "./db/pool.ts";
 
 /**
  * Monthly attendance of the signed-in user from Hasaki HR (wshr API, the user's own Hasaki Work token), with the
@@ -39,6 +40,9 @@ export interface TimesheetDay {
   diff_seconds: number;
   /** Today before the shift ends: shown, but left out of the month totals until the day is over. */
   in_progress?: boolean;
+  /** The classification the HR punches give; `kind` differs from it when the user corrected the day. */
+  auto_kind: DayKind;
+  overridden: boolean;
 }
 
 type Row = {
@@ -129,6 +133,69 @@ export function resolveDay(day: ReturnType<typeof classifyDay>, kind: DayKind = 
   };
 }
 
+/**
+ * The user's own classification of a day with both punches (late arrival vs. half-day leave): the day is resolved as that
+ * kind. A day with a missing punch has its own flow (a forgotten-attendance request), so a correction never applies to it.
+ */
+export function applyOverride(
+  facts: ReturnType<typeof classifyDay>,
+  override: Exclude<DayKind, "missing_punch"> | undefined,
+): Omit<TimesheetDay, "in_progress"> {
+  const auto = facts.kind;
+  if (!override || auto === "missing_punch" || override === auto)
+    return { ...facts, ...resolveDay(facts), auto_kind: auto, overridden: false };
+  const session =
+    override === "half_leave"
+      ? (facts.late_by ?? 0) >= (facts.early_by ?? 0)
+        ? "morning"
+        : "afternoon"
+      : null;
+  return {
+    ...facts,
+    ...resolveDay(facts, override),
+    session,
+    auto_kind: auto,
+    overridden: true,
+  };
+}
+
+export const DAY_KINDS = ["full", "half_leave"] as const;
+
+async function dayOverrides(userId: number, fromDate: string, toDate: string) {
+  const rows = await q<{ work_date: string; kind: "full" | "half_leave" }>(
+    pool,
+    "SELECT to_char(work_date, 'YYYY-MM-DD') AS work_date, kind FROM timesheet_day_overrides WHERE user_id = $1 AND work_date BETWEEN $2 AND $3",
+    [userId, fromDate, toDate],
+  );
+  return new Map(rows.map((r) => [r.work_date, r.kind]));
+}
+
+/** Corrects the classification of one day; `auto` removes the correction. */
+export async function setDayKind(userId: number, date: unknown, kind: unknown) {
+  const day = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
+  if (
+    !day ||
+    Number.isNaN(Date.parse(`${day}T00:00:00Z`)) ||
+    new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day
+  )
+    throw new HttpError(400, "invalid date");
+  if (kind === "auto") {
+    await q(pool, "DELETE FROM timesheet_day_overrides WHERE user_id = $1 AND work_date = $2", [
+      userId,
+      day,
+    ]);
+    return { date: day, kind: "auto" as const };
+  }
+  if (kind !== "full" && kind !== "half_leave") throw new HttpError(400, "invalid kind");
+  await q(
+    pool,
+    `INSERT INTO timesheet_day_overrides (user_id, work_date, kind) VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, work_date) DO UPDATE SET kind = excluded.kind, updated_at = now()`,
+    [userId, day, kind],
+  );
+  return { date: day, kind };
+}
+
 export function summarize(all: TimesheetDay[]) {
   const days = all.filter((d) => !d.in_progress);
   const counts = { full: 0, half_leave: 0, missing_punch: 0 };
@@ -143,6 +210,7 @@ export function summarize(all: TimesheetDay[]) {
     valid_days: days.length,
     day_counts: counts,
     half_leave_days: days.filter((d) => d.kind === "half_leave").map((d) => d.date),
+    overridden_days: days.filter((d) => d.overridden).map((d) => d.date),
     missing_punch_days: days.filter((d) => d.kind === "missing_punch").map((d) => d.date),
     total_worked_seconds: worked,
     total_target_seconds: target,
@@ -196,11 +264,12 @@ export async function myTimesheet(userId: number, year: number, month: number, n
     page: 1,
   });
   const rows: Row[] = Array.isArray(sheet?.data?.rows) ? sheet.data.rows : [];
+  const overrides = await dayOverrides(userId, fromDate, toDate);
   const days = markInProgress(
     rows
       .map((row): TimesheetDay => {
         const facts = classifyDay(row);
-        return { ...facts, ...resolveDay(facts) };
+        return applyOverride(facts, overrides.get(String(facts.date)));
       })
       .sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? ""))),
     nowMs,

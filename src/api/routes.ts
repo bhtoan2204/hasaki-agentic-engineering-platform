@@ -87,7 +87,7 @@ import { knowledgeUsage } from "../knowledge/usageRepository.ts";
 import { listEvalResults } from "../eval/resultsRepository.ts";
 import { inbox } from "../db.ts";
 import { authStatus, closeLoginWindow, openLoginWindow, setToken } from "../hasakiAuth.ts";
-import { myTimesheet } from "../timesheet.ts";
+import { myTimesheet, setDayKind } from "../timesheet.ts";
 import { fetchTaskList, importHasakiTask, pickTask } from "../work.ts";
 import { argoStatus, clearArgoToken, setArgoToken } from "../integrations/argocd.ts";
 import {
@@ -2536,6 +2536,11 @@ export const routes: Route[] = [
         Number(url.searchParams.get("year")),
         Number(url.searchParams.get("month")),
       ),
+  ],
+  [
+    "POST",
+    /^\/api\/timesheet\/day-kind$/,
+    ({ actor, body }) => setDayKind(actor.id, body.date, body.kind),
   ],
   [
     "POST",

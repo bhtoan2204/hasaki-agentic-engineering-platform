@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyOverride,
   classifyDay,
   markInProgress,
-  resolveDay,
   summarize,
   type TimesheetDay,
 } from "../src/timesheet.ts";
@@ -19,10 +19,7 @@ const row = (checkIn: number | null, checkOut: number | null, extra = {}) => ({
   staff_schedule: { staffsche_time_in: IN, staffsche_time_out: OUT, staffsche_shift: "HC 7" },
   ...extra,
 });
-const day = (r: ReturnType<typeof row>): TimesheetDay => {
-  const facts = classifyDay(r);
-  return { ...facts, ...resolveDay(facts) };
-};
+const day = (r: ReturnType<typeof row>): TimesheetDay => applyOverride(classifyDay(r), undefined);
 
 test("a regular day: worked minus the shift span, late and early measured against the schedule", () => {
   const d = day(row(IN + 600, OUT + 1800));
@@ -84,4 +81,39 @@ test("today before the shift ends is shown but not counted; a finished day is co
     true,
     "today without a check-out yet is not a forgotten punch",
   );
+});
+
+test("a day the user corrected is resolved as the chosen kind; the automatic kind stays visible", () => {
+  const lateMorning = row(IN + 4 * 3600, OUT);
+  const auto = day(lateMorning);
+  assert.equal(auto.kind, "half_leave");
+  assert.equal(auto.overridden, false);
+  const late = applyOverride(classifyDay(lateMorning), "full");
+  assert.equal(late.kind, "full", "the user was late, not on leave");
+  assert.equal(late.auto_kind, "half_leave");
+  assert.equal(late.overridden, true);
+  assert.equal(late.session, null);
+  assert.equal(late.target_seconds, 9 * 3600);
+  assert.equal(late.diff_seconds, 5 * 3600 - 9 * 3600);
+  const leave = applyOverride(classifyDay(row(IN + 3600, OUT)), "half_leave");
+  assert.equal(leave.kind, "half_leave");
+  assert.equal(leave.session, "morning");
+  assert.equal(leave.target_seconds, 4.5 * 3600);
+  assert.equal(
+    applyOverride(classifyDay(row(IN, OUT - 4 * 3600)), "half_leave").session,
+    "afternoon",
+  );
+  const same = applyOverride(classifyDay(lateMorning), "half_leave");
+  assert.equal(same.overridden, false, "choosing what the punches already say is not a correction");
+});
+
+test("a correction never applies to a day with a missing punch, and the summary counts corrected days", () => {
+  const missing = applyOverride(classifyDay(row(null, OUT)), "full");
+  assert.equal(missing.kind, "missing_punch");
+  assert.equal(missing.overridden, false);
+  const corrected = applyOverride(classifyDay(row(IN + 4 * 3600, OUT)), "full");
+  const s = summarize([corrected, day(row(IN, OUT))]);
+  assert.deepEqual(s.day_counts, { full: 2, half_leave: 0, missing_punch: 0 });
+  assert.deepEqual(s.overridden_days, ["2026-11-02"]);
+  assert.equal(s.difference_seconds, 5 * 3600 - 9 * 3600);
 });
