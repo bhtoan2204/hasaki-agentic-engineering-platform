@@ -21,7 +21,16 @@ const args = Object.fromEntries(
 );
 if (args.suite === "adaptive-v1") {
   if (args.fixture === "true") {
-    execFileSync(process.execPath, ["--disable-warning=ExperimentalWarning", "--import", "./test/setup.ts", "test/adaptive.bench.ts"], { stdio: "inherit" });
+    execFileSync(
+      process.execPath,
+      [
+        "--disable-warning=ExperimentalWarning",
+        "--import",
+        "./test/setup.ts",
+        "test/adaptive.bench.ts",
+      ],
+      { stdio: "inherit" },
+    );
     process.exit(0);
   }
   await import("./benchAdaptive.ts");
@@ -54,7 +63,7 @@ const db = `platform_legacy_bench_${process.pid}_${randomUUID().replace(/-/g, ""
 {
   const c = new pg.Client({ connectionString: admin });
   await c.connect();
-  await c.query(`CREATE DATABASE ${db}`);
+  await c.query(`CREATE DATABASE ${c.escapeIdentifier(db)}`);
   await c.end();
 }
 const u = new URL(admin);
@@ -635,7 +644,7 @@ await pool.end();
 const cleanup = new pg.Client({ connectionString: admin });
 try {
   await cleanup.connect();
-  await cleanup.query(`DROP DATABASE ${db} WITH (FORCE)`);
+  await cleanup.query(`DROP DATABASE ${cleanup.escapeIdentifier(db)} WITH (FORCE)`);
 } finally {
   await cleanup.end();
 }

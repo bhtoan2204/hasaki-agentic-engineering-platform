@@ -106,7 +106,7 @@ export async function isolatedDatabase(root: string) {
     await admin.connect();
     const name = `platform_eval_${randomUUID().replaceAll("-", "")}`;
     try {
-      await admin.query(`CREATE DATABASE ${name}`);
+      await admin.query(`CREATE DATABASE ${admin.escapeIdentifier(name)}`);
     } finally {
       await admin.end();
     }

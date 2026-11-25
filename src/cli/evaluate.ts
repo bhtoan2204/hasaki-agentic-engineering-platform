@@ -31,7 +31,7 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
 const admin = new pg.Client({ connectionString: url.toString() });
 await admin.connect();
 const databaseName = `platform_eval_${crypto.randomUUID().replaceAll("-", "")}`;
-await admin.query(`CREATE DATABASE ${databaseName}`);
+await admin.query(`CREATE DATABASE ${admin.escapeIdentifier(databaseName)}`);
 await admin.end();
 url.pathname = `/${databaseName}`;
 process.env.DATABASE_URL = url.toString();
@@ -262,7 +262,7 @@ try {
   });
   await cleanup.connect();
   try {
-    await cleanup.query(`DROP DATABASE ${databaseName} WITH (FORCE)`);
+    await cleanup.query(`DROP DATABASE ${cleanup.escapeIdentifier(databaseName)} WITH (FORCE)`);
   } finally {
     await cleanup.end();
   }
