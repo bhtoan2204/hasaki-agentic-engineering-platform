@@ -112,6 +112,8 @@ const DOCUMENT_EXT = /\.(pdf|docx|xlsx|md|markdown|txt|json|csv)$/i;
 const DOCUMENT_BYTES = 10 * 1024 * 1024;
 const DOCUMENTS_PER_MESSAGE = 10;
 const TOTAL_BYTES = 40 * 1024 * 1024;
+/** Pasted text longer than this becomes a .txt attachment instead of filling the composer and the bubble. */
+const PASTE_AS_FILE_CHARS = 4000;
 const isImage = (f: File) => IMAGE_TYPES.includes(f.type);
 const isDocument = (f: File) => !isImage(f) && DOCUMENT_EXT.test(f.name);
 const sizeLabel = (n: number) =>
@@ -1846,6 +1848,15 @@ export function ChatPage({ conversationId }: { conversationId?: number }) {
                   const files = Array.from(e.clipboardData.files).filter(
                     (f) => isImage(f) || isDocument(f),
                   );
+                  const text = e.clipboardData.getData("text");
+                  if (!files.length && text.length > PASTE_AS_FILE_CHARS) {
+                    e.preventDefault();
+                    const stamp = new Date().toTimeString().slice(0, 8).replaceAll(":", "");
+                    addImages([
+                      new File([text], `pasted-text-${stamp}.txt`, { type: "text/plain" }),
+                    ]);
+                    return;
+                  }
                   if (!files.length) return;
                   // A pasted screenshot is an attachment; pasted text keeps its default behaviour.
                   if (!e.clipboardData.getData("text")) e.preventDefault();
