@@ -509,6 +509,19 @@ test("published feature and bug templates enable a bounded independent review re
     const verifiers = spec.steps.filter((s) => s.config.independent === true);
     assert.deepEqual(verifiers, [], `${key} must not get an implicit repair loop`);
   }
+  for (const key of ["refactoring", "refactor-from-task"]) {
+    const spec = validateSpec(TEMPLATES.find((t) => t.key === key)!.spec);
+    const review = spec.steps.find((s) => s.key === "review")!;
+    assert.equal(review.type, "agent", `${key} has a code review step`);
+    assert.deepEqual(review.depends_on, ["regression_test"], `${key}: review follows the tests`);
+    assert.deepEqual(
+      spec.steps.find((s) => s.key === "pr")!.depends_on,
+      ["review"],
+      `${key}: the PR waits for the review`,
+    );
+    assert.match(String(review.config.instructions), /behaviour must stay unchanged/);
+    assert.notEqual(review.config.independent, true, "no implicit repair loop in a refactor");
+  }
   const codeReview = validateSpec(TEMPLATES.find((t) => t.key === "code-review")!.spec);
   assert.ok(
     codeReview.steps.some((s) => s.type === "human_approval"),

@@ -391,6 +391,7 @@ const REQUIRED_TESTS_RULE =
   "required_tests holds only executable test IDs the platform runs after implementation: Go `<module path>/<package path>/TestName`, or a Node --test file such as `<repo>::test/foo.test.ts`. " +
   "Prefix `<repo>::` when the ID could match more than one repository. Never put shell commands (go build, npm run lint/build), prose or test descriptions there; " +
   "list those under regression_tests. Leave required_tests empty when no such test exists yet in a form you can name exactly. ";
+
 const ROOT_CAUSE_CONTRACT =
   "root_cause_assessment: { status: 'CONFIRMED'|'PROBABLE'|'UNCONFIRMED'|'INSUFFICIENT_EVIDENCE', confidence: 'low'|'medium'|'high', explanation, supporting_claims: string[] }";
 
@@ -484,6 +485,17 @@ const BUG_IMPLEMENT = {
     "If you must change anything outside the approved scope, list it in scope_deviations with its risk: a deviation riskier than the approved risk pauses for renewed approval.",
   output_contract:
     "{ summary, pull_requests: { [repo]: { title, summary, decisions } }, verification, scope_deviations?: [{ description, files, risk: 'LOW'|'MEDIUM'|'HIGH', reason }] }",
+};
+
+const REFACTOR_REVIEW = {
+  ...REVIEW,
+  independent: false,
+  max_repairs: 0,
+  instructions:
+    REVIEW.instructions +
+    " This is a refactor: behaviour must stay unchanged. Flag any change to a public API or contract, to error handling or logging that callers observe, to transaction or idempotency behaviour, or to a business result. " +
+    "Check that the safety_net tests of the approved plan exist and still pass, that the diff stays inside the plan's scope (no drive-by changes), " +
+    "and that the new code follows the architectural patterns of its neighbouring code instead of introducing a second way of doing something the codebase already does.",
 };
 
 const BUG_REVIEW = {
@@ -1509,10 +1521,17 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
           },
         },
         {
+          key: "review",
+          type: "agent",
+          name: "Code Review",
+          depends_on: ["regression_test"],
+          config: REFACTOR_REVIEW,
+        },
+        {
           key: "pr",
           type: "git_pull_request",
           name: "Pull Request",
-          depends_on: ["regression_test"],
+          depends_on: ["review"],
           config: { mode: "approval", content_from: "refactor" },
         },
         qcMerge("pr"),
