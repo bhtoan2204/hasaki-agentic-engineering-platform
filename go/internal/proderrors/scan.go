@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"claude-task-platform/go/internal/worker"
+	"hasaki-orbit/go/internal/worker"
 )
 
 type Config struct {

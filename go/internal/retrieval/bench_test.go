@@ -15,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"claude-task-platform/go/internal/retrieval/embed"
-	"claude-task-platform/go/internal/testutil"
+	"hasaki-orbit/go/internal/retrieval/embed"
+	"hasaki-orbit/go/internal/testutil"
 )
 
 const benchDims = 1024

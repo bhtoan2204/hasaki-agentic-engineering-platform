@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"claude-task-platform/go/internal/testutil"
+	"hasaki-orbit/go/internal/testutil"
 )
 
 func TestProviders(t *testing.T) {

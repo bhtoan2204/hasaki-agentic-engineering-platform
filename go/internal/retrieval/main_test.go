@@ -9,9 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"claude-task-platform/go/internal/platform"
-	"claude-task-platform/go/internal/retrieval/embed"
-	"claude-task-platform/go/internal/testutil"
+	"hasaki-orbit/go/internal/platform"
+	"hasaki-orbit/go/internal/retrieval/embed"
+	"hasaki-orbit/go/internal/testutil"
 )
 
 const testDims = 256

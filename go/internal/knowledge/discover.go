@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-task-platform/go/internal/jsstr"
+	"hasaki-orbit/go/internal/jsstr"
 )
 
 // Repository is one repository TypeScript selected and authorized for the scan.

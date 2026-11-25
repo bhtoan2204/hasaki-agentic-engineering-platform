@@ -2,7 +2,7 @@ package codeintelligence
 
 import (
 	"bufio"
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 	"context"
 	"encoding/json"
 	"errors"

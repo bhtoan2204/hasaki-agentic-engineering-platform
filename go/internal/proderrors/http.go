@@ -3,7 +3,7 @@ package proderrors
 import (
 	"net/http"
 
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 )
 
 // Routes registers POST /internal/v1/jobs/wake: TypeScript queued a job, claim now instead of at the next poll.

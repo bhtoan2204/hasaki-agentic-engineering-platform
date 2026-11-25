@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 )
 
 // maxJobDuration bounds one request whatever the caller asks (the TypeScript job timeout is far below it).

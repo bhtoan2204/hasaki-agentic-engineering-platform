@@ -24,7 +24,7 @@ import (
 	tsjs "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
 	tsts "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 
-	tssql "claude-task-platform/go/internal/codeintelligence/grammar/sql"
+	tssql "hasaki-orbit/go/internal/codeintelligence/grammar/sql"
 )
 
 // ExtractorVersion is the INDEX_VERSION prefix of src/codeIntelligence/parser.ts this extractor reproduces. The

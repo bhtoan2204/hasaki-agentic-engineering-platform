@@ -11,7 +11,7 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 )
 
 var sourceKinds = []string{"knowledge", "skill", "task_memory", "lesson", "chat_memory"}

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 )
 
 // ScanVersion is KNOWLEDGE_SCAN_VERSION of src/knowledge/goKnowledge.ts: the discovery rules both engines implement.

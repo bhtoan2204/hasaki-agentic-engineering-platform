@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 )
 
 // Response is the v1 envelope (go/contracts/analytics-v1.schema.json).

@@ -1,7 +1,7 @@
 package codeintelligence
 
 import (
-	"claude-task-platform/go/internal/jsstr"
+	"hasaki-orbit/go/internal/jsstr"
 	"regexp"
 	"strings"
 )

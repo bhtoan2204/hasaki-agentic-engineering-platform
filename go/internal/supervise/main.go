@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 )
 
 // Exit ends the launcher the way the command ended: with its exit code, or with the signal that killed it, so the

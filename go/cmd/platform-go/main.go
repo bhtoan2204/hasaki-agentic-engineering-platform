@@ -15,14 +15,14 @@ import (
 	"syscall"
 	"time"
 
-	"claude-task-platform/go/internal/analytics"
-	"claude-task-platform/go/internal/codeintelligence"
-	"claude-task-platform/go/internal/knowledge"
-	"claude-task-platform/go/internal/platform"
-	"claude-task-platform/go/internal/proderrors"
-	"claude-task-platform/go/internal/retrieval"
-	"claude-task-platform/go/internal/retrieval/embed"
-	"claude-task-platform/go/internal/worker"
+	"hasaki-orbit/go/internal/analytics"
+	"hasaki-orbit/go/internal/codeintelligence"
+	"hasaki-orbit/go/internal/knowledge"
+	"hasaki-orbit/go/internal/platform"
+	"hasaki-orbit/go/internal/proderrors"
+	"hasaki-orbit/go/internal/retrieval"
+	"hasaki-orbit/go/internal/retrieval/embed"
+	"hasaki-orbit/go/internal/worker"
 )
 
 func main() {

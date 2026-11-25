@@ -35,7 +35,7 @@ export async function eligiblePonytailRepositories(rows: RepositoryRow[]) {
       (r) =>
         r.enabled &&
         r.provider !== "benchmark" &&
-        !/^(?:hasaki-agentic-engineering-platform|claude-task-platform)$/.test(r.name),
+        !/^(?:hasaki-agentic-engineering-platform|claude-task-platform|hasaki-orbit)$/.test(r.name),
     )
     .sort((a, b) => a.name.localeCompare(b.name));
   // A renamed or re-registered copy of this platform must never become a benchmark target; unknown means excluded.

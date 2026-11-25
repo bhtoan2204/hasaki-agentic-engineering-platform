@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"claude-task-platform/go/internal/jsstr"
+	"hasaki-orbit/go/internal/jsstr"
 )
 
 // Limits bound one scan (ScanRequest.limits); the same values as SCAN_LIMITS of the TypeScript engine.

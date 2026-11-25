@@ -15,7 +15,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"claude-task-platform/go/internal/platform"
+	"hasaki-orbit/go/internal/platform"
 )
 
 const testToken = "test-token-0123456789abcdef-0123456789"

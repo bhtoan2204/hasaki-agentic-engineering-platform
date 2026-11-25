@@ -25,7 +25,7 @@ export function liveApplicationRoot(): string | null {
     if (existsSync(pkg) && existsSync(join(dir, ".git"))) {
       try {
         const name = JSON.parse(readFileSync(pkg, "utf8")).name;
-        if (name === "claude-task-platform") {
+        if (name === "hasaki-orbit") {
           liveRoot = realpathSync(dir);
           return liveRoot;
         }

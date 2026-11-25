@@ -6,7 +6,7 @@ package main
 import (
 	"os"
 
-	"claude-task-platform/go/internal/supervise"
+	"hasaki-orbit/go/internal/supervise"
 )
 
 func main() {

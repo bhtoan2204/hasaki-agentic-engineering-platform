@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"claude-task-platform/go/internal/worker"
+	"hasaki-orbit/go/internal/worker"
 )
 
 // RequiredSchemaVersion is the migration that made scans durable jobs (085_prod_error_scan_jobs).

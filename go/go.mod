@@ -1,4 +1,4 @@
-module claude-task-platform/go
+module hasaki-orbit/go
 
 go 1.26.11
 

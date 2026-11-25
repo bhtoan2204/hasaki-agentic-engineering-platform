@@ -1,7 +1,7 @@
 services:
   postgres:
     image: docker.io/pgvector/pgvector:pg17
-    container_name: claude-task-platform-db
+    container_name: hasaki-orbit-db
     environment:
       POSTGRES_USER: platform
       POSTGRES_PASSWORD: platform
@@ -14,7 +14,7 @@ services:
 
   ollama:
     image: docker.io/ollama/ollama:latest
-    container_name: claude-task-platform-ollama
+    container_name: hasaki-orbit-ollama
     ports:
       - "127.0.0.1:11434:11434"
     environment:
@@ -33,7 +33,7 @@ services:
 
   ollama-init:
     image: docker.io/ollama/ollama:latest
-    container_name: claude-task-platform-ollama-init
+    container_name: hasaki-orbit-ollama-init
     depends_on:
       ollama:
         condition: service_healthy

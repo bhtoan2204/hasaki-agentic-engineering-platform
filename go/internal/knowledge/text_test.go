@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"claude-task-platform/go/internal/jsstr"
+	"hasaki-orbit/go/internal/jsstr"
 )
 
 // testdata/text-golden.json is what the TypeScript importer computes on these inputs

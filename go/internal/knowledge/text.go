@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"claude-task-platform/go/internal/jsstr"
+	"hasaki-orbit/go/internal/jsstr"
 )
 
 // Text rules of src/knowledge/importer.ts, reproduced with their JavaScript semantics (UTF-16 lengths, JS `\s`,

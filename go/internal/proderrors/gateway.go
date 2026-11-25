@@ -17,7 +17,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"claude-task-platform/go/internal/worker"
+	"hasaki-orbit/go/internal/worker"
 )
 
 // Gateway calls the TypeScript provider gateway (src/prodErrors/gateway.ts). It never sees provider credentials:
