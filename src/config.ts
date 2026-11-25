@@ -76,7 +76,7 @@ export interface SlopSettings {
 }
 
 export interface GitlabInstance {
-  /** Lower-case host name, e.g. "gitlab.com" or "gitlab.hasaki.work". No scheme, path or port. */
+  /** Lower-case host name, e.g. "gitlab.com" or "gitlab.example.com". No scheme, path or port. */
   host: string;
   /** PEM bundle for an internal CA, used for Git transport to this host (http.<url>.sslCAInfo). TLS is never disabled. */
   caFile?: string;
@@ -94,6 +94,157 @@ export const SSH_HOST_KEY =
   /^(ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa|sk-ssh-ed25519@openssh\.com) ([A-Za-z0-9+/]+={0,3})(?:\s.*)?$/;
 
 export interface Config {
+  /** Values mapped from .env, one typed field per variable (unset = undefined). Defaults and parsing are done here, once. */
+  auth: {
+    /** AUTH_SECRET */
+    secret?: string;
+    /** AUTH_SECRET_PREVIOUS */
+    secretPrevious?: string;
+    /** AUTH_CIPHERTEXT_FORMAT */
+    ciphertextFormat?: string;
+  };
+  cache: {
+    /** CACHE */
+    mode?: string;
+  };
+  chat: {
+    /** CHAT_DOCUMENTS_PER_MESSAGE */
+    documentsPerMessage?: string;
+    /** CHAT_DOCUMENT_MAX_BYTES */
+    documentMaxBytes?: string;
+    /** CHAT_NATIVE_TOOLS */
+    nativeTools?: string;
+    /** CHAT_TITLE_CONCURRENCY */
+    titleConcurrency?: string;
+    /** CHAT_TITLE_REAL_IN_TESTS */
+    titleRealInTests?: string;
+  };
+  agentEnv: {
+    /** CLAUDE_CODE_OAUTH_TOKEN */
+    claudeOauthToken?: string;
+    /** CLAUDE_USER_SKILLS_DIR */
+    userSkillsDir?: string;
+    /** OCR_BIN */
+    ocrBin?: string;
+    /** CURSOR_API_KEY */
+    cursorApiKey?: string;
+    /** CODEX_MODEL */
+    codexModel?: string;
+    /** CODEX_REASONING_EFFORT */
+    codexReasoningEffort?: string;
+    /** AGY_MODEL */
+    agyModel?: string;
+    /** ANTIGRAVITY_MODEL */
+    antigravityModel?: string;
+    /** AGY_EFFORT */
+    agyEffort?: string;
+    /** ANTIGRAVITY_EFFORT */
+    antigravityEffort?: string;
+    /** AGY_MAX_CONCURRENT */
+    agyMaxConcurrent?: string;
+    /** ANTIGRAVITY_MAX_CONCURRENT */
+    antigravityMaxConcurrent?: string;
+    /** COPILOT_MODEL */
+    copilotModel?: string;
+    /** COPILOT_EFFORT */
+    copilotEffort?: string;
+    /** COPILOT_MAX_CONCURRENT */
+    copilotMaxConcurrent?: string;
+    /** COPILOT_SANDBOX */
+    copilotSandbox?: string;
+    /** CURSOR_AGENT_TIMEOUT_MS */
+    cursorTimeoutMs?: string;
+    /** CODEX_TIMEOUT_MS */
+    codexTimeoutMs?: string;
+    /** AGY_TIMEOUT_MS */
+    agyTimeoutMs?: string;
+    /** ANTIGRAVITY_TIMEOUT_MS */
+    antigravityTimeoutMs?: string;
+    /** COPILOT_TIMEOUT_MS */
+    copilotTimeoutMs?: string;
+    /** AGY_SANDBOX */
+    agySandbox?: string;
+    /** ANTIGRAVITY_SANDBOX */
+    antigravitySandbox?: string;
+  };
+  hasakiWorkBrowser: {
+    /** HASAKI_WORK_BROWSER_MODE */
+    mode?: string;
+    /** HASAKI_WORK_CHROME_PATH */
+    chromePath?: string;
+    /** HASAKI_WORK_CHROME_PROFILE */
+    chromeProfile?: string;
+    /** HASAKI_WORK_EXISTING_CHROME_USER */
+    existingChromeUser?: string;
+  };
+  server: {
+    /** HOST */
+    host?: string;
+    /** HTTP_COMPRESSION */
+    compression?: string;
+    /** COOKIE_SECURE */
+    cookieSecure?: string;
+    /** SESSION_MAX_AGE_HOURS */
+    sessionMaxAgeHours?: string;
+    /** SESSION_CACHE_MS */
+    sessionCacheMs?: string;
+  };
+  system: {
+    /** HOME */
+    home?: string;
+    /** LANG */
+    lang?: string;
+    /** NODE_ENV */
+    nodeEnv?: string;
+    /** NODE_EXTRA_CA_CERTS */
+    extraCaCerts?: string;
+    /** PATH */
+    path?: string;
+    /** PROGRAMFILES */
+    programFiles?: string;
+    /** TMPDIR */
+    tmpdir?: string;
+    /** XDG_RUNTIME_DIR */
+    xdgRuntimeDir?: string;
+    /** DOCKER_HOST */
+    dockerHost?: string;
+    /** CONTAINER_HOST */
+    containerHost?: string;
+    /** OTEL_EXPORTER_OTLP_ENDPOINT */
+    otelEndpoint?: string;
+  };
+  test: {
+    /** PLATFORM_TEST */
+    platformTest?: string;
+    /** FAKE_AGY_MODE */
+    fakeAgyMode?: string;
+    /** FAKE_COPILOT_MODE */
+    fakeCopilotMode?: string;
+  };
+  binaries: {
+    /** PLATFORM_CONFIG */
+    configFile?: string;
+    /** PLATFORM_GO_BIN */
+    goBin?: string;
+    /** PLATFORM_SUPERVISE_BIN */
+    superviseBin?: string;
+  };
+  polling: {
+    /** SPLUNK_POLL_MS */
+    splunkMs?: string;
+  };
+  trace: {
+    /** TRACE_DEBUG_RETENTION_DAYS */
+    debugRetentionDays?: string;
+    /** TRACE_MIN_LEVEL */
+    minLevel?: string;
+  };
+  verification: {
+    /** VERIFICATION_EVIDENCE_RETENTION_DAYS */
+    evidenceRetentionDays?: string;
+    /** VERIFY_MAX_CONCURRENT */
+    maxConcurrent?: string;
+  };
   knowledge: {
     ponytail: { enabled: boolean; mapChars: number };
   };
@@ -106,6 +257,8 @@ export interface Config {
       topK: number;
       minSimilarity: number;
     };
+    /** Token between this server and platform-go: RETRIEVAL_INTERNAL_TOKEN, else one generated per data directory. */
+    internalToken: string;
   };
   /** Optional local source indexing; paths and worker ownership follow existing instance configuration. */
   codeIntelligence: CodeIntelligenceConfig;
@@ -233,6 +386,8 @@ export interface Config {
   maxTurns: number;
   hasakiWork: {
     apiUrl: string;
+    /** Web origin of the Hasaki Work site (login page and the tab the browser login looks for). */
+    webUrl: string;
     /** Poll the task list every N minutes and auto-pick new tasks. 0 = only when you click "Lấy task". */
     pollMinutes: number;
     /** wshr API paths (relative to apiUrl). Check ~/.claude-task-platform/work-api.log if Hasaki changes them. */
@@ -354,6 +509,8 @@ export interface Config {
       Record<"claude" | "cursor" | "codex" | "antigravity" | "copilot", boolean>
     >;
     cursorBin?: string;
+    /** Cursor Agent turn limit (CURSOR_AGENT_TIMEOUT_MS), default 45 minutes. */
+    cursorTimeoutMs?: number;
     claudeBin?: string;
     /**
      * OpenAI Codex CLI (provider "codex"). Runs as the Codex login of the WORKER machine (`codex login`, e.g. a ChatGPT
@@ -663,8 +820,21 @@ const LIVE = process.env.PLATFORM_TEST !== "1";
 const ENGINE = LIVE ? ("go" as const) : ("typescript" as const);
 
 const defaults: Config = {
+  auth: {},
+  cache: {},
+  chat: {},
+  agentEnv: {},
+  hasakiWorkBrowser: {},
+  server: {},
+  system: {},
+  test: {},
+  binaries: {},
+  polling: {},
+  trace: {},
+  verification: {},
   knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
   retrieval: {
+    internalToken: "",
     semantic: {
       enabled: LIVE,
       url: "http://127.0.0.1:4646",
@@ -745,8 +915,8 @@ const defaults: Config = {
     ],
   },
   relatedProjects: {},
-  fileBaseUrl: "https://hr-media.hasaki.vn/production/hr",
-  bitbucket: { workspace: "hasaki-tech", user: "", token: "", reviewers: [] },
+  fileBaseUrl: "",
+  bitbucket: { workspace: "", user: "", token: "", reviewers: [] },
   github: { allowSharedCredentials: false, accessVerification: "strict", token: "" },
   gitlab: {
     instances: [{ host: "gitlab.com" }],
@@ -764,7 +934,8 @@ const defaults: Config = {
   maxConcurrent: 1,
   maxTurns: 300,
   hasakiWork: {
-    apiUrl: "https://wshr.hasaki.vn/api",
+    apiUrl: "",
+    webUrl: "",
     pollMinutes: 0,
     listPath: "hr/projects/mytasks-es",
     detailPath: "hr/projects/task-input/{id}",
@@ -800,12 +971,12 @@ const defaults: Config = {
     heartbeatSeconds: 10,
     pollMs: 1000,
   },
-  argocd: { baseUrl: "https://argocd-qc-v2.hasaki.dev" },
-  vault: { baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [{ path: "*", keys: ["*"] }] },
+  argocd: { baseUrl: "" },
+  vault: { baseUrl: "", writeAllow: [{ path: "*", keys: ["*"] }] },
   qcHttp: {
     hosts: [],
     internalHosts: [],
-    productionDomains: ["hasaki.vn"],
+    productionDomains: [],
     preauthorized: [],
     maxOperationsPerTurn: 5,
     timeoutMs: 20_000,
@@ -813,14 +984,14 @@ const defaults: Config = {
     auth: {},
   },
   kafka: {
-    baseUrl: "https://kafka-ui-qc-v2.hasaki.dev",
+    baseUrl: "",
     cluster: "",
     maxMessages: 200,
     timeoutSeconds: 60,
     publishAllow: [],
   },
   splunk: {
-    baseUrl: "https://siem.hasaki.work",
+    baseUrl: "",
     managementUrl: "",
     locale: "en-US",
     allowedIndexes: [],
@@ -946,6 +1117,38 @@ const defaults: Config = {
 
 export let instanceIdentityExplicit = false;
 
+const TRUE = new Set(["1", "true", "yes", "on"]);
+const FALSE = new Set(["0", "false", "no", "off"]);
+
+/** A trimmed string from the environment, or `fallback` when unset or blank. */
+function text(name: string, fallback: string): string {
+  return process.env[name]?.trim() || fallback;
+}
+
+/** 1/true/yes/on or 0/false/no/off in any case; unset or blank keeps `fallback`; anything else warns and keeps it. */
+function flag(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (TRUE.has(raw)) return true;
+  if (FALSE.has(raw)) return false;
+  console.warn(
+    `Ignoring ${name}=${JSON.stringify(raw)}: expected 1/true/yes/on or 0/false/no/off; using ${fallback}.`,
+  );
+  return fallback;
+}
+
+/** A whole number within [min, max], never NaN. Unset or blank keeps `fallback`. A bad value throws (or warns when `lenient`). */
+function integer(name: string, fallback: number, min: number, max: number, lenient = false) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= min && n <= max) return n;
+  const expected = `an integer from ${min} to ${max}`;
+  if (!lenient) throw new Error(`${name} must be ${expected} (got ${JSON.stringify(raw)})`);
+  console.warn(`Ignoring ${name}=${JSON.stringify(raw)}: expected ${expected}; using ${fallback}.`);
+  return fallback;
+}
+
 function load(): Config {
   // Operators configure through .env and the Settings page; PLATFORM_CONFIG is only for test/benchmark fixtures.
   const file = process.env.PLATFORM_CONFIG ? resolve(process.env.PLATFORM_CONFIG) : null;
@@ -1060,11 +1263,12 @@ function load(): Config {
       .PROCESS_SUPERVISION_ENGINE as Config["supervision"]["engine"];
   if (!["typescript", "go"].includes(cfg.supervision.engine))
     throw new Error("PROCESS_SUPERVISION_ENGINE must be typescript or go");
-  if (process.env.ANALYTICS_TIMEOUT_MS)
-    cfg.analytics.timeoutMs = Number(process.env.ANALYTICS_TIMEOUT_MS);
-  cfg.analytics.timeoutMs = positiveInt("analytics.timeoutMs", cfg.analytics.timeoutMs);
-  if (process.env.CODEACT_ENABLED) cfg.codeAct.enabled = process.env.CODEACT_ENABLED === "1";
-  if (process.env.LSP_ENABLED) cfg.lsp.enabled = process.env.LSP_ENABLED === "1";
+  cfg.analytics.timeoutMs = positiveInt(
+    "analytics.timeoutMs",
+    integer("ANALYTICS_TIMEOUT_MS", cfg.analytics.timeoutMs, 1, 3_600_000),
+  );
+  cfg.codeAct.enabled = flag("CODEACT_ENABLED", cfg.codeAct.enabled);
+  cfg.lsp.enabled = flag("LSP_ENABLED", cfg.lsp.enabled);
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
   if (process.env.IGNORE_REPOSITORIES)
@@ -1072,12 +1276,10 @@ function load(): Config {
       .map((x) => x.trim())
       .filter(Boolean);
   const semantic = cfg.retrieval.semantic;
-  if (process.env.RADAR_ENABLED)
-    cfg.radar.enabled = ["1", "true"].includes(process.env.RADAR_ENABLED);
+  cfg.radar.enabled = flag("RADAR_ENABLED", cfg.radar.enabled);
   if (process.env.RADAR_INTERVAL_SECONDS)
     cfg.radar.intervalSeconds = Math.max(60, Number(process.env.RADAR_INTERVAL_SECONDS) || 300);
-  if (process.env.RETRIEVAL_SEMANTIC_ENABLED)
-    semantic.enabled = ["1", "true"].includes(process.env.RETRIEVAL_SEMANTIC_ENABLED);
+  semantic.enabled = flag("RETRIEVAL_SEMANTIC_ENABLED", semantic.enabled);
   if (process.env.RETRIEVAL_SEMANTIC_URL) semantic.url = process.env.RETRIEVAL_SEMANTIC_URL;
   if (process.env.RETRIEVAL_SEMANTIC_TIMEOUT_MS)
     semantic.timeoutMs = Number(process.env.RETRIEVAL_SEMANTIC_TIMEOUT_MS);
@@ -1168,7 +1370,7 @@ function load(): Config {
   if (process.env.PLATFORM_TEST_DATABASE_ADMIN_URL)
     cfg.platform.testDatabaseAdminUrl = process.env.PLATFORM_TEST_DATABASE_ADMIN_URL;
   cfg.notifyWebhook = process.env.NOTIFY_WEBHOOK ?? cfg.notifyWebhook;
-  if (process.env.PORT) cfg.port = Number(process.env.PORT);
+  cfg.port = integer("PORT", cfg.port, 1, 65535);
   if (process.env.TRUSTED_PROXY_HOPS !== undefined)
     cfg.http.trustedProxyHops = Math.min(
       8,
@@ -1192,9 +1394,99 @@ function load(): Config {
     if (!process.env.RETRIEVAL_INTERNAL_TOKEN) {
       const file = join(cfg.dataDir, "internal-token");
       if (!existsSync(file)) writeFileSync(file, randomBytes(32).toString("hex"), { mode: 0o600 });
-      process.env.RETRIEVAL_INTERNAL_TOKEN = readFileSync(file, "utf8").trim();
+      cfg.retrieval.internalToken = readFileSync(file, "utf8").trim();
     }
   }
+  if (process.env.RETRIEVAL_INTERNAL_TOKEN)
+    cfg.retrieval.internalToken = process.env.RETRIEVAL_INTERNAL_TOKEN;
+  // One resolution of the Claude and Cursor executables (the environment wins over config.json, then the bundled CLI).
+  if (process.env.CLAUDE_CODE_EXECUTABLE) cfg.agent.claudeBin = process.env.CLAUDE_CODE_EXECUTABLE;
+  if (process.env.CURSOR_AGENT_BIN) cfg.agent.cursorBin = process.env.CURSOR_AGENT_BIN;
+  cfg.agent.cursorTimeoutMs = integer(
+    "CURSOR_AGENT_TIMEOUT_MS",
+    45 * 60_000,
+    1,
+    24 * 3_600_000,
+    true,
+  );
+  // Company endpoints live in .env, not in code.
+  cfg.fileBaseUrl = text("FILE_BASE_URL", cfg.fileBaseUrl);
+  cfg.bitbucket.workspace = text("BITBUCKET_WORKSPACE", cfg.bitbucket.workspace);
+  cfg.hasakiWork.apiUrl = text("HASAKI_WORK_API_URL", cfg.hasakiWork.apiUrl);
+  cfg.hasakiWork.webUrl = text("HASAKI_WORK_WEB_URL", cfg.hasakiWork.webUrl);
+  cfg.argocd.baseUrl = text("ARGOCD_BASE_URL", cfg.argocd.baseUrl);
+  cfg.vault.baseUrl = text("VAULT_BASE_URL", cfg.vault.baseUrl);
+  cfg.kafka.baseUrl = text("KAFKA_BASE_URL", cfg.kafka.baseUrl);
+  cfg.splunk.baseUrl = text("SPLUNK_BASE_URL", cfg.splunk.baseUrl);
+  const production = text("PRODUCTION_DOMAINS", "");
+  if (production)
+    cfg.qcHttp.productionDomains = production
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+  cfg.auth.secret = process.env.AUTH_SECRET;
+  cfg.auth.secretPrevious = process.env.AUTH_SECRET_PREVIOUS;
+  cfg.auth.ciphertextFormat = process.env.AUTH_CIPHERTEXT_FORMAT;
+  cfg.cache.mode = process.env.CACHE;
+  cfg.chat.documentsPerMessage = process.env.CHAT_DOCUMENTS_PER_MESSAGE;
+  cfg.chat.documentMaxBytes = process.env.CHAT_DOCUMENT_MAX_BYTES;
+  cfg.chat.nativeTools = process.env.CHAT_NATIVE_TOOLS;
+  cfg.chat.titleConcurrency = process.env.CHAT_TITLE_CONCURRENCY;
+  cfg.chat.titleRealInTests = process.env.CHAT_TITLE_REAL_IN_TESTS;
+  cfg.agentEnv.claudeOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  cfg.agentEnv.userSkillsDir = process.env.CLAUDE_USER_SKILLS_DIR;
+  cfg.agentEnv.ocrBin = process.env.OCR_BIN;
+  cfg.agentEnv.cursorApiKey = process.env.CURSOR_API_KEY;
+  cfg.agentEnv.codexModel = process.env.CODEX_MODEL;
+  cfg.agentEnv.codexReasoningEffort = process.env.CODEX_REASONING_EFFORT;
+  cfg.agentEnv.agyModel = process.env.AGY_MODEL;
+  cfg.agentEnv.antigravityModel = process.env.ANTIGRAVITY_MODEL;
+  cfg.agentEnv.agyEffort = process.env.AGY_EFFORT;
+  cfg.agentEnv.antigravityEffort = process.env.ANTIGRAVITY_EFFORT;
+  cfg.agentEnv.agyMaxConcurrent = process.env.AGY_MAX_CONCURRENT;
+  cfg.agentEnv.antigravityMaxConcurrent = process.env.ANTIGRAVITY_MAX_CONCURRENT;
+  cfg.agentEnv.copilotModel = process.env.COPILOT_MODEL;
+  cfg.agentEnv.copilotEffort = process.env.COPILOT_EFFORT;
+  cfg.agentEnv.copilotMaxConcurrent = process.env.COPILOT_MAX_CONCURRENT;
+  cfg.agentEnv.copilotSandbox = process.env.COPILOT_SANDBOX;
+  cfg.agentEnv.cursorTimeoutMs = process.env.CURSOR_AGENT_TIMEOUT_MS;
+  cfg.agentEnv.codexTimeoutMs = process.env.CODEX_TIMEOUT_MS;
+  cfg.agentEnv.agyTimeoutMs = process.env.AGY_TIMEOUT_MS;
+  cfg.agentEnv.antigravityTimeoutMs = process.env.ANTIGRAVITY_TIMEOUT_MS;
+  cfg.agentEnv.copilotTimeoutMs = process.env.COPILOT_TIMEOUT_MS;
+  cfg.agentEnv.agySandbox = process.env.AGY_SANDBOX;
+  cfg.agentEnv.antigravitySandbox = process.env.ANTIGRAVITY_SANDBOX;
+  cfg.hasakiWorkBrowser.mode = process.env.HASAKI_WORK_BROWSER_MODE;
+  cfg.hasakiWorkBrowser.chromePath = process.env.HASAKI_WORK_CHROME_PATH;
+  cfg.hasakiWorkBrowser.chromeProfile = process.env.HASAKI_WORK_CHROME_PROFILE;
+  cfg.hasakiWorkBrowser.existingChromeUser = process.env.HASAKI_WORK_EXISTING_CHROME_USER;
+  cfg.server.host = process.env.HOST;
+  cfg.server.compression = process.env.HTTP_COMPRESSION;
+  cfg.server.cookieSecure = process.env.COOKIE_SECURE;
+  cfg.server.sessionMaxAgeHours = process.env.SESSION_MAX_AGE_HOURS;
+  cfg.server.sessionCacheMs = process.env.SESSION_CACHE_MS;
+  cfg.system.home = process.env.HOME;
+  cfg.system.lang = process.env.LANG;
+  cfg.system.nodeEnv = process.env.NODE_ENV;
+  cfg.system.extraCaCerts = process.env.NODE_EXTRA_CA_CERTS;
+  cfg.system.path = process.env.PATH;
+  cfg.system.programFiles = process.env.PROGRAMFILES;
+  cfg.system.tmpdir = process.env.TMPDIR;
+  cfg.system.xdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
+  cfg.system.dockerHost = process.env.DOCKER_HOST;
+  cfg.system.containerHost = process.env.CONTAINER_HOST;
+  cfg.system.otelEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  cfg.test.platformTest = process.env.PLATFORM_TEST;
+  cfg.test.fakeAgyMode = process.env.FAKE_AGY_MODE;
+  cfg.test.fakeCopilotMode = process.env.FAKE_COPILOT_MODE;
+  cfg.binaries.configFile = process.env.PLATFORM_CONFIG;
+  cfg.binaries.goBin = process.env.PLATFORM_GO_BIN;
+  cfg.binaries.superviseBin = process.env.PLATFORM_SUPERVISE_BIN;
+  cfg.polling.splunkMs = process.env.SPLUNK_POLL_MS;
+  cfg.trace.debugRetentionDays = process.env.TRACE_DEBUG_RETENTION_DAYS;
+  cfg.trace.minLevel = process.env.TRACE_MIN_LEVEL;
+  cfg.verification.evidenceRetentionDays = process.env.VERIFICATION_EVIDENCE_RETENTION_DAYS;
+  cfg.verification.maxConcurrent = process.env.VERIFY_MAX_CONCURRENT;
   return cfg;
 }
 
@@ -1265,10 +1557,10 @@ export function codexConfig(): Required<
   return {
     bin: process.env.CODEX_BIN || c.bin || "codex",
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
-    model: isOwned("codex.model") ? (c.model ?? "") : (process.env.CODEX_MODEL ?? c.model ?? ""),
+    model: isOwned("codex.model") ? (c.model ?? "") : (config.agentEnv.codexModel ?? c.model ?? ""),
     reasoningEffort: isOwned("codex.reasoningEffort")
       ? (c.reasoningEffort ?? "")
-      : (process.env.CODEX_REASONING_EFFORT ?? c.reasoningEffort ?? ""),
+      : (config.agentEnv.codexReasoningEffort ?? c.reasoningEffort ?? ""),
     models: c.models ?? {},
   };
 }
@@ -1320,8 +1612,8 @@ export function antigravityConfig(): Required<
   const maxConcurrent = isOwned("antigravity.maxConcurrent")
     ? Number(c.maxConcurrent)
     : Number(
-        process.env.AGY_MAX_CONCURRENT ||
-          process.env.ANTIGRAVITY_MAX_CONCURRENT ||
+        config.agentEnv.agyMaxConcurrent ||
+          config.agentEnv.antigravityMaxConcurrent ||
           c.maxConcurrent ||
           1,
       );
@@ -1330,10 +1622,10 @@ export function antigravityConfig(): Required<
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
     model: isOwned("antigravity.model")
       ? (c.model ?? "")
-      : (process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? c.model ?? ""),
+      : (config.agentEnv.agyModel ?? config.agentEnv.antigravityModel ?? c.model ?? ""),
     effort: isOwned("antigravity.effort")
       ? (c.effort ?? "")
-      : (process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? c.effort ?? ""),
+      : (config.agentEnv.agyEffort ?? config.agentEnv.antigravityEffort ?? c.effort ?? ""),
     maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
     allowSubagents:
       (process.env.AGY_ALLOW_SUBAGENTS ?? process.env.ANTIGRAVITY_ALLOW_SUBAGENTS)
@@ -1390,24 +1682,24 @@ export function copilotConfig(): Required<
   const timeout = Number(process.env.COPILOT_TIMEOUT_MS || c.timeoutMs || 45 * 60 * 1000);
   const maxConcurrent = isOwned("copilot.maxConcurrent")
     ? Number(c.maxConcurrent)
-    : Number(process.env.COPILOT_MAX_CONCURRENT || c.maxConcurrent || 1);
+    : Number(config.agentEnv.copilotMaxConcurrent || c.maxConcurrent || 1);
   return {
     bin: process.env.COPILOT_BIN || c.bin || "copilot",
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 45 * 60 * 1000,
     model: isOwned("copilot.model")
       ? (c.model ?? "")
-      : (process.env.COPILOT_MODEL ?? c.model ?? ""),
+      : (config.agentEnv.copilotModel ?? c.model ?? ""),
     effort: isOwned("copilot.effort")
       ? (c.effort ?? "")
-      : (process.env.COPILOT_EFFORT ?? c.effort ?? ""),
+      : (config.agentEnv.copilotEffort ?? c.effort ?? ""),
     maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? maxConcurrent : 1,
     allowSubagents: process.env.COPILOT_ALLOW_SUBAGENTS
       ? process.env.COPILOT_ALLOW_SUBAGENTS === "true"
       : (c.allowSubagents ?? false),
     sandbox: isOwned("copilot.sandbox")
       ? c.sandbox !== false
-      : process.env.COPILOT_SANDBOX
-        ? process.env.COPILOT_SANDBOX === "true"
+      : config.agentEnv.copilotSandbox
+        ? config.agentEnv.copilotSandbox === "true"
         : (c.sandbox ?? true),
     models: c.models ?? {},
   };

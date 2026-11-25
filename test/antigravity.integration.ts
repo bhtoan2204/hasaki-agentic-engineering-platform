@@ -42,6 +42,7 @@ import { startBroker } from "../src/agent/broker/server.ts";
 import { completeForRun } from "../src/agent/complete.ts";
 import { antigravityModelFor } from "../src/agent/stepAgent.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
+import { config } from "../src/config.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-agy.mjs");
 const HOOK = join(import.meta.dirname, "..", "src", "agent", "antigravity", "hook.ts");
@@ -61,10 +62,10 @@ beforeEach(() => {
   logFile = join(mkdtempSync(join(tmpdir(), "fake-agy-log-")), "log.jsonl");
   process.env.FAKE_AGY_LOG = logFile;
   process.env.FAKE_AGY_MODE = "ok";
-  delete process.env.AGY_MODEL;
-  delete process.env.AGY_EFFORT;
+  config.agentEnv.agyModel = undefined;
+  config.agentEnv.agyEffort = undefined;
   delete process.env.AGY_TIMEOUT_MS;
-  delete process.env.AGY_MAX_CONCURRENT;
+  config.agentEnv.agyMaxConcurrent = undefined;
   resetCapabilitiesCache();
 });
 
@@ -345,7 +346,7 @@ function runHook(
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const c = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", HOOK], {
-      env: { PATH: process.env.PATH, ...env },
+      env: { PATH: config.system.path, ...env },
     });
     let stdout = "";
     let stderr = "";
@@ -590,8 +591,8 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
 });
 
 test("model resolution for Antigravity step uses antigravityModelFor", () => {
-  process.env.AGY_MODEL = "gemini-3.8-flash-high";
-  process.env.AGY_EFFORT = "medium";
+  config.agentEnv.agyModel = "gemini-3.8-flash-high";
+  config.agentEnv.agyEffort = "medium";
 
   const resolved = antigravityModelFor({
     type: "agent",

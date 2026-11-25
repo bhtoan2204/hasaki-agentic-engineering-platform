@@ -550,7 +550,7 @@ export function skillCandidates(s: {
 
 /** The user-level skills directory imported with the repositories. */
 export const userSkillsDir = () =>
-  process.env.CLAUDE_USER_SKILLS_DIR ?? join(homedir(), ".claude", "skills");
+  config.agentEnv.userSkillsDir ?? join(homedir(), ".claude", "skills");
 
 const UNATTENDED_UNSAFE_REASON =
   "interactive/workflow skill: acts on its own (push, PR, delegation) — enable deliberately";

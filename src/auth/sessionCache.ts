@@ -1,3 +1,4 @@
+import { config } from "../config.ts";
 /**
  * Short-lived, in-process cache of session lookups. Every authenticated request starts with a session lookup; with a
  * remote database that is a full network round trip before any work. Entries live at most SESSION_CACHE_MS (default
@@ -7,7 +8,7 @@
  * change and deactivation. Another instance sharing the database may keep honouring a revoked session for up to
  * SESSION_CACHE_MS. Set SESSION_CACHE_MS=0 to disable the cache.
  */
-export const SESSION_CACHE_MS = Math.max(0, Number(process.env.SESSION_CACHE_MS ?? 10_000) || 0);
+export const SESSION_CACHE_MS = Math.max(0, Number(config.server.sessionCacheMs ?? 10_000) || 0);
 const MAX_ENTRIES = 5000;
 
 interface Entry<U> {

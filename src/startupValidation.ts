@@ -28,9 +28,9 @@ export async function validateLocalConfiguration(
     }
   }
   for (const [provider, bin] of [
-    ["Claude", process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin || "claude"],
+    ["Claude", config.agent.claudeBin || "claude"],
     ["Codex", codexConfig().bin],
-    ["Cursor", process.env.CURSOR_AGENT_BIN || config.agent.cursorBin || "agent"],
+    ["Cursor", config.agent.cursorBin || "agent"],
   ]) {
     if (!probe(bin))
       warnings.push(
@@ -41,7 +41,7 @@ export async function validateLocalConfiguration(
     warnings.push(
       "Code intelligence live search unavailable: install ripgrep (rg) on this worker. Indexed navigation remains available.",
     );
-  if (config.retrieval.semantic.enabled && !process.env.RETRIEVAL_INTERNAL_TOKEN)
+  if (config.retrieval.semantic.enabled && !config.retrieval.internalToken)
     warnings.push(
       "retrieval.semantic is enabled but RETRIEVAL_INTERNAL_TOKEN is not set; knowledge ranking stays lexical.",
     );

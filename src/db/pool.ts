@@ -18,7 +18,7 @@ export const pool = new pg.Pool({
   keepAliveInitialDelayMillis: 30000,
   // A developer shell may set a multi-minute idle timeout and a minimum pool. Those sockets must not pin a
   // finished test process; checked-out clients and every other handle still keep it alive.
-  allowExitOnIdle: process.env.PLATFORM_TEST === "1",
+  allowExitOnIdle: config.test.platformTest === "1",
 });
 watchPoolErrors(pool);
 registerGauge("db.pool_total", () => pool.totalCount);

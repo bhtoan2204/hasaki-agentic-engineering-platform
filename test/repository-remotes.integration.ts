@@ -118,13 +118,15 @@ try {
 `,
     { mode: 0o700 },
   );
-  oldPath = process.env.PATH;
+  oldPath = config.system.path;
   process.env.PATH = bin + ":" + oldPath;
+  config.system.path = bin + ":" + oldPath;
   await seedTemplates();
 });
 after(async () => {
   platformGo?.stop();
   process.env.PATH = oldPath;
+  config.system.path = oldPath;
   delete process.env.REMOTE_TEST_REVOKED;
   await pool.end();
 });

@@ -229,7 +229,7 @@ function startTypescript(o: SuperviseOptions): Supervised {
 
 /** The launcher binary: PLATFORM_SUPERVISE_BIN, else the build next to platform-go (src/retrieval/goService.ts). */
 export function supervisorBinary() {
-  return process.env.PLATFORM_SUPERVISE_BIN ?? join(config.dataDir, "bin", "platform-supervise");
+  return config.binaries.superviseBin ?? join(config.dataDir, "bin", "platform-supervise");
 }
 
 let scopeProbe: { at: number; ok: boolean; problem?: string } | null = null;
@@ -239,7 +239,7 @@ export function delegatedScopeAvailable(force = false) {
   const r = spawnSync(
     "systemd-run",
     ["--user", "--scope", "-q", "--collect", "-p", "Delegate=yes", "true"],
-    { env: { PATH: process.env.PATH, ...scopeEnvironment() }, timeout: 5000, encoding: "utf8" },
+    { env: { PATH: config.system.path, ...scopeEnvironment() }, timeout: 5000, encoding: "utf8" },
   );
   const ok = r.status === 0;
   scopeProbe = {
@@ -319,8 +319,8 @@ function startGo(o: SuperviseOptions): Supervised {
   const env: NodeJS.ProcessEnv = {
     ...o.env,
     ...busEnv,
-    ...(process.env.OTEL_EXPORTER_OTLP_ENDPOINT
-      ? { CTP_SUPERVISE_OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT }
+    ...(config.system.otelEndpoint
+      ? { CTP_SUPERVISE_OTEL_EXPORTER_OTLP_ENDPOINT: config.system.otelEndpoint }
       : {}),
   };
   if (unset.length) launcherArgs.unshift(`--unset=${unset.join(",")}`);

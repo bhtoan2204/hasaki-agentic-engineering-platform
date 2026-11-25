@@ -158,12 +158,14 @@ beforeEach(() => {
     minSimilarity: 0.35,
   });
   process.env.RETRIEVAL_INTERNAL_TOKEN = "test-token";
+  config.retrieval.internalToken = "test-token";
   requests.length = 0;
   handler = (_req, _body, res) => json(res, 200, searchFixture);
 });
 after(() => {
   config.retrieval.semantic.enabled = false;
   delete process.env.RETRIEVAL_INTERNAL_TOKEN;
+  config.retrieval.internalToken = "";
 });
 
 const ask = (extra: Partial<Parameters<typeof semanticRanks>[0]> = {}) =>
@@ -198,9 +200,11 @@ test("client: falls back (null) when disabled, without token, on 503, invalid bo
   assert.equal(await ask(), null);
   config.retrieval.semantic.enabled = true;
   delete process.env.RETRIEVAL_INTERNAL_TOKEN;
+  config.retrieval.internalToken = "";
   assert.equal(await ask(), null);
   assert.equal(requests.length, 0);
   process.env.RETRIEVAL_INTERNAL_TOKEN = "test-token";
+  config.retrieval.internalToken = "test-token";
 
   handler = (_req, _body, res) =>
     json(res, 503, { error: "pgvector missing", code: "vector_unavailable" });

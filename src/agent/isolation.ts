@@ -117,7 +117,7 @@ export async function probeIsolation(force = false): Promise<IsolationRuntime> {
       ["--user", "--scope", "-q", "--collect", "-p", "TasksMax=8", "-p", "MemoryMax=64M", "true"],
       {
         timeout: 5000,
-        env: { PATH: process.env.PATH, ...scopeEnvironment() },
+        env: { PATH: config.system.path, ...scopeEnvironment() },
       },
     );
     cgroup = "systemd-scope";
@@ -194,7 +194,7 @@ export function credentialMasks(): string[] {
   const home = homedir();
   return [
     ...HOME_CREDENTIALS.map((p) => join(home, p)),
-    resolve(process.env.PLATFORM_CONFIG ?? "config.json"),
+    resolve(config.binaries.configFile ?? "config.json"),
     resolve(".env"),
     config.dataDir,
     ...hostSockets(),
@@ -283,7 +283,7 @@ const inside = (p: string, root: string) => p === root || p.startsWith(root + se
 /** Toolchain directories the sandbox must still read when their parent tree is hidden (PATH entries, configured). */
 function toolchainPaths(hidden: string[]) {
   const out = new Set<string>();
-  for (const dir of (process.env.PATH ?? "").split(":").filter((d) => d.startsWith("/"))) {
+  for (const dir of (config.system.path ?? "").split(":").filter((d) => d.startsWith("/"))) {
     if (!hidden.some((h) => inside(dir, h))) continue;
     // A versioned toolchain (…/versions/node/v22/bin, …/gos/go1.x/bin) needs its prefix; a generic bin dir
     // (~/.local/bin, ~/bin) is bound alone so the rest of that tree (keyrings, app data) stays hidden.
@@ -293,7 +293,7 @@ function toolchainPaths(hidden: string[]) {
   }
   out.add(dirname(dirname(process.execPath)));
   for (const p of config.isolation.readOnlyPaths) out.add(resolve(p));
-  if (process.env.NODE_EXTRA_CA_CERTS) out.add(resolve(process.env.NODE_EXTRA_CA_CERTS));
+  if (config.system.extraCaCerts) out.add(resolve(config.system.extraCaCerts));
   return [...out].filter((p) => existsSync(p) && !credentialMasks().some((m) => inside(p, m)));
 }
 

@@ -42,7 +42,7 @@ const sessions = new Map<string, Entry>();
 
 function onPath(bin: string) {
   if (bin.includes("/")) return existsSync(bin) ? bin : null;
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+  for (const dir of (config.system.path ?? "").split(delimiter)) {
     const p = join(dir, bin);
     if (dir && existsSync(p)) return p;
   }

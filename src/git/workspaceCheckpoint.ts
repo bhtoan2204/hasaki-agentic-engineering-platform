@@ -7,6 +7,7 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { encryptSecret } from "../auth/crypto.ts";
 import { allWorkspacesOf, workspacesOf, type Workspace } from "./provider.ts";
 import type { RunRow, StepRow } from "../workflow/types.ts";
+import { childEnv } from "../platform/childEnv.ts";
 
 const exec = promisify(execFile);
 const hash = (v: string | Buffer) => createHash("sha256").update(v).digest("hex");
@@ -63,7 +64,7 @@ async function inspectWorkspace(workspaces: Workspace[], capture = false, bindMo
             signal: deadline,
             timeout: 10000,
             maxBuffer: 5 * 1024 * 1024,
-            env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+            env: { ...childEnv(), GIT_OPTIONAL_LOCKS: "0" },
           },
         )
       ).stdout;

@@ -70,7 +70,7 @@ type Providers = Record<AgentProvider, CompletionRunner>;
 let providerSeam: Providers | undefined;
 /** Native tool calls unless CHAT_NATIVE_TOOLS=off (then every provider uses the chat-tool block protocol). */
 const nativeToolsFor = (provider: string) =>
-  process.env.CHAT_NATIVE_TOOLS !== "off" &&
+  config.chat.nativeTools !== "off" &&
   (NATIVE_TOOL_PROVIDERS as readonly string[]).includes(provider);
 
 export function setChatProviders(p: Providers | undefined) {

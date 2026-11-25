@@ -10,14 +10,14 @@ describe("telegramUrl", () => {
   });
 
   test("leaves public or IP hosts unchanged", () => {
-    assert.equal(telegramUrl("https://app.hasaki.vn/tasks"), "https://app.hasaki.vn/tasks");
+    assert.equal(telegramUrl("https://app.example.vn/tasks"), "https://app.example.vn/tasks");
     assert.equal(telegramUrl("http://192.168.1.100:8080"), "http://192.168.1.100:8080");
   });
 });
 
 describe("isPublicHttps", () => {
   test("returns true for public HTTPS URLs", () => {
-    assert.equal(isPublicHttps("https://app.hasaki.vn/runs/42"), true);
+    assert.equal(isPublicHttps("https://app.example.vn/runs/42"), true);
     assert.equal(isPublicHttps("https://sub.example.com:8443/api"), true);
     assert.equal(isPublicHttps("https://github.com/org/repo"), true);
   });
@@ -43,10 +43,10 @@ describe("isPublicHttps", () => {
 
 describe("linkFooter", () => {
   test("returns inline keyboard button for public HTTPS URLs", () => {
-    const footer = linkFooter("https://app.hasaki.vn/#/runs/10/step", "Open step");
+    const footer = linkFooter("https://app.example.vn/#/runs/10/step", "Open step");
     assert.equal(footer.text, "");
     assert.deepEqual(footer.reply_markup, {
-      inline_keyboard: [[{ text: "Open step", url: "https://app.hasaki.vn/#/runs/10/step" }]],
+      inline_keyboard: [[{ text: "Open step", url: "https://app.example.vn/#/runs/10/step" }]],
     });
   });
 

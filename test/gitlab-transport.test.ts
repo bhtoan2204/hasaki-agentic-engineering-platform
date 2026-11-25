@@ -20,16 +20,16 @@ const FAKE_KEY =
   "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAfakekeymaterialforthetestonly0000000000\n-----END OPENSSH PRIVATE KEY-----";
 const HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeHostKeyForTestsOnly000000000000000000";
 const remote = {
-  url: "https://gitlab.hasaki.work/platform/backend/oms-api.git",
+  url: "https://gitlab.example.work/platform/backend/oms-api.git",
   workspace: "platform/backend",
   slug: "oms-api",
   provider: "gitlab" as const,
-  host: "gitlab.hasaki.work",
+  host: "gitlab.example.work",
 };
 const saved = structuredClone(config.gitlab);
 beforeEach(() => {
   config.gitlab.instances = [
-    { host: "gitlab.hasaki.work", sshHostKeys: [HOST_KEY], sshPort: 2222 },
+    { host: "gitlab.example.work", sshHostKeys: [HOST_KEY], sshPort: 2222 },
   ];
 });
 afterEach(() => {
@@ -38,18 +38,18 @@ afterEach(() => {
 });
 
 test("SSH URL and known_hosts are derived from the canonical identity and the pinned keys", () => {
-  assert.equal(sshUrlOf(remote, null), "ssh://git@gitlab.hasaki.work/platform/backend/oms-api.git");
+  assert.equal(sshUrlOf(remote, null), "ssh://git@gitlab.example.work/platform/backend/oms-api.git");
   assert.equal(
     sshUrlOf(remote, 2222),
-    "ssh://git@gitlab.hasaki.work:2222/platform/backend/oms-api.git",
+    "ssh://git@gitlab.example.work:2222/platform/backend/oms-api.git",
   );
   assert.equal(
-    knownHostsFor("gitlab.hasaki.work", null, [HOST_KEY]),
-    `gitlab.hasaki.work ${HOST_KEY}\n`,
+    knownHostsFor("gitlab.example.work", null, [HOST_KEY]),
+    `gitlab.example.work ${HOST_KEY}\n`,
   );
   assert.equal(
-    knownHostsFor("gitlab.hasaki.work", 2222, [HOST_KEY]),
-    `[gitlab.hasaki.work]:2222 ${HOST_KEY}\n`,
+    knownHostsFor("gitlab.example.work", 2222, [HOST_KEY]),
+    `[gitlab.example.work]:2222 ${HOST_KEY}\n`,
   );
 });
 
@@ -58,7 +58,7 @@ test("instance config keeps only well-formed host keys and a non-default port", 
     ...config.gitlab,
     instances: [
       {
-        host: "gitlab.hasaki.work",
+        host: "gitlab.example.work",
         sshHostKeys: [`${HOST_KEY} comment@host`, "not a key", "ssh-dss AAAA"],
         sshPort: 2222,
       },
@@ -66,7 +66,7 @@ test("instance config keeps only well-formed host keys and a non-default port", 
     ],
   });
   assert.deepEqual(cfg.instances, [
-    { host: "gitlab.hasaki.work", sshHostKeys: [HOST_KEY], sshPort: 2222 },
+    { host: "gitlab.example.work", sshHostKeys: [HOST_KEY], sshPort: 2222 },
     { host: "gitlab.com" },
   ]);
 });
@@ -88,7 +88,7 @@ test("only unencrypted OpenSSH/PEM private keys are accepted", () => {
 
 test("without a run owner (or without pinned host keys) GitLab falls back to the HTTPS token transport", async () => {
   assert.equal(await gitHosts.gitlab.sshTransport!(remote), null);
-  config.gitlab.instances = [{ host: "gitlab.hasaki.work" }];
+  config.gitlab.instances = [{ host: "gitlab.example.work" }];
   assert.equal(await gitHosts.gitlab.sshTransport!(remote), null);
 });
 
@@ -150,13 +150,13 @@ test("real git uses the pinned SSH command for the canonical URL and keeps HTTPS
   assert.ok(args.includes("StrictHostKeyChecking=yes"));
   assert.ok(args.includes(join(dir, "id_key")));
   assert.ok(args.includes(`UserKnownHostsFile=${join(dir, "known_hosts")}`));
-  assert.ok(args.includes("git@gitlab.hasaki.work"));
+  assert.ok(args.includes("git@gitlab.example.work"));
   assert.ok(args.includes("2222"));
   assert.ok(args.some((a) => a.includes("platform/backend/oms-api.git")));
   // Any other HTTPS URL is not rewritten and https itself is not allowed on the SSH branch.
   const other = await exec(
     "git",
-    [...setup.config, "ls-remote", "--", "https://gitlab.hasaki.work/x/y.git"],
+    [...setup.config, "ls-remote", "--", "https://gitlab.example.work/x/y.git"],
     {
       cwd: dir,
       env,
@@ -166,7 +166,7 @@ test("real git uses the pinned SSH command for the canonical URL and keeps HTTPS
 });
 
 test("project metadata exposes default and protected branches", async () => {
-  config.gitlab.instances = [{ host: "gitlab.hasaki.work" }];
+  config.gitlab.instances = [{ host: "gitlab.example.work" }];
   config.gitlab.allowSharedCredentials = true;
   config.gitlab.token = "glpat-TESTTOKEN0000000000";
   mock.method(globalThis, "fetch", async (input: string | URL | Request) => {

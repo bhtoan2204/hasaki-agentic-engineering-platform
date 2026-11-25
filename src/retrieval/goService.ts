@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { config } from "../config.ts";
 import { log } from "../logging.ts";
+import { childEnv } from "../platform/childEnv.ts";
 
 const goDir = resolve(import.meta.dirname, "../../go");
 
@@ -26,7 +27,7 @@ export function platformTrustedRoots() {
   return [
     config.reposRoot,
     config.dataDir,
-    process.env.CLAUDE_USER_SKILLS_DIR ?? join(homedir(), ".claude", "skills"),
+    config.agentEnv.userSkillsDir ?? join(homedir(), ".claude", "skills"),
   ]
     .map((p) => {
       try {
@@ -43,7 +44,7 @@ export function platformTrustedRoots() {
  * image; never rebuilt here), otherwise the cached build under dataDir, rebuilt only when a Go source is newer.
  */
 async function binary(): Promise<string | null> {
-  const prebuilt = process.env.PLATFORM_GO_BIN;
+  const prebuilt = config.binaries.goBin;
   if (prebuilt) {
     if (existsSync(prebuilt)) return prebuilt;
     log.error(`PLATFORM_GO_BIN ${prebuilt} does not exist; platform-go was not started`);
@@ -91,8 +92,7 @@ export function startGoService() {
   let child: ChildProcess | null = null;
   let stopping = false;
   const local = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
-  if (config.supervision.engine === "go" && !process.env.PLATFORM_SUPERVISE_BIN)
-    void ensureSupervisor();
+  if (config.supervision.engine === "go" && !config.binaries.superviseBin) void ensureSupervisor();
   // Analytics, code intelligence, knowledge scans and production error scans all run in platform-go: always start it.
   if (local) {
     let bin = "";
@@ -102,7 +102,10 @@ export function startGoService() {
       child = spawn(bin, [], {
         // DATABASE_POOL_MAX belongs to the Node pool; the Go service keeps its own small pool.
         env: {
-          ...process.env,
+          // Not AUTH_SECRET or the git tokens: the Go service gets what it reads, DATABASE_URL and the internal token, explicitly.
+          ...childEnv(),
+          DATABASE_URL: config.databaseUrl,
+          RETRIEVAL_INTERNAL_TOKEN: config.retrieval.internalToken,
           PLATFORM_GO_ADDR: `${url.hostname}:${url.port || 80}`,
           DATABASE_POOL_MAX: "4",
           // Production error scans (ADR 0004) reach the providers through this server's internal gateway.

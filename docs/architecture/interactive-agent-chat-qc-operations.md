@@ -13,7 +13,7 @@ Mở rộng `interactive-agent-chat-operations.md`. Không thêm orchestration l
 
 ## HTTP có kiểm soát (`src/integrations/qcHttp.ts`)
 
-- **Đích**: chỉ host trong `qcHttp.hosts` (exact hoặc `*.suffix`; rỗng = tắt). Host có dạng production (`prod`/`production`/`live`/`prd`) hoặc thuộc `qcHttp.productionDomains` (mặc định `hasaki.vn`) luôn bị từ chối, kể cả khi đã liệt kê.
+- **Đích**: chỉ host trong `qcHttp.hosts` (exact hoặc `*.suffix`; rỗng = tắt). Host có dạng production (`prod`/`production`/`live`/`prd`) hoặc thuộc `qcHttp.productionDomains` (mặc định `example.vn`) luôn bị từ chối, kể cả khi đã liệt kê.
 - **Chống SSRF**: qua `safeHttp` (kiểm tra IP khi resolve DNS, chặn metadata và địa chỉ private trừ `internalHosts`, không follow redirect, TLS bật, giới hạn kích thước body).
 - **Header**: caller không được tự đặt `Authorization`, `Cookie`, API key hay token.
 - **Response**: field kiểu token/password/secret/cookie bị che.

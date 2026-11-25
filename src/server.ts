@@ -93,7 +93,7 @@ const server = createServer(handle);
 await new Promise<void>((resolve, reject) => {
   server.once("error", reject);
   // One shared installation. HOST=0.0.0.0 exposes it on the central machine; the default stays loopback.
-  server.listen(config.port, process.env.HOST ?? "127.0.0.1", () => resolve());
+  server.listen(config.port, config.server.host ?? "127.0.0.1", () => resolve());
 }).catch(async (e: NodeJS.ErrnoException) => {
   log.error(
     e.code === "EADDRINUSE"

@@ -84,8 +84,8 @@ let lastTracePurge = 0;
 export async function purgeDebugEventsThrottled(now = Date.now()) {
   if (now - lastTracePurge < 3_600_000) return 0;
   lastTracePurge = now;
-  const days = Number(process.env.TRACE_DEBUG_RETENTION_DAYS);
-  const evidenceDays = Number(process.env.VERIFICATION_EVIDENCE_RETENTION_DAYS);
+  const days = Number(config.trace.debugRetentionDays);
+  const evidenceDays = Number(config.verification.evidenceRetentionDays);
   await purgeVerificationEvidence(
     Number.isFinite(evidenceDays) && evidenceDays > 0 ? evidenceDays : 30,
     pool,

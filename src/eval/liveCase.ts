@@ -44,7 +44,7 @@ export async function stopPostmaster(data: string) {
   if (state === "stopped") return;
   if (state === "unknown")
     throw new Error(`cannot tell whether a postmaster serves ${data}; left in place`);
-  const env = { PATH: process.env.PATH, HOME: dirname(data), LANG: "C.UTF-8" };
+  const env = { PATH: config.system.path, HOME: dirname(data), LANG: "C.UTF-8" };
   await promisify(execFile)("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], {
     env,
     timeout: 15000,

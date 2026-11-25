@@ -404,8 +404,8 @@ test("user-level ~/.claude skills: imported once (copies of repo skills skipped)
     mkdirSync(join(dir, n), { recursive: true });
     writeFileSync(join(dir, n, "SKILL.md"), body);
   }
-  const previous = process.env.CLAUDE_USER_SKILLS_DIR;
-  process.env.CLAUDE_USER_SKILLS_DIR = dir;
+  const previous = config.agentEnv.userSkillsDir;
+  config.agentEnv.userSkillsDir = dir;
   try {
     const r = await importFromRepositories();
     const keys = r.candidates.map((c) => c.key);
@@ -433,7 +433,7 @@ test("user-level ~/.claude skills: imported once (copies of repo skills skipped)
       "named after the OMS repositories (oms-*): OMS only, never Payment",
     );
   } finally {
-    process.env.CLAUDE_USER_SKILLS_DIR = previous;
+    config.agentEnv.userSkillsDir = previous;
   }
   assert.ok(
     (await repositories.get("oms-api"))!.description.includes("Money fields"),
@@ -508,7 +508,10 @@ test("wiki conventions also reach code repos of the same project registered with
     core = join(config.reposRoot, "sib-src/sib-core");
   for (const d of [wiki, core]) mkdirSync(join(d, ".git"), { recursive: true });
   mkdirSync(join(wiki, "docs/development"), { recursive: true });
-  writeFileSync(join(wiki, "docs/development/business-conventions.md"), "# Business rules\n\nProvider services only write the event store.\n");
+  writeFileSync(
+    join(wiki, "docs/development/business-conventions.md"),
+    "# Business rules\n\nProvider services only write the event store.\n",
+  );
   await repositories.upsert("sib-wiki", { path: "sib-src/sib-wiki", projects: ["Sib"] });
   await repositories.upsert("sib-core", { path: "sib-src/sib-core", projects: ["Sib"] });
   await repositories.upsert("sib-managed", { path: "", projects: ["Sib"] }); // e.g. registered by URL: no group folder
@@ -516,6 +519,10 @@ test("wiki conventions also reach code repos of the same project registered with
   await importFromRepositories({ only: "sib-wiki." });
   const conv = (await knowledge.get("sib-wiki.business-conventions"))!;
   assert.equal(conv.versions[0].metadata.load, "inline");
-  assert.deepEqual(conv.versions[0].applicability.repos.sort(), ["sib-core", "sib-managed"], "same project counts even without a shared folder; other projects do not");
+  assert.deepEqual(
+    conv.versions[0].applicability.repos.sort(),
+    ["sib-core", "sib-managed"],
+    "same project counts even without a shared folder; other projects do not",
+  );
   assert.equal(`${conv.scope_type}:${conv.scope_ref}`, "PROJECT:Sib");
 });

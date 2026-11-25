@@ -122,7 +122,7 @@ test("parseVaultToken: raw, header line, cURL; rejects junk", () => {
   assert.equal(parseVaultToken(`X-Vault-Token: ${TOKEN}`), TOKEN);
   assert.equal(
     parseVaultToken(
-      `curl 'https://vault-qc-v2.hasaki.dev/v1/sys/health' -H 'x-vault-token: ${TOKEN}'`,
+      `curl 'https://vault-qc-v2.example.dev/v1/sys/health' -H 'x-vault-token: ${TOKEN}'`,
     ),
     TOKEN,
   );

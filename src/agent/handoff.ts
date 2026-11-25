@@ -2,7 +2,11 @@ import { pool, q, one } from "../db/pool.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { inspectHandoffWorkspace } from "../git/workspaceCheckpoint.ts";
-export { inspectHandoffWorkspace, classifyHandoffUntracked, isHandoffScratch } from "../git/workspaceCheckpoint.ts";
+export {
+  inspectHandoffWorkspace,
+  classifyHandoffUntracked,
+  isHandoffScratch,
+} from "../git/workspaceCheckpoint.ts";
 import { safeDiagnostics, normalizeProviderFailure, type FailureCategory } from "./telemetry.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { summarizeValue } from "../context/plan.ts";
@@ -163,13 +167,11 @@ export async function buildHandoffPackage(
   if (!testsExecuted.some((t) => t.passed === true && t.matches_current_workspace))
     missing.push("no passing test run on the current workspace commits");
   for (const v of runSteps.filter((x) => x.independent))
-    if (
-      !(
-        v.status === "COMPLETED" &&
-        v.output?.verdict === "PASS" &&
-        Object.entries(heads).every(([r, h]) => v.output?.verified_heads?.[r] === h)
-      )
-    )
+    if (!(
+      v.status === "COMPLETED" &&
+      v.output?.verdict === "PASS" &&
+      Object.entries(heads).every(([r, h]) => v.output?.verified_heads?.[r] === h)
+    ))
       missing.push(`independent verification "${v.key}" has no PASS on the current commits`);
   if (workspace.workspaces.some((w) => w.status.trim()))
     missing.push(
@@ -255,7 +257,7 @@ let testReadiness:
   | undefined;
 let readinessSeam = 0;
 export function setHandoffReadinessForTests(value: typeof testReadiness) {
-  if (process.env.PLATFORM_TEST !== "1") throw new Error("Test readiness override disabled");
+  if (config.test.platformTest !== "1") throw new Error("Test readiness override disabled");
   testReadiness = value;
   readinessSeam++;
 }
@@ -294,7 +296,7 @@ export async function handoffReadiness(a: EffectiveAgent) {
       });
       return { ok: c.ok, error: c.error, quota: "unknown", cost: "unknown" };
     }
-    const configured = process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin;
+    const configured = config.agent.claudeBin;
     const bin = configured || "claude";
     const { stdout } = await exec(
       process.execPath === bin ? bin : bin.endsWith(".js") ? process.execPath : bin,

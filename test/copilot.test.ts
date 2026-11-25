@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENT_PROVIDERS, parseAgentProvider, resolveAgentProvider } from "../src/agent/provider.ts";
-import { copilotConfig } from "../src/config.ts";
+import {
+  AGENT_PROVIDERS,
+  parseAgentProvider,
+  resolveAgentProvider,
+} from "../src/agent/provider.ts";
+import { copilotConfig, config } from "../src/config.ts";
 import {
   copilotModelFor,
   resolveStepAgent,
@@ -18,11 +22,7 @@ import {
   resetCapabilitiesCache,
   type CopilotModel,
 } from "../src/agent/copilot/capabilities.ts";
-import {
-  CopilotStream,
-  TextBatch,
-  classifyCopilotError,
-} from "../src/agent/copilot/stream.ts";
+import { CopilotStream, TextBatch, classifyCopilotError } from "../src/agent/copilot/stream.ts";
 import {
   copilotHookDecision,
   writeCopilotWorkspaceConfig,
@@ -40,12 +40,12 @@ beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), "copilot-unit-test-"));
   process.env.COPILOT_BIN = FAKE;
   process.env.FAKE_COPILOT_MODE = "ok";
-  delete process.env.COPILOT_MODEL;
-  delete process.env.COPILOT_EFFORT;
+  config.agentEnv.copilotModel = undefined;
+  config.agentEnv.copilotEffort = undefined;
   delete process.env.COPILOT_TIMEOUT_MS;
-  delete process.env.COPILOT_MAX_CONCURRENT;
+  config.agentEnv.copilotMaxConcurrent = undefined;
   delete process.env.COPILOT_ALLOW_SUBAGENTS;
-  delete process.env.COPILOT_SANDBOX;
+  config.agentEnv.copilotSandbox = undefined;
   resetCapabilitiesCache();
 });
 
@@ -94,11 +94,11 @@ test("copilotConfig loads defaults and honors environment overrides", () => {
 
   process.env.COPILOT_BIN = "/custom/bin/copilot";
   process.env.COPILOT_TIMEOUT_MS = "60000";
-  process.env.COPILOT_MODEL = "gpt-4o";
-  process.env.COPILOT_EFFORT = "high";
-  process.env.COPILOT_MAX_CONCURRENT = "3";
+  config.agentEnv.copilotModel = "gpt-4o";
+  config.agentEnv.copilotEffort = "high";
+  config.agentEnv.copilotMaxConcurrent = "3";
   process.env.COPILOT_ALLOW_SUBAGENTS = "true";
-  process.env.COPILOT_SANDBOX = "false";
+  config.agentEnv.copilotSandbox = "false";
 
   const custom = copilotConfig();
   assert.equal(custom.bin, "/custom/bin/copilot");
@@ -163,9 +163,7 @@ test("FallbackPolicy supports up to 5 providers including copilot without duplic
 });
 
 test("validateAgentOptions validates reasoning effort for copilot", () => {
-  assert.doesNotThrow(() =>
-    validateAgentOptions({ provider: "copilot", reasoning_effort: "low" }),
-  );
+  assert.doesNotThrow(() => validateAgentOptions({ provider: "copilot", reasoning_effort: "low" }));
   assert.doesNotThrow(() =>
     validateAgentOptions({ provider: "copilot", reasoning_effort: "high" }),
   );
@@ -223,26 +221,41 @@ test("checkModel validates model slugs and reasoning effort against catalog", ()
 
   assert.equal(checkModel(catalog, "gpt-4o", "medium"), null);
   assert.match(checkModel(catalog, "unknown-model", "") ?? "", /not available/);
-  assert.match(checkModel(catalog, "gpt-4o", "ultra-max") ?? "", /does not support reasoning effort/);
+  assert.match(
+    checkModel(catalog, "gpt-4o", "ultra-max") ?? "",
+    /does not support reasoning effort/,
+  );
 });
 
 // ------------------------------------------------------------------ NDJSON Stream Parsing & Text Batching
 
 test("CopilotStream parses valid NDJSON events and extracts tokens without invention", () => {
   const stream = new CopilotStream();
-  const rawEvents = [
-    JSON.stringify({ event: "init", session_id: "copilot-sess-42", model: "gpt-4o" }),
-    JSON.stringify({ event: "step_update", step_update: { step_type: "text", text_delta: "Hello " } }),
-    JSON.stringify({ event: "step_update", step_update: { step_type: "text", text_delta: "World!" } }),
-    JSON.stringify({
-      event: "result",
-      result: {
-        status: "SUCCESS",
-        num_turns: 2,
-        usage: { input_tokens: 150, output_tokens: 45, reasoning_tokens: 10, cache_read_tokens: 20 },
-      },
-    }),
-  ].join("\n") + "\n";
+  const rawEvents =
+    [
+      JSON.stringify({ event: "init", session_id: "copilot-sess-42", model: "gpt-4o" }),
+      JSON.stringify({
+        event: "step_update",
+        step_update: { step_type: "text", text_delta: "Hello " },
+      }),
+      JSON.stringify({
+        event: "step_update",
+        step_update: { step_type: "text", text_delta: "World!" },
+      }),
+      JSON.stringify({
+        event: "result",
+        result: {
+          status: "SUCCESS",
+          num_turns: 2,
+          usage: {
+            input_tokens: 150,
+            output_tokens: 45,
+            reasoning_tokens: 10,
+            cache_read_tokens: 20,
+          },
+        },
+      }),
+    ].join("\n") + "\n";
 
   const { events, errors } = stream.push(rawEvents);
   assert.equal(errors.length, 0);
@@ -305,27 +318,80 @@ test("copilotHookDecision enforces read-only in analysis and worktree sandbox in
   };
 
   // 1. MCP Platform tools allowed
-  assert.equal(copilotHookDecision({ tool_call: { name: "mcp__platform__submit_result", args: { output: {} } } }, analysisPolicy, tempDir).allow, true);
-  assert.equal(copilotHookDecision({ tool_call: { name: "platform.ask_user", args: {} } }, analysisPolicy, tempDir).allow, true);
+  assert.equal(
+    copilotHookDecision(
+      { tool_call: { name: "mcp__platform__submit_result", args: { output: {} } } },
+      analysisPolicy,
+      tempDir,
+    ).allow,
+    true,
+  );
+  assert.equal(
+    copilotHookDecision(
+      { tool_call: { name: "platform.ask_user", args: {} } },
+      analysisPolicy,
+      tempDir,
+    ).allow,
+    true,
+  );
 
   // 2. Subagents denied
-  assert.equal(copilotHookDecision({ tool_call: { name: "invoke_subagent", args: {} } }, analysisPolicy, tempDir).allow, false);
+  assert.equal(
+    copilotHookDecision(
+      { tool_call: { name: "invoke_subagent", args: {} } },
+      analysisPolicy,
+      tempDir,
+    ).allow,
+    false,
+  );
 
   // 3. Web search denied
-  assert.equal(copilotHookDecision({ tool_call: { name: "search_web", args: {} } }, analysisPolicy, tempDir).allow, false);
+  assert.equal(
+    copilotHookDecision({ tool_call: { name: "search_web", args: {} } }, analysisPolicy, tempDir)
+      .allow,
+    false,
+  );
 
   // 4. File modifications denied in analysis
-  assert.equal(copilotHookDecision({ tool_call: { name: "write_file", args: { Path: join(tempDir, "test.txt") } } }, analysisPolicy, tempDir).allow, false);
+  assert.equal(
+    copilotHookDecision(
+      { tool_call: { name: "write_file", args: { Path: join(tempDir, "test.txt") } } },
+      analysisPolicy,
+      tempDir,
+    ).allow,
+    false,
+  );
 
   // 5. File modifications allowed in coding inside workspace
-  assert.equal(copilotHookDecision({ tool_call: { name: "write_file", args: { Path: join(tempDir, "test.txt") } } }, codingPolicy, tempDir).allow, true);
+  assert.equal(
+    copilotHookDecision(
+      { tool_call: { name: "write_file", args: { Path: join(tempDir, "test.txt") } } },
+      codingPolicy,
+      tempDir,
+    ).allow,
+    true,
+  );
 
   // 6. Direct .git modifications denied
-  assert.equal(copilotHookDecision({ tool_call: { name: "write_file", args: { Path: join(tempDir, ".git", "config") } } }, codingPolicy, tempDir).allow, false);
+  assert.equal(
+    copilotHookDecision(
+      { tool_call: { name: "write_file", args: { Path: join(tempDir, ".git", "config") } } },
+      codingPolicy,
+      tempDir,
+    ).allow,
+    false,
+  );
 
   // 7. Reading credentials denied
   const envFile = join(tempDir, "." + "env");
-  assert.equal(copilotHookDecision({ tool_call: { name: "read_file", args: { Path: envFile } } }, analysisPolicy, tempDir).allow, false);
+  assert.equal(
+    copilotHookDecision(
+      { tool_call: { name: "read_file", args: { Path: envFile } } },
+      analysisPolicy,
+      tempDir,
+    ).allow,
+    false,
+  );
 });
 
 // ------------------------------------------------------------------ Workspace Config & Args

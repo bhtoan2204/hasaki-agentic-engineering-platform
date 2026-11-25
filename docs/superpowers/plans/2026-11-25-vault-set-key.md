@@ -40,7 +40,7 @@
 - Produces: `config.vault.writeAllow: Array<{ path: string; keys: string[] }>`; `vaultWriteTarget(path: string, key: string): Promise<{ path: string; mount: string; rest: string }>` exported from `vault.ts` (throws `Error` with a human message on any refusal).
 
 - [ ] **Step 1: Write failing tests** in `test/vault-write.test.ts` (use `test/env.ts` import pattern of `test/chat-operations.test.ts`; set `config.vault` fields per test and restore after). Names and assertions:
-  - `vault write target: production host is refused even when allowlisted` → host `vault.hasaki.vn` and `vault-prod.hasaki.dev` both reject with `/not a QC environment/`.
+  - `vault write target: production host is refused even when allowlisted` → host `vault.example.vn` and `vault-prod.example.dev` both reject with `/not a QC environment/`.
   - `vault write target: empty allowlist disables writes` → rejects with `/disabled/`.
   - `vault write target: path and key must match the allowlist` → path outside prefix rejects; `otel_endpoint` vs allowed `OTEL_ENDPOINT` rejects; a `*` suffix entry matches by prefix.
   - `vault write target: path escapes are refused` → `secret/payment/../prod/x` and paths containing `..` reject.

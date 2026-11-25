@@ -79,7 +79,7 @@ export function parseSplunkCookie(raw: string): { cookie: string; formKey: strin
     .filter(Boolean) as RegExpMatchArray[];
   if (!session.length)
     throw new Error(
-      "không thấy cookie splunkd_<port> — copy cả header Cookie (hoặc Copy as cURL) của một request tới siem.hasaki.work",
+      "không thấy cookie splunkd_<port> — copy cả header Cookie (hoặc Copy as cURL) của một request tới siem.example.work",
     );
   const ports = session.map((m) => m[1]);
   const formKey =
@@ -616,7 +616,7 @@ async function searchJob(
       );
       throw new Error(`Splunk search quá ${timeout}s, đã huỷ`);
     }
-    await new Promise((r) => setTimeout(r, Number(process.env.SPLUNK_POLL_MS ?? 1500)));
+    await new Promise((r) => setTimeout(r, Number(config.polling.splunkMs ?? 1500)));
   }
   const res = await call(
     "GET",
@@ -944,7 +944,7 @@ const selectRow = "SELECT * FROM splunk_searches";
 /** Only the run's own searches, or the actor's own searches outside a run. Unknown and foreign rows look the same. */
 async function authorizedRow(searchId: number, scope: SearchScope): Promise<SearchRow> {
   const row = await one<SearchRow>(pool, `${selectRow} WHERE id = $1`, [searchId]);
-  const uid = currentUserId() ?? (process.env.PLATFORM_TEST === "1" ? await actorId() : null);
+  const uid = currentUserId() ?? (config.test.platformTest === "1" ? await actorId() : null);
   if (row && scope.runId && row.run_id !== null && Number(row.run_id) !== Number(scope.runId)) {
     // A follow-up run (e.g. the fix of an investigation) may re-read the evidence of the run it was started from,
     // only when both runs have the same owner.

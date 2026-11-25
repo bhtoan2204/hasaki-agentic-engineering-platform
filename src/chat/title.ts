@@ -8,6 +8,7 @@ import { LIMITS } from "./policy.ts";
 import { whenNoTurnRuns, whenTurnSettles } from "./turnActivity.ts";
 import type { ConversationRow, TitleSource } from "./types.ts";
 import { log } from "../logging.ts";
+import { config } from "../config.ts";
 
 const TITLE_TIMEOUT_MS = 20_000;
 
@@ -28,7 +29,7 @@ export const TITLE_SCHEDULING = {
    * the model: one at a time left the 8th of eight new conversations untitled for ~30 s; two bound the extra CLI
    * processes while halving that.
    */
-  concurrency: Math.max(1, Math.floor(Number(process.env.CHAT_TITLE_CONCURRENCY ?? 2)) || 1),
+  concurrency: Math.max(1, Math.floor(Number(config.chat.titleConcurrency ?? 2)) || 1),
   /** Titles waiting at most; beyond that a new conversation keeps its fallback title (it can be regenerated). */
   maxQueued: 200,
   /** A title waits for its conversation's first turn at most as long as a turn may run. */
@@ -102,7 +103,7 @@ async function runTitleCompletion(
   if (completeSeam) return completeSeam(prompt, opts);
   // Tests keep the developer's HOME, where the provider CLIs are logged in: a title would be a real model call on
   // their account. Suites must inject a completion (setChatTitleComplete); the fallback title stays otherwise.
-  if (process.env.PLATFORM_TEST === "1" && process.env.CHAT_TITLE_REAL_IN_TESTS !== "1")
+  if (config.test.platformTest === "1" && config.chat.titleRealInTests !== "1")
     throw new NoTitleInTests();
   const signal = AbortSignal.timeout(TITLE_TIMEOUT_MS);
   const completion = await completeForRun(null, prompt, signal, null, {

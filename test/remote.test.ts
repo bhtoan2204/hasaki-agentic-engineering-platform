@@ -10,14 +10,14 @@ import { redactSecrets } from "../src/integrations/redact.ts";
 
 const saved = structuredClone(config.gitlab);
 beforeEach(() => {
-  config.gitlab.instances = [{ host: "gitlab.com" }, { host: "gitlab.hasaki.work" }];
+  config.gitlab.instances = [{ host: "gitlab.com" }, { host: "gitlab.example.work" }];
 });
 afterEach(() => Object.assign(config.gitlab, structuredClone(saved)));
 
 test("Bitbucket and GitHub identities are unchanged (plus their host)", () => {
-  assert.deepEqual(repositoryRemote("https://bitbucket.org/Hasaki-Tech/OMS-API"), {
-    url: "https://bitbucket.org/hasaki-tech/oms-api.git",
-    workspace: "hasaki-tech",
+  assert.deepEqual(repositoryRemote("https://bitbucket.org/Example-Tech/OMS-API"), {
+    url: "https://bitbucket.org/example-tech/oms-api.git",
+    workspace: "example-tech",
     slug: "oms-api",
     provider: "bitbucket",
     host: "bitbucket.org",
@@ -33,12 +33,12 @@ test("GitLab URLs on allow-listed hosts canonicalise, including nested groups", 
     provider: "gitlab",
     host: "gitlab.com",
   });
-  assert.deepEqual(repositoryRemote("https://gitlab.hasaki.work/platform/oms-api.git/"), {
-    url: "https://gitlab.hasaki.work/platform/oms-api.git",
+  assert.deepEqual(repositoryRemote("https://gitlab.example.work/platform/oms-api.git/"), {
+    url: "https://gitlab.example.work/platform/oms-api.git",
     workspace: "platform",
     slug: "oms-api",
     provider: "gitlab",
-    host: "gitlab.hasaki.work",
+    host: "gitlab.example.work",
   });
   const deep = Array.from({ length: 20 }, (_, i) => `g${i}`).join("/");
   assert.equal(repositoryRemote(`https://gitlab.com/${deep}/p.git`).workspace, deep);
@@ -66,8 +66,8 @@ test("GitLab URLs are refused off the allow-list and in every unsafe form", () =
 
 test("detected SSH origins of allow-listed GitLab hosts map to the HTTPS identity", () => {
   assert.equal(
-    canonicalizeDetectedUrl("git@gitlab.hasaki.work:platform/backend/oms-api.git"),
-    "https://gitlab.hasaki.work/platform/backend/oms-api.git",
+    canonicalizeDetectedUrl("git@gitlab.example.work:platform/backend/oms-api.git"),
+    "https://gitlab.example.work/platform/backend/oms-api.git",
   );
   assert.equal(
     canonicalizeDetectedUrl("ssh://git@gitlab.com:2222/group/project.git"),
@@ -84,15 +84,15 @@ test("instance config keeps bare lower-case host names only", () => {
   const cfg = gitlabConfig({
     ...config.gitlab,
     instances: [
-      { host: "GitLab.Hasaki.Work" },
+      { host: "GitLab.example.Work" },
       { host: "https://evil.example.com" },
-      { host: "gitlab.hasaki.work" },
+      { host: "gitlab.example.work" },
       { host: "localhost" },
       { host: "gitlab.com", caFile: "/ca.pem" },
     ],
   });
   assert.deepEqual(cfg.instances, [
-    { host: "gitlab.hasaki.work" },
+    { host: "gitlab.example.work" },
     { host: "gitlab.com", caFile: "/ca.pem" },
   ]);
 });

@@ -9,7 +9,7 @@ export function ArgoCd(p: { open: boolean; onToggle: (id: string) => void }) {
   const { t } = useI18n();
   const { data: st, reload } = useApi<ArgoStatus>("/api/integrations/argocd");
   const health: Health = !st ? "loading" : st.loggedIn ? "ok" : st.expired ? "expired" : "off";
-  const href = st?.baseUrl ?? "https://argocd-qc-v2.hasaki.dev";
+  const href = st?.baseUrl ?? "https://argocd-qc-v2.example.dev";
   return (
     <Row
       id="argocd"

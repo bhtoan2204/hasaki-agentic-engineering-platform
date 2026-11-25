@@ -217,8 +217,11 @@ test("self-development registers GitHub, isolates the live tree and stays recove
     );
     config.platform.trustedOperatorIsolation = true;
     process.env.NODE_EXTRA_CA_CERTS = "/etc/ssl/certs/ca-certificates.crt";
+    config.system.extraCaCerts = "/etc/ssl/certs/ca-certificates.crt";
     const isolated = await commandProcessEnv(repoPath, {});
+    process.env.NODE_EXTRA_CA_CERTS = undefined;
     delete process.env.NODE_EXTRA_CA_CERTS;
+    config.system.extraCaCerts = undefined;
     assert.equal(isolated.env.NODE_EXTRA_CA_CERTS, "/etc/ssl/certs/ca-certificates.crt");
     assert.equal("DATABASE_URL" in isolated.env, false);
     assert.equal("AUTH_SECRET" in isolated.env, false);

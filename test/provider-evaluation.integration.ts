@@ -1061,7 +1061,7 @@ test("a failed isolated database start stops a started postmaster and keeps a di
   const { execFileSync } = await import("node:child_process");
   const real = execFileSync("sh", ["-c", "command -v pg_ctl"], { encoding: "utf8" }).trim();
   const bin = await mkdtemp(join(tmpdir(), "eval-pgctl-"));
-  const path = process.env.PATH;
+  const path = config.system.path;
   const fakeStart = async (onStart: string) => {
     await writeFile(
       join(bin, "pg_ctl"),
@@ -1073,6 +1073,7 @@ test("a failed isolated database start stops a started postmaster and keeps a di
     return root;
   };
   process.env.PATH = `${bin}:${path}`;
+  config.system.path = `${bin}:${path}`;
   const roots: string[] = [];
   try {
     const started = await fakeStart(`${real} "$@" >/dev/null`);
@@ -1085,6 +1086,7 @@ test("a failed isolated database start stops a started postmaster and keeps a di
     assert.ok((await readdir(data)).includes("PG_VERSION"));
   } finally {
     process.env.PATH = path;
+    config.system.path = path;
     for (const root of roots) await rm(root, { recursive: true, force: true });
     await rm(bin, { recursive: true, force: true });
   }
@@ -1125,10 +1127,11 @@ test("live cleanup stops an orphaned postmaster first and reports a missing pg_c
   const orphan = await leftover("FAILED");
   const idle = await leftover("FAILED");
   const { data, socket, pid } = await startPostmaster(orphan.root);
-  const path = process.env.PATH;
+  const path = config.system.path;
   try {
     await mkdir(join(idle.root, `database-${randomUUID()}`));
     process.env.PATH = "/nonexistent";
+    config.system.path = "/nonexistent";
     const missing = await evalCleanup({ yes: true, caseRunId: orphan.caseRunId });
     const entry = missing.find((r) => r.case_run_id === orphan.caseRunId);
     assert.equal(entry?.removed, false);
@@ -1142,11 +1145,13 @@ test("live cleanup stops an orphaned postmaster first and reports a missing pg_c
     });
     await stat(data);
     process.env.PATH = path;
+    config.system.path = path;
     await cleanupLiveWork(Number(orphan.e.workflow_run_id), orphan.root);
     await assertPostmasterTerminated(pid);
     await assert.rejects(stat(orphan.root));
   } finally {
     process.env.PATH = path;
+    config.system.path = path;
     try {
       execFileSync("pg_ctl", ["-D", data, "-m", "immediate", "-w", "stop"], { stdio: "ignore" });
     } catch {

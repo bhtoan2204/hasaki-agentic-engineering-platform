@@ -24,6 +24,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { installBenchHarness, quantile, round } from "./fixtures/benchHarness.ts";
+import { config as appConfig } from "../src/config.ts";
 
 const N = Number(process.env.BENCH_N ?? 10);
 const LATENCY = Number(process.env.BENCH_DB_LATENCY_MS ?? 0);
@@ -93,13 +94,13 @@ const realHealth = async () => {
   return (await probeAgentHealth()) as ReturnType<typeof allHealthy>;
 };
 const withRealHealth =
-  <T,>(fn: () => Promise<T>) =>
+  <T>(fn: () => Promise<T>) =>
   async () => {
     useHealth(realHealth);
     return fn();
   };
 const withInstantHealth =
-  <T,>(fn: () => Promise<T>) =>
+  <T>(fn: () => Promise<T>) =>
   async () => {
     useHealth(instantHealth);
     return fn();
@@ -347,7 +348,7 @@ const scenarios = {
     // with the modeled cost below and be counted here.
     while (titleBusy()) await sleep(10);
     useHealth(spawnedHealth);
-    if (process.env.BENCH_REAL_TITLES) process.env.CHAT_TITLE_REAL_IN_TESTS = "1";
+    if (process.env.BENCH_REAL_TITLES) appConfig.chat.titleRealInTests = "1";
     setChatTitleComplete(process.env.BENCH_REAL_TITLES ? undefined : modeledTitle);
     try {
       const cs = await Promise.all(
@@ -401,9 +402,11 @@ const scenarios = {
     const t0 = performance.now();
     const run = await startRun({ definitionKey: "runtime-bench", inputs: { enabled: true } });
     for (;;) {
-      const [r] = await q<{ status: string }>(observer as never, "SELECT status FROM workflow_runs WHERE id = $1", [
-        run.id,
-      ]);
+      const [r] = await q<{ status: string }>(
+        observer as never,
+        "SELECT status FROM workflow_runs WHERE id = $1",
+        [run.id],
+      );
       if (["COMPLETED", "FAILED", "CANCELED"].includes(r.status)) {
         if (r.status !== "COMPLETED") throw new Error(`run ${r.status}`);
         break;
@@ -436,15 +439,24 @@ async function settled(runId: number) {
 /** Scheduler empty claims, when the platform counts them (src/runtimeMetrics.ts; absent before Phase 4D). */
 const runtimeMetrics = await import("../src/runtimeMetrics.ts").catch(() => null);
 const emptyClaims = () =>
-  (runtimeMetrics?.runtimeMetricsSnapshot().counters["scheduler.claims_empty"] as number | undefined) ?? NaN;
+  (runtimeMetrics?.runtimeMetricsSnapshot().counters["scheduler.claims_empty"] as
+    number | undefined) ?? NaN;
 /** n 12-step runs started together under the production loops (4 workers + 1 light worker, 1 s idle poll). */
 async function concurrentRuns(n: number) {
-  scheduler ??= startScheduler({ workers: 4, lightWorkers: 1, leaseSeconds: 120, heartbeatSeconds: 10, pollMs: 1000 });
+  scheduler ??= startScheduler({
+    workers: 4,
+    lightWorkers: 1,
+    leaseSeconds: 120,
+    heartbeatSeconds: 10,
+    pollMs: 1000,
+  });
   await sleep(1200);
   const e0 = emptyClaims();
   const t0 = performance.now();
   const runs = await Promise.all(
-    Array.from({ length: n }, () => startRun({ definitionKey: "runtime-bench", inputs: { enabled: true } })),
+    Array.from({ length: n }, () =>
+      startRun({ definitionKey: "runtime-bench", inputs: { enabled: true } }),
+    ),
   );
   const done = new Map<number, number>();
   while (done.size < n) {

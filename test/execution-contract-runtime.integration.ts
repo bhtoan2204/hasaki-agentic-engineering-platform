@@ -817,12 +817,24 @@ test("final publication reuses only fully bound verification evidence on the int
     runCommand(command, ...rest)
   );
   const sideEffect = "echo publish-side-effect";
-  const withSideEffect = [...steps, {
-    ...second, key: "external-effect", type: "command" as const,
-    config: { command: sideEffect }, status: "COMPLETED" as const,
-    output: { tested_heads: { [integrated.repo]: git(integrated.path, "rev-parse", "HEAD") } },
-  }];
-  const result = await verifyPublication(ctx, withSideEffect, await workspacesOf(run.id), counting, pgEvidenceStore(pool));
+  const withSideEffect = [
+    ...steps,
+    {
+      ...second,
+      key: "external-effect",
+      type: "command" as const,
+      config: { command: sideEffect },
+      status: "COMPLETED" as const,
+      output: { tested_heads: { [integrated.repo]: git(integrated.path, "rev-parse", "HEAD") } },
+    },
+  ];
+  const result = await verifyPublication(
+    ctx,
+    withSideEffect,
+    await workspacesOf(run.id),
+    counting,
+    pgEvidenceStore(pool),
+  );
   assert.ok(!commands.includes(sideEffect), "publication never invokes unrelated command steps");
   assert.deepEqual(result.problems, []);
   assert.ok(
@@ -844,7 +856,10 @@ test("final publication reuses only fully bound verification evidence on the int
     runCommand,
     pgEvidenceStore(pool),
   );
-  assert.ok(!logsAfter.some((l) => /reused evidence/.test(l)), "an uncommitted change forces a rerun");
+  assert.ok(
+    !logsAfter.some((l) => /reused evidence/.test(l)),
+    "an uncommitted change forces a rerun",
+  );
   void dirty;
 });
 

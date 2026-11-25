@@ -36,7 +36,7 @@ before(async () => {
       req.method === "GET" &&
       url.pathname === "/en-US/splunkd/__raw/services/authentication/current-context"
     )
-      return json(200, { entry: [{ content: { username: "dev@hasaki.vn", roles: ["user"] } }] });
+      return json(200, { entry: [{ content: { username: "dev@example.vn", roles: ["user"] } }] });
     if (req.method === "POST" && url.pathname === "/en-US/splunkd/__raw/services/search/jobs") {
       let body = "";
       req.on("data", (c) => (body += c));
@@ -78,7 +78,7 @@ test("parseSplunkCookie: Cookie header, `Cookie:` line and Copy-as-cURL; both se
   assert.equal(parseSplunkCookie(`Cookie: ${COOKIE}`).formKey, "CSRF123");
   assert.equal(
     parseSplunkCookie(
-      `curl 'https://siem.hasaki.work/en-US/app' -H 'accept: */*' -H 'cookie: ${COOKIE}' --compressed`,
+      `curl 'https://siem.example.work/en-US/app' -H 'accept: */*' -H 'cookie: ${COOKIE}' --compressed`,
     ).cookie,
     COOKIE,
   );
@@ -137,7 +137,7 @@ test("session is validated before saving; search sends the CSRF key, caps the wi
 
   const st = await setSplunkCookie(COOKIE);
   assert.equal(st.connected, true);
-  assert.equal(st.user, "dev@hasaki.vn");
+  assert.equal(st.user, "dev@example.vn");
 
   const r = await callTool(
     "splunk.search",

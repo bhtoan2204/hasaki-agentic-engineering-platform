@@ -154,7 +154,7 @@ export const igMessages: Record<"vi" | "en", Record<string, string>> = {
       "Kiểm tra lần cuối {time}; phiên Splunk Web hết hạn khi không dùng một thời gian.",
     "ig.splunk.s1": "Mở {link} và đăng nhập Google.",
     "ig.splunk.s2":
-      "F12 → Network → chuột phải một request tới siem.hasaki.work → Copy as cURL (cmd hoặc bash), hoặc copy header Cookie (cần splunkd_… và splunkweb_csrf_token_…).",
+      "F12 → Network → chuột phải một request tới siem.example.work → Copy as cURL (cmd hoặc bash), hoặc copy header Cookie (cần splunkd_… và splunkweb_csrf_token_…).",
     "ig.splunk.s3": "Dán vào ô dưới và bấm Lưu. Platform kiểm tra phiên với Splunk trước khi lưu.",
     "ig.splunk.ph": "curl … hoặc splunkd_8080=…; splunkweb_csrf_token_8080=…",
     "ig.splunk.saved": "Đã kết nối Splunk",
@@ -212,7 +212,7 @@ export const igMessages: Record<"vi" | "en", Record<string, string>> = {
       "Chỉ repo trên các instance trong danh sách này mới được đăng ký và nhận token.",
     "ig.gl.instanceAdd": "Thêm instance (admin)",
     "ig.gl.instanceAddHint":
-      "Dán host hoặc URL, ví dụ http://gitlab.hasaki.work/ → gitlab.hasaki.work. Git và API luôn chạy qua HTTPS.",
+      "Dán host hoặc URL, ví dụ http://gitlab.example.work/ → gitlab.example.work. Git và API luôn chạy qua HTTPS.",
     "ig.gl.instanceAddButton": "Thêm",
     "ig.gl.instanceAdded": "Đã thêm instance",
     "ig.gl.instanceRemove": "Xoá instance này khỏi danh sách",
@@ -468,7 +468,7 @@ export const igMessages: Record<"vi" | "en", Record<string, string>> = {
       "Last check {time}. The Splunk Web session expires after a period without use.",
     "ig.splunk.s1": "Open {link} and sign in with Google.",
     "ig.splunk.s2":
-      "F12 → Network → right-click a request to siem.hasaki.work → Copy as cURL (cmd or bash), or copy the Cookie header (splunkd_… and splunkweb_csrf_token_… are required).",
+      "F12 → Network → right-click a request to siem.example.work → Copy as cURL (cmd or bash), or copy the Cookie header (splunkd_… and splunkweb_csrf_token_… are required).",
     "ig.splunk.s3":
       "Paste it below and press Save. The platform checks the session with Splunk before saving.",
     "ig.splunk.ph": "curl … or splunkd_8080=…; splunkweb_csrf_token_8080=…",
@@ -528,7 +528,7 @@ export const igMessages: Record<"vi" | "en", Record<string, string>> = {
       "Only repositories on the instances in this list can be registered and receive tokens.",
     "ig.gl.instanceAdd": "Add instance (admin)",
     "ig.gl.instanceAddHint":
-      "Paste a host or URL, e.g. http://gitlab.hasaki.work/ → gitlab.hasaki.work. Git and the API always use HTTPS.",
+      "Paste a host or URL, e.g. http://gitlab.example.work/ → gitlab.example.work. Git and the API always use HTTPS.",
     "ig.gl.instanceAddButton": "Add",
     "ig.gl.instanceAdded": "Instance added",
     "ig.gl.instanceRemove": "Remove this instance from the list",

@@ -15,21 +15,21 @@ import {
 
 test("hosted refuses Chrome; local sessions isolate users and handle missing Chrome/cancel/duplicates", async () => {
   const old = {
-    mode: process.env.HASAKI_WORK_BROWSER_MODE,
-    path: process.env.HASAKI_WORK_CHROME_PATH,
-    host: process.env.HOST,
+    mode: config.hasakiWorkBrowser.mode,
+    path: config.hasakiWorkBrowser.chromePath,
+    host: config.server.host,
   };
   try {
-    delete process.env.HASAKI_WORK_BROWSER_MODE;
+    config.hasakiWorkBrowser.mode = undefined;
     await assert.rejects(
       openChrome(81, async () => {}),
       /chrome_hosted/,
     );
-    process.env.HASAKI_WORK_BROWSER_MODE = "local";
-    process.env.HOST = "0.0.0.0";
+    config.hasakiWorkBrowser.mode = "local";
+    config.server.host = "0.0.0.0";
     assert.equal(localChromeEnabled(), false);
-    process.env.HOST = "127.0.0.1";
-    process.env.HASAKI_WORK_CHROME_PATH = "/missing-chrome";
+    config.server.host = "127.0.0.1";
+    config.hasakiWorkBrowser.chromePath = "/missing-chrome";
     // Explicit paths must not silently select another browser.
     await openChrome(81, async () => {});
     await new Promise((r) => setTimeout(r, 10));
@@ -54,15 +54,15 @@ test("mock process lifecycle: duplicate open, actor cancellation, and timeout", 
   const executable = join(root, "mock-chrome");
   writeFileSync(executable, "#!/bin/sh\nexec sleep 30\n", { mode: 0o700 });
   const old = {
-    mode: process.env.HASAKI_WORK_BROWSER_MODE,
-    path: process.env.HASAKI_WORK_CHROME_PATH,
-    host: process.env.HOST,
+    mode: config.hasakiWorkBrowser.mode,
+    path: config.hasakiWorkBrowser.chromePath,
+    host: config.server.host,
     dir: config.dataDir,
   };
   try {
-    process.env.HASAKI_WORK_BROWSER_MODE = "local";
-    process.env.HASAKI_WORK_CHROME_PATH = executable;
-    process.env.HOST = "127.0.0.1";
+    config.hasakiWorkBrowser.mode = "local";
+    config.hasakiWorkBrowser.chromePath = executable;
+    config.server.host = "127.0.0.1";
     config.dataDir = root;
     await openChrome(91, async () => {}, 5000);
     await openChrome(91, async () => {
@@ -106,21 +106,21 @@ test("profile identity is stable and isolated by user and installation", () => {
 
 test("personal Chrome is pinned to the configured authenticated actor", async () => {
   const prior = {
-    owner: process.env.HASAKI_WORK_EXISTING_CHROME_USER,
-    mode: process.env.HASAKI_WORK_BROWSER_MODE,
-    profile: process.env.HASAKI_WORK_CHROME_PROFILE,
-    host: process.env.HOST,
+    owner: config.hasakiWorkBrowser.existingChromeUser,
+    mode: config.hasakiWorkBrowser.mode,
+    profile: config.hasakiWorkBrowser.chromeProfile,
+    host: config.server.host,
   };
   try {
-    delete process.env.HASAKI_WORK_EXISTING_CHROME_USER;
+    config.hasakiWorkBrowser.existingChromeUser = undefined;
     assert.equal(existingChromeOwner("toan"), false);
-    process.env.HASAKI_WORK_EXISTING_CHROME_USER = "toan";
+    config.hasakiWorkBrowser.existingChromeUser = "toan";
     assert.equal(existingChromeOwner("toan"), true);
     assert.equal(existingChromeOwner("other"), false);
     assert.equal(existingChromeOwner(undefined), false);
-    process.env.HASAKI_WORK_BROWSER_MODE = "local";
-    process.env.HASAKI_WORK_CHROME_PROFILE = "existing";
-    process.env.HOST = "127.0.0.1";
+    config.hasakiWorkBrowser.mode = "local";
+    config.hasakiWorkBrowser.chromeProfile = "existing";
+    config.server.host = "127.0.0.1";
     await assert.rejects(
       openChrome(123, async () => {}, 1000, "other"),
       /chrome_existing_owner/,

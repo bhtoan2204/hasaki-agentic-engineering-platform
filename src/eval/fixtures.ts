@@ -40,7 +40,7 @@ async function fixtureGitOnce(root: string, args: string[], input?: string) {
         timeout: 10000,
         maxBuffer: 1024 * 1024,
         env: {
-          PATH: process.env.PATH,
+          PATH: config.system.path,
           HOME: root,
           GIT_CONFIG_NOSYSTEM: "1",
           GIT_CONFIG_GLOBAL: "/dev/null",

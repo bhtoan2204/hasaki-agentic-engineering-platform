@@ -62,14 +62,14 @@ export function Bitbucket(p: { open: boolean; onToggle: (id: string) => void }) 
         <Field label={t("ig.bb.user")}>
           <input
             value={v.user}
-            placeholder="you@hasaki.vn"
+            placeholder="you@example.vn"
             onChange={(e) => setF({ ...f, user: e.target.value })}
           />
         </Field>
         <Field label={t("ig.bb.workspace")}>
           <input
             value={v.workspace}
-            placeholder="hasaki-tech"
+            placeholder="example-tech"
             onChange={(e) => setF({ ...f, workspace: e.target.value })}
           />
         </Field>

@@ -28,7 +28,7 @@ if (!goToolchain()) {
 } else {
   // Before platform-go starts: its trusted roots include the user skills directory.
   const userDir = join(config.dataDir, "kb-user-skills");
-  process.env.CLAUDE_USER_SKILLS_DIR = userDir;
+  config.agentEnv.userSkillsDir = userDir;
   const { pool, q } = await import("../src/db/pool.ts");
   const { migrate } = await import("../src/db/migrate.ts");
   const { repositories } = await import("../src/repos/service.ts");
@@ -490,12 +490,14 @@ if (!goToolchain()) {
       await assert.rejects(goKnowledgeScan(repoArgs(), userDir), /Knowledge scan is unavailable/);
       assert.equal(goKnowledgeStats.failures.unreachable, before + 1);
       config.retrieval.semantic.url = url;
-      const token = process.env.RETRIEVAL_INTERNAL_TOKEN;
+      const token = config.retrieval.internalToken;
       process.env.RETRIEVAL_INTERNAL_TOKEN = "x".repeat(64);
+      config.retrieval.internalToken = "x".repeat(64);
       try {
         await assert.rejects(goKnowledgeScan(repoArgs(), userDir), /refused \(401\)/);
       } finally {
         process.env.RETRIEVAL_INTERNAL_TOKEN = token;
+        config.retrieval.internalToken = token;
       }
       // A server that accepts and never answers: the request deadline cancels it.
       const hang = createServer(() => {}).listen(0, "127.0.0.1");

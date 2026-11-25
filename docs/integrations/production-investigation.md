@@ -115,7 +115,7 @@ paste is not stored); the agent continues with `splunk_get_search_results`.
 
 ```json
 "splunk": {
-  "baseUrl": "https://siem.hasaki.work",
+  "baseUrl": "https://siem.example.work",
   "managementUrl": "",
   "locale": "en-US",
   "environment": "production",

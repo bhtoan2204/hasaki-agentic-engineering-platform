@@ -15,14 +15,14 @@ const withArgo = async (baseUrl: string, fn: () => Promise<void>) => {
 };
 
 test("argocd restart target: production Argo CD is refused", async () => {
-  for (const url of ["https://argocd.hasaki.vn", "https://argocd-prod.hasaki.dev"])
+  for (const url of ["https://argocd.example.vn", "https://argocd-prod.example.dev"])
     await withArgo(url, async () => {
       await assert.rejects(restartTarget({ app: "payment-qc-x" }), /not a QC environment/);
     });
 });
 
 test("argocd restart target: production-looking app is refused before any request", async () => {
-  await withArgo("https://argocd-qc-v2.hasaki.dev", async () => {
+  await withArgo("https://argocd-qc-v2.example.dev", async () => {
     await assert.rejects(restartTarget({ app: "payment-prod-api" }), /never allowed/);
   });
 });

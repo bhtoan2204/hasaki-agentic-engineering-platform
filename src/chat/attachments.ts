@@ -4,6 +4,7 @@ import { one, pool, q, type Db } from "../db/pool.ts";
 import type { CompletionImage } from "../agent/complete.ts";
 import { redactSecrets } from "../integrations/redact.ts";
 import { extractDocument, sniffDocument, type DocumentType, type Extraction } from "./documents.ts";
+import { config } from "../config.ts";
 
 /**
  * Chat image attachments. An upload is bound to its owner and conversation and stays unreferenced until the message
@@ -17,8 +18,8 @@ export const ATTACHMENT_LIMITS = {
   imagesPerMessage: 4,
   /** Images of one message together. */
   messageBytes: 12 * 1024 * 1024,
-  documentBytes: Number(process.env.CHAT_DOCUMENT_MAX_BYTES ?? 10 * 1024 * 1024),
-  documentsPerMessage: Number(process.env.CHAT_DOCUMENTS_PER_MESSAGE ?? 10),
+  documentBytes: Number(config.chat.documentMaxBytes ?? 10 * 1024 * 1024),
+  documentsPerMessage: Number(config.chat.documentsPerMessage ?? 10),
   /** Everything one message carries (images and documents). */
   totalMessageBytes: 40 * 1024 * 1024,
   /** Unattached uploads one conversation may hold at once (one composer's worth, plus room for a retry). */
@@ -32,10 +33,17 @@ export type ImageType = CompletionImage["media_type"];
 
 /** The image type the bytes actually are, or null. */
 export function sniffImage(b: Buffer): ImageType | null {
-  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+  if (
+    b.length >= 8 &&
+    b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  )
     return "image/png";
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
-  if (b.length >= 12 && b.toString("latin1", 0, 4) === "RIFF" && b.toString("latin1", 8, 12) === "WEBP")
+  if (
+    b.length >= 12 &&
+    b.toString("latin1", 0, 4) === "RIFF" &&
+    b.toString("latin1", 8, 12) === "WEBP"
+  )
     return "image/webp";
   return null;
 }
@@ -64,7 +72,8 @@ export const safeFilename = (name: unknown) =>
 export async function uploadAttachment(ownerId: number, conversationId: number, body: unknown) {
   const data = (body as { data?: unknown } | null)?.data;
   const filename = safeFilename((body as { filename?: unknown } | null)?.filename);
-  if (typeof data !== "string" || !data) throw new HttpError(400, "data (base64 file bytes) is required");
+  if (typeof data !== "string" || !data)
+    throw new HttpError(400, "data (base64 file bytes) is required");
   const max = Math.max(ATTACHMENT_LIMITS.imageBytes, ATTACHMENT_LIMITS.documentBytes);
   // Reject before decoding: base64 is 4/3 of the bytes.
   if (data.length > Math.ceil(max / 3) * 4 + 4)
@@ -83,7 +92,10 @@ export async function uploadAttachment(ownerId: number, conversationId: number, 
   if (image && bytes.length > ATTACHMENT_LIMITS.imageBytes)
     throw new HttpError(413, `image larger than ${ATTACHMENT_LIMITS.imageBytes / 1048576} MB`);
   if (document && bytes.length > ATTACHMENT_LIMITS.documentBytes)
-    throw new HttpError(413, `document larger than ${ATTACHMENT_LIMITS.documentBytes / 1048576} MB`);
+    throw new HttpError(
+      413,
+      `document larger than ${ATTACHMENT_LIMITS.documentBytes / 1048576} MB`,
+    );
   const conversation = await one(
     pool,
     "SELECT id FROM chat_conversations WHERE id = $1 AND owner_id = $2",
@@ -103,7 +115,10 @@ export async function uploadAttachment(ownerId: number, conversationId: number, 
     [conversationId],
   );
   if ((pending?.n ?? 0) >= ATTACHMENT_LIMITS.pendingPerConversation)
-    throw new HttpError(429, "too many unsent images in this conversation; send or remove some first");
+    throw new HttpError(
+      429,
+      "too many unsent images in this conversation; send or remove some first",
+    );
   const row = await one<AttachmentMeta>(
     pool,
     `INSERT INTO chat_attachments (owner_id, conversation_id, media_type, kind, filename, bytes, sha256, content)
@@ -142,23 +157,38 @@ export async function attachToMessage(
     [unique, ownerId, conversationId, messageId],
   );
   // Unknown, foreign, already sent or expired ids: the whole message is refused (same answer for each).
-  if (rows.length !== unique.length) throw new HttpError(400, "attachment not found or already used");
+  if (rows.length !== unique.length)
+    throw new HttpError(400, "attachment not found or already used");
   const images = rows.filter((r) => r.kind === "image");
   const documents = rows.filter((r) => r.kind === "document");
   if (images.length > ATTACHMENT_LIMITS.imagesPerMessage)
     throw new HttpError(400, `at most ${ATTACHMENT_LIMITS.imagesPerMessage} images per message`);
   if (documents.length > ATTACHMENT_LIMITS.documentsPerMessage)
-    throw new HttpError(400, `at most ${ATTACHMENT_LIMITS.documentsPerMessage} documents per message`);
+    throw new HttpError(
+      400,
+      `at most ${ATTACHMENT_LIMITS.documentsPerMessage} documents per message`,
+    );
   if (images.reduce((n, r) => n + r.bytes, 0) > ATTACHMENT_LIMITS.messageBytes)
-    throw new HttpError(413, `images larger than ${ATTACHMENT_LIMITS.messageBytes / 1048576} MB in one message`);
+    throw new HttpError(
+      413,
+      `images larger than ${ATTACHMENT_LIMITS.messageBytes / 1048576} MB in one message`,
+    );
   if (rows.reduce((n, r) => n + r.bytes, 0) > ATTACHMENT_LIMITS.totalMessageBytes)
-    throw new HttpError(413, `attachments larger than ${ATTACHMENT_LIMITS.totalMessageBytes / 1048576} MB in one message`);
+    throw new HttpError(
+      413,
+      `attachments larger than ${ATTACHMENT_LIMITS.totalMessageBytes / 1048576} MB in one message`,
+    );
   return rows;
 }
 
 /** Bytes of one attachment for its owner, through a conversation the owner still has. */
 export async function readAttachment(ownerId: number, id: number) {
-  return one<{ media_type: ImageType | DocumentType; kind: string; filename: string; content: Buffer }>(
+  return one<{
+    media_type: ImageType | DocumentType;
+    kind: string;
+    filename: string;
+    content: Buffer;
+  }>(
     pool,
     `SELECT a.media_type, a.kind, a.filename, a.content FROM chat_attachments a
        JOIN chat_conversations c ON c.id = a.conversation_id AND c.owner_id = a.owner_id
@@ -207,7 +237,11 @@ export async function imagesForTurn(
  * Documents of the recent user messages of a conversation (the current one included), newest first: what "these files"
  * refers to in a request. Metadata only; the text comes from documentText().
  */
-export function documentsForTurn(ownerId: number, conversationId: number, currentMessageId: number) {
+export function documentsForTurn(
+  ownerId: number,
+  conversationId: number,
+  currentMessageId: number,
+) {
   return q<AttachmentMeta & { sha256: string }>(
     pool,
     `SELECT ${META}, sha256 FROM chat_attachments
@@ -239,7 +273,11 @@ export async function documentText(ownerId: number, id: number, signal?: AbortSi
   );
   if (!row) return null;
   if (row.extraction) return { ...row, extraction: row.extraction };
-  const content = await one<{ content: Buffer }>(pool, "SELECT content FROM chat_attachments WHERE id = $1", [id]);
+  const content = await one<{ content: Buffer }>(
+    pool,
+    "SELECT content FROM chat_attachments WHERE id = $1",
+    [id],
+  );
   const ex = extractDocument(content!.content, row.media_type, signal);
   let redacted = 0;
   const sections = ex.sections.map((s) => {
@@ -250,8 +288,13 @@ export async function documentText(ownerId: number, id: number, signal?: AbortSi
   const extraction: Extraction = {
     ...ex,
     sections,
-    warnings: redacted ? [...ex.warnings, `secret-like values redacted in ${redacted} section(s)`] : ex.warnings,
+    warnings: redacted
+      ? [...ex.warnings, `secret-like values redacted in ${redacted} section(s)`]
+      : ex.warnings,
   };
-  await q(pool, "UPDATE chat_attachments SET extraction = $2 WHERE id = $1", [id, JSON.stringify(extraction)]);
+  await q(pool, "UPDATE chat_attachments SET extraction = $2 WHERE id = $1", [
+    id,
+    JSON.stringify(extraction),
+  ]);
   return { ...row, extraction };
 }

@@ -60,10 +60,9 @@ async function claudeDiscovery() {
   const session = query({
     prompt,
     options: {
-      ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
+      ...(config.agent.claudeBin
         ? {
-            pathToClaudeCodeExecutable:
-              process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin,
+            pathToClaudeCodeExecutable: config.agent.claudeBin,
           }
         : {}),
       env: agentEnvironment(process.env, "claude"),

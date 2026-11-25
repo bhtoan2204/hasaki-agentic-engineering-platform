@@ -56,7 +56,7 @@ export const gatewayStats: Record<string, number> = {};
 const count = (k: string) => (gatewayStats[k] = (gatewayStats[k] ?? 0) + 1);
 
 function authorized(req: IncomingMessage) {
-  const token = process.env.RETRIEVAL_INTERNAL_TOKEN ?? "";
+  const token = config.retrieval.internalToken ?? "";
   const got = Buffer.from(String(req.headers.authorization ?? ""));
   const want = Buffer.from(`Bearer ${token}`);
   return token.length >= 32 && got.length === want.length && timingSafeEqual(got, want);

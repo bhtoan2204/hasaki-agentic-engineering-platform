@@ -107,12 +107,13 @@ import { saveDefaultProvider } from "../src/agent/configurationStore.ts";
 import { previewAgentConfiguration } from "../src/api/agentConfiguration.ts";
 import { patchAgentProvider } from "../src/api/agentConfiguration.ts";
 import { providerDraftPatch } from "../web/src/agentConfiguration.ts";
+import { config } from "../src/config.ts";
 
 test("Settings saves and previews preserve environment models until that field is edited", async () => {
-  const previous = process.env.CODEX_MODEL;
+  const previous = config.agentEnv.codexModel;
   const provider = "codex";
   try {
-    process.env.CODEX_MODEL = "gpt-environment-one";
+    config.agentEnv.codexModel = "gpt-environment-one";
     const document = await loadAgentConfiguration();
     const draft = {
       ...document.providers[provider],
@@ -123,7 +124,7 @@ test("Settings saves and previews preserve environment models until that field i
       revision: draft.revision,
       patch: providerDraftPatch(draft, []),
     });
-    process.env.CODEX_MODEL = "gpt-environment-two";
+    config.agentEnv.codexModel = "gpt-environment-two";
     const inherited = await loadAgentConfiguration();
     assert.equal(inherited.providers[provider].defaults.model, "gpt-environment-two");
     const edited = providerDraftPatch(
@@ -146,14 +147,14 @@ test("Settings saves and previews preserve environment models until that field i
       revision: inherited.providers[provider].revision,
       patch: edited,
     });
-    process.env.CODEX_MODEL = "gpt-environment-three";
+    config.agentEnv.codexModel = "gpt-environment-three";
     assert.equal(
       (await loadAgentConfiguration()).providers[provider].defaults.model,
       "gpt-explicit",
     );
   } finally {
-    if (previous === undefined) delete process.env.CODEX_MODEL;
-    else process.env.CODEX_MODEL = previous;
+    if (previous === undefined) config.agentEnv.codexModel = undefined;
+    else config.agentEnv.codexModel = previous;
   }
 });
 test("default changes and disable/re-enable preserve independent provider values and preview routing", async () => {

@@ -25,39 +25,39 @@ test("destinations: allowlisted QC hosts only; production, metadata, private add
   await withQc(
     {
       hosts: [
-        "oms.qc.hasaki.dev",
-        "*.qc-v2.hasaki.dev",
-        "api.hasaki.vn",
+        "oms.qc.example.dev",
+        "*.qc-v2.example.dev",
+        "api.example.vn",
         "169.254.169.254",
         "10.0.0.5",
       ],
     },
     () => {
-      assert.equal(qcDestination("https://oms.qc.hasaki.dev/orders").hostname, "oms.qc.hasaki.dev");
+      assert.equal(qcDestination("https://oms.qc.example.dev/orders").hostname, "oms.qc.example.dev");
       assert.equal(
-        qcDestination("https://warranty.qc-v2.hasaki.dev/x").hostname,
-        "warranty.qc-v2.hasaki.dev",
+        qcDestination("https://warranty.qc-v2.example.dev/x").hostname,
+        "warranty.qc-v2.example.dev",
       );
       assert.throws(
-        () => qcDestination("https://qc-v2.hasaki.dev/x"),
+        () => qcDestination("https://qc-v2.example.dev/x"),
         /not an allowlisted/,
         "suffix pattern needs a subdomain",
       );
-      assert.throws(() => qcDestination("https://payment.qc.hasaki.dev/x"), /not an allowlisted/);
+      assert.throws(() => qcDestination("https://payment.qc.example.dev/x"), /not an allowlisted/);
       assert.throws(
-        () => qcDestination("https://api.hasaki.vn/orders"),
+        () => qcDestination("https://api.example.vn/orders"),
         /production/,
         "a production domain stays refused even when listed",
       );
-      assert.throws(() => qcDestination("https://oms.prod.qc-v2.hasaki.dev/x"), /production/);
+      assert.throws(() => qcDestination("https://oms.prod.qc-v2.example.dev/x"), /production/);
       assert.throws(() => qcDestination("https://169.254.169.254/latest"), /metadata/);
       assert.throws(() => qcDestination("https://10.0.0.5/x"), /internal address/);
-      assert.throws(() => qcDestination("https://u:p@oms.qc.hasaki.dev/x"), /credentials/);
+      assert.throws(() => qcDestination("https://u:p@oms.qc.example.dev/x"), /credentials/);
     },
   );
   await withQc({ hosts: [] }, () => {
     assert.throws(
-      () => qcDestination("https://oms.qc.hasaki.dev/x"),
+      () => qcDestination("https://oms.qc.example.dev/x"),
       /not an allowlisted/,
       "disabled by default",
     );
@@ -67,28 +67,28 @@ test("destinations: allowlisted QC hosts only; production, metadata, private add
 test("callers cannot set credentials themselves; reads may be pre-authorized, DELETE never is", async () => {
   await withQc(
     {
-      hosts: ["oms.qc.hasaki.dev"],
+      hosts: ["oms.qc.example.dev"],
       preauthorized: [
-        { method: "POST", host: "oms.qc.hasaki.dev", path: "/orders" },
-        { method: "DELETE", host: "oms.qc.hasaki.dev", path: "/" },
+        { method: "POST", host: "oms.qc.example.dev", path: "/orders" },
+        { method: "DELETE", host: "oms.qc.example.dev", path: "/" },
       ],
     },
     async () => {
       for (const h of ["Authorization", "cookie", "X-Api-Key", "x-access-token"])
         await assert.rejects(
-          qcRequest({ method: "GET", url: "https://oms.qc.hasaki.dev/x", headers: { [h]: "v" } }),
+          qcRequest({ method: "GET", url: "https://oms.qc.example.dev/x", headers: { [h]: "v" } }),
           /set by the platform/,
         );
-      assert.equal(qcPreauthorized("POST", "https://oms.qc.hasaki.dev/orders"), true);
+      assert.equal(qcPreauthorized("POST", "https://oms.qc.example.dev/orders"), true);
       assert.equal(
-        qcPreauthorized("POST", "https://oms.qc.hasaki.dev/orders/1/cancel"),
+        qcPreauthorized("POST", "https://oms.qc.example.dev/orders/1/cancel"),
         true,
         "prefix rule",
       );
-      assert.equal(qcPreauthorized("POST", "https://oms.qc.hasaki.dev/refunds"), false);
-      assert.equal(qcPreauthorized("PUT", "https://oms.qc.hasaki.dev/orders"), false);
+      assert.equal(qcPreauthorized("POST", "https://oms.qc.example.dev/refunds"), false);
+      assert.equal(qcPreauthorized("PUT", "https://oms.qc.example.dev/orders"), false);
       assert.equal(
-        qcPreauthorized("DELETE", "https://oms.qc.hasaki.dev/orders/1"),
+        qcPreauthorized("DELETE", "https://oms.qc.example.dev/orders/1"),
         false,
         "DELETE always needs a confirmation",
       );
@@ -172,7 +172,7 @@ test("service discovery: routes, hosts, paths, backends, service ports and sourc
           targetRevision: "qc",
         },
       },
-      status: { summary: { externalURLs: ["https://oms.qc.hasaki.dev"] } },
+      status: { summary: { externalURLs: ["https://oms.qc.example.dev"] } },
     },
     {
       nodes: [
@@ -180,7 +180,7 @@ test("service discovery: routes, hosts, paths, backends, service ports and sourc
           kind: "Ingress",
           name: "oms",
           namespace: "oms",
-          networkingInfo: { ingress: [{ hostname: "oms.qc.hasaki.dev" }] },
+          networkingInfo: { ingress: [{ hostname: "oms.qc.example.dev" }] },
         },
         { kind: "HTTPRoute", name: "oms-route", namespace: "oms" },
         { kind: "Service", name: "oms-api", namespace: "oms" },
@@ -195,7 +195,7 @@ test("service discovery: routes, hosts, paths, backends, service ports and sourc
           spec: {
             rules: [
               {
-                host: "oms.qc.hasaki.dev",
+                host: "oms.qc.example.dev",
                 http: {
                   paths: [
                     {
@@ -214,7 +214,7 @@ test("service discovery: routes, hosts, paths, backends, service ports and sourc
         name: "oms-route",
         manifest: {
           spec: {
-            hostnames: ["oms-gw.qc.hasaki.dev"],
+            hostnames: ["oms-gw.qc.example.dev"],
             parentRefs: [{ name: "qc-gateway" }],
             rules: [
               {
@@ -237,8 +237,8 @@ test("service discovery: routes, hosts, paths, backends, service ports and sourc
   assert.deepEqual(
     e.routes.map((r) => [r.kind, r.hosts, r.paths, r.backends]),
     [
-      ["Ingress", ["oms.qc.hasaki.dev"], ["/api"], ["oms-api:8080"]],
-      ["HTTPRoute", ["oms-gw.qc.hasaki.dev"], ["/v2"], ["oms-api:8080"]],
+      ["Ingress", ["oms.qc.example.dev"], ["/api"], ["oms-api:8080"]],
+      ["HTTPRoute", ["oms-gw.qc.example.dev"], ["/v2"], ["oms-api:8080"]],
     ],
   );
   assert.deepEqual(e.routes[1].gateways, ["qc-gateway"]);
@@ -250,5 +250,5 @@ test("service discovery: routes, hosts, paths, backends, service ports and sourc
     cluster_dns: "oms-api.oms.svc",
   });
   assert.equal(e.source.repo_url, "https://bitbucket.org/hsk/oms-api.git");
-  assert.deepEqual(e.external_urls, ["https://oms.qc.hasaki.dev"]);
+  assert.deepEqual(e.external_urls, ["https://oms.qc.example.dev"]);
 });

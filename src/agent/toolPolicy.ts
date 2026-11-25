@@ -218,6 +218,7 @@ const deny = (reason: string): Decision => ({ allow: false, reason });
 // A leaf module, so code-intelligence readers can use it without importing the policy engine.
 export { isSecretPath } from "./secretPaths.ts";
 import { isSecretPath } from "./secretPaths.ts";
+import { config } from "../config.ts";
 
 function secretPathViolation(paths: string[], ctx: PolicyContext): string | null {
   const roots = ctx.protectedRoots ?? [];
@@ -746,11 +747,11 @@ function loopStructure(input: string[]): { commands: string[] } | { error: strin
 }
 
 const TEMP_ROOTS = () =>
-  [...new Set(["/tmp", tmpdir(), process.env.TMPDIR].filter(Boolean) as string[])].map((r) =>
+  [...new Set(["/tmp", tmpdir(), config.system.tmpdir].filter(Boolean) as string[])].map((r) =>
     resolve(r),
   );
 const strictlyInside = (p: string, root: string) => p !== root && isInside(p, [root]);
-const expandHome = (t: string) => t.replace(/^~(?=\/|$)/, process.env.HOME ?? "~");
+const expandHome = (t: string) => t.replace(/^~(?=\/|$)/, config.system.home ?? "~");
 
 /**
  * The directory each simple command runs in, following literal `cd` (starting from the hook's cwd). A `cd` whose

@@ -87,7 +87,7 @@ export async function getToken(userId: number): Promise<string> {
 
 export async function openLoginWindow(userId: number, username?: string) {
   if (!localChromeEnabled()) throw new HttpError(403, "chrome_hosted");
-  if (process.env.HASAKI_WORK_CHROME_PROFILE === "existing" && !existingChromeOwner(username))
+  if (config.hasakiWorkBrowser.chromeProfile === "existing" && !existingChromeOwner(username))
     throw new HttpError(403, "chrome_existing_owner");
   await openChrome(userId, (raw, valid) => setToken(raw, userId, valid), 300000, username);
   return authStatus(userId);
@@ -126,7 +126,7 @@ export async function workApi<T = unknown>(
   const json: unknown = await res.json().catch(() => null);
   if (res.status === 404)
     throw new Error(
-      `Hasaki Work ${method} ${url.pathname}: HTTP 404 — endpoint không tồn tại. Mở work.hasaki.vn/tasks, DevTools > Network, ` +
+      `Hasaki Work ${method} ${url.pathname}: HTTP 404 — endpoint không tồn tại. Mở work.example.vn/tasks, DevTools > Network, ` +
         `tìm request lấy danh sách task tới ${config.hasakiWork.apiUrl} rồi sửa hasakiWork.listPath / detailPath / listQuery trong config.json.`,
     );
   if (!res.ok || !json) throw new Error(`Hasaki Work ${method} ${path}: HTTP ${res.status}`);

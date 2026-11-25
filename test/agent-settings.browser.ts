@@ -8,10 +8,11 @@ import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 import { AGENT_PROVIDERS } from "../src/agent/provider.ts";
 import { providerControlState } from "../src/agent/providerCapabilities.ts";
+import { config } from "../src/config.ts";
 
 test("provider Settings retain drafts and hide unsupported controls", async () => {
-  const previousModel = process.env.CODEX_MODEL;
-  process.env.CODEX_MODEL = "gpt-environment-one";
+  const previousModel = config.agentEnv.codexModel;
+  config.agentEnv.codexModel = "gpt-environment-one";
   await createUser({
     username: "agent-settings-admin",
     password: "local-browser-password",
@@ -108,7 +109,7 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
     const payload = (await saving).postDataJSON();
     assert.equal(Object.hasOwn(payload.patch, "defaults"), false);
     await page.getByText("Provider saved", { exact: true }).waitFor();
-    process.env.CODEX_MODEL = "gpt-environment-two";
+    config.agentEnv.codexModel = "gpt-environment-two";
     await page.reload();
     await page.getByRole("tab", { name: "codex", exact: true }).click();
     assert.equal(
@@ -116,8 +117,8 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
       "gpt-environment-two",
     );
   } finally {
-    if (previousModel === undefined) delete process.env.CODEX_MODEL;
-    else process.env.CODEX_MODEL = previousModel;
+    if (previousModel === undefined) config.agentEnv.codexModel = undefined;
+    else config.agentEnv.codexModel = previousModel;
     await browser?.close();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

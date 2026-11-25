@@ -919,7 +919,7 @@ export function registerBuiltinTools() {
     summary:
       "PRODUCTION logs (Splunk SIEM): run a read-only SPL search over a bounded time window; PII is masked.",
     description:
-      "Read-only search of production logs in Splunk (siem.hasaki.work) with the developer's session. " +
+      "Read-only search of production logs in Splunk (siem.example.work) with the developer's session. " +
       '`query` is SPL: e.g. `index=<idx> "HSK-T123" | head 50` or `index=<idx> level=error | stats count by service`. ' +
       "Always name the index and narrow by a concrete identifier (order_code, transaction_code, request id) before broad searches. " +
       "Commands that write or reach outside search (delete, collect, outputlookup, sendemail, rest, map, script…) are refused. " +

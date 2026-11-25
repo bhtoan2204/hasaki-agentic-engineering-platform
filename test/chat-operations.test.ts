@@ -52,7 +52,7 @@ test("kafka publish target: QC allowlist only; production and unlisted topics ar
       "even an allowlisted production cluster",
     );
   });
-  await withKafka({ publishAllow: allow, baseUrl: "https://kafka-ui.hasaki.vn" }, async () => {
+  await withKafka({ publishAllow: allow, baseUrl: "https://kafka-ui.example.vn" }, async () => {
     await assert.rejects(kafkaPublishTarget("warranty.create"), /not a QC environment/);
   });
 });

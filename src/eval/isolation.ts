@@ -174,11 +174,11 @@ export async function containerRun(
         signal,
         maxBuffer: 64 * 1024,
         env: {
-          PATH: process.env.PATH,
-          HOME: process.env.HOME,
-          XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
-          DOCKER_HOST: process.env.DOCKER_HOST,
-          CONTAINER_HOST: process.env.CONTAINER_HOST,
+          PATH: config.system.path,
+          HOME: config.system.home,
+          XDG_RUNTIME_DIR: config.system.xdgRuntimeDir,
+          DOCKER_HOST: config.system.dockerHost,
+          CONTAINER_HOST: config.system.containerHost,
         },
       },
     );

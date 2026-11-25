@@ -1,8 +1,9 @@
 import type { Page } from "playwright-core";
+import { config } from "./config.ts";
 
 /** Let Work generate state and PKCE verifier/challenge in this same browser profile. */
 export async function startWorkSso(page: Page, active: () => boolean) {
-  await page.goto("https://work.hasaki.vn/auth/login", {
+  await page.goto(`${config.hasakiWork.webUrl}/auth/login`, {
     waitUntil: "domcontentloaded",
     timeout: 30000,
   });
@@ -16,7 +17,7 @@ export async function startWorkSso(page: Page, active: () => boolean) {
     if (
       !active() ||
       new URL(page.url()).pathname !== "/auth/login" ||
-      new URL(page.url()).origin !== "https://work.hasaki.vn"
+      new URL(page.url()).origin !== new URL(config.hasakiWork.webUrl).origin
     )
       return;
     throw new Error("chrome_sso_start");

@@ -13,6 +13,7 @@ import { pool, one, q } from "../db/pool.ts";
 import { retrievalService } from "../retrieval/semantic.ts";
 import { scanNamespaces, scanWindow, type ScanOptions, type ScanWindow } from "./window.ts";
 import { ignoreError } from "../ignoreError.ts";
+import { config } from "../config.ts";
 
 export type ScanTrigger = "manual" | "schedule";
 export type ScanEngine = "typescript" | "go";
@@ -134,7 +135,7 @@ export const initialProgress = () => ({
 
 /** Tell platform-go a job is waiting (best effort: its own poll picks the job up anyway). */
 function wakeGo() {
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return;
+  if (!config.retrieval.internalToken) return;
   void retrievalService("/internal/v1/jobs/wake", { kind: "prod_error_scan" }, 2000)
     .then((r) => r.body?.cancel())
     .catch(ignoreError("prod_errors.wake_go"));

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 import { cookieSecure, readCookie } from "../src/auth/sessions.ts";
+import { config } from "../src/config.ts";
 
 const password = randomBytes(24).toString("hex");
 function bootstrap(username = "toan") {
@@ -113,11 +114,13 @@ test("bootstrap script migrates an empty database, preserves existing admin, and
 });
 
 test("cookie policy supports localhost and enforces production Secure; malformed cookies are anonymous", () => {
-  const prev = process.env.COOKIE_SECURE;
-  const nodeEnv = process.env.NODE_ENV;
+  const prev = config.server.cookieSecure;
+  const nodeEnv = config.system.nodeEnv;
   try {
-    delete process.env.COOKIE_SECURE;
+    config.server.cookieSecure = undefined;
+    process.env.NODE_ENV = undefined;
     delete process.env.NODE_ENV;
+    config.system.nodeEnv = undefined;
     assert.equal(
       cookieSecure({ headers: { host: "localhost:4545" }, socket: {} } as IncomingMessage),
       false,
@@ -126,17 +129,18 @@ test("cookie policy supports localhost and enforces production Secure; malformed
       cookieSecure({ headers: { host: "app.example.com" }, socket: {} } as IncomingMessage),
       true,
     );
-    process.env.COOKIE_SECURE = "0";
+    config.server.cookieSecure = "0";
     process.env.NODE_ENV = "production";
+    config.system.nodeEnv = "production";
     assert.equal(
       cookieSecure({ headers: { host: "localhost" }, socket: {} } as IncomingMessage),
       true,
     );
     assert.equal(readCookie({ headers: { cookie: "sid=%invalid" } } as IncomingMessage), null);
   } finally {
-    if (prev === undefined) delete process.env.COOKIE_SECURE;
-    else process.env.COOKIE_SECURE = prev;
-    if (nodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = nodeEnv;
+    if (prev === undefined) config.server.cookieSecure = undefined;
+    else config.server.cookieSecure = prev;
+    if (nodeEnv === undefined) config.system.nodeEnv = undefined;
+    else config.system.nodeEnv = nodeEnv;
   }
 });

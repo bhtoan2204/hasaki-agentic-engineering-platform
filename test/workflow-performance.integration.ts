@@ -23,6 +23,7 @@ import { settleBackground } from "../src/workflow/background.ts";
 import { runtimeMetricsSnapshot } from "../src/runtimeMetrics.ts";
 import { handle } from "../src/http/app.ts";
 import type { ExecResult } from "../src/workflow/types.ts";
+import { config } from "../src/config.ts";
 
 const PROVIDERS = ["claude", "cursor", "codex", "antigravity", "copilot"] as const;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -373,7 +374,7 @@ test("large GET results are compressed when the client accepts it, never the ses
     // The session route carries the CSRF token: never compressed (BREACH).
     const me = await fetch(`${base}/api/auth/me`, { headers: { cookie, "accept-encoding": "br" } });
     assert.equal(me.headers.get("content-encoding"), null);
-    process.env.HTTP_COMPRESSION = "off";
+    config.server.compression = "off";
     try {
       assert.equal(
         (await raw("br")).headers["content-encoding"],
@@ -381,7 +382,7 @@ test("large GET results are compressed when the client accepts it, never the ses
         "HTTP_COMPRESSION=off",
       );
     } finally {
-      delete process.env.HTTP_COMPRESSION;
+      config.server.compression = undefined;
     }
   } finally {
     server.closeAllConnections();

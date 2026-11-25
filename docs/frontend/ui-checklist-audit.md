@@ -1011,7 +1011,7 @@ LearningInsights.tsx:27   <h2 style={{ display: "flex", gap: 8, alignItems: "cen
   - AgentValueFields.tsx:259 `${ariaLabel} suggestions`; StepAgentFields.tsx:168 `label="Step"`; raw enum option labels `disabled/manual/automatic` (66-68) and `MICRO/FAST/STANDARD/DEEP` (191-193)
   - AutonomyPolicies.tsx 52, 55, 80-82, ~108 (`global`, `owner`, `repository`, `shadow`, `≤`); AutonomyInsights.tsx 103-107 (`p50`, `p95`, `min`, `tokens`), 162 (`commit`), 174 (`PASS`/`FAIL`)
   - Integrations.tsx:1184 `TLS`; Settings.tsx:660/662 `title="Ctrl+S"`, `<kbd>Ctrl S</kbd>` (also wrong on macOS where Cmd+S is bound)
-  - Example placeholders: Integrations.tsx 499, 621, 693, 1106, 1113, 1120, 1127, 1318 (`you@hasaki.vn`), 1325, 1573, 1795ff (`123456789:AA…`); Settings.tsx 512, 539 (these are format examples; ambiguous under the rule "no hard-coded copy", listed for completeness)
+  - Example placeholders: Integrations.tsx 499, 621, 693, 1106, 1113, 1120, 1127, 1318 (`you@example.vn`), 1325, 1573, 1795ff (`123456789:AA…`); Settings.tsx 512, 539 (these are format examples; ambiguous under the rule "no hard-coded copy", listed for completeness)
 - Evidence: `<Sparkles size={15} /> Preview` (OfficeToolbar.tsx:95); `setNote({ text: "Provider saved", ok: true })` (AgentSettings.tsx:229)
 - Smallest fix: add catalog keys (vi + en) and use `t()`; for enum values reuse existing option labels.
 - Scope: local per file; Office toolbar and GlobalChibiCompanion are shared.

@@ -11,10 +11,11 @@ import {
   forgetUserSessions,
   rememberSession,
 } from "./sessionCache.ts";
+import { config } from "../config.ts";
 
 const COOKIE = "sid";
 /** Login session lifetime (cookie Max-Age and the stored expiry). Default 3 days; SESSION_MAX_AGE_HOURS overrides. */
-const hours = Number(process.env.SESSION_MAX_AGE_HOURS ?? 72);
+const hours = Number(config.server.sessionMaxAgeHours ?? 72);
 export const MAX_AGE_S = Math.round((Number.isFinite(hours) && hours > 0 ? hours : 72) * 60 * 60);
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILS = 8;
@@ -22,9 +23,9 @@ const MAX_FAILS = 8;
 export type SessionUser = PublicUser & { csrf: string };
 
 export function cookieSecure(req: IncomingMessage) {
-  if (process.env.COOKIE_SECURE === "1") return true;
-  if (process.env.COOKIE_SECURE === "0" && process.env.NODE_ENV !== "production") return false;
-  if (process.env.NODE_ENV === "production" || (req.socket as { encrypted?: boolean }).encrypted)
+  if (config.server.cookieSecure === "1") return true;
+  if (config.server.cookieSecure === "0" && config.system.nodeEnv !== "production") return false;
+  if (config.system.nodeEnv === "production" || (req.socket as { encrypted?: boolean }).encrypted)
     return true;
   const host = String(req.headers.host ?? "").replace(/:\d+$/, "");
   return host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]";

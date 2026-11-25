@@ -12,11 +12,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { goToolchain, requireGoToolchain, startPlatformGo } from "./fixtures/platformGo.ts";
+import { config as appConfig } from "../src/config.ts";
 
 if (!goToolchain()) {
   requireGoToolchain("production error scans with the Go engine");
 } else {
-  process.env.SPLUNK_POLL_MS = "50";
+  appConfig.polling.splunkMs = "50";
   const { config } = await import("../src/config.ts");
   const { pool, one, q } = await import("../src/db/pool.ts");
   const { migrate } = await import("../src/db/migrate.ts");
@@ -350,7 +351,7 @@ if (!goToolchain()) {
     assert.equal((await jobs.recoverScans()).recovered, 1);
     const res = await fetch(`${base}/internal/v1/prod-errors/scans/${id}/finalize`, {
       method: "POST",
-      headers: { authorization: `Bearer ${process.env.RETRIEVAL_INTERNAL_TOKEN}` },
+      headers: { authorization: `Bearer ${appConfig.retrieval.internalToken}` },
       body: JSON.stringify({ fence: Number(stale), outcome: "succeeded" }),
     });
     assert.equal(res.status, 409);
@@ -521,7 +522,7 @@ if (!goToolchain()) {
         ),
       ),
     );
-    const post = (path: string, body: unknown, token = process.env.RETRIEVAL_INTERNAL_TOKEN) =>
+    const post = (path: string, body: unknown, token = appConfig.retrieval.internalToken) =>
       fetch(`${base}${path}`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },

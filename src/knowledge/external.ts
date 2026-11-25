@@ -1,5 +1,6 @@
 import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
+import { config } from "../config.ts";
 
 /**
  * Third-party skills (skills/external, imported as `skill.ext.<name>`): provenance, runtime/provider availability
@@ -58,7 +59,7 @@ export function hasBinary(name: string): boolean {
   if (!/^[\w.-]+$/.test(name)) return false;
   let hit = binCache.get(name);
   if (hit === undefined) {
-    hit = (process.env.PATH ?? "").split(delimiter).some((d) => {
+    hit = (config.system.path ?? "").split(delimiter).some((d) => {
       try {
         accessSync(join(d, name), constants.X_OK);
         return true;

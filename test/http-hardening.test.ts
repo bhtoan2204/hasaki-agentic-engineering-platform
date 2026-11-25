@@ -14,6 +14,7 @@ import {
   DEFAULT_BODY_LIMIT,
   UPLOAD_BODY_LIMIT,
 } from "../src/http/bodyLimits.ts";
+import { config } from "../src/config.ts";
 
 const server = createServer(handle);
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -128,14 +129,14 @@ test("API responses carry the security headers", async () => {
 });
 
 test("HSTS is sent only when the cookie is Secure", async () => {
-  const before = process.env.COOKIE_SECURE;
-  process.env.COOKIE_SECURE = "1";
+  const before = config.server.cookieSecure;
+  config.server.cookieSecure = "1";
   try {
     const r = await fetch(`${base}/api/health`);
     assert.match(r.headers.get("strict-transport-security") ?? "", /max-age=\d+/);
   } finally {
-    if (before === undefined) delete process.env.COOKIE_SECURE;
-    else process.env.COOKIE_SECURE = before;
+    if (before === undefined) config.server.cookieSecure = undefined;
+    else config.server.cookieSecure = before;
   }
 });
 

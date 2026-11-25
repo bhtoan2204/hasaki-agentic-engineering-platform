@@ -3,7 +3,14 @@ import { repositories } from "../src/repos/service.ts";
 import { approvedCodingFixture } from "./approved-coding-fixture.ts";
 import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, unlinkSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  unlinkSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +55,7 @@ import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
 import type { AttemptRow, RunRow, StepRow } from "../src/workflow/types.ts";
 import type { ResolvedContext, StepInput } from "../src/workflow/context.ts";
 import type { AgentMetrics } from "../src/agent/metrics.ts";
+import { config } from "../src/config.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-codex.mjs");
 const HOOK = join(import.meta.dirname, "..", "src", "agent", "codex", "hook.ts");
@@ -69,8 +77,8 @@ beforeEach(() => {
   logFile = join(mkdtempSync(join(tmpdir(), "fake-codex-log-")), "log.jsonl");
   process.env.FAKE_CODEX_LOG = logFile;
   process.env.FAKE_CODEX_MODE = "ok";
-  delete process.env.CODEX_MODEL;
-  delete process.env.CODEX_REASONING_EFFORT;
+  config.agentEnv.codexModel = undefined;
+  config.agentEnv.codexReasoningEffort = undefined;
   delete process.env.CODEX_TIMEOUT_MS;
 });
 after(async () => {
@@ -101,7 +109,10 @@ async function workflow(steps: unknown[]) {
   return key;
 }
 const stepOf = async (runId: number, key: string) =>
-  (await one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [runId, key]))!;
+  (await one<StepRow>(pool, "SELECT * FROM workflow_steps WHERE run_id = $1 AND key = $2", [
+    runId,
+    key,
+  ]))!;
 type AttemptWithMetrics = AttemptRow & {
   metrics: AgentMetrics & {
     prompt_context: {
@@ -125,7 +136,7 @@ test("codex is a valid provider; omitted stays claude; unknown values are reject
   assert.equal(resolveAgentProvider(undefined), "claude");
   assert.throws(
     () => resolveAgentProvider("openai"),
-    /agent_provider must be one of claude, cursor, codex, antigravity/
+    /agent_provider must be one of claude, cursor, codex, antigravity/,
   );
 });
 
@@ -307,7 +318,7 @@ function runHook(
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const c = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", HOOK], {
-      env: { PATH: process.env.PATH, ...env },
+      env: { PATH: config.system.path, ...env },
     });
     let stdout = "";
     let stderr = "";
@@ -406,7 +417,7 @@ test("MCP bridge lists mode-scoped tools and relays calls only through the broke
   });
   const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", BRIDGE], {
     env: {
-      PATH: process.env.PATH,
+      PATH: config.system.path,
       PLATFORM_MODE: "analysis",
       PLATFORM_BROKER_SOCKET: broker.socketPath,
       PLATFORM_BROKER_TOKEN: broker.token,
@@ -414,7 +425,11 @@ test("MCP bridge lists mode-scoped tools and relays calls only through the broke
   });
   const replies: Array<{
     id: number;
-    result: { tools?: Array<{ name: string }>; content?: Array<{ text: string }>; isError?: boolean };
+    result: {
+      tools?: Array<{ name: string }>;
+      content?: Array<{ text: string }>;
+      isError?: boolean;
+    };
   }> = [];
   let buf = "";
   child.stdout.on("data", (b) => {
@@ -464,9 +479,7 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
       assert.ok(args.includes(f), f);
     assert.ok(!args.includes("--last"));
     assert.ok(
-      !args.some(
-        (x) => x === "--dangerously-bypass-approvals-and-sandbox" || x === "--full-auto",
-      ),
+      !args.some((x) => x === "--dangerously-bypass-approvals-and-sandbox" || x === "--full-auto"),
     );
     assert.ok(args.includes('approval_policy="never"'));
     assert.ok(args.some((x) => x.startsWith("hooks.PreToolUse=")));
@@ -483,7 +496,9 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
   // The outer test environment may itself live under ctp-agent-tmp. Reject this invocation's
   // scratch cache, not an unrelated ancestor name in the configured shared cache directory.
   assert.ok(!c.some((x) => x.includes(`npm_config_cache=${JSON.stringify(scratch)}`)));
-  assert.ok(!c.some((x) => x.includes(`npm_config_cache=${JSON.stringify(scratch).slice(0, -1)}/`)));
+  assert.ok(
+    !c.some((x) => x.includes(`npm_config_cache=${JSON.stringify(scratch).slice(0, -1)}/`)),
+  );
   assert.deepEqual(c.slice(0, 2), ["exec", "resume"]);
   assert.deepEqual(c.slice(-2), ["th-9", "-"]);
   assert.ok(c.includes('model="gpt-test"') && c.includes('model_reasoning_effort="high"'));
@@ -501,8 +516,8 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
 });
 
 test("Codex model routing never uses the Claude model; effort is separate", () => {
-  process.env.CODEX_MODEL = "gpt-test";
-  process.env.CODEX_REASONING_EFFORT = "high";
+  config.agentEnv.codexModel = "gpt-test";
+  config.agentEnv.codexReasoningEffort = "high";
   const r = codexModelFor({ type: "agent", config: { model: "claude-opus-5-5" } });
   assert.deepEqual(r, { model: "gpt-test", source: "agent.codex.model", effort: "high" });
   assert.equal(
@@ -535,9 +550,9 @@ test("probe reports missing CLI, old CLI, logged-out and unsupported model witho
   assert.equal(lo.kind, "auth");
   assert.match(lo.error!, /codex login/);
   process.env.FAKE_CODEX_MODE = "ok";
-  process.env.CODEX_MODEL = "gpt-missing";
+  config.agentEnv.codexModel = "gpt-missing";
   assert.equal((await codexCapabilities(true)).kind, "model");
-  delete process.env.CODEX_MODEL;
+  config.agentEnv.codexModel = undefined;
   const ok = await codexCapabilities(true);
   assert.equal(ok.ok, true);
   assert.equal(ok.auth, "ChatGPT");
@@ -626,7 +641,11 @@ test("Codex turn passes authorized worktrees to the native sandbox", async () =>
     metrics: newMetrics(""),
   });
   const invocation = fakeLog().find((entry) => entry.argv);
-  assert.ok(invocation.argv.includes(`sandbox_workspace_write.writable_roots=[${JSON.stringify(workspace)}]`));
+  assert.ok(
+    invocation.argv.includes(
+      `sandbox_workspace_write.writable_roots=[${JSON.stringify(workspace)}]`,
+    ),
+  );
 });
 
 test("hook denies git push and escalation in a real turn; secrets stay out of the CLI env; tokens are real and cost is null", async () => {
@@ -764,13 +783,19 @@ test("Codex ask_user pauses the step, blocks edits while waiting, then resumes t
   const run = await startRun({ definitionKey: key, title: "codex ask", agentProvider: "codex" });
   await approvedCodingFixture(run.id, "plan");
   await drain();
-  assert.equal((await stepOf(run.id, "plan")).status, "WAITING_INPUT", JSON.stringify((await attemptsOf(run.id, "plan")).map(a => a.error)));
+  assert.equal(
+    (await stepOf(run.id, "plan")).status,
+    "WAITING_INPUT",
+    JSON.stringify((await attemptsOf(run.id, "plan")).map((a) => a.error)),
+  );
   assert.equal(
     fakeLog().find((l) => "editAfterAsk" in l).editAfterAsk,
     2,
     "edit denied while waiting for answers",
   );
-  const qs = await q<{ id: number }>(pool, "SELECT * FROM workflow_questions WHERE run_id = $1", [run.id]);
+  const qs = await q<{ id: number }>(pool, "SELECT * FROM workflow_questions WHERE run_id = $1", [
+    run.id,
+  ]);
   process.env.FAKE_CODEX_MODE = "ok";
   delete process.env.FAKE_CODEX_THREAD;
   await answerQuestions({ [qs[0].id]: "Không" }, "dev");
@@ -861,9 +886,22 @@ test("no submit_result or output missing contract keys fails the step; retry kee
   await drain();
   atts = await attemptsOf(run.id, "analyze");
   // It did call submit_result; the contract rejected it. Reported as such (with the reason), not as "never submitted".
-  assert.match(atts.at(-1)!.error?.message ?? "", /submit_result was rejected by the step's output contract/);
+  assert.match(
+    atts.at(-1)!.error?.message ?? "",
+    /submit_result was rejected by the step's output contract/,
+  );
   assert.equal(atts.at(-1)!.error?.details?.failure_code, "CONTRACT_INVALID");
-  assert.equal((await one(pool, "SELECT count(*)::int AS n FROM workflow_checkpoints WHERE run_id=$1 AND reason='submit_result'", [run.id])).n, 0, "invalid submissions are refused before they are recorded");
+  assert.equal(
+    (
+      await one(
+        pool,
+        "SELECT count(*)::int AS n FROM workflow_checkpoints WHERE run_id=$1 AND reason='submit_result'",
+        [run.id],
+      )
+    ).n,
+    0,
+    "invalid submissions are refused before they are recorded",
+  );
   assert.equal((await getRun(run.id)).agent_provider, "codex");
 });
 
@@ -914,7 +952,7 @@ test("commit_changes commits inside the run worktree only, with repository hooks
   await drain();
   delete process.env.FAKE_CODEX_WS;
   const entry = fakeLog().find((l) => "commit" in l);
-  assert.ok(entry, JSON.stringify((await attemptsOf(run.id, "implement")).map(a => a.error)));
+  assert.ok(entry, JSON.stringify((await attemptsOf(run.id, "implement")).map((a) => a.error)));
   assert.match(entry.outside, /outside the worktree/);
   assert.match(entry.commit, /Committed \w+ feat: add feature/);
   assert.equal(
@@ -969,7 +1007,11 @@ test("session lookup never crosses provider, step or user", async () => {
     [att!.id],
   );
   const ctx = (step: StepRow, _provider: string) =>
-    ({ step, input: { pending: { feedback: "again" } }, context: { snapshot_id: 0 } }) as ExecutionContext;
+    ({
+      step,
+      input: { pending: { feedback: "again" } },
+      context: { snapshot_id: 0 },
+    }) as ExecutionContext;
   assert.equal(
     (await resumableSession(ctx(stepA, "codex"), "/cwd", "codex"))?.sessionId,
     "codex-sess",
@@ -1067,60 +1109,139 @@ test("output contract keys", () => {
 
 test("coding launch refuses missing contracts and stale approval attempts before starting Codex", async () => {
   for (const stale of [false, true]) {
-    const key = await workflow([{ key: "implement", type: "coding_agent", config: { verify: false } }]);
-    const run = await startRun({ definitionKey: key, title: "contract refusal", agentProvider: "codex" });
+    const key = await workflow([
+      { key: "implement", type: "coding_agent", config: { verify: false } },
+    ]);
+    const run = await startRun({
+      definitionKey: key,
+      title: "contract refusal",
+      agentProvider: "codex",
+    });
     if (stale) {
       await approvedCodingFixture(run.id, "implement");
-      await q(pool, `UPDATE workflow_step_attempts SET input='{}'::jsonb WHERE run_id=$1 AND step_id=(SELECT id FROM workflow_steps WHERE run_id=$1 AND key='approve_plan')`, [run.id]);
+      await q(
+        pool,
+        `UPDATE workflow_step_attempts SET input='{}'::jsonb WHERE run_id=$1 AND step_id=(SELECT id FROM workflow_steps WHERE run_id=$1 AND key='approve_plan')`,
+        [run.id],
+      );
     }
-    const before = fakeLog().filter(l => l.argv).length;
+    const before = fakeLog().filter((l) => l.argv).length;
     await drain();
     assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
     const attempts = await attemptsOf(run.id, "implement");
     assert.match(JSON.stringify(attempts.at(-1)!.error), /Mandatory execution contract/);
-    assert.equal(fakeLog().filter(l => l.argv).length, before, "invalid approval must prevent provider launch");
+    assert.equal(
+      fakeLog().filter((l) => l.argv).length,
+      before,
+      "invalid approval must prevent provider launch",
+    );
   }
 });
 
 test("coding completion refuses a passing verification with no implementation changes", async () => {
-  const key = await workflow([{ key: "implement", type: "coding_agent", config: { output_contract: "{ goal, requirements }" } }]);
-  const run = await startRun({ definitionKey: key, title: "empty implementation", agentProvider: "codex" });
+  const key = await workflow([
+    {
+      key: "implement",
+      type: "coding_agent",
+      config: { output_contract: "{ goal, requirements }" },
+    },
+  ]);
+  const run = await startRun({
+    definitionKey: key,
+    title: "empty implementation",
+    agentProvider: "codex",
+  });
   await approvedCodingFixture(run.id, "implement");
   const [workspace] = await workspacesOf(run.id);
   unlinkSync(join(workspace.path, "implementation-evidence.txt"));
   // The test harness is part of the approved fixture baseline, not an implementation change.
   execFileSync("git", ["-C", workspace.path, "add", "go.mod", "transport_test.go"]);
-  execFileSync("git", ["-C", workspace.path, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "verification fixture"]);
-  execFileSync("git", ["-C", workspace.path, "update-ref", "refs/remotes/origin/release/prod", "HEAD"]);
+  execFileSync("git", [
+    "-C",
+    workspace.path,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "commit",
+    "-qm",
+    "verification fixture",
+  ]);
+  execFileSync("git", [
+    "-C",
+    workspace.path,
+    "update-ref",
+    "refs/remotes/origin/release/prod",
+    "HEAD",
+  ]);
   execFileSync("git", ["-C", workspace.path, "update-ref", "refs/remotes/origin/main", "HEAD"]);
   await drain();
   assert.equal((await stepOf(run.id, "implement")).status, "FAILED");
-  assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error), /IMPLEMENTED requires worker-observed implementation/);
+  assert.match(
+    JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error),
+    /IMPLEMENTED requires worker-observed implementation/,
+  );
 });
 
 test("approved coding submissions cannot complete without a registered worktree", async () => {
   for (const outcome of ["IMPLEMENTED", "NO_CHANGE_REQUIRED"]) {
-    const key = await workflow([{ key: "implement", type: "coding_agent", config: { output_contract: "{ goal, requirements }" } }]);
-    const run = await startRun({ definitionKey: key, title: "no worktree", agentProvider: "codex" });
+    const key = await workflow([
+      {
+        key: "implement",
+        type: "coding_agent",
+        config: { output_contract: "{ goal, requirements }" },
+      },
+    ]);
+    const run = await startRun({
+      definitionKey: key,
+      title: "no worktree",
+      agentProvider: "codex",
+    });
     await approvedCodingFixture(run.id, "implement");
     await q(pool, "DELETE FROM execution_workspaces WHERE run_id=$1", [run.id]);
     process.env.FAKE_CODEX_MODE = `outcome-${outcome}`;
     await drain();
     const step = await stepOf(run.id, "implement");
-    assert.equal(step.status, "FAILED", `${outcome} must not bypass verification without a worktree`);
-    assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error), /no worktree/i);
-    assert.ok(fakeLog().some(log => log.argv), "the valid contract must reach the provider submission path");
+    assert.equal(
+      step.status,
+      "FAILED",
+      `${outcome} must not bypass verification without a worktree`,
+    );
+    assert.match(
+      JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error),
+      /no worktree/i,
+    );
+    assert.ok(
+      fakeLog().some((log) => log.argv),
+      "the valid contract must reach the provider submission path",
+    );
   }
 });
 
 test("repair completion preserves terminal outcomes and verified implementation", async () => {
   for (const outcome of ["FAILED", "BLOCKED", "IMPLEMENTED"]) {
-    const key = await workflow([{ key: "implement", type: "coding_agent", config: { output_contract: "{ goal, requirements }" } }]);
-    const run = await startRun({ definitionKey: key, title: "terminal repair", agentProvider: "codex" });
+    const key = await workflow([
+      {
+        key: "implement",
+        type: "coding_agent",
+        config: { output_contract: "{ goal, requirements }" },
+      },
+    ]);
+    const run = await startRun({
+      definitionKey: key,
+      title: "terminal repair",
+      agentProvider: "codex",
+    });
     await approvedCodingFixture(run.id, "implement", 1);
     const [workspace] = await workspacesOf(run.id);
-    writeFileSync(join(workspace.path, "transport.go"), 'package fixture\nfunc TransportValue() int { return 5 }\n');
-    writeFileSync(join(workspace.path, "transport_test.go"), 'package fixture\nimport "testing"\nfunc TestTransport(t *testing.T) { if TransportValue() != 4 { t.Fatal("initial business failure") } }\n');
+    writeFileSync(
+      join(workspace.path, "transport.go"),
+      "package fixture\nfunc TransportValue() int { return 5 }\n",
+    );
+    writeFileSync(
+      join(workspace.path, "transport_test.go"),
+      'package fixture\nimport "testing"\nfunc TestTransport(t *testing.T) { if TransportValue() != 4 { t.Fatal("initial business failure") } }\n',
+    );
     process.env.FAKE_CODEX_MODE = `repair-${outcome}`;
     process.env.FAKE_CODEX_WS = workspace.path;
     try {
@@ -1133,10 +1254,18 @@ test("repair completion preserves terminal outcomes and verified implementation"
         assert.equal(step.output.verification.repairs, 1);
       } else {
         assert.equal(step.status, "FAILED", `${outcome} from repair must remain terminal`);
-        assert.match(JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error), new RegExp(`Coding outcome ${outcome}`));
+        assert.match(
+          JSON.stringify((await attemptsOf(run.id, "implement")).at(-1)!.error),
+          new RegExp(`Coding outcome ${outcome}`),
+        );
       }
-      assert.ok(fakeLog().some(log => log.argv && log.resumeId), "the verification failure must actually invoke repair");
+      assert.ok(
+        fakeLog().some((log) => log.argv && log.resumeId),
+        "the verification failure must actually invoke repair",
+      );
       execFileSync("go", ["test", "."], { cwd: workspace.path, stdio: "pipe" });
-    } finally { delete process.env.FAKE_CODEX_WS; }
+    } finally {
+      delete process.env.FAKE_CODEX_WS;
+    }
   }
 });

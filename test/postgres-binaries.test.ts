@@ -16,6 +16,7 @@ import {
 import { runCommand } from "../src/workflow/executors/builtin.ts";
 import { TEST_COMMAND } from "../src/workflow/templates.ts";
 import { environmentUnavailable } from "../src/agent/verify.ts";
+import { config } from "../src/config.ts";
 
 after(() => pool.end());
 
@@ -180,8 +181,9 @@ test("postgres env: only repositories whose test preload runs initdb get the bin
 
 test("postgres env: without build it never starts nix and reports PostgreSQL as unavailable", async () => {
   setPostgresBinForTests(undefined);
-  const path = process.env.PATH;
+  const path = config.system.path;
   process.env.PATH = dir("empty-path");
+  config.system.path = dir("empty-path");
   try {
     assert.deepEqual(await testPostgresEnv(harness(), undefined, { build: false }), {
       PLATFORM_POSTGRES_UNAVAILABLE:
@@ -189,6 +191,7 @@ test("postgres env: without build it never starts nix and reports PostgreSQL as 
     });
   } finally {
     process.env.PATH = path;
+    config.system.path = path;
   }
 });
 
@@ -256,7 +259,7 @@ test("runCommand: every command in a harness repo finds the bin dir after a logi
       onPath.output.startsWith(`/usr/bin:/bin:${dirname(process.execPath)}`),
       "initdb found on the platform PATH is not prepended ahead of the user's toolchains",
     );
-    for (const inherited of (process.env.PATH ?? "").split(":").filter(Boolean))
+    for (const inherited of (config.system.path ?? "").split(":").filter(Boolean))
       assert.ok(
         onPath.output.split(":").includes(inherited),
         `inherited toolchain retained: ${inherited}`,
@@ -287,7 +290,7 @@ test("runCommand preserves login-profile priority and restores inherited tools o
     const result = await runCommand(
       "toolchain-choice; inherited-only-tool",
       repo,
-      { ...env, PATH: `${inheritedBin}:${process.env.PATH ?? ""}` },
+      { ...env, PATH: `${inheritedBin}:${config.system.path ?? ""}` },
       30_000,
       never,
     );

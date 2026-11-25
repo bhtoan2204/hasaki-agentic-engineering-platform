@@ -106,7 +106,7 @@ before(async () => {
   ] as const)
     ids[u] = Number((await createUser({ username: u, password: `${u}-password`, role })).id);
   for (const u of ["acl-a", "acl-b"]) {
-    await putUserSecret(ids[u], "bitbucket_user", `${u}@hasaki.vn`);
+    await putUserSecret(ids[u], "bitbucket_user", `${u}@example.vn`);
     await putUserSecret(ids[u], "bitbucket_token", `${u}-token`);
   }
   await register("repo-a", { dependencies: ["repo-b", "repo-c"] });
@@ -352,7 +352,7 @@ test("7. shared credentials never stand in for a user's own permission; only the
   const saved = { ...config.bitbucket };
   const admUser = ids["acl-admin"];
   try {
-    config.bitbucket.user = "service@hasaki.vn";
+    config.bitbucket.user = "service@example.vn";
     config.bitbucket.token = "service-token";
     config.bitbucket.allowSharedCredentials = true;
     await admin("/api/repositories/repo-a/access", { user_id: admUser, level: "read" });

@@ -23,19 +23,19 @@ type Session = {
 };
 const sessions = new Map<number, Session>();
 export const localChromeEnabled = () =>
-  process.env.HASAKI_WORK_BROWSER_MODE === "local" &&
-  (!process.env.HOST || ["localhost", "127.0.0.1", "::1"].includes(process.env.HOST));
+  config.hasakiWorkBrowser.mode === "local" &&
+  (!config.server.host || ["localhost", "127.0.0.1", "::1"].includes(config.server.host));
 export function chromePath() {
-  if (process.env.HASAKI_WORK_CHROME_PATH) {
-    if (!existsSync(process.env.HASAKI_WORK_CHROME_PATH)) throw new Error("chrome_missing");
-    return process.env.HASAKI_WORK_CHROME_PATH;
+  if (config.hasakiWorkBrowser.chromePath) {
+    if (!existsSync(config.hasakiWorkBrowser.chromePath)) throw new Error("chrome_missing");
+    return config.hasakiWorkBrowser.chromePath;
   }
   const candidates = [
     "/opt/google/chrome/google-chrome",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    join(process.env.PROGRAMFILES ?? "C:/Program Files", "Google/Chrome/Application/chrome.exe"),
+    join(config.system.programFiles ?? "C:/Program Files", "Google/Chrome/Application/chrome.exe"),
     "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe",
     "/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe",
   ];
@@ -64,7 +64,7 @@ export function chromeProfilePath(root: string, installation: string, userId: nu
 export function connectionStatus(id: number) {
   const s = sessions.get(id);
   return {
-    chromeProfile: process.env.HASAKI_WORK_CHROME_PROFILE === "existing" ? "existing" : "dedicated",
+    chromeProfile: config.hasakiWorkBrowser.chromeProfile === "existing" ? "existing" : "dedicated",
     browserMode: localChromeEnabled() ? "local" : "hosted",
     connectionState: s?.state ?? "idle",
     connectionError: s?.error ?? null,
@@ -104,7 +104,7 @@ export async function openChrome(
   username?: string,
 ) {
   if (!localChromeEnabled()) throw new Error("chrome_hosted");
-  if (process.env.HASAKI_WORK_CHROME_PROFILE === "existing" && !existingChromeOwner(username))
+  if (config.hasakiWorkBrowser.chromeProfile === "existing" && !existingChromeOwner(username))
     throw new Error("chrome_existing_owner");
   if (sessions.get(id)?.state === "waiting") return;
   const s: Session = { state: "waiting" };
@@ -116,7 +116,7 @@ export async function openChrome(
     try {
       const executable = chromePath();
       let personalPage: Page | undefined;
-      if (process.env.HASAKI_WORK_CHROME_PROFILE === "existing") {
+      if (config.hasakiWorkBrowser.chromeProfile === "existing") {
         s.external = true;
         s.browser = await attachExistingWindowsChrome(
           executable,
@@ -134,7 +134,7 @@ export async function openChrome(
           .flatMap((context) => context.pages())
           .filter((page) => {
             try {
-              return new URL(page.url()).origin === "https://work.hasaki.vn";
+              return new URL(page.url()).origin === new URL(config.hasakiWork.webUrl).origin;
             } catch {
               return false;
             }
@@ -183,7 +183,7 @@ export async function openChrome(
           "--remote-debugging-address=127.0.0.1",
           "--no-first-run",
           "--no-default-browser-check",
-          "https://work.hasaki.vn/auth/login",
+          `${config.hasakiWork.webUrl}/auth/login`,
         ];
         if (windows) {
           const quote = (v: string) => "'" + v.replaceAll("'", "''") + "'";

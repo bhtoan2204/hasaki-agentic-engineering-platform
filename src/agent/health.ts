@@ -8,6 +8,7 @@ import {
   type ProviderFlags,
 } from "./provider.ts";
 import type { EffectiveAgent } from "./stepAgent.ts";
+import { config } from "../config.ts";
 
 const QUOTA_TTL_MS = 30 * 60_000;
 const quotaUntil = new Map<string, number>();
@@ -30,7 +31,7 @@ export function rememberedQuota(provider: string): "exhausted" | "unknown" {
 }
 
 export function clearProviderHealthForTests() {
-  if (process.env.PLATFORM_TEST !== "1") throw new Error("Health reset disabled");
+  if (config.test.platformTest !== "1") throw new Error("Health reset disabled");
   quotaUntil.clear();
 }
 
@@ -142,7 +143,7 @@ export function primeSharedAgentHealth(rows: AgentHealth[]) {
 
 /** Benchmarks and tests: replace what a shared probe runs (the reuse above still applies). */
 export function setSharedHealthProber(fn: (() => Promise<AgentHealth[]>) | undefined) {
-  if (process.env.PLATFORM_TEST !== "1") throw new Error("Health prober override disabled");
+  if (config.test.platformTest !== "1") throw new Error("Health prober override disabled");
   prober = fn ?? (() => probeAgentHealth());
   shared = null;
 }

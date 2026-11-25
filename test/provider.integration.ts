@@ -16,14 +16,15 @@ import type { PolicyContext } from "../src/agent/toolPolicy.ts";
 import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
 import type { AttemptRow, RunRow, StepRow } from "../src/workflow/types.ts";
 import { nodeModulesReady, recordDependencies } from "../src/git/provider.ts";
+import { config } from "../src/config.ts";
 
 before(async () => {
   await migrate();
   await seedTemplates();
 });
 after(() => {
-  delete process.env.CURSOR_AGENT_BIN;
-  delete process.env.CURSOR_AGENT_TIMEOUT_MS;
+  config.agent.cursorBin = undefined;
+  config.agent.cursorTimeoutMs = undefined;
   delete process.env.FAKE_MODE;
   return pool.end();
 });
@@ -195,7 +196,7 @@ function fakeCtx(signal: AbortSignal) {
 }
 
 test("missing CLI capability is reported and does not pretend to be Claude", async () => {
-  process.env.CURSOR_AGENT_BIN = fakeAgent("missing-flag");
+  config.agent.cursorBin = fakeAgent("missing-flag");
   const cap = await cursorCapabilities(true);
   assert.equal(cap.ok, false);
   assert.match(cap.error || "", /does not advertise --output-format/);
@@ -203,7 +204,7 @@ test("missing CLI capability is reported and does not pretend to be Claude", asy
 });
 
 test("zero exit without a result event fails the turn", async () => {
-  process.env.CURSOR_AGENT_BIN = fakeAgent("no-result");
+  config.agent.cursorBin = fakeAgent("no-result");
   const ac = new AbortController();
   const { ctx } = fakeCtx(ac.signal);
   const dir = mkdtempSync(join(tmpdir(), "cursor-turn-"));
@@ -219,7 +220,7 @@ test("zero exit without a result event fails the turn", async () => {
 });
 
 test("nonzero exit and a denied git push are failures", async () => {
-  process.env.CURSOR_AGENT_BIN = fakeAgent("fail");
+  config.agent.cursorBin = fakeAgent("fail");
   const ac = new AbortController();
   const dir = mkdtempSync(join(tmpdir(), "cursor-turn-"));
   const failed = await cursorAgentTurn({
@@ -230,7 +231,7 @@ test("nonzero exit and a denied git push are failures", async () => {
     prompt: "hi",
   });
   assert.equal(failed.isError, true);
-  process.env.CURSOR_AGENT_BIN = fakeAgent("partial");
+  config.agent.cursorBin = fakeAgent("partial");
   const dir2 = mkdtempSync(join(tmpdir(), "cursor-turn-"));
   const blocked = await cursorAgentTurn({
     ctx: fakeCtx(ac.signal).ctx,
@@ -249,8 +250,9 @@ test("nonzero exit and a denied git push are failures", async () => {
 });
 
 test("cancellation kills a hung Cursor process", async () => {
-  process.env.CURSOR_AGENT_BIN = fakeAgent("hang");
-  process.env.CURSOR_AGENT_TIMEOUT_MS = "300";
+  config.agent.cursorBin = fakeAgent("hang");
+  config.agent.cursorTimeoutMs = 300;
+  config.agentEnv.cursorTimeoutMs = "300";
   const ac = new AbortController();
   const dir = mkdtempSync(join(tmpdir(), "cursor-turn-"));
   const started = Date.now();
@@ -269,8 +271,8 @@ test("Cursor shares the attempt collector across invocations without overwriting
   const { newMetrics } = await import("../src/agent/metrics.ts");
   const metrics = newMetrics("");
   metrics.provider = "cursor";
-  process.env.CURSOR_AGENT_BIN = fakeAgent("partial");
-  delete process.env.CURSOR_AGENT_TIMEOUT_MS;
+  config.agent.cursorBin = fakeAgent("partial");
+  config.agent.cursorTimeoutMs = undefined;
   for (let i = 0; i < 2; i++) {
     const dir = mkdtempSync(join(tmpdir(), "cursor-metrics-"));
     await cursorAgentTurn({

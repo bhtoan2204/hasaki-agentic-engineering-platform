@@ -68,11 +68,11 @@ export const miscMessages: Record<"vi" | "en", Record<string, string>> = {
     "scan.left": "còn ~{t}",
     "scan.almost": "sắp xong",
     "chrome.existing":
-      "Dùng Chrome cá nhân đang mở: mở chrome://inspect/#remote-debugging và bật Remote debugging, giữ đúng một tab work.hasaki.vn trong profile của bạn. Bấm kết nối và chọn Allow khi Chrome hỏi. App chỉ theo dõi tab Work này, không đóng Chrome khi xong.",
+      "Dùng Chrome cá nhân đang mở: mở chrome://inspect/#remote-debugging và bật Remote debugging, giữ đúng một tab work.example.vn trong profile của bạn. Bấm kết nối và chọn Allow khi Chrome hỏi. App chỉ theo dõi tab Work này, không đóng Chrome khi xong.",
     chrome_existing_permission:
       "Chrome chưa cho phép kết nối. Bật Remote debugging tại chrome://inspect/#remote-debugging trong Chrome cá nhân, bấm kết nối lại rồi chọn Allow. Chrome sẽ hiện thông báo đang được điều khiển.",
     chrome_existing_tab:
-      "Giữ đúng một tab work.hasaki.vn trong Chrome cá nhân rồi kết nối lại; app không tự chọn giữa nhiều tab tài khoản khác nhau.",
+      "Giữ đúng một tab work.example.vn trong Chrome cá nhân rồi kết nối lại; app không tự chọn giữa nhiều tab tài khoản khác nhau.",
     chrome_existing_owner:
       "Chrome cá nhân chỉ được kết nối bởi tài khoản platform được cấu hình trên máy local.",
     chrome_existing_platform: "Chế độ Chrome cá nhân hiện hỗ trợ Chrome Windows qua WSL.",
@@ -384,11 +384,11 @@ export const miscMessages: Record<"vi" | "en", Record<string, string>> = {
     "scan.left": "~{t} left",
     "scan.almost": "almost done",
     "chrome.existing":
-      "Use your running personal Chrome: enable Remote debugging at chrome://inspect/#remote-debugging and keep exactly one work.hasaki.vn tab in your profile. Connect, then select Allow in Chrome. Only that Work tab is monitored; Chrome stays open.",
+      "Use your running personal Chrome: enable Remote debugging at chrome://inspect/#remote-debugging and keep exactly one work.example.vn tab in your profile. Connect, then select Allow in Chrome. Only that Work tab is monitored; Chrome stays open.",
     chrome_existing_permission:
       "Chrome connection not authorized. Enable Remote debugging at chrome://inspect/#remote-debugging in personal Chrome, reconnect and select Allow. Chrome shows a control banner.",
     chrome_existing_tab:
-      "Keep exactly one work.hasaki.vn tab in personal Chrome and reconnect; the app does not choose between different account tabs.",
+      "Keep exactly one work.example.vn tab in personal Chrome and reconnect; the app does not choose between different account tabs.",
     chrome_existing_owner:
       "Personal Chrome can only be connected by the configured local platform account.",
     chrome_existing_platform: "Personal Chrome mode currently supports Windows Chrome through WSL.",

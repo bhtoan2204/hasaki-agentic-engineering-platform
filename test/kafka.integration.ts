@@ -38,7 +38,7 @@ before(async () => {
     if (url.pathname === "/api/clusters")
       return json([{ name: "qc", status: "online", brokerCount: 3, topicCount: 120 }]);
     if (url.pathname === "/api/authorization")
-      return json({ rbacEnabled: false, userInfo: { username: "dev@hasaki.vn" } });
+      return json({ rbacEnabled: false, userInfo: { username: "dev@example.vn" } });
     if (url.pathname === "/api/clusters/qc/topics")
       return json({
         pageCount: 1,
@@ -104,7 +104,7 @@ test("parseKafkaCookie needs SESSION; accepts Cookie header and cURL", () => {
   assert.equal(parseKafkaCookie(`Cookie: ${COOKIE}`), COOKIE);
   assert.equal(
     parseKafkaCookie(
-      `curl 'https://kafka-ui-qc-v2.hasaki.dev/api/clusters' -H 'cookie: ${COOKIE}'`,
+      `curl 'https://kafka-ui-qc-v2.example.dev/api/clusters' -H 'cookie: ${COOKIE}'`,
     ),
     COOKIE,
   );
@@ -135,7 +135,7 @@ test("session validated before saving; topics, groups and message search work; e
 
   const st = await setKafkaCookie(COOKIE);
   assert.equal(st.connected, true);
-  assert.equal(st.user, "dev@hasaki.vn");
+  assert.equal(st.user, "dev@example.vn");
   assert.equal(st.clusters?.[0].name, "qc");
 
   const topics = (await callTool("kafka.list_topics", { query: "fanout" }, ctx)).result as Awaited<

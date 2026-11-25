@@ -152,7 +152,7 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
         : `Agent isolation is enforced and ${provider} cannot run inside the sandbox yet (missing ${guarantees.unmet.join(", ")}). Use Claude for this step, or switch isolation.mode to "off" only on a trusted single-operator host (unattended work then stays disabled).`,
       details: { failure_code: "GUARANTEE_UNMET", guarantees, isolation: runtime },
     };
-  if (enforce && provider === "claude" && !process.env.CLAUDE_CODE_OAUTH_TOKEN)
+  if (enforce && provider === "claude" && !config.agentEnv.claudeOauthToken)
     return {
       kind: "failed",
       retryable: false,

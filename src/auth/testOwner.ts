@@ -1,5 +1,6 @@
 import { pool, one } from "../db/pool.ts";
 import { hashPassword } from "./password.ts";
+import { config } from "../config.ts";
 
 let cached: number | null = null;
 
@@ -8,7 +9,7 @@ let cached: number | null = null;
  * startRun, imports and workers require a real owner.
  */
 export async function ensureTestOwner(): Promise<number> {
-  if (process.env.PLATFORM_TEST !== "1")
+  if (config.test.platformTest !== "1")
     throw new Error("test owner is only available under PLATFORM_TEST");
   if (cached) return cached;
   const existing = await one<{ id: number }>(

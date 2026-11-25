@@ -15,10 +15,10 @@ const prev = {
   agy: { ...config.agent.antigravity },
   copilot: { ...config.agent.copilot },
   sandbox: process.env.AGY_SANDBOX,
-  agyModel: process.env.AGY_MODEL,
-  codexModel: process.env.CODEX_MODEL,
-  copilotModel: process.env.COPILOT_MODEL,
-  copilotSandbox: process.env.COPILOT_SANDBOX,
+  agyModel: config.agentEnv.agyModel,
+  codexModel: config.agentEnv.codexModel,
+  copilotModel: config.agentEnv.copilotModel,
+  copilotSandbox: config.agentEnv.copilotSandbox,
 };
 
 after(() => {
@@ -33,23 +33,23 @@ after(() => {
   config.agent.copilot = prev.copilot;
   if (prev.sandbox == null) delete process.env.AGY_SANDBOX;
   else process.env.AGY_SANDBOX = prev.sandbox;
-  if (prev.agyModel == null) delete process.env.AGY_MODEL;
-  else process.env.AGY_MODEL = prev.agyModel;
-  if (prev.codexModel == null) delete process.env.CODEX_MODEL;
-  else process.env.CODEX_MODEL = prev.codexModel;
-  if (prev.copilotModel == null) delete process.env.COPILOT_MODEL;
-  else process.env.COPILOT_MODEL = prev.copilotModel;
-  if (prev.copilotSandbox == null) delete process.env.COPILOT_SANDBOX;
-  else process.env.COPILOT_SANDBOX = prev.copilotSandbox;
+  if (prev.agyModel == null) config.agentEnv.agyModel = undefined;
+  else config.agentEnv.agyModel = prev.agyModel;
+  if (prev.codexModel == null) config.agentEnv.codexModel = undefined;
+  else config.agentEnv.codexModel = prev.codexModel;
+  if (prev.copilotModel == null) config.agentEnv.copilotModel = undefined;
+  else config.agentEnv.copilotModel = prev.copilotModel;
+  if (prev.copilotSandbox == null) config.agentEnv.copilotSandbox = undefined;
+  else config.agentEnv.copilotSandbox = prev.copilotSandbox;
 });
 
 test("saved settings win over env and config.json; clearing restores the startup values", () => {
   resetOperatorForTests();
   process.env.AGY_SANDBOX = "true";
-  process.env.AGY_MODEL = "from-env";
-  process.env.CODEX_MODEL = "codex-env";
-  process.env.COPILOT_MODEL = "copilot-env";
-  process.env.COPILOT_SANDBOX = "true";
+  config.agentEnv.agyModel = "from-env";
+  config.agentEnv.codexModel = "codex-env";
+  config.agentEnv.copilotModel = "copilot-env";
+  config.agentEnv.copilotSandbox = "true";
   applyOperator({});
   assert.equal(antigravityConfig().sandbox, true);
   assert.equal(antigravityConfig().model, "from-env");
@@ -177,12 +177,12 @@ test("GitLab instances are Settings-owned and gate which GitLab URLs are accepte
   try {
     config.gitlab.instances = [{ host: "gitlab.com" }];
     applyOperator({});
-    assert.throws(() => repositoryRemote("https://gitlab.hasaki.work/payment/payment-paypal.git"));
-    applyOperator({ gitlabInstances: [{ host: "gitlab.hasaki.work", sshPort: 2222 }] });
-    const r = repositoryRemote("https://gitlab.hasaki.work/payment/payment-paypal.git");
+    assert.throws(() => repositoryRemote("https://gitlab.example.work/payment/payment-paypal.git"));
+    applyOperator({ gitlabInstances: [{ host: "gitlab.example.work", sshPort: 2222 }] });
+    const r = repositoryRemote("https://gitlab.example.work/payment/payment-paypal.git");
     assert.equal(r.provider, "gitlab");
-    assert.equal(r.host, "gitlab.hasaki.work");
-    assert.deepEqual(config.gitlab.instances, [{ host: "gitlab.hasaki.work", sshPort: 2222 }]);
+    assert.equal(r.host, "gitlab.example.work");
+    assert.deepEqual(config.gitlab.instances, [{ host: "gitlab.example.work", sshPort: 2222 }]);
     applyOperator({});
     assert.deepEqual(config.gitlab.instances, [{ host: "gitlab.com" }]);
   } finally {
@@ -193,8 +193,12 @@ test("GitLab instances are Settings-owned and gate which GitLab URLs are accepte
 
 test("a GitLab instance can be entered as a URL; only the bare host is kept", async () => {
   const { gitlabHostFrom } = await import("../src/platform/operatorSettings.ts");
-  assert.equal(gitlabHostFrom("http://gitlab.hasaki.work/"), "gitlab.hasaki.work");
-  assert.equal(gitlabHostFrom(" HTTPS://user@GitLab.Example.com:8443/group/project.git "), "gitlab.example.com");
-  assert.equal(gitlabHostFrom("gitlab.hasaki.work"), "gitlab.hasaki.work");
-  for (const bad of ["", "localhost", "http://", "not a host"]) assert.throws(() => gitlabHostFrom(bad), bad);
+  assert.equal(gitlabHostFrom("http://gitlab.example.work/"), "gitlab.example.work");
+  assert.equal(
+    gitlabHostFrom(" HTTPS://user@GitLab.Example.com:8443/group/project.git "),
+    "gitlab.example.com",
+  );
+  assert.equal(gitlabHostFrom("gitlab.example.work"), "gitlab.example.work");
+  for (const bad of ["", "localhost", "http://", "not a host"])
+    assert.throws(() => gitlabHostFrom(bad), bad);
 });

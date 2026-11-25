@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
+import { config } from "../../config.ts";
 
 /** What systemd-run itself needs from the worker environment (bus addresses only); bwrap unsets both. */
 export function scopeEnvironment(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
@@ -18,7 +19,7 @@ function systemdExpandsDollar() {
   const r = spawnSync(
     "systemd-run",
     ["--user", "--scope", "-q", "--collect", "--", "/bin/sh", "-c", "printf %s '$$'"],
-    { env: { PATH: process.env.PATH, ...scopeEnvironment() }, timeout: 5000, encoding: "utf8" },
+    { env: { PATH: config.system.path, ...scopeEnvironment() }, timeout: 5000, encoding: "utf8" },
   );
   if (r.status !== 0) return true;
   expandsDollar = r.stdout === "$";

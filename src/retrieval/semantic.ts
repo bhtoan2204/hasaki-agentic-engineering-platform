@@ -59,7 +59,7 @@ export function retrievalService(
   return fetch(new URL(path, config.retrieval.semantic.url), {
     method: body === undefined ? "GET" : "POST",
     headers: {
-      Authorization: `Bearer ${process.env.RETRIEVAL_INTERNAL_TOKEN ?? ""}`,
+      Authorization: `Bearer ${config.retrieval.internalToken ?? ""}`,
       "X-Request-Timeout-Ms": String(ms),
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     },
@@ -82,7 +82,7 @@ export async function platformGoCall(
 ): Promise<
   { ok: true; body: Record<string, unknown> } | { ok: false; reason: string; detail?: string }
 > {
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return { ok: false, reason: "missing_token" };
+  if (!config.retrieval.internalToken) return { ok: false, reason: "missing_token" };
   let res: Response;
   try {
     res = await retrievalService(path, body, timeoutMs);
@@ -118,7 +118,7 @@ export async function semanticRanks(req: {
   if (!query || req.sourceIds?.length === 0) return null;
   const cfg = config.retrieval.semantic;
   if (!cfg.enabled) return fallback("disabled");
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return fallback("missing_token");
+  if (!config.retrieval.internalToken) return fallback("missing_token");
   let res: Response;
   try {
     res = await retrievalService("/internal/v1/retrieval/search", {

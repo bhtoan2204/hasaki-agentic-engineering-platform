@@ -27,9 +27,9 @@ import {
 
 // Fake credentials only. Every request goes to the mocked fetch below; nothing reaches a real GitLab.
 const TOKEN = "glpat-TESTTOKEN0000000000";
-const remote = { host: "gitlab.hasaki.work", workspace: "platform/backend", slug: "oms-api" };
+const remote = { host: "gitlab.example.work", workspace: "platform/backend", slug: "oms-api" };
 const PID = "platform%2Fbackend%2Foms-api";
-const MR_URL = "https://gitlab.hasaki.work/platform/backend/oms-api/-/merge_requests/7";
+const MR_URL = "https://gitlab.example.work/platform/backend/oms-api/-/merge_requests/7";
 
 /** Parsed JSON request body (only the fields the fakes read). */
 type Body = { title?: string; state_event?: string } & Record<string, unknown>;
@@ -68,7 +68,7 @@ beforeEach(() => {
   calls = [];
   sleeps = [];
   setGitlabSleep(async (ms) => void sleeps.push(ms));
-  config.gitlab.instances = [{ host: "gitlab.com" }, { host: "gitlab.hasaki.work" }];
+  config.gitlab.instances = [{ host: "gitlab.com" }, { host: "gitlab.example.work" }];
   config.gitlab.allowSharedCredentials = true;
   config.gitlab.token = TOKEN;
   config.gitlab.maxRetries = 3;
@@ -84,7 +84,7 @@ const noToken = (s: string) => assert.ok(!s.includes(TOKEN), `token leaked: ${s}
 test("requests use the PRIVATE-TOKEN header, encode nested namespaces and refuse redirects", async () => {
   serve([["GET", /\/projects\//, () => json({ id: 1 })]]);
   await glab(remote.host, TOKEN, `/projects/${PID}`);
-  assert.equal(calls[0].url, `https://gitlab.hasaki.work/api/v4/projects/${PID}`);
+  assert.equal(calls[0].url, `https://gitlab.example.work/api/v4/projects/${PID}`);
   assert.equal(calls[0].headers.get("PRIVATE-TOKEN"), TOKEN);
   assert.equal(calls[0].redirect, "error");
   noToken(calls[0].url);
@@ -262,7 +262,7 @@ test("without credentials the adapter returns a create-MR link and calls nothing
   assert.equal(r.created, false);
   assert.match(
     r.url,
-    /^https:\/\/gitlab\.hasaki\.work\/platform\/backend\/oms-api\/-\/merge_requests\/new\?/,
+    /^https:\/\/gitlab\.example\.work\/platform\/backend\/oms-api\/-\/merge_requests\/new\?/,
   );
   assert.equal(calls.length, 0);
 });
@@ -288,7 +288,7 @@ test("merge request states map to the shared OPEN/MERGED/DECLINED values", async
   assert.equal(
     await gitlabMergeRequestState(
       remote,
-      "https://gitlab.hasaki.work/x/y/-/merge_requests/new?a=b",
+      "https://gitlab.example.work/x/y/-/merge_requests/new?a=b",
     ),
     null,
   );
@@ -480,7 +480,7 @@ test("pipelines include jobs of the newest; failed job logs are tail-capped and 
       /\/jobs\/5\/trace$/,
       () =>
         new Response(
-          `line1\n\x1b[31mERROR\x1b[0m using ${TOKEN}\nPRIVATE-TOKEN: ${TOKEN}\nhttps://oauth2:${TOKEN}@gitlab.hasaki.work/x.git\nlast`,
+          `line1\n\x1b[31mERROR\x1b[0m using ${TOKEN}\nPRIVATE-TOKEN: ${TOKEN}\nhttps://oauth2:${TOKEN}@gitlab.example.work/x.git\nlast`,
           { status: 200, headers: { "content-type": "text/plain" } },
         ),
     ],
@@ -499,7 +499,7 @@ test("pipelines include jobs of the newest; failed job logs are tail-capped and 
 
 test("gitlabRemoteOf accepts only canonical GitLab registry URLs", () => {
   assert.deepEqual(
-    gitlabRemoteOf("https://gitlab.hasaki.work/platform/backend/oms-api.git"),
+    gitlabRemoteOf("https://gitlab.example.work/platform/backend/oms-api.git"),
     remote,
   );
   assert.throws(() => gitlabRemoteOf("https://github.com/o/r.git"), /Not a GitLab repository/);

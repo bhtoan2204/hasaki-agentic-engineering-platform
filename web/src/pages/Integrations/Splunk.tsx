@@ -57,7 +57,7 @@ export function Splunk(p: { open: boolean; onToggle: (id: string) => void }) {
       <Steps>
         <li>
           {slot(t("ig.splunk.s1"), {
-            link: <Link href={st?.baseUrl ?? "https://siem.hasaki.work"} />,
+            link: <Link href={st?.baseUrl ?? "https://siem.example.work"} />,
           })}
         </li>
         <li>{t("ig.splunk.s2")}</li>

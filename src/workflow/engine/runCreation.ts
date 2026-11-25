@@ -143,8 +143,7 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
     if (ownerId != null && Number(ownerId) !== Number(wi.owner_id))
       throw new EngineError("run owner must match the work item", 403);
     ownerId = Number(wi.owner_id);
-  } else if (ownerId == null && process.env.PLATFORM_TEST === "1")
-    ownerId = await ensureTestOwner();
+  } else if (ownerId == null && config.test.platformTest === "1") ownerId = await ensureTestOwner();
   if (ownerId == null) throw new EngineError("a run needs an owner", 400);
   const owner = await one<{ active: boolean }>(c, "SELECT active FROM users WHERE id = $1", [
     ownerId,

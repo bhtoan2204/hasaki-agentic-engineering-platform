@@ -3,9 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
 import { windowsChromeRelay } from "./windowsChromeRelay.ts";
+import { config } from "./config.ts";
 
 export function existingChromeOwner(username?: string) {
-  const owner = process.env.HASAKI_WORK_EXISTING_CHROME_USER?.trim().toLowerCase();
+  const owner = config.hasakiWorkBrowser.existingChromeUser?.trim().toLowerCase();
   return !!owner && username === owner;
 }
 

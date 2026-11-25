@@ -97,6 +97,16 @@ process.env.PLATFORM_CONFIG = cfgPath;
 process.env.PLATFORM_TEST = "1";
 process.env.AUTH_SECRET = "test-auth-secret-not-for-production";
 process.env.COOKIE_SECURE = "0";
+// Company endpoints come from .env in a real installation; tests use fixed placeholder domains, never the developer's.
+process.env.FILE_BASE_URL = "https://hr-media.example.vn/production/hr";
+process.env.BITBUCKET_WORKSPACE = "example-tech";
+process.env.HASAKI_WORK_API_URL = "https://wshr.example.vn/api";
+process.env.HASAKI_WORK_WEB_URL = "https://work.example.vn";
+process.env.ARGOCD_BASE_URL = "https://argocd-qc-v2.example.dev";
+process.env.VAULT_BASE_URL = "https://vault-qc-v2.example.dev";
+process.env.KAFKA_BASE_URL = "https://kafka-ui-qc-v2.example.dev";
+process.env.SPLUNK_BASE_URL = "https://siem.example.work";
+process.env.PRODUCTION_DOMAINS = "example.vn";
 delete process.env.NOTIFY_WEBHOOK;
 // Budget limits from the developer shell would change cost assertions; tests set budgets explicitly.
 for (const k of Object.keys(process.env)) if (k.startsWith("COST_BUDGET_")) delete process.env[k];

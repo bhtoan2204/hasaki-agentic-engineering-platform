@@ -406,7 +406,7 @@ test("production and unlisted destinations are refused before anything is sent; 
     execution.run({ userId: alice.id, kind: "user" }, () =>
       callTool("qc_http.get", { url, auth: "oms-qc" }, ctx),
     );
-  assert.match((await read("https://api.hasaki.vn/orders/1")).error!, /production/);
+  assert.match((await read("https://api.example.vn/orders/1")).error!, /production/);
   assert.match((await read("https://oms.example.com/orders/1")).error!, /not an allowlisted/);
   assert.match(
     (await read("https://169.254.169.254/latest")).error!,
@@ -417,7 +417,7 @@ test("production and unlisted destinations are refused before anything is sent; 
   await assert.rejects(
     proposeOperation(b, "qc_http.request", {
       method: "POST",
-      url: "https://oms.prod.hasaki.dev/orders",
+      url: "https://oms.prod.example.dev/orders",
       body: {},
     }),
     /production/,

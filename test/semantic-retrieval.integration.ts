@@ -129,6 +129,7 @@ beforeEach(() => {
     timeoutMs: 800,
   });
   process.env.RETRIEVAL_INTERNAL_TOKEN = "integration-token";
+  config.retrieval.internalToken = "integration-token";
   hits = new Map();
   staleIds = new Set();
   delayMs = 0;
@@ -137,6 +138,7 @@ beforeEach(() => {
 after(async () => {
   config.retrieval.semantic.enabled = false;
   delete process.env.RETRIEVAL_INTERNAL_TOKEN;
+  config.retrieval.internalToken = "";
   server.close();
   await settleBackground();
   await pool.end();

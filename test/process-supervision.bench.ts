@@ -13,6 +13,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join, resolve } from "node:path";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
+import { config as appConfig } from "../src/config.ts";
 
 const AGENTS = Number(process.env.BENCH_AGENTS ?? 8);
 const FLOOD_MB = Number(process.env.BENCH_FLOOD_MB ?? 200);
@@ -26,7 +27,7 @@ if (
   }).status
 )
   throw new Error("build failed");
-process.env.PLATFORM_SUPERVISE_BIN = join(out, "platform-supervise");
+appConfig.binaries.superviseBin = join(out, "platform-supervise");
 const { config } = await import("../src/config.ts");
 const sup = await import("../src/agent/process/supervisor.ts");
 config.supervision.slots = { agent: 0, verification: 0 }; // admission is measured separately, not here
@@ -90,7 +91,7 @@ function start(
     command,
     args,
     cwd: root,
-    env: { PATH: process.env.PATH },
+    env: { PATH: appConfig.system.path },
     class: cls,
     graceMs: 0,
   });

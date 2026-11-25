@@ -29,7 +29,7 @@ export const diagnosticsRoutes: Route[] = [
     /^\/api\/admin\/retrieval\/status$/,
     async (c) => {
       requireAdmin(c.actor);
-      const res = process.env.RETRIEVAL_INTERNAL_TOKEN
+      const res = config.retrieval.internalToken
         ? await retrievalService("/internal/v1/retrieval/status", undefined, 5000).catch(() => null)
         : null;
       return {
@@ -46,7 +46,7 @@ export const diagnosticsRoutes: Route[] = [
     /^\/api\/admin\/analytics\/engine$/,
     async (c) => {
       requireAdmin(c.actor);
-      const res = process.env.RETRIEVAL_INTERNAL_TOKEN
+      const res = config.retrieval.internalToken
         ? await retrievalService("/internal/v1/analytics/stats", undefined, 5000).catch(() => null)
         : null;
       return {
@@ -70,7 +70,7 @@ export const diagnosticsRoutes: Route[] = [
           !ids.every((id) => Number.isInteger(id) && id > 0))
       )
         throw new EngineError("source_ids must be at most 5000 positive integers", 400);
-      if (!process.env.RETRIEVAL_INTERNAL_TOKEN)
+      if (!config.retrieval.internalToken)
         throw new EngineError("RETRIEVAL_INTERNAL_TOKEN is not set", 409);
       const res = await retrievalService(
         "/internal/v1/retrieval/reindex",

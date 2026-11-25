@@ -26,7 +26,7 @@ import { ignoreError } from "../ignoreError.ts";
  * CACHE=off disables all caches (every get loads).
  */
 
-const DISABLED = process.env.CACHE === "off";
+const DISABLED = config.cache.mode === "off";
 type ListenerState = "none" | "connected" | "down";
 /** "none": no listener in this process (tests, CLI) → only local writes exist, local invalidation suffices. */
 let listener: ListenerState = "none";

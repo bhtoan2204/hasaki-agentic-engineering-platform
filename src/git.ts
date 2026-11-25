@@ -14,6 +14,7 @@ import { overlapsLiveApplication } from "./platform/selfDevelopment.ts";
 import { promisify } from "node:util";
 import { config } from "./config.ts";
 import { ignoreError } from "./ignoreError.ts";
+import { childEnv } from "./platform/childEnv.ts";
 
 const exec = promisify(execFile);
 
@@ -277,7 +278,7 @@ export async function snapshotUncommitted(path: string, ref: string, message: st
   const dirty = await git(path, "status", "--porcelain");
   if (!dirty) return null;
   const dir = mkdtempSync(join(tmpdir(), "snapshot-"));
-  const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
+  const env = { ...childEnv(), GIT_INDEX_FILE: join(dir, "index") };
   const run = async (...args: string[]) =>
     (
       await exec("git", ["-c", "core.hooksPath=/dev/null", "-C", path, ...args], { env })

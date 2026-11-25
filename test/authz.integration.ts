@@ -156,7 +156,13 @@ test("work item detail authorizes from its fetched row and audits explicit admin
   const path = `/api/work-items/${item.id}`;
   assert.equal((await admin.call(path)).status, 404);
   assert.equal((await admin.call(`${path}?scope=all`)).status, 200);
-  assert.ok(await one(pool, "SELECT id FROM audit_log WHERE action='support.access' AND resource_type='work_item' AND resource_id=$1", [String(item.id)]));
+  assert.ok(
+    await one(
+      pool,
+      "SELECT id FROM audit_log WHERE action='support.access' AND resource_type='work_item' AND resource_id=$1",
+      [String(item.id)],
+    ),
+  );
   const before = runtimeMetricsSnapshot().counters["db.statements"] ?? 0;
   const detail = await owner.call(path);
   const statements = (runtimeMetricsSnapshot().counters["db.statements"] ?? 0) - before;
@@ -436,16 +442,16 @@ test("Chrome hosted endpoint stays authenticated, CSRF protected and cannot be e
 
 test("personal Chrome endpoint rejects another member even with a forged owner in the body", async () => {
   const previous = {
-    mode: process.env.HASAKI_WORK_BROWSER_MODE,
-    profile: process.env.HASAKI_WORK_CHROME_PROFILE,
-    owner: process.env.HASAKI_WORK_EXISTING_CHROME_USER,
-    host: process.env.HOST,
+    mode: config.hasakiWorkBrowser.mode,
+    profile: config.hasakiWorkBrowser.chromeProfile,
+    owner: config.hasakiWorkBrowser.existingChromeUser,
+    host: config.server.host,
   };
   try {
-    process.env.HASAKI_WORK_BROWSER_MODE = "local";
-    process.env.HASAKI_WORK_CHROME_PROFILE = "existing";
-    process.env.HASAKI_WORK_EXISTING_CHROME_USER = "toan";
-    process.env.HOST = "127.0.0.1";
+    config.hasakiWorkBrowser.mode = "local";
+    config.hasakiWorkBrowser.chromeProfile = "existing";
+    config.hasakiWorkBrowser.existingChromeUser = "toan";
+    config.server.host = "127.0.0.1";
     const member = client();
     await member.login("memberb", "member-b-password");
     const result = await member.call("/api/work/login-window", { username: "toan", userId: 1 });

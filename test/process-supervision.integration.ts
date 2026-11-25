@@ -18,6 +18,7 @@ import {
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { goToolchain, requireGoToolchain } from "./fixtures/platformGo.ts";
+import { config as appConfig } from "../src/config.ts";
 
 if (!goToolchain()) {
   requireGoToolchain("process supervision engines");
@@ -35,7 +36,7 @@ if (!goToolchain()) {
       stdio: "inherit",
     });
     if (r.status !== 0) throw new Error("platform-supervise build failed");
-    process.env.PLATFORM_SUPERVISE_BIN = join(out, "platform-supervise");
+    appConfig.binaries.superviseBin = join(out, "platform-supervise");
   });
 
   const withEngine = async <T>(engine: (typeof engines)[number], fn: () => Promise<T>) => {
@@ -56,7 +57,7 @@ if (!goToolchain()) {
       command,
       args,
       cwd: root,
-      env: { PATH: process.env.PATH },
+      env: { PATH: appConfig.system.path },
       class: "agent",
       graceMs: 0,
       ...extra,
@@ -154,13 +155,13 @@ if (!goToolchain()) {
 
   test("go: the command's environment carries neither launcher nor systemd bus variables it did not have", () =>
     withEngine("go", async () => {
-      process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:9";
+      appConfig.system.otelEndpoint = "http://127.0.0.1:9";
       try {
         const r = await collect(run("env", []))();
         assert.doesNotMatch(r.out, /CTP_SUPERVISE_|OTEL_|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR/);
         assert.match(r.out, /^PATH=/m);
       } finally {
-        delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+        appConfig.system.otelEndpoint = undefined;
       }
     }));
 
@@ -211,22 +212,22 @@ if (!goToolchain()) {
   test("go: fails closed before anything runs (missing launcher; missing cgroup while isolation is enforced)", () =>
     withEngine("go", async () => {
       const marker = join(root, "never-ran");
-      const bin = process.env.PLATFORM_SUPERVISE_BIN;
-      process.env.PLATFORM_SUPERVISE_BIN = join(root, "missing-launcher");
+      const bin = appConfig.binaries.superviseBin;
+      appConfig.binaries.superviseBin = join(root, "missing-launcher");
       try {
         assert.throws(() => run("touch", [marker]), /launcher .* is missing/);
       } finally {
-        process.env.PLATFORM_SUPERVISE_BIN = bin;
+        appConfig.binaries.superviseBin = bin;
       }
-      const path = process.env.PATH;
+      const path = appConfig.system.path;
       const mode = config.isolation.mode;
-      process.env.PATH = "/nonexistent";
+      appConfig.system.path = "/nonexistent";
       config.isolation.mode = "enforce";
       try {
         sup.delegatedScopeAvailable(true);
         assert.throws(() => run("/usr/bin/touch", [marker]), /delegated cgroup/);
       } finally {
-        process.env.PATH = path;
+        appConfig.system.path = path;
         config.isolation.mode = mode;
         sup.delegatedScopeAvailable(true);
       }

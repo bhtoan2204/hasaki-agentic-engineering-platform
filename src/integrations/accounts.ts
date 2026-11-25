@@ -418,7 +418,7 @@ export async function gitlabStatus(userId?: number) {
 }
 
 function gitlabHostOf(input: unknown): string {
-  // Accept a bare host or a base URL ("https://gitlab.hasaki.work/"); it must be an allow-listed instance.
+  // Accept a bare host or a base URL ("https://gitlab.example.work/"); it must be an allow-listed instance.
   const raw = String(input ?? "")
     .trim()
     .toLowerCase();

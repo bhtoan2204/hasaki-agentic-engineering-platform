@@ -60,12 +60,12 @@ export interface CursorCapability {
 let capabilityCache: CursorCapability | null = null;
 
 export function cursorBinary(): string {
-  return process.env.CURSOR_AGENT_BIN || config.agent.cursorBin || "agent";
+  return config.agent.cursorBin || "agent";
 }
 
 /** Probe the installed CLI. Cached for the process. Never falls back to Claude. */
 export async function cursorCapabilities(force = false): Promise<CursorCapability> {
-  if (capabilityCache && !force && !process.env.CURSOR_AGENT_BIN) return capabilityCache;
+  if (capabilityCache && !force && !config.agent.cursorBin) return capabilityCache;
   const bin = cursorBinary();
   let help = "";
   try {
@@ -103,7 +103,7 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
         error: `Cursor CLI at ${bin} does not advertise ${flag}. This version cannot enforce the platform's execution policy. The platform will not fall back to Claude.`,
       });
   }
-  if (!process.env.CURSOR_API_KEY) {
+  if (!config.agentEnv.cursorApiKey) {
     try {
       const st = await exec(bin, ["status"], {
         env: scrubEnv(process.env),
@@ -131,7 +131,7 @@ export async function cursorCapabilities(force = false): Promise<CursorCapabilit
 }
 
 function finish(c: CursorCapability): CursorCapability {
-  if (!process.env.CURSOR_AGENT_BIN) capabilityCache = c;
+  if (!config.agent.cursorBin) capabilityCache = c;
   return c;
 }
 
@@ -223,7 +223,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
 
     const limits = turnLimits(
       input.ctx.attempt.effective_agent,
-      Number(process.env.CURSOR_AGENT_TIMEOUT_MS || 45 * 60 * 1000),
+      config.agent.cursorTimeoutMs ?? 45 * 60_000,
     );
     // Cursor is stopped at once (no grace), as before.
     const proc = superviseSpawn({

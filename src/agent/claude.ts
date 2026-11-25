@@ -595,10 +595,9 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
                 ),
             }
           : {}),
-        ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
+        ...(config.agent.claudeBin
           ? {
-              pathToClaudeCodeExecutable:
-                process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin,
+              pathToClaudeCodeExecutable: config.agent.claudeBin,
             }
           : {}),
         additionalDirectories: [

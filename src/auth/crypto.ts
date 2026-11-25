@@ -5,6 +5,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
+import { config } from "../config.ts";
 
 /**
  * Application keys live outside the database. Missing or short values fail closed.
@@ -36,8 +37,8 @@ let ringMemo: { source: string; ring: KeyRing } | undefined;
 
 /** Reads and validates the key configuration; throws on a missing, short or duplicated secret. */
 export function keyRing(): KeyRing {
-  const current = process.env.AUTH_SECRET ?? "";
-  const previous = process.env.AUTH_SECRET_PREVIOUS ?? "";
+  const current = config.auth.secret ?? "";
+  const previous = config.auth.secretPrevious ?? "";
   const source = `${current}\n${previous}`;
   if (ringMemo?.source === source) return ringMemo.ring;
   if (current.length < MIN_SECRET_CHARS)
@@ -63,7 +64,7 @@ export function keyRing(): KeyRing {
 
 /** Format new values are written in. "legacy" until every machine sharing the database runs a reader for "v2". */
 export function writeFormat(): CiphertextFormat {
-  const raw = process.env.AUTH_CIPHERTEXT_FORMAT ?? "legacy";
+  const raw = config.auth.ciphertextFormat ?? "legacy";
   if (raw !== "legacy" && raw !== "v2")
     throw new Error('AUTH_CIPHERTEXT_FORMAT must be "legacy" or "v2"');
   return raw;

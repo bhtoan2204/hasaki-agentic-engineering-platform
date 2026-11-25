@@ -31,7 +31,7 @@ export function liveClaudeSandbox(databaseUrl: string, workRoot: string) {
     filesystem: {
       denyRead: [
         ...HOME_CREDENTIALS.map((p) => join(homedir(), p)),
-        resolve(process.env.PLATFORM_CONFIG ?? "config.json"),
+        resolve(config.binaries.configFile ?? "config.json"),
         config.reposRoot,
         config.dataDir,
         ...Object.values(config.repositories),

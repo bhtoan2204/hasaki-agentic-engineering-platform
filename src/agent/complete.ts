@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { assertModelAllowed } from "./modelPolicy.ts";
-import { createSdkMcpServer, query, tool, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  createSdkMcpServer,
+  query,
+  tool,
+  type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import type { z } from "zod";
 import { config } from "../config.ts";
 import { agentEnvironment, paidClaudeAuth, paidClaudeAuthMessage } from "./environment.ts";
@@ -151,10 +156,9 @@ const claudeComplete: CompletionRunner = async (prompt, options) => {
     for await (const msg of query({
       prompt: input,
       options: {
-        ...(process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin
+        ...(config.agent.claudeBin
           ? {
-              pathToClaudeCodeExecutable:
-                process.env.CLAUDE_CODE_EXECUTABLE || config.agent.claudeBin,
+              pathToClaudeCodeExecutable: config.agent.claudeBin,
             }
           : {}),
         env: agentEnvironment(process.env, "claude"),

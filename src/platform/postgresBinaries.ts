@@ -88,7 +88,7 @@ function linkedBin(outLink: string): string | null {
 }
 
 export function installedPostgresBin(opts: PostgresResolveOptions = {}): PostgresBin | null {
-  for (const dir of (opts.pathEnv ?? process.env.PATH ?? "").split(delimiter))
+  for (const dir of (opts.pathEnv ?? config.system.path ?? "").split(delimiter))
     if (dir && executable(join(dir, "initdb"))) return { dir, source: "path" };
   const linked = linkedBin(outLinkOf(opts));
   return linked ? { dir: linked, source: "cache" } : null;

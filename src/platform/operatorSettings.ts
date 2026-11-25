@@ -152,8 +152,7 @@ const KEY = "operator";
 let fallback: OperatorPatch | null = null;
 let saved: OperatorPatch = {};
 
-function envFlag(name: string, alt: string): boolean | undefined {
-  const raw = process.env[name] ?? process.env[alt];
+function envFlag(raw: string | undefined): boolean | undefined {
   if (raw == null || raw === "") return undefined;
   return raw === "true";
 }
@@ -165,15 +164,15 @@ export function captureOperatorFallback(): OperatorPatch {
   const agy = config.agent.antigravity ?? {};
   const copilot = config.agent.copilot ?? {};
   const maxConcurrent = Number(
-    process.env.AGY_MAX_CONCURRENT ||
-      process.env.ANTIGRAVITY_MAX_CONCURRENT ||
+    config.agentEnv.agyMaxConcurrent ||
+      config.agentEnv.antigravityMaxConcurrent ||
       agy.maxConcurrent ||
       1,
   );
   const copilotConcurrent = Number(
-    process.env.COPILOT_MAX_CONCURRENT || copilot.maxConcurrent || 1,
+    config.agentEnv.copilotMaxConcurrent || copilot.maxConcurrent || 1,
   );
-  const copilotSandbox = process.env.COPILOT_SANDBOX;
+  const copilotSandbox = config.agentEnv.copilotSandbox;
   fallback = {
     model: config.model ?? "",
     models: structuredClone(config.agent.models ?? {}) as OperatorPatch["models"],
@@ -186,21 +185,26 @@ export function captureOperatorFallback(): OperatorPatch {
     defaultProvider: config.agent.defaultProvider ?? "claude",
     enabledProviders: { ...(config.agent.enabledProviders ?? {}) },
     codex: {
-      model: process.env.CODEX_MODEL ?? codex.model ?? "",
-      reasoningEffort: (process.env.CODEX_REASONING_EFFORT ?? codex.reasoningEffort ?? "") as
+      model: config.agentEnv.codexModel ?? codex.model ?? "",
+      reasoningEffort: (config.agentEnv.codexReasoningEffort ?? codex.reasoningEffort ?? "") as
         "" | "low" | "medium" | "high" | "xhigh",
     },
     antigravity: {
-      model: process.env.AGY_MODEL ?? process.env.ANTIGRAVITY_MODEL ?? agy.model ?? "",
-      effort: (process.env.AGY_EFFORT ?? process.env.ANTIGRAVITY_EFFORT ?? agy.effort ?? "") as
-        "" | "low" | "medium" | "high" | "xhigh" | "max",
-      sandbox: envFlag("AGY_SANDBOX", "ANTIGRAVITY_SANDBOX") ?? agy.sandbox ?? true,
+      model: config.agentEnv.agyModel ?? config.agentEnv.antigravityModel ?? agy.model ?? "",
+      effort: (config.agentEnv.agyEffort ??
+        config.agentEnv.antigravityEffort ??
+        agy.effort ??
+        "") as "" | "low" | "medium" | "high" | "xhigh" | "max",
+      sandbox:
+        envFlag(config.agentEnv.agySandbox ?? config.agentEnv.antigravitySandbox) ??
+        agy.sandbox ??
+        true,
       maxConcurrent:
         Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? Math.floor(maxConcurrent) : 1,
     },
     copilot: {
-      model: process.env.COPILOT_MODEL ?? copilot.model ?? "",
-      effort: (process.env.COPILOT_EFFORT ?? copilot.effort ?? "") as
+      model: config.agentEnv.copilotModel ?? copilot.model ?? "",
+      effort: (config.agentEnv.copilotEffort ?? copilot.effort ?? "") as
         "" | "low" | "medium" | "high" | "xhigh",
       sandbox:
         copilotSandbox === "true"

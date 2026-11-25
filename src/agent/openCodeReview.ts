@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { ignoreError } from "../ignoreError.ts";
+import { config } from "../config.ts";
+import { childEnv } from "../platform/childEnv.ts";
 
 /**
  * Alibaba OpenCodeReview (github.com/alibaba/open-code-review) in DELEGATION mode: `ocr delegate` picks the files worth
@@ -20,7 +22,8 @@ const MAX_CHARS = 45_000;
 
 /** The native binary: OCR_BIN, else the platform package installed with @alibaba-group/open-code-review. */
 export function ocrBinary(): string | null {
-  if (process.env.OCR_BIN) return existsSync(process.env.OCR_BIN) ? process.env.OCR_BIN : null;
+  if (config.agentEnv.ocrBin)
+    return existsSync(config.agentEnv.ocrBin) ? config.agentEnv.ocrBin : null;
   const arch = process.arch === "arm64" ? "arm64" : "x64";
   const os =
     process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
@@ -39,7 +42,7 @@ async function ocr(bin: string, cwd: string, args: string[]) {
     cwd,
     timeout: 60_000,
     maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, NO_COLOR: "1" },
+    env: { ...childEnv(), NO_COLOR: "1" },
   });
   return stdout;
 }

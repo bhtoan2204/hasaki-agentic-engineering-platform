@@ -112,13 +112,15 @@ if (!goToolchain()) {
   });
 
   test("a refused credential is raised, never answered by fallback", async () => {
-    const token = process.env.RETRIEVAL_INTERNAL_TOKEN;
+    const token = config.retrieval.internalToken;
     process.env.RETRIEVAL_INTERNAL_TOKEN = "y".repeat(64);
+    config.retrieval.internalToken = "y".repeat(64);
     try {
       await assert.rejects(search.searchSymbols("searchSymbols", scope(), 30), /refused \(401\)/);
       await assert.rejects(search.searchCodeExact("searchSymbols", scope(), 5), /refused \(401\)/);
     } finally {
       process.env.RETRIEVAL_INTERNAL_TOKEN = token;
+      config.retrieval.internalToken = token;
     }
   });
 

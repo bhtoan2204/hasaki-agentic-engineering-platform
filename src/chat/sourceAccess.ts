@@ -2,6 +2,7 @@ import { localScope } from "../codeIntelligence/indexer.ts";
 import { repositories } from "../repos/service.ts";
 import { git } from "../git.ts";
 import { isSecretPath } from "../agent/toolPolicy.ts";
+import { config } from "../config.ts";
 
 /**
  * How chat reaches a repository's source, cheapest first:
@@ -35,7 +36,7 @@ async function slot<T>(fn: () => Promise<T>): Promise<T> {
 /** Test seam: replaces how a missing checkout is materialized (PLATFORM_TEST only). */
 let materializer: ((name: string) => Promise<string>) | null = null;
 export function setChatMaterializerForTests(fn: ((name: string) => Promise<string>) | null) {
-  if (process.env.PLATFORM_TEST !== "1") throw new Error("test seam disabled");
+  if (config.test.platformTest !== "1") throw new Error("test seam disabled");
   materializer = fn;
 }
 

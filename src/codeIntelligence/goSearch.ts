@@ -127,7 +127,7 @@ export async function goSearch<H, E>(
   provision: boolean,
   query: Query,
 ): Promise<GoSearchResponse<H, E>> {
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) unavailable("missing_token");
+  if (!config.retrieval.internalToken) unavailable("missing_token");
   return call<H, E>(op, scope, await resolveScope(scope, provision), query);
 }
 
@@ -172,7 +172,7 @@ export async function goExactSearch<H extends { repository: string }>(
   provision: boolean,
   query: { pattern: string; limit: number; any_file: boolean },
 ): Promise<H[]> {
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) unavailable("missing_token");
+  if (!config.retrieval.internalToken) unavailable("missing_token");
   const inRun = await runRepos(scope);
   const hits: H[] = [];
   for (let i = 0; i < scope.repositories.length && hits.length < query.limit; i += 4) {

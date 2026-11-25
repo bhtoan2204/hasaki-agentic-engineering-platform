@@ -12,6 +12,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { goToolchain, requireGoToolchain, startPlatformGo } from "./fixtures/platformGo.ts";
+import { config as appConfig } from "../src/config.ts";
 
 if (!goToolchain()) {
   requireGoToolchain("analytics Go engine parity");
@@ -229,8 +230,9 @@ if (!goToolchain()) {
       loadDashboard("usage", f, { ownerId: 0, all: false }),
       (e: { status?: number }) => e.status === 400,
     );
-    const token = process.env.RETRIEVAL_INTERNAL_TOKEN;
+    const token = appConfig.retrieval.internalToken;
     process.env.RETRIEVAL_INTERNAL_TOKEN = "x".repeat(64);
+    appConfig.retrieval.internalToken = "x".repeat(64);
     try {
       await assert.rejects(
         loadDashboard("usage", f, { ownerId: fixture.owner.id, all: false }),
@@ -238,6 +240,7 @@ if (!goToolchain()) {
       );
     } finally {
       process.env.RETRIEVAL_INTERNAL_TOKEN = token;
+      appConfig.retrieval.internalToken = token;
     }
   });
 

@@ -29,5 +29,5 @@ test("Git host credential variables in the environment are ignored", () => {
   assert.equal(r.status, 0, r.stderr);
   const c = JSON.parse(r.stdout.trim().split("\n").at(-1)!);
   assert.deepEqual([c.bb.user, c.bb.token, c.gh, c.gl], ["", "", "", ""]);
-  assert.equal(c.bb.workspace, "hasaki-tech", "non-secret defaults stay");
+  assert.equal(c.bb.workspace, "example-tech", "non-secret defaults stay");
 });

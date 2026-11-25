@@ -5,12 +5,12 @@ import { EngineError } from "../workflow/mutations.ts";
 import { runEvents } from "../workflow/events.ts";
 import { activeRunForWorkItem, listRuns } from "../workflow/runRepository.ts";
 import { workItemRepository, type ImportInput, type WorkItemRow } from "./repository.ts";
+import { config } from "../config.ts";
 
 export type { ImportInput, WorkItemRow } from "./repository.ts";
 
 async function requireWorkItemOwner(ownerId?: number) {
-  const owner =
-    ownerId ?? (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
+  const owner = ownerId ?? (config.test.platformTest === "1" ? await ensureTestOwner() : undefined);
   if (!owner) throw new Error("owner is required");
   return owner;
 }

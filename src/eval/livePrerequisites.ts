@@ -5,7 +5,7 @@ import { bwrapAvailable } from "../platform/selfDevelopment.ts";
 async function executable(bin: string) {
   const candidates = isAbsolute(bin)
     ? [bin]
-    : (process.env.PATH ?? "").split(delimiter).map((path) => join(path, bin));
+    : (config.system.path ?? "").split(delimiter).map((path) => join(path, bin));
   for (const path of candidates) {
     try {
       await access(path, constants.X_OK);
@@ -32,7 +32,7 @@ export async function livePrerequisites(configuration: {
   const bins: Record<string, string> = {
     claude: config.agent.claudeBin || "claude",
     codex: codexConfig().bin,
-    cursor: process.env.CURSOR_AGENT_BIN || config.agent.cursorBin || "agent",
+    cursor: config.agent.cursorBin || "agent",
     antigravity: antigravityConfig().bin,
     copilot: copilotConfig().bin,
   };

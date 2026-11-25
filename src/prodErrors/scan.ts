@@ -941,8 +941,7 @@ export async function linkWorkItem(fp: string, ref: string, ownerId?: number) {
     );
     return { fingerprint: fp, work_item_id: null };
   }
-  const owner =
-    ownerId ?? (process.env.PLATFORM_TEST === "1" ? await ensureTestOwner() : undefined);
+  const owner = ownerId ?? (config.test.platformTest === "1" ? await ensureTestOwner() : undefined);
   if (!owner) throw new Error("owner is required");
   const wi =
     (await workItems.byCode(r, owner)) ??

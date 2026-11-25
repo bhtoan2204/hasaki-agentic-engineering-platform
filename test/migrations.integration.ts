@@ -19,7 +19,7 @@ test("legacy data is backfilled into work items / pull requests, then 083 drops 
     `INSERT INTO events (task_code, kind, content) VALUES ('TASK-1', 'status', 'review')`,
   );
   await pool.query(`INSERT INTO prs (task_code, repo, branch, url, title, decisions) VALUES
-      ('TASK-1', 'oms-api', 'TASK-1', 'https://bitbucket.org/hasaki-tech/oms-api/pull-requests/7', 'fix(stock): retry', '[{"title":"a","detail":"b"}]')`);
+      ('TASK-1', 'oms-api', 'TASK-1', 'https://bitbucket.org/example-tech/oms-api/pull-requests/7', 'fix(stock): retry', '[{"title":"a","detail":"b"}]')`);
 
   const applied = await migrate(pool, all);
   assert.deepEqual(
@@ -85,7 +85,7 @@ test("060: existing Bitbucket/GitHub remotes still satisfy the constraint; GitLa
   await add(
     "m060-gl-nested",
     "gitlab",
-    "https://gitlab.hasaki.work/platform/backend/team/oms-api.git",
+    "https://gitlab.example.work/platform/backend/team/oms-api.git",
   );
   for (const bad of [
     "https://user:token@gitlab.com/acme/shop.git",

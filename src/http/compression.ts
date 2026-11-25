@@ -13,13 +13,14 @@
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { promisify } from "node:util";
 import { readFileSync, statSync } from "node:fs";
+import { config } from "../config.ts";
 
 const br = promisify(brotliCompress);
 const gz = promisify(gzip);
 export const COMPRESS_MIN_BYTES = 8 * 1024;
 export type Encoding = "br" | "gzip";
 
-export const compressionEnabled = () => process.env.HTTP_COMPRESSION !== "off";
+export const compressionEnabled = () => config.server.compression !== "off";
 
 /** The best encoding the client accepts (`q=0` refuses one), or null. */
 export function pickEncoding(accept: string | string[] | undefined): Encoding | null {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitHost, type SshTransport } from "../git/hosts.ts";
 import { repositoryRemote, type CanonicalRemote } from "./remote.ts";
+import { childEnv } from "../platform/childEnv.ts";
 
 const exec = promisify(execFile);
 /** Secrets exist only in the short-lived child environment or a 0600 temp file, never arguments, config or errors. */
@@ -86,7 +87,7 @@ export async function remoteGit(url: string, args: string[], cwd?: string): Prom
       )
         throw new Error("Unsafe local Git network configuration");
     }
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    const env: NodeJS.ProcessEnv = { ...childEnv() };
     for (const key of Object.keys(env)) if (/^(GIT_|PLATFORM_GIT_|SSH_)/.test(key)) delete env[key];
     Object.assign(env, {
       GIT_TERMINAL_PROMPT: "0",

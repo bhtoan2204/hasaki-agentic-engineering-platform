@@ -17,7 +17,7 @@ const withVault = async (v: Partial<typeof config.vault>, fn: () => Promise<void
 const allow = [{ path: "secret/payment/*", keys: ["OTEL_ENDPOINT"] }];
 
 test("vault write target: production host is refused even when allowlisted", async () => {
-  for (const baseUrl of ["https://vault.hasaki.vn", "https://vault-prod.hasaki.dev"])
+  for (const baseUrl of ["https://vault.example.vn", "https://vault-prod.example.dev"])
     await withVault({ baseUrl, writeAllow: allow }, async () => {
       await assert.rejects(
         vaultWriteTarget("secret/payment/app", "OTEL_ENDPOINT"),
@@ -32,20 +32,20 @@ test("vault write target: default config allows any QC path and key, never produ
 
 test("vault write target: wildcard key still refuses production host and production path", async () => {
   const any = [{ path: "*", keys: ["*"] }];
-  await withVault({ baseUrl: "https://vault.hasaki.vn", writeAllow: any }, async () => {
+  await withVault({ baseUrl: "https://vault.example.vn", writeAllow: any }, async () => {
     await assert.rejects(
       vaultWriteTarget("payment/qc/app", "OTEL_ENDPOINT"),
       /not a QC environment/,
     );
   });
-  await withVault({ baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: any }, async () => {
+  await withVault({ baseUrl: "https://vault-qc-v2.example.dev", writeAllow: any }, async () => {
     await assert.rejects(vaultWriteTarget("payment/prod/app", "OTEL_ENDPOINT"), /production/);
   });
 });
 
 test("vault write target: wildcard key and path pass the allowlist step", async () => {
   await withVault(
-    { baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [{ path: "*", keys: ["*"] }] },
+    { baseUrl: "https://vault-qc-v2.example.dev", writeAllow: [{ path: "*", keys: ["*"] }] },
     async () => {
       await assert.rejects(
         vaultWriteTarget("payment/qc/app", "ANY_KEY"),
@@ -56,13 +56,13 @@ test("vault write target: wildcard key and path pass the allowlist step", async 
 });
 
 test("vault write target: empty allowlist disables writes", async () => {
-  await withVault({ baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: [] }, async () => {
+  await withVault({ baseUrl: "https://vault-qc-v2.example.dev", writeAllow: [] }, async () => {
     await assert.rejects(vaultWriteTarget("secret/payment/app", "OTEL_ENDPOINT"), /disabled/);
   });
 });
 
 test("vault write target: path and key must match the allowlist", async () => {
-  await withVault({ baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: allow }, async () => {
+  await withVault({ baseUrl: "https://vault-qc-v2.example.dev", writeAllow: allow }, async () => {
     await assert.rejects(
       vaultWriteTarget("secret/order/app", "OTEL_ENDPOINT"),
       /not in the QC write allowlist/,
@@ -79,14 +79,14 @@ test("vault write target: path and key must match the allowlist", async () => {
 });
 
 test("vault write target: path escapes are refused", async () => {
-  await withVault({ baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: allow }, async () => {
+  await withVault({ baseUrl: "https://vault-qc-v2.example.dev", writeAllow: allow }, async () => {
     for (const p of ["secret/payment/../order/app", "secret/payment/./../x", "../secret/payment/x"])
       await assert.rejects(vaultWriteTarget(p, "OTEL_ENDPOINT"), /\.\./);
   });
 });
 
 test("vault write target: encoded or backslash path tricks are refused", async () => {
-  await withVault({ baseUrl: "https://vault-qc-v2.hasaki.dev", writeAllow: allow }, async () => {
+  await withVault({ baseUrl: "https://vault-qc-v2.example.dev", writeAllow: allow }, async () => {
     for (const p of [
       "secret/payment/%2e%2e/order/app",
       "secret/payment/%2E%2e/app",
@@ -103,7 +103,7 @@ test("vault write target: encoded or backslash path tricks are refused", async (
 test("vault write target: production-looking path is refused", async () => {
   await withVault(
     {
-      baseUrl: "https://vault-qc-v2.hasaki.dev",
+      baseUrl: "https://vault-qc-v2.example.dev",
       writeAllow: [{ path: "secret/payment*", keys: ["OTEL_ENDPOINT"] }],
     },
     async () => {

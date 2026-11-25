@@ -69,7 +69,7 @@ async function viaGo(
   scope: AnalyticsScope,
   signal?: AbortSignal,
 ): Promise<object> {
-  if (!process.env.RETRIEVAL_INTERNAL_TOKEN) throw new Unavailable("missing_token");
+  if (!config.retrieval.internalToken) throw new Unavailable("missing_token");
   let res: Response;
   try {
     res = await retrievalService(

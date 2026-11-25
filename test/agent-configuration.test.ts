@@ -6,9 +6,11 @@ import { previewAgentValues } from "../src/agent/configuration.ts";
 import { providerControlState } from "../src/agent/providerCapabilities.ts";
 
 test("profile-only saves retain environment defaults while explicit edits pin only their fields", () => {
-  const previous = process.env.CURSOR_AGENT_TIMEOUT_MS;
+  const previous = config.agent.cursorTimeoutMs;
+  const previousRaw = config.agentEnv.cursorTimeoutMs;
   try {
-    process.env.CURSOR_AGENT_TIMEOUT_MS = "10000";
+    config.agent.cursorTimeoutMs = 10000;
+    config.agentEnv.cursorTimeoutMs = "10000";
     const document = legacyAgentConfiguration();
     const provider = "cursor";
     const draft = {
@@ -18,7 +20,8 @@ test("profile-only saves retain environment defaults while explicit edits pin on
     const patch = providerDraftPatch(draft, []);
     assert.equal(Object.hasOwn(patch, "defaults"), false);
     const saved = patchProviderConfiguration(document, provider, 0, patch);
-    process.env.CURSOR_AGENT_TIMEOUT_MS = "20000";
+    config.agent.cursorTimeoutMs = 20000;
+    config.agentEnv.cursorTimeoutMs = "20000";
     assert.equal(refreshEnvironmentDefaults(saved).providers[provider].defaults.timeout_ms, 20000);
     const edited = providerDraftPatch(
       { ...draft, defaults: { ...draft.defaults, timeout_ms: 40000 } },
@@ -27,8 +30,9 @@ test("profile-only saves retain environment defaults while explicit edits pin on
     const pinned = patchProviderConfiguration(document, provider, 0, edited);
     assert.equal(refreshEnvironmentDefaults(pinned).providers[provider].defaults.timeout_ms, 40000);
   } finally {
-    if (previous === undefined) delete process.env.CURSOR_AGENT_TIMEOUT_MS;
-    else process.env.CURSOR_AGENT_TIMEOUT_MS = previous;
+    if (previous === undefined) config.agent.cursorTimeoutMs = undefined;
+    else config.agent.cursorTimeoutMs = previous;
+    config.agentEnv.cursorTimeoutMs = previousRaw;
   }
 });
 
@@ -63,9 +67,9 @@ test("Cursor model controls follow confirmed CLI support and keep unavailable di
 });
 
 test("editing one provider option preserves other environment fallbacks", () => {
-  const previous = process.env.COPILOT_MAX_CONCURRENT;
+  const previous = config.agentEnv.copilotMaxConcurrent;
   try {
-    process.env.COPILOT_MAX_CONCURRENT = "2";
+    config.agentEnv.copilotMaxConcurrent = "2";
     const document = legacyAgentConfiguration();
     const provider = "copilot";
     const entry = document.providers[provider];
@@ -85,13 +89,13 @@ test("editing one provider option preserves other environment fallbacks", () => 
       "provider default",
     );
     assert.equal(saved.providers[provider].default_sources?.model, entry.default_sources?.model);
-    process.env.COPILOT_MAX_CONCURRENT = "3";
+    config.agentEnv.copilotMaxConcurrent = "3";
     const fresh = refreshEnvironmentDefaults(saved);
     assert.equal(fresh.providers[provider].defaults.options?.max_concurrent, 3);
     assert.equal(fresh.providers[provider].defaults.options?.sandbox, false);
   } finally {
-    if (previous === undefined) delete process.env.COPILOT_MAX_CONCURRENT;
-    else process.env.COPILOT_MAX_CONCURRENT = previous;
+    if (previous === undefined) config.agentEnv.copilotMaxConcurrent = undefined;
+    else config.agentEnv.copilotMaxConcurrent = previous;
   }
 });
 
@@ -354,11 +358,14 @@ test("effective step config carries resolved execution limits for all executor c
 
 import { refreshEnvironmentDefaults } from "../src/agent/configuration.ts";
 test("environment defaults refresh for new snapshots without overriding configured profiles or saved defaults", () => {
-  const previous = process.env.CURSOR_AGENT_TIMEOUT_MS;
+  const previous = config.agent.cursorTimeoutMs;
+  const previousRaw = config.agentEnv.cursorTimeoutMs;
   try {
-    process.env.CURSOR_AGENT_TIMEOUT_MS = "10000";
+    config.agent.cursorTimeoutMs = 10000;
+    config.agentEnv.cursorTimeoutMs = "10000";
     const started = legacyAgentConfiguration();
-    process.env.CURSOR_AGENT_TIMEOUT_MS = "20000";
+    config.agent.cursorTimeoutMs = 20000;
+    config.agentEnv.cursorTimeoutMs = "20000";
     const fresh = refreshEnvironmentDefaults(started);
     assert.equal(started.providers.cursor.defaults.timeout_ms, 10000);
     assert.equal(fresh.providers.cursor.defaults.timeout_ms, 20000);
@@ -373,8 +380,9 @@ test("environment defaults refresh for new snapshots without overriding configur
       /environment/,
     );
   } finally {
-    if (previous === undefined) delete process.env.CURSOR_AGENT_TIMEOUT_MS;
-    else process.env.CURSOR_AGENT_TIMEOUT_MS = previous;
+    if (previous === undefined) config.agent.cursorTimeoutMs = undefined;
+    else config.agent.cursorTimeoutMs = previous;
+    config.agentEnv.cursorTimeoutMs = previousRaw;
   }
 });
 

@@ -365,7 +365,7 @@ export const runVerificationCommand: import("../../agent/verify.ts").VerifyDeps[
   const release = await acquireVerificationSlot(
     signal,
     verificationSlotLimit(
-      process.env,
+      { VERIFY_MAX_CONCURRENT: config.verification.maxConcurrent },
       config.supervision.engine === "go" ? config.supervision.slots.verification : undefined,
     ),
   );
@@ -399,7 +399,7 @@ export const runIsolatedCommand = async (
   const release = await acquireVerificationSlot(
     signal,
     verificationSlotLimit(
-      process.env,
+      { VERIFY_MAX_CONCURRENT: config.verification.maxConcurrent },
       config.supervision.engine === "go" ? config.supervision.slots.verification : undefined,
     ),
   );

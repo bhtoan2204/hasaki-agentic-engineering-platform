@@ -3,6 +3,7 @@ import { redactSecrets } from "../integrations/redact.ts";
 import { redactContextValue } from "../context/redact.ts";
 import { runEvents } from "./events.ts";
 import { logError } from "../logging.ts";
+import { config } from "../config.ts";
 
 /**
  * Execution tracing on top of the existing workflow_events / workflow_step_attempts tables.
@@ -36,7 +37,7 @@ export function isTraceLevel(v: unknown): v is TraceLevel {
 }
 
 function minLevel(): TraceLevel {
-  const v = process.env.TRACE_MIN_LEVEL?.toUpperCase();
+  const v = config.trace.minLevel?.toUpperCase();
   return isTraceLevel(v) ? v : "INFO";
 }
 
@@ -53,14 +54,16 @@ function clip(v: unknown, max: number): unknown {
 }
 
 /** GitLab personal, deploy, trigger, runner, ... tokens (same prefixes as integrations/redact.ts). */
-const GITLAB_TOKEN = /\bgl(?:pat|dt|ptt|rt|rtr|cbt|imt|ft|soat|oas|agent|wt|ffct)-[A-Za-z0-9_-]{16,}/g;
+const GITLAB_TOKEN =
+  /\bgl(?:pat|dt|ptt|rt|rtr|cbt|imt|ft|soat|oas|agent|wt|ffct)-[A-Za-z0-9_-]{16,}/g;
 const GITHUB_TOKEN = /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g;
 
 const secretKey = (k: string) => redactSecrets(`"${k}":"probe-value"`).endsWith('***"');
 
 // redactContextValue only masks exact key names; this restores the key+value patterns (github_token, db_password...).
 function maskFields(v: unknown): unknown {
-  if (typeof v === "string") return v.replace(GITHUB_TOKEN, "[redacted]").replace(GITLAB_TOKEN, "[redacted]");
+  if (typeof v === "string")
+    return v.replace(GITHUB_TOKEN, "[redacted]").replace(GITLAB_TOKEN, "[redacted]");
   if (Array.isArray(v)) return v.map(maskFields);
   if (v && typeof v === "object")
     return Object.fromEntries(
@@ -171,7 +174,10 @@ export interface LogFilter {
 export async function searchLogs(runId: number, f: LogFilter = {}, db: Db = pool) {
   const params: unknown[] = [runId, f.afterId ?? 0];
   const where = ["e.run_id = $1", "e.id > $2", "e.kind = 'trace'"];
-  const add = (sql: string, v: unknown) => (params.push(v), where.push(sql.replace("?", `$${params.length}`)));
+  const add = (sql: string, v: unknown) => (
+    params.push(v),
+    where.push(sql.replace("?", `$${params.length}`))
+  );
   if (f.stepId) add("e.step_id = ?", f.stepId);
   if (f.attemptId) add("e.attempt_id = ?", f.attemptId);
   if (f.provider) add("e.data->'trace'->>'provider' = ?", f.provider);
@@ -225,13 +231,26 @@ export interface TraceNode {
   startedAt: string | null;
   durationMs: number | null;
   /** Correlation identifiers; absent ones were not observed. */
-  ids: { runId: number; stepId?: number; attemptId?: number; jobId?: number | null; toolUseId?: string };
+  ids: {
+    runId: number;
+    stepId?: number;
+    attemptId?: number;
+    jobId?: number | null;
+    toolUseId?: string;
+  };
   attrs: Record<string, unknown>;
   children: TraceNode[];
 }
 
 export interface TraceInput {
-  run: { id: number; status: string; created_at: string; finished_at?: string | null; profile?: string; graph?: { transitions?: unknown[] } };
+  run: {
+    id: number;
+    status: string;
+    created_at: string;
+    finished_at?: string | null;
+    profile?: string;
+    graph?: { transitions?: unknown[] };
+  };
   steps: Array<{
     id: number;
     key: string;
@@ -260,12 +279,32 @@ export interface TraceInput {
     workspace_conflict?: boolean | null;
   }>;
   /** `tool` events, their `tool_result` partners and `tool.prepare_branch` trace events, ordered by id. */
-  events: Array<{ id: number; attempt_id: number | null; kind: string; content: string; data: Record<string, unknown> | null; created_at: string }>;
-  handoffs: Array<{ source_attempt_id: number; target_attempt_id: number | null; reason: string; status: string }>;
+  events: Array<{
+    id: number;
+    attempt_id: number | null;
+    kind: string;
+    content: string;
+    data: Record<string, unknown> | null;
+    created_at: string;
+  }>;
+  handoffs: Array<{
+    source_attempt_id: number;
+    target_attempt_id: number | null;
+    reason: string;
+    status: string;
+  }>;
   /** Harness stage timings per attempt (harness_evidence artifacts). */
-  stages?: Array<{ attempt_id: number; stages: Array<{ stage: string; ms: number; outcome: string }> | null }>;
+  stages?: Array<{
+    attempt_id: number;
+    stages: Array<{ stage: string; ms: number; outcome: string }> | null;
+  }>;
   /** Checkpoint rows; only recoverable ones become nodes, progress notes are counted on the attempt. */
-  checkpoints?: Array<{ id: number; attempt_id: number | null; reason: string; created_at: string }>;
+  checkpoints?: Array<{
+    id: number;
+    attempt_id: number | null;
+    reason: string;
+    created_at: string;
+  }>;
   /** Execution decisions (execution_decisions); checkpoint size records annotate the checkpoint node. */
   decisions?: Array<{
     id: number;
@@ -283,7 +322,12 @@ export interface TraceInput {
   }>;
 }
 
-const RECOVERABLE_CHECKPOINTS = new Set(["executor_returned", "waiting_input", "waiting_approval", "provider_handoff"]);
+const RECOVERABLE_CHECKPOINTS = new Set([
+  "executor_returned",
+  "waiting_input",
+  "waiting_approval",
+  "provider_handoff",
+]);
 
 const decisionNode = (
   runId: number,
@@ -323,7 +367,10 @@ export function assembleTrace(input: TraceInput): TraceNode {
     startedAt: input.run.created_at,
     durationMs: ms(input.run.created_at, input.run.finished_at),
     ids: { runId: input.run.id },
-    attrs: { profile: input.run.profile ?? null, transitions: redactTraceValue(input.run.graph?.transitions ?? []) },
+    attrs: {
+      profile: input.run.profile ?? null,
+      transitions: redactTraceValue(input.run.graph?.transitions ?? []),
+    },
     children: [],
   };
   const runId = input.run.id;
@@ -349,7 +396,9 @@ export function assembleTrace(input: TraceInput): TraceNode {
       },
       children: [],
     };
-    const attempts = input.attempts.filter((a) => a.step_id === step.id).sort((a, b) => a.number - b.number);
+    const attempts = input.attempts
+      .filter((a) => a.step_id === step.id)
+      .sort((a, b) => a.number - b.number);
     let prev: number | null = null;
     for (const a of attempts) {
       const node: TraceNode = {
@@ -386,7 +435,11 @@ export function assembleTrace(input: TraceInput): TraceNode {
             startedAt: e.created_at,
             durationMs: null,
             ids: { runId, stepId: step.id, attemptId: a.id, toolUseId: String(e.data.id) },
-            attrs: { eventId: e.id, parentToolUseId: e.data.parent ?? null, input: redactTraceValue(e.data.input) },
+            attrs: {
+              eventId: e.id,
+              parentToolUseId: e.data.parent ?? null,
+              input: redactTraceValue(e.data.input),
+            },
             children: [],
           };
           calls.set(String(e.data.id), t);
@@ -427,7 +480,9 @@ export function assembleTrace(input: TraceInput): TraceNode {
       const checkpoints = (input.checkpoints ?? []).filter((c) => c.attempt_id === a.id);
       const notes = checkpoints.filter((c) => !RECOVERABLE_CHECKPOINTS.has(c.reason)).length;
       if (notes) node.attrs.progressNotes = notes;
-      const sizes = (input.decisions ?? []).filter((d) => d.kind === "checkpoint" && d.attempt_id === a.id);
+      const sizes = (input.decisions ?? []).filter(
+        (d) => d.kind === "checkpoint" && d.attempt_id === a.id,
+      );
       for (const c of checkpoints.filter((c) => RECOVERABLE_CHECKPOINTS.has(c.reason)))
         node.children.push({
           id: `checkpoint:${c.id}`,
@@ -439,14 +494,19 @@ export function assembleTrace(input: TraceInput): TraceNode {
           ids: { runId, stepId: step.id, attemptId: a.id },
           attrs: {
             reason: c.reason,
-            bytes: c.reason === "executor_returned" ? (sizes.at(-1)?.checkpoint_bytes ?? null) : null,
+            bytes:
+              c.reason === "executor_returned" ? (sizes.at(-1)?.checkpoint_bytes ?? null) : null,
           },
           children: [],
         });
-      for (const d of (input.decisions ?? []).filter((d) => d.attempt_id === a.id && d.kind !== "checkpoint"))
+      for (const d of (input.decisions ?? []).filter(
+        (d) => d.attempt_id === a.id && d.kind !== "checkpoint",
+      ))
         node.children.push(decisionNode(runId, step.id, d));
       for (const t of calls.values()) {
-        const parent = t.attrs.parentToolUseId ? calls.get(String(t.attrs.parentToolUseId)) : undefined;
+        const parent = t.attrs.parentToolUseId
+          ? calls.get(String(t.attrs.parentToolUseId))
+          : undefined;
         (parent ?? node).children.push(t);
       }
       const h = handoffBySource.get(a.id);
@@ -465,12 +525,18 @@ export function assembleTrace(input: TraceInput): TraceNode {
       stepNode.children.push(node);
     }
     for (const d of (input.decisions ?? []).filter(
-      (d) => d.step_id === step.id && d.kind !== "checkpoint" && (d.attempt_id == null || !attempts.some((a) => a.id === d.attempt_id)),
+      (d) =>
+        d.step_id === step.id &&
+        d.kind !== "checkpoint" &&
+        (d.attempt_id == null || !attempts.some((a) => a.id === d.attempt_id)),
     ))
       stepNode.children.push(decisionNode(runId, step.id, d));
     stepNode.startedAt = attempts[0]?.started_at ?? null;
     stepNode.durationMs = attempts.reduce<number | null>(
-      (sum, n) => (n.wall_duration_ms == null && ms(n.started_at, n.finished_at) == null ? sum : (sum ?? 0) + (n.wall_duration_ms ?? ms(n.started_at, n.finished_at) ?? 0)),
+      (sum, n) =>
+        n.wall_duration_ms == null && ms(n.started_at, n.finished_at) == null
+          ? sum
+          : (sum ?? 0) + (n.wall_duration_ms ?? ms(n.started_at, n.finished_at) ?? 0),
       null,
     );
     root.children.push(stepNode);
@@ -480,55 +546,64 @@ export function assembleTrace(input: TraceInput): TraceNode {
 
 /** Loads the rows of a run (reusing execution_attempt_telemetry for duration/tokens) and builds the tree. */
 export async function loadTraceInput(runId: number, db: Db = pool): Promise<TraceInput> {
-  const [runs, steps, attempts, events, handoffs, stages, checkpoints, decisions] = await Promise.all([
-    q(db, "SELECT id, status, created_at, finished_at, profile, graph FROM workflow_runs WHERE id = $1", [runId]),
-    q(
-      db,
-      `SELECT s.id, s.key, s.type, s.status, j.status AS live_job_status, j.available_at AS live_job_available_at,
+  const [runs, steps, attempts, events, handoffs, stages, checkpoints, decisions] =
+    await Promise.all([
+      q(
+        db,
+        "SELECT id, status, created_at, finished_at, profile, graph FROM workflow_runs WHERE id = $1",
+        [runId],
+      ),
+      q(
+        db,
+        `SELECT s.id, s.key, s.type, s.status, j.status AS live_job_status, j.available_at AS live_job_available_at,
               j.lease_expires_at AS live_job_lease_expires_at
          FROM workflow_steps s LEFT JOIN workflow_jobs j ON j.step_id = s.id AND j.status IN ('queued', 'running')
         WHERE s.run_id = $1 ORDER BY s.position, s.id`,
-      [runId],
-    ),
-    q(
-      db,
-      `SELECT a.id, a.step_id, a.number, a.generation, a.status, a.job_id, a.started_at, a.finished_at, a.error,
+        [runId],
+      ),
+      q(
+        db,
+        `SELECT a.id, a.step_id, a.number, a.generation, a.status, a.job_id, a.started_at, a.finished_at, a.error,
               t.provider, t.model, t.wall_duration_ms, t.input_tokens, t.output_tokens, t.normalized_failure_category AS failure_category,
               (a.metrics->>'workspace_conflict')::boolean AS workspace_conflict
          FROM workflow_step_attempts a LEFT JOIN execution_attempt_telemetry t ON t.attempt_id = a.id
         WHERE a.run_id = $1 ORDER BY a.id`,
-      [runId],
-    ),
-    q(
-      db,
-      `SELECT * FROM (
+        [runId],
+      ),
+      q(
+        db,
+        `SELECT * FROM (
          SELECT id, attempt_id, kind, left(content, 2000) AS content, data, created_at FROM workflow_events
           WHERE run_id = $1
             AND (kind IN ('tool', 'tool_result')
                  OR (kind = 'trace' AND data->'trace'->>'event' = 'tool.prepare_branch'))
           ORDER BY id DESC LIMIT $2) e
         ORDER BY id`,
-      [runId, TRACE_LIMITS.treeEvents],
-    ),
-    q(db, "SELECT source_attempt_id, target_attempt_id, reason, status FROM provider_handoffs WHERE run_id = $1", [runId]),
-    q(
-      db,
-      "SELECT attempt_id, data->'stages' AS stages FROM workflow_artifacts WHERE run_id = $1 AND kind = 'harness_evidence' AND attempt_id IS NOT NULL ORDER BY id",
-      [runId],
-    ),
-    q(
-      db,
-      "SELECT id, attempt_id, reason, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id LIMIT $2",
-      [runId, TRACE_LIMITS.treeEvents],
-    ),
-    q(
-      db,
-      `SELECT id, step_id, attempt_id, kind, action, outcome, reason, source_attempt_id, latency_ms, checkpoint_bytes,
+        [runId, TRACE_LIMITS.treeEvents],
+      ),
+      q(
+        db,
+        "SELECT source_attempt_id, target_attempt_id, reason, status FROM provider_handoffs WHERE run_id = $1",
+        [runId],
+      ),
+      q(
+        db,
+        "SELECT attempt_id, data->'stages' AS stages FROM workflow_artifacts WHERE run_id = $1 AND kind = 'harness_evidence' AND attempt_id IS NOT NULL ORDER BY id",
+        [runId],
+      ),
+      q(
+        db,
+        "SELECT id, attempt_id, reason, created_at FROM workflow_checkpoints WHERE run_id = $1 ORDER BY id LIMIT $2",
+        [runId, TRACE_LIMITS.treeEvents],
+      ),
+      q(
+        db,
+        `SELECT id, step_id, attempt_id, kind, action, outcome, reason, source_attempt_id, latency_ms, checkpoint_bytes,
               saved_tokens, created_at
          FROM execution_decisions WHERE run_id = $1 ORDER BY id LIMIT $2`,
-      [runId, TRACE_LIMITS.treeEvents],
-    ),
-  ]);
+        [runId, TRACE_LIMITS.treeEvents],
+      ),
+    ]);
   if (!runs[0]) throw new Error(`run ${runId} not found`);
   return { run: runs[0], steps, attempts, events, handoffs, stages, checkpoints, decisions };
 }

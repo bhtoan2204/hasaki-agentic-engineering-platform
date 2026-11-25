@@ -21,7 +21,7 @@ import { callTool, registerBuiltinTools } from "../src/agent/toolRegistry.ts";
 
 const jwt = (claims: object) =>
   `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.c2lnbmF0dXJlLXZhbHVl`;
-const GOOD = jwt({ email: "dev@hasaki.vn", exp: Math.floor(Date.now() / 1000) + 3600 });
+const GOOD = jwt({ email: "dev@example.vn", exp: Math.floor(Date.now() / 1000) + 3600 });
 let server: Server;
 const seen: URL[] = [];
 const posts: Array<{ path: string; body: unknown }> = [];
@@ -40,7 +40,7 @@ before(async () => {
       return json(
         200,
         auth === `Bearer ${GOOD}`
-          ? { loggedIn: true, username: "dev@hasaki.vn" }
+          ? { loggedIn: true, username: "dev@example.vn" }
           : { loggedIn: false },
       );
     if (auth !== `Bearer ${GOOD}`) return json(401, { error: "invalid session" });
@@ -178,7 +178,7 @@ test("token is validated against Argo CD before saving; tools work and are read-
   );
   const st = await setArgoToken(`argocd.token=${GOOD}`);
   assert.equal(st.loggedIn, true);
-  assert.equal(st.user, "dev@hasaki.vn");
+  assert.equal(st.user, "dev@example.vn");
 
   assert.deepEqual(
     (await listApps("payment zalopay")).map((a) => a.app),

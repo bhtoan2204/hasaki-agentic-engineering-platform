@@ -326,7 +326,7 @@ test("policy versions are content-addressed and comparable; requirements are san
   assert.notEqual(policyKey(v), policyKey({ ...v, prompt_template: "000000000000" }));
   assert.equal(policyKey(null), "unversioned", "legacy runs stay comparable as one group");
   const s = sanitizeRequirement(
-    "Customer nguyen.van.a@example.com (0912345678) reports refund; token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 see https://internal.hasaki.vn/x",
+    "Customer nguyen.van.a@example.com (0912345678) reports refund; token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 see https://internal.example.vn/x",
   );
   assert.doesNotMatch(s, /example\.com|0912345678|ghp_|internal\.hasaki/);
   assert.match(s, /reports refund/);

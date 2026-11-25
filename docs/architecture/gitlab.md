@@ -1,6 +1,6 @@
 # GitLab
 
-GitLab (gitlab.com and self-hosted instances such as gitlab.hasaki.work) is the third Git host next to Bitbucket and
+GitLab (gitlab.com and self-hosted instances such as gitlab.example.work) is the third Git host next to Bitbucket and
 GitHub. It uses the same registry, grants, worktrees, push path, PR recording and workflow definitions. Nothing in the
 workflow engine knows about GitLab: it calls `gitProviderFor(repository.provider)`.
 
@@ -30,7 +30,7 @@ answer "unsupported for <provider>" for the rest.
   "instances": [
     { "host": "gitlab.com" },
     {
-      "host": "gitlab.hasaki.work",
+      "host": "gitlab.example.work",
       "caFile": "/etc/ssl/certs/hasaki-ca.pem",
       "sshHostKeys": ["ssh-ed25519 AAAA…"],
       "sshPort": 22

@@ -40,7 +40,7 @@ import type { Hypothesis, RoundState } from "../src/investigation/rounds.ts";
 type SearchView = Awaited<ReturnType<typeof investigationSearch>>;
 type SearchEvent = SearchView["events"][number];
 
-process.env.SPLUNK_POLL_MS = "20";
+config.polling.splunkMs = "20";
 const GOOD = "good-token-0123456789abcdefghij";
 const ADMINISH = "admin-token-0123456789abcdefghij";
 let server: Server;

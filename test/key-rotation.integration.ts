@@ -17,21 +17,22 @@ import { pool, q } from "../src/db/pool.ts";
 import { handle } from "../src/http/app.ts";
 import { definitions } from "../src/workflow/definitions.ts";
 import { startRun } from "../src/workflow/engine.ts";
+import { config } from "../src/config.ts";
 
 const OLD = "rotation-old-secret-0123456789";
 const NEW = "rotation-new-secret-9876543210";
 const original = {
-  secret: process.env.AUTH_SECRET,
-  previous: process.env.AUTH_SECRET_PREVIOUS,
-  format: process.env.AUTH_CIPHERTEXT_FORMAT,
+  secret: config.auth.secret,
+  previous: config.auth.secretPrevious,
+  format: config.auth.ciphertextFormat,
 };
 
 function useKeys(current: string, previous?: string, format?: string) {
-  process.env.AUTH_SECRET = current;
-  if (previous) process.env.AUTH_SECRET_PREVIOUS = previous;
-  else delete process.env.AUTH_SECRET_PREVIOUS;
-  if (format) process.env.AUTH_CIPHERTEXT_FORMAT = format;
-  else delete process.env.AUTH_CIPHERTEXT_FORMAT;
+  config.auth.secret = current;
+  if (previous) config.auth.secretPrevious = previous;
+  else config.auth.secretPrevious = undefined;
+  if (format) config.auth.ciphertextFormat = format;
+  else config.auth.ciphertextFormat = undefined;
 }
 
 /** What the platform wrote before key ids existed, written independently of the code under test. */
@@ -79,15 +80,9 @@ before(async () => {
 
 after(async () => {
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
-  for (const [name, value] of Object.entries(original)) {
-    const env = {
-      secret: "AUTH_SECRET",
-      previous: "AUTH_SECRET_PREVIOUS",
-      format: "AUTH_CIPHERTEXT_FORMAT",
-    }[name]!;
-    if (value === undefined) delete process.env[env];
-    else process.env[env] = value;
-  }
+  config.auth.secret = original.secret;
+  config.auth.secretPrevious = original.previous;
+  config.auth.ciphertextFormat = original.format;
   await pool.end();
 });
 

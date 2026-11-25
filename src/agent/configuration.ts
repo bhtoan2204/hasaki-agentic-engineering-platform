@@ -125,6 +125,31 @@ export function parseAgentConfiguration(raw: unknown): AgentConfiguration {
   return document;
 }
 
+/** Whether an environment variable named in the table below currently supplies a value (read from config.agentEnv). */
+function suppliedByEnvironment(name: string): boolean {
+  const e = config.agentEnv;
+  const values: Record<string, string | undefined> = {
+    CODEX_MODEL: e.codexModel,
+    CODEX_REASONING_EFFORT: e.codexReasoningEffort,
+    CODEX_TIMEOUT_MS: e.codexTimeoutMs,
+    CURSOR_AGENT_TIMEOUT_MS: e.cursorTimeoutMs,
+    AGY_MODEL: e.agyModel,
+    ANTIGRAVITY_MODEL: e.antigravityModel,
+    AGY_EFFORT: e.agyEffort,
+    ANTIGRAVITY_EFFORT: e.antigravityEffort,
+    AGY_TIMEOUT_MS: e.agyTimeoutMs,
+    ANTIGRAVITY_TIMEOUT_MS: e.antigravityTimeoutMs,
+    AGY_SANDBOX: e.agySandbox,
+    AGY_MAX_CONCURRENT: e.agyMaxConcurrent,
+    COPILOT_MODEL: e.copilotModel,
+    COPILOT_EFFORT: e.copilotEffort,
+    COPILOT_TIMEOUT_MS: e.copilotTimeoutMs,
+    COPILOT_SANDBOX: e.copilotSandbox,
+    COPILOT_MAX_CONCURRENT: e.copilotMaxConcurrent,
+  };
+  return !!values[name];
+}
+
 /** Import only routing inputs. Credentials and local transport/security options never enter the document. */
 export function legacyAgentConfiguration(): AgentConfiguration {
   const codex = codexConfig(),
@@ -141,7 +166,7 @@ export function legacyAgentConfiguration(): AgentConfiguration {
     cursor: {
       model: "",
       effort: "",
-      timeoutMs: Number(process.env.CURSOR_AGENT_TIMEOUT_MS) || 45 * 60_000,
+      timeoutMs: config.agent.cursorTimeoutMs ?? 45 * 60_000,
       models: {},
     },
     antigravity,
@@ -191,7 +216,7 @@ export function legacyAgentConfiguration(): AgentConfiguration {
               ].map((key) => {
                 const env = environment[provider][
                   key as "model" | "reasoning_effort" | "timeout_ms"
-                ]?.find((name) => process.env[name]);
+                ]?.find((name) => suppliedByEnvironment(name));
                 const optionEnv =
                   key === "options.sandbox"
                     ? provider === "copilot"
@@ -209,7 +234,7 @@ export function legacyAgentConfiguration(): AgentConfiguration {
                       : "effort"
                     : key;
                 const selectedEnv =
-                  env ?? (optionEnv && process.env[optionEnv] ? optionEnv : undefined);
+                  env ?? (optionEnv && suppliedByEnvironment(optionEnv) ? optionEnv : undefined);
                 return [
                   key,
                   selectedEnv && !isOwned(`${provider}.${ownedKey}`)

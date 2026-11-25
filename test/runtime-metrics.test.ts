@@ -9,6 +9,7 @@ import {
   runtimeMetricsSnapshot,
 } from "../src/runtimeMetrics.ts";
 import { pickEncoding } from "../src/http/compression.ts";
+import { config } from "../src/config.ts";
 
 test("runtime metrics: fixed names and labels, bucketed quantiles, gauges read at snapshot time", () => {
   resetRuntimeMetrics();
@@ -43,11 +44,11 @@ test("compression negotiation: best accepted encoding, q=0 refuses, off switch",
   assert.equal(pickEncoding("*"), "br");
   assert.equal(pickEncoding("identity"), null);
   assert.equal(pickEncoding(undefined), null);
-  process.env.HTTP_COMPRESSION = "off";
+  config.server.compression = "off";
   try {
     assert.equal(pickEncoding("br"), null);
   } finally {
-    delete process.env.HTTP_COMPRESSION;
+    config.server.compression = undefined;
   }
 });
 

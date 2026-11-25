@@ -36,7 +36,7 @@ export function Vault(p: { open: boolean; onToggle: (id: string) => void }) {
       <Steps>
         <li>
           {slot(t("ig.vault.s1"), {
-            link: <Link href={st?.baseUrl ?? "https://vault-qc-v2.hasaki.dev"} />,
+            link: <Link href={st?.baseUrl ?? "https://vault-qc-v2.example.dev"} />,
           })}
         </li>
         <li>{t("ig.vault.s2")}</li>

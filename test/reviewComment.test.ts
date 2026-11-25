@@ -6,8 +6,8 @@ import type { GitProvider } from "../src/git/provider.ts";
 // Fake provider objects only; nothing reaches a Git host.
 const ref = {
   repo: "acme/team/shop",
-  url: "https://gitlab.hasaki.work/acme/team/shop/-/merge_requests/7",
-  remoteUrl: "https://gitlab.hasaki.work/acme/team/shop.git",
+  url: "https://gitlab.example.work/acme/team/shop/-/merge_requests/7",
+  remoteUrl: "https://gitlab.example.work/acme/team/shop.git",
 };
 const TOKEN = "glpat-TESTTOKEN0000000000";
 

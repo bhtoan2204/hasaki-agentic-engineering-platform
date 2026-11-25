@@ -23,6 +23,7 @@ import { getExecutor, type ExecutionContext } from "../workflow/executors/regist
 import type { ExecResult } from "../workflow/types.ts";
 import { log } from "../logging.ts";
 import { ignoreError } from "../ignoreError.ts";
+import { config } from "../config.ts";
 const exec = promisify(execFile);
 const LIVE_ALLOWED_TOOLS = [
   "Read",
@@ -79,7 +80,7 @@ async function stopIsolatedDatabase(data: string) {
 export async function isolatedDatabase(root: string) {
   const data = join(root, `database-${randomUUID()}`);
   const socket = join(data, "socket");
-  const env = { PATH: process.env.PATH, HOME: root, LANG: "C.UTF-8" };
+  const env = { PATH: config.system.path, HOME: root, LANG: "C.UTF-8" };
   await exec(
     "initdb",
     ["-D", data, "-U", "platform_eval", "-A", "trust", "--no-locale", "--encoding=UTF8"],

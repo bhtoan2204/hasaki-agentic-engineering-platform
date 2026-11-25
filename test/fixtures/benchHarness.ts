@@ -8,9 +8,10 @@ import { connect, createServer as tcpServer, type Socket } from "node:net";
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { config } from "../../src/config.ts";
 
 export async function installBenchHarness(opts: { tools: string[]; latencyMs: number }) {
-  if (process.env.PLATFORM_TEST !== "1")
+  if (config.test.platformTest !== "1")
     throw new Error("Use --import ./test/setup.ts with the isolated local test database");
   const scratch = process.env.TEST_ROOT!;
   const wrapDir = join(scratch, "bench-wrappers");
@@ -25,7 +26,8 @@ export async function installBenchHarness(opts: { tools: string[]; latencyMs: nu
     );
     chmodSync(join(wrapDir, tool), 0o755);
   }
-  process.env.PATH = `${wrapDir}:${process.env.PATH}`;
+  process.env.PATH = `${wrapDir}:${config.system.path}`;
+  config.system.path = `${wrapDir}:${config.system.path}`;
   const count = (tool: string) => {
     try {
       return readFileSync(join(counterDir, tool), "utf8").length;

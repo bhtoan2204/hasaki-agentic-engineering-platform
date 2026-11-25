@@ -166,11 +166,11 @@ function gitlabFake(): Fake {
   return {
     provider: gitlabProvider,
     repo: "acme/team/shop",
-    remoteUrl: "https://gitlab.hasaki.work/acme/team/shop.git",
+    remoteUrl: "https://gitlab.example.work/acme/team/shop.git",
     prs,
     posts: () => posts,
     handle(url, method, body) {
-      if (url.host !== "gitlab.hasaki.work") return null;
+      if (url.host !== "gitlab.example.work") return null;
       // fetch() receives the encoded project id; URL keeps %2F in the path.
       if (method === "GET" && url.pathname === base) {
         const s = url.searchParams;
@@ -194,7 +194,7 @@ function gitlabFake(): Fake {
           target: String(body.target_branch),
           title: String(body.title),
           state: "OPEN",
-          url: `https://gitlab.hasaki.work/acme/team/shop/-/merge_requests/${id}`,
+          url: `https://gitlab.example.work/acme/team/shop/-/merge_requests/${id}`,
         };
         prs.push(p);
         return json(view(p), 201);
@@ -217,7 +217,7 @@ beforeEach(() => {
   config.bitbucket.allowSharedCredentials = true;
   config.github.allowSharedCredentials = true;
   config.github.token = "fake-github-token";
-  config.gitlab.instances = [{ host: "gitlab.com" }, { host: "gitlab.hasaki.work" }];
+  config.gitlab.instances = [{ host: "gitlab.com" }, { host: "gitlab.example.work" }];
   config.gitlab.allowSharedCredentials = true;
   config.gitlab.token = "glpat-CONTRACT000000000000";
   setGitlabSleep(async () => {});
@@ -343,11 +343,11 @@ test("every registered hosting provider has a host adapter (transport, policy, l
 
 test("GitLab Git transport uses oauth2 + the instance token; a missing token is actionable and secret-free", async () => {
   const remote = {
-    url: "https://gitlab.hasaki.work/acme/team/shop.git",
+    url: "https://gitlab.example.work/acme/team/shop.git",
     workspace: "acme/team",
     slug: "shop",
     provider: "gitlab" as const,
-    host: "gitlab.hasaki.work",
+    host: "gitlab.example.work",
   };
   assert.deepEqual(await gitHosts.gitlab.gitCredentials(remote), {
     user: "oauth2",
@@ -358,10 +358,10 @@ test("GitLab Git transport uses oauth2 + the instance token; a missing token is 
     gitHosts.gitlab.gitCredentials(remote),
     (e: Error) => /GitLab authentication required/.test(e.message) && !e.message.includes("glpat-"),
   );
-  config.gitlab.instances = [{ host: "gitlab.hasaki.work", caFile: "/etc/ssl/hasaki-ca.pem" }];
+  config.gitlab.instances = [{ host: "gitlab.example.work", caFile: "/etc/ssl/hasaki-ca.pem" }];
   assert.deepEqual(gitHosts.gitlab.gitOptions!(remote), [
     "-c",
-    "http.https://gitlab.hasaki.work/.sslCAInfo=/etc/ssl/hasaki-ca.pem",
+    "http.https://gitlab.example.work/.sslCAInfo=/etc/ssl/hasaki-ca.pem",
   ]);
 });
 

@@ -6,7 +6,7 @@ import { parseKafkaCookie } from "../src/integrations/kafka.ts";
 
 // Same shape as Chrome "Copy as cURL (cmd)" on Windows; values are fake.
 const CMD = [
-  'curl --url ^"https://siem.hasaki.work/en-GB/splunkd/__raw/servicesNS/nobody/system/web-features?output_mode=json^" ^',
+  'curl --url ^"https://siem.example.work/en-GB/splunkd/__raw/servicesNS/nobody/system/web-features?output_mode=json^" ^',
   '  -H ^"accept: */*^" ^',
   '  -H ^"content-type: application/x-www-form-urlencoded^" ^',
   '  -b ^"splunkweb_csrf_token_8000=111; session_id_8080=abc; splunkweb_csrf_token_8080=222; token_key=111; splunkd_8080=Aa^^76iB_x^^rnQ-z^^C3QA_^" ^',
@@ -16,7 +16,7 @@ const CMD = [
   '  -H ^"x-splunk-form-key: 222^"',
 ].join("\r\n");
 
-const BASH = `curl 'https://kafka-ui-qc-v2.hasaki.dev/api/clusters' \\
+const BASH = `curl 'https://kafka-ui-qc-v2.example.dev/api/clusters' \\
   -H 'accept: application/json' \\
   -b 'SESSION=s3ss10n; _ga=GA1' \\
   -H 'sec-ch-ua: "Chromium";v="156"'`;
@@ -25,7 +25,7 @@ test("Windows cmd cURL: caret escapes undone, cookie and headers extracted", () 
   const c = parseCurl(CMD)!;
   assert.equal(
     c.url,
-    "https://siem.hasaki.work/en-GB/splunkd/__raw/servicesNS/nobody/system/web-features?output_mode=json",
+    "https://siem.example.work/en-GB/splunkd/__raw/servicesNS/nobody/system/web-features?output_mode=json",
   );
   assert.equal(
     c.cookie,

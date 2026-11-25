@@ -259,8 +259,8 @@ export function selfTestEnvironment(extra: Record<string, string>): NodeJS.Proce
   const home = join(config.dataDir, "self-test-home");
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    LANG: process.env.LANG ?? "C.UTF-8",
+    PATH: config.system.path,
+    LANG: config.system.lang ?? "C.UTF-8",
     HOME: home,
     TMPDIR: "/tmp",
     TEST_DATABASE_ADMIN_URL: isolatedAdminUrl(),
@@ -273,7 +273,7 @@ export function selfTestEnvironment(extra: Record<string, string>): NodeJS.Proce
     npm_config_update_notifier: "false",
   };
   // TLS-intercepting proxies (corporate WARP) need their CA, or npm/npx cannot reach the registry.
-  if (process.env.NODE_EXTRA_CA_CERTS) env.NODE_EXTRA_CA_CERTS = process.env.NODE_EXTRA_CA_CERTS;
+  if (config.system.extraCaCerts) env.NODE_EXTRA_CA_CERTS = config.system.extraCaCerts;
   for (const [key, value] of Object.entries(extra)) {
     if (!key || SECRET_ENV.test(key) || key.startsWith("PLATFORM_") || key.startsWith("GIT_"))
       continue;
