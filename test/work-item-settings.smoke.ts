@@ -54,7 +54,10 @@ try {
     { locale: "en", width: 1024 },
     { locale: "vi", width: 390 },
   ]) {
-    const context = await browser.newContext({ viewport: { width: sample.width, height: 900 } });
+    const context = await browser.newContext({
+      bypassCSP: true,
+      viewport: { width: sample.width, height: 900 },
+    });
     try {
       await context.addInitScript(
         (locale) => localStorage.setItem("hasaki.uiLocale", locale),

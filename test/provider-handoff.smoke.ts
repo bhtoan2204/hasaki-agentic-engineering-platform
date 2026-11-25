@@ -80,7 +80,10 @@ const browser = await chromium.launch({
 });
 const evidence: string[] = [];
 try {
-  const context = await browser.newContext({ viewport: { width: 1600, height: 1200 } });
+  const context = await browser.newContext({
+    bypassCSP: true,
+    viewport: { width: 1600, height: 1200 },
+  });
   await context.addInitScript(() => {
     if (!localStorage.getItem("hasaki.uiLocale")) localStorage.setItem("hasaki.uiLocale", "en");
   });

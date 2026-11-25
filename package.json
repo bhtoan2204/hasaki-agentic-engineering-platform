@@ -65,6 +65,7 @@
     "smoke:incident-workbench": "node --disable-warning=ExperimentalWarning test/incident-workbench.smoke.ts",
     "smoke:run-delegation": "node --disable-warning=ExperimentalWarning test/run-delegation.smoke.ts",
     "smoke:overview-timesheet": "node --disable-warning=ExperimentalWarning test/overview-timesheet.smoke.ts",
+    "smoke:csp": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/csp.browser.ts",
     "smoke:chat": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/chat.browser.ts",
     "smoke:run-detail": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/run-detail.browser.ts",
     "smoke:bug-hunter": "node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=4 test/bug-hunter.browser.ts",

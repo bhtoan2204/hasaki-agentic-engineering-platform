@@ -123,7 +123,7 @@ after(async () => {
 });
 
 async function open(locale: "en" | "vi", viewport: { width: number; height: number }) {
-  const context = await browser.newContext({ viewport });
+  const context = await browser.newContext({ bypassCSP: true, viewport });
   await context.addInitScript((l) => localStorage.setItem("hasaki.uiLocale", l), locale);
   const page = await context.newPage();
   const errors: string[] = [];

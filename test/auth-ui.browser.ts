@@ -29,7 +29,10 @@ const browser = await chromium.launch({
   headless: true,
   args: ["--no-sandbox"],
 });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const context = await browser.newContext({
+  bypassCSP: true,
+  viewport: { width: 1440, height: 1000 },
+});
 const page = await context.newPage();
 page.setDefaultTimeout(7000);
 const errors: string[] = [];

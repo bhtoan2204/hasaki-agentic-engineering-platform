@@ -64,7 +64,10 @@ const browser = await chromium.launch({
 });
 const evidence: string[] = [];
 try {
-  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1100 } });
+  const ctx = await browser.newContext({
+    bypassCSP: true,
+    viewport: { width: 1600, height: 1100 },
+  });
   await ctx.addInitScript(() => localStorage.setItem("hasaki.uiLocale", "en"));
   const page = await ctx.newPage();
   const errors: string[] = [];

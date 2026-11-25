@@ -60,9 +60,7 @@ const out = resolve("docs/validation/telegram");
 mkdirSync(out, { recursive: true });
 const results: string[] = [];
 try {
-  const page = await browser.newPage({
-    viewport: { width: 1440, height: 900 },
-  });
+  const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1440, height: 900 } });
   await page.addInitScript(() => localStorage.setItem("hasaki.uiLocale", "en"));
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));

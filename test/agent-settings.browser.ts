@@ -27,7 +27,7 @@ test("provider Settings retain drafts and hide unsupported controls", async () =
       headless: true,
       args: ["--no-sandbox", "--disable-dev-shm-usage"],
     });
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1440, height: 900 } });
     await page.route("**/api/agent-providers*", (route) =>
       route.fulfill({
         json: AGENT_PROVIDERS.map((id) => ({

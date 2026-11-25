@@ -49,7 +49,7 @@ after(async () => {
 });
 
 async function signedIn(): Promise<{ context: BrowserContext; csrf: string }> {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ bypassCSP: true });
   const page = await context.newPage();
   await page.goto(base + "/#/overview");
   const { csrf } = await page.evaluate(async () => {

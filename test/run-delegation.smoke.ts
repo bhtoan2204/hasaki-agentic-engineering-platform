@@ -181,7 +181,7 @@ try {
     ["en", 1440],
     ["vi", 1366],
   ] as const) {
-    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    const context = await browser.newContext({ bypassCSP: true, viewport: { width, height: 900 } });
     try {
       await context.addInitScript(
         (value) => localStorage.setItem("hasaki.uiLocale", value),

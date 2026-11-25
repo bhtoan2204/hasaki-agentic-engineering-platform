@@ -117,6 +117,9 @@ jobs:
         run: npm run smoke:live-updates
       - name: Responsive layout (1920 → 320 px), keyboard focus
         run: npm run smoke:ui-quality
+      # The other browser tests bypass the CSP (Playwright's string evaluation needs 'unsafe-eval'); this one does not.
+      - name: UI under its Content-Security-Policy
+        run: npm run smoke:csp
 
   # platform-go: vet + unit, contract and extractor parity tests, and the production build (CGO: the tree-sitter
   # grammars are C). Cross-language suites (test/*-go.integration.ts) run in the test job and fail without Go.

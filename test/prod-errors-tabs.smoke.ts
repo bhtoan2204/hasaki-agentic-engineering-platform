@@ -117,7 +117,7 @@ const data = {
 
 try {
   for (const locale of ["en", "vi"]) {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ bypassCSP: true });
     try {
       await context.addInitScript(
         (value) => localStorage.setItem("hasaki.uiLocale", value),

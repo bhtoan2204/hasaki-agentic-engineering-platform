@@ -21,7 +21,7 @@ const browser = await chromium.launch({
   headless: true,
   args: ["--no-sandbox"],
 });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1440, height: 1000 } });
 const errors: string[] = [];
 let indexRequests = 0;
 page.on("request", (r) => {

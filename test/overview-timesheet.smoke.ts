@@ -87,7 +87,10 @@ const sheet = {
 try {
   for (const locale of ["vi", "en"]) {
     for (const connected of [true, false]) {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+      const context = await browser.newContext({
+        bypassCSP: true,
+        viewport: { width: 1280, height: 1000 },
+      });
       try {
         await context.addInitScript(
           (value) => localStorage.setItem("hasaki.uiLocale", value),

@@ -138,7 +138,10 @@ const heapMb = (page: Page) =>
   );
 
 async function signedIn(): Promise<BrowserContext> {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({
+    bypassCSP: true,
+    viewport: { width: 1440, height: 900 },
+  });
   await context.addInitScript(instrument);
   const page = await context.newPage();
   await page.goto(base + "/#/overview");
@@ -542,7 +545,10 @@ for (const [type, tab, kind] of [
       endpoint.respond([line(102, "Second recorded line")]);
       await inspector.getByText("Second recorded line").waitFor();
       assert.ok(await inspector.getByText(first).isVisible());
-      assert.equal(await inspector.getByText("Execution output temporarily unavailable").count(), 0);
+      assert.equal(
+        await inspector.getByText("Execution output temporarily unavailable").count(),
+        0,
+      );
       assert.deepEqual(errors, []);
     } finally {
       await context.close();

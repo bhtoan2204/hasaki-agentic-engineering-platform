@@ -54,7 +54,7 @@ const browser = await chromium.launch({
 });
 
 async function session() {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ bypassCSP: true });
   const page = await context.newPage();
   await page.goto(base + "/#/overview");
   const login = await page.evaluate(async () => {

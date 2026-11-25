@@ -76,7 +76,7 @@ const measurements: unknown[] = [];
 const errors: string[] = [];
 const query = "from=2026-11-01&to=2026-11-03&timezone=UTC&bucket=day";
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1440, height: 900 } });
   await page.emulateMedia({ reducedMotion: "reduce" });
   page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(() => localStorage.setItem("hasaki.uiLocale", "en"));

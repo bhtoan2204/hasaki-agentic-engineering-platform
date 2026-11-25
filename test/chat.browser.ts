@@ -144,7 +144,7 @@ const instrument = () => {
 };
 
 async function signedIn(): Promise<BrowserContext> {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ bypassCSP: true });
   await context.addInitScript(instrument);
   const page = await context.newPage();
   await page.goto(base + "/#/overview");

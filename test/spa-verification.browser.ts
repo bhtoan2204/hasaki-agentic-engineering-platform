@@ -33,7 +33,7 @@ mkdirSync(screenshotDir, { recursive: true });
 let companionScenario: "working" | "approval" | "success" = "working";
 
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1280, height: 800 } });
   await page.emulateMedia({ reducedMotion: "reduce" });
   page.on("pageerror", (e) => {
     pageErrors.push(e.message);
