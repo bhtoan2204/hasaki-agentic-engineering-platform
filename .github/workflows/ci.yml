@@ -72,7 +72,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       # The analytics dashboards (smoke:ui-quality) are served only by platform-go, built from go/ by the test.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
@@ -129,7 +129,7 @@ jobs:
         working-directory: go
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
@@ -204,7 +204,7 @@ jobs:
       # test/analytics-go.integration.ts, test/code-intelligence-go.integration.ts, test/code-search-go.integration.ts and
       # test/knowledge-import-go.integration.ts (engine parity, mandatory) build and run platform-go
       # against the test cluster; they fail (never skip) without a Go toolchain.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
