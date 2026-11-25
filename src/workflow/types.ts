@@ -346,7 +346,7 @@ export type ExecResult =
       output?: unknown;
     }
   /** Re-execute an upstream step with feedback (its dependants, including this step, are invalidated and rerun). */
-  | { kind: "reexecute"; target: string; feedback: string; output?: unknown }
+  | { kind: "reexecute"; target: string; feedback: string; output?: unknown; reason?: string }
   | {
       kind: "waiting_approval";
       request: Record<string, unknown>;

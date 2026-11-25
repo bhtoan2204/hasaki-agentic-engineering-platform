@@ -1,6 +1,6 @@
 import type { RunRow, StepRow } from "../workflow/types.ts";
 import { detectRisk, evidenceRole, evidenceSummary } from "./evidence.ts";
-import type { Finding, VerdictOutput } from "./independentReview.ts";
+import type { BlockedKind, Finding, VerdictOutput } from "./independentReview.ts";
 
 /**
  * Root Cause First policy (provider-agnostic, versioned). One definition feeds every provider through the system
@@ -596,10 +596,11 @@ export function enforceRootCauseReview(
     findings: [...v.findings, ...findings],
     summary: [v.summary, `Root Cause First: ${why}`].filter(Boolean).join(" — "),
   });
-  const blocked = (reason: string) => ({
+  const blocked = (reason: string, kind: BlockedKind = "proof") => ({
     ...out,
     verdict: "BLOCKED" as const,
     blocked_reason: reason,
+    blocked_kind: kind,
   });
 
   const accepted = Array.isArray(c?.justified_signals)
@@ -652,7 +653,11 @@ export function enforceRootCauseReview(
     );
   if (depth === "light" || !coded) return out;
 
-  if (!c) return blocked("Root Cause First: a PASS on a defect fix must include root_cause_check");
+  if (!c)
+    return blocked(
+      "Root Cause First: a PASS on a defect fix must include root_cause_check",
+      "verifier_output",
+    );
   if (c.observability_reduced === true && !accepted.length)
     return fail(
       [
@@ -699,6 +704,7 @@ export function enforceRootCauseReview(
   if (kind === "ROOT_CAUSE_FIX" && root && root !== "CONFIRMED" && root !== "PROBABLE")
     return blocked(
       `Root Cause First: presented as a root-cause fix but the investigation assessed the root cause as ${root}; provide the missing evidence or reclassify the change as PARTIAL_FIX / MITIGATION`,
+      "root_cause",
     );
   const fix = kind === "ROOT_CAUSE_FIX" || kind === "PARTIAL_FIX";
   const problem = proofProblem(proof, tested);

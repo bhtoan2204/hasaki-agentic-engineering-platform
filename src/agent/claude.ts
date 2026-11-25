@@ -67,7 +67,9 @@ export const SINCE_HUMAN_REEXECUTE = `a.started_at > COALESCE((SELECT max(e.crea
               AND (e.content LIKE '%(re-executed by user)%' OR e.content LIKE '%(re-executed with %' OR e.content LIKE '%(re-executed after rejection%')), '-infinity'::timestamptz)`;
 
 /** Current state of each worktree (read-only git), so a re-executed coding step continues from it instead of redoing it. */
-export async function worktreeState(workspaces: Array<{ repo: string; path: string }>): Promise<string> {
+export async function worktreeState(
+  workspaces: Array<{ repo: string; path: string }>,
+): Promise<string> {
   const out: string[] = [];
   for (const w of workspaces) {
     const baseBranch = await repositoryBaseBranch(w.repo);
@@ -222,7 +224,9 @@ function platformServer(
               options: z
                 .array(z.string())
                 .optional()
-                .describe("candidate answers; put your recommendation first"),
+                .describe(
+                  'Options are distinct answers the step can act on right away: each one a concrete decision or instruction (your recommendation first). Never restate the question or tell the developer to provide information in their answer; when you need typed details, end the option with a colon (for example "Use this SPL window:"). Settle what you can with your tools first and ask only what only the developer can decide or provide.',
+                ),
             }),
           )
           .min(1),
@@ -295,7 +299,9 @@ function platformServer(
     ),
   ];
   tools.push(
-    ...advertisedContextTools().map((t) => tool(t.name, t.description, t.input.shape, call(t.logicalName))),
+    ...advertisedContextTools().map((t) =>
+      tool(t.name, t.description, t.input.shape, call(t.logicalName)),
+    ),
   );
   if (mode === "coding") {
     tools.unshift(
@@ -319,8 +325,11 @@ export async function resumableSession(
   provider: AgentProvider,
 ): Promise<{ sessionId: string; fromAttempt?: number } | null> {
   const resume = ctx.input.pending?.resume;
-  if (resume?.checkpoint?.execution?.workspace_reconciliation_required &&
-      resume.checkpoint.execution.workspace_unavailable) return null;
+  if (
+    resume?.checkpoint?.execution?.workspace_reconciliation_required &&
+    resume.checkpoint.execution.workspace_unavailable
+  )
+    return null;
   const candidates = await q<{
     session_id: string;
     attempt_id: number;
@@ -348,9 +357,15 @@ export async function resumableSession(
     JSON.stringify(snap?.upstream ?? {}) === JSON.stringify(current?.content?.upstream ?? {});
   // 1. resume after answers: the paused attempt's own session.
   if (resume?.from_attempt_id) {
-    const c = candidates.find((x) => x.attempt_id === resume.from_attempt_id && x.generation === ctx.step.generation);
-    if (c && sameUpstream(c.snapshot) &&
-        JSON.stringify(c.snapshot?.knowledge ?? []) === JSON.stringify(current?.content?.knowledge ?? []))
+    const c = candidates.find(
+      (x) => x.attempt_id === resume.from_attempt_id && x.generation === ctx.step.generation,
+    );
+    if (
+      c &&
+      sameUpstream(c.snapshot) &&
+      JSON.stringify(c.snapshot?.knowledge ?? []) ===
+        JSON.stringify(current?.content?.knowledge ?? [])
+    )
       return { sessionId: c.session_id, fromAttempt: c.attempt_id };
   }
   // 2. reviewer feedback: continue the step's last session if nothing upstream changed since.
@@ -539,11 +554,18 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
         env: {
           ...agentEnvironment(process.env, "claude"),
           // Native compaction mode: Claude Code's own auto-compaction triggers at the platform's pressure threshold.
-          ...(nativeCompaction ? { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(nativeCompaction.percent) } : {}),
+          ...(nativeCompaction
+            ? { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(nativeCompaction.percent) }
+            : {}),
         },
         ...(sandbox
           ? {
-              spawnClaudeCodeProcess: (o: { command: string; args: string[]; env: Record<string, string | undefined>; signal?: AbortSignal }) =>
+              spawnClaudeCodeProcess: (o: {
+                command: string;
+                args: string[];
+                env: Record<string, string | undefined>;
+                signal?: AbortSignal;
+              }) =>
                 sandbox.spawn(
                   o.command,
                   o.args,
@@ -551,7 +573,10 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
                     ...Object.fromEntries(
                       Object.entries(o.env).filter(
                         (e): e is [string, string] =>
-                          typeof e[1] === "string" && /^(CLAUDE_CODE_[A-Z_]+|CLAUDE_AGENT_SDK_[A-Z_]+|MCP_[A-Z_]+|DEBUG_CLAUDE_AGENT_SDK)$/.test(e[0]),
+                          typeof e[1] === "string" &&
+                          /^(CLAUDE_CODE_[A-Z_]+|CLAUDE_AGENT_SDK_[A-Z_]+|MCP_[A-Z_]+|DEBUG_CLAUDE_AGENT_SDK)$/.test(
+                            e[0],
+                          ),
                       ),
                     ),
                     CLAUDE_CONFIG_DIR: `${SANDBOX_HOME}/.claude`,
@@ -593,9 +618,7 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
         },
         tools: nativeTools,
         ...(agents ? { agents } : {}),
-        ...(live
-          ? { sandbox: liveClaudeSandbox(live.databaseUrl, live.root ?? live.cwd) }
-          : {}),
+        ...(live ? { sandbox: liveClaudeSandbox(live.databaseUrl, live.root ?? live.cwd) } : {}),
         permissionMode: "default",
         canUseTool,
         hooks: {
@@ -609,9 +632,7 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
             ...d
               .split("\n")
               .filter(Boolean)
-              .map(
-                (l) => `[+${((Date.now() - startedAt) / 1000).toFixed(1)}s] ${l.slice(0, 300)}`,
-              ),
+              .map((l) => `[+${((Date.now() - startedAt) / 1000).toFixed(1)}s] ${l.slice(0, 300)}`),
           );
           if (stderrTail.length > 40) stderrTail.splice(0, stderrTail.length - 40);
         },
@@ -622,11 +643,7 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
         paidSource = paid;
         break;
       }
-      if (
-        !initSeen &&
-        msg.type === "system" &&
-        (msg as { subtype?: string }).subtype === "init"
-      ) {
+      if (!initSeen && msg.type === "system" && (msg as { subtype?: string }).subtype === "init") {
         initSeen = true;
         const ms = Date.now() - startedAt;
         if (ms > 10_000)
@@ -638,7 +655,11 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
       }
       watch.touch();
       // The model the session actually runs (an account default included) must not be a blocked one.
-      if (msg.type === "system" && msg.subtype === "init" && isModelBlocked(msg.model ?? config.model)) {
+      if (
+        msg.type === "system" &&
+        msg.subtype === "init" &&
+        isModelBlocked(msg.model ?? config.model)
+      ) {
         blocked = `Claude started with model "${msg.model ?? config.model}", which is blocked by platform policy (agent.blockedModels); the run was stopped. Configure another model.`;
         ac.abort();
         break;
@@ -670,13 +691,20 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
     if (sandbox) {
       // Closing the egress proxy revokes the sandbox's only network path; its refusals are the denied-action evidence.
       if (sandbox.egress.denied.length)
-        await ctx.log("system", `sandbox egress denied ${sandbox.egress.denied.length} connection(s)`, {
-          egress_denied: sandbox.egress.denied.slice(0, 20).map((d) => ({ reason: d.reason, target: d.target.replace(/:\d+$/, "") })),
-        });
+        await ctx.log(
+          "system",
+          `sandbox egress denied ${sandbox.egress.denied.length} connection(s)`,
+          {
+            egress_denied: sandbox.egress.denied
+              .slice(0, 20)
+              .map((d) => ({ reason: d.reason, target: d.target.replace(/:\d+$/, "") })),
+          },
+        );
       await sandbox.close();
     }
   }
-  if (blocked) return { isError: true, text: blocked, assistantTurns: 0, failure: "POLICY_VIOLATION" };
+  if (blocked)
+    return { isError: true, text: blocked, assistantTurns: 0, failure: "POLICY_VIOLATION" };
   if (paidSource)
     return {
       isError: true,
@@ -684,8 +712,7 @@ export async function claudeAgentTurn(turn: ClaudeTurnInput): Promise<{
       assistantTurns: 0,
       failure: "AUTHENTICATION",
     };
-  if (watch.reason && watch.reason !== "canceled" && reaper.armed && isSubmitted())
-    return result;
+  if (watch.reason && watch.reason !== "canceled" && reaper.armed && isSubmitted()) return result;
   if (watch.reason && !reaper.fired)
     return {
       isError: true,

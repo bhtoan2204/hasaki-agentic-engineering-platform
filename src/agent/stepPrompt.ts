@@ -46,7 +46,11 @@ export function buildSystemAppend(
 ): string {
   const cfg = step.config ?? {};
   const lines = [
-    ...(run.profile === "MICRO" ? ["MICRO: complete analysis, plan, implementation and self-review in this session. Do not delegate. Edit only verified micro_scope files using explicit edit tools. Shell execution is disabled; use bounded platform read tools. The trusted platform harness runs mandatory verification. If scope, business risk, dependency impact or budgets grow, call mcp__platform__escalate_profile and end the turn before further changes."] : []),
+    ...(run.profile === "MICRO"
+      ? [
+          "MICRO: complete analysis, plan, implementation and self-review in this session. Do not delegate. Edit only verified micro_scope files using explicit edit tools. Shell execution is disabled; use bounded platform read tools. The trusted platform harness runs mandatory verification. If scope, business risk, dependency impact or budgets grow, call mcp__platform__escalate_profile and end the turn before further changes.",
+        ]
+      : []),
     `You are executing ONE step of an engineering workflow on the Hasaki workflow platform, UNATTENDED.`,
     `Workflow: ${run.definition_key} · run #${run.id} · step "${step.name}" (${step.key}, type ${step.type}).`,
     `The developer is not watching the terminal; reach them only through the platform tools (mcp__platform__*).`,
@@ -68,7 +72,7 @@ export function buildSystemAppend(
         ]
       : []),
     `- Do NOT run git push. Pull requests are opened by a later workflow step.`,
-    `- If business behaviour is genuinely ambiguous and cannot be settled by reading code, call mcp__platform__ask_user with ALL open questions at once (each with the context you found and your recommended option first), then END YOUR TURN. Answers arrive as the next message.`,
+    `- If business behaviour is genuinely ambiguous and cannot be settled by reading code, call mcp__platform__ask_user with ALL open questions at once (each with the context you found and your recommended option first), then END YOUR TURN. Answers arrive as the next message. Options are distinct decisions or instructions you can act on right away: never restate the question, never tell the developer to provide information in their answer (end an option with a colon when you need typed details), and settle what your tools can answer before asking.`,
     `- Use mcp__platform__post_update for short progress notes at milestones.`,
     ...(mode === "coding" && (step.pending_input?.reexecute || step.pending_input?.feedback)
       ? [
@@ -215,7 +219,8 @@ export function buildSystemAppend(
       "Domain integrations (Splunk, project QC databases, Kafka, Vault, Argo CD, Hasaki Work, Bitbucket, repository registry, this run's history/changes) are not loaded up front:",
       "mcp__platform__list_tools to discover them, mcp__platform__describe_tool for the full contract, mcp__platform__call_tool to use one.",
     );
-  const children = step.config?.child_workflows as { workflows?: string[]; modes?: string[] } | undefined;
+  const children = step.config?.child_workflows as
+    { workflows?: string[]; modes?: string[] } | undefined;
   if (children?.workflows?.length)
     lines.push(
       "",
@@ -410,7 +415,10 @@ export function buildResumeMessage(
   if (decided && (!delivery || delivery.decisionsChanged)) lines.push("", decided, "");
   if (contextPack && delivery) {
     // This session already holds the rest of the pack, unchanged since it was delivered.
-    const changed = { ...contextPack, entries: contextPack.entries.filter((e) => delivery.send.includes(e.id)) };
+    const changed = {
+      ...contextPack,
+      entries: contextPack.entries.filter((e) => delivery.send.includes(e.id)),
+    };
     if (changed.entries.length)
       lines.push(
         "Context that is new or changed since this conversation last received it:",

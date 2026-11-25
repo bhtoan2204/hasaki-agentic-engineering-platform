@@ -1,5 +1,6 @@
 import { pool, q, one, json, retryTransient } from "../../db/pool.ts";
 import { runEvents } from "../events.ts";
+import { questionRow } from "../questionOptions.ts";
 import type { ResolvedContext, StepInput } from "../context.ts";
 import type { AgentProvider } from "../../agent/provider.ts";
 import type { AttemptRow, ExecResult, RunRow, StepRow, StepType } from "../types.ts";
@@ -98,8 +99,8 @@ export function makeContext(
             attempt.id,
             x.question,
             x.context ?? "",
-            json(x.options ?? []),
-            x.options?.[0] ?? null,
+            json(questionRow(x).options),
+            questionRow(x).suggested,
           ],
         );
       return questions.length;

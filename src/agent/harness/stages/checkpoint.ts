@@ -8,11 +8,15 @@ import { approvedScopeIn } from "../../evidence.ts";
 import { executionWorkspaces, implementationBaseline } from "../../implementationEvidence.ts";
 import {
   collectEvidence,
+  BLOCKED_PREFIX,
+  blockedResolution,
   enforceVerdict,
+  evidenceTargetFor,
   hasTestEvidence,
   incrementalCheckpoint,
   incrementalReviewBrief,
   repairDiff,
+  repairTargetFor,
   reusablePass,
   testDigestOf,
   verificationKey,
@@ -34,6 +38,31 @@ export async function checkpointStage(s: LifecycleState): Promise<ExecResult | v
   let incremental: LifecycleState["incremental"] = null;
   let evidence: LifecycleState["evidence"] = null;
   if (independent) {
+    // The developer's answer to this step's own BLOCKED question is a decision, not text for another verification:
+    // send the change back, stop, or (anything else) let the verifier read it as before. Only the answer to the attempt
+    // right before this one counts, so a decision already carried out is never repeated.
+    const previous = await one<{ id: number }>(
+      pool,
+      "SELECT id FROM workflow_step_attempts WHERE step_id = $1 AND id < $2 ORDER BY id DESC LIMIT 1",
+      [ctx.step.id, ctx.attempt.id],
+    );
+    const answered = ctx.input.answers
+      .filter((a) => a.attempt_id === previous?.id && a.question.startsWith(BLOCKED_PREFIX))
+      .at(-1);
+    const resolved = answered
+      ? blockedResolution(answered, {
+          repairTarget: repairTargetFor(ctx.run.graph, ctx.step.key),
+          evidenceTarget: evidenceTargetFor(ctx.run.graph, ctx.step.key),
+        })
+      : null;
+    if (resolved) {
+      await ctx.log(
+        "system",
+        `independent verification: developer decision on the blocked verdict → ${resolved.kind}${resolved.kind === "reexecute" ? ` "${resolved.target}"` : ""}`,
+        { blocked_resolution: resolved.kind },
+      );
+      return resolved;
+    }
     if (ctx.step.config.strict === true && !hasTestEvidence(ctx.input.upstream))
       return enforceVerdict(
         {
@@ -44,6 +73,7 @@ export async function checkpointStage(s: LifecycleState): Promise<ExecResult | v
             outputLocale(ctx.run) === "vi"
               ? "Xác minh strict cần kết quả test thật từ bước test phía trước, nhưng chưa có bước nào chạy."
               : "Strict verification requires real test evidence from an upstream test step, and none ran.",
+          blocked_kind: "test_evidence",
         },
         { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} },
       );
@@ -65,6 +95,7 @@ export async function checkpointStage(s: LifecycleState): Promise<ExecResult | v
           findings: [],
           summary: "",
           blocked_reason: `the code under review is not bound to a commit: ${evidence.problems.join("; ")}`,
+          blocked_kind: "uncommitted",
         },
         { repairsUsed: 0, maxRepairs: 0, repairTarget: null, heads: {} },
       );

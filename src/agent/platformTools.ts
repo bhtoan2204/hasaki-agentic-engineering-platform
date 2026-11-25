@@ -1,4 +1,5 @@
 import { requireRunRepositoryAccess } from "../repos/access.ts";
+import { questionRow } from "../workflow/questionOptions.ts";
 import { recordPreparedBaseline } from "./implementationEvidence.ts";
 import { validateOutputContract } from "./contract.ts";
 import { validateMicroWorkspace } from "../workflow/microEvidence.ts";
@@ -1004,8 +1005,8 @@ export async function envFromDatabase(
             attempt.id,
             x.question,
             x.context ?? "",
-            JSON.stringify(x.options ?? []),
-            x.options?.[0] ?? null,
+            JSON.stringify(questionRow(x).options),
+            questionRow(x).suggested,
           ],
         );
       return questions.length;
@@ -1017,7 +1018,7 @@ export async function envFromDatabase(
 const PLATFORM_TOOL_DOCS: Record<string, { summary: string; read_only: boolean }> = {
   ask_user: {
     summary:
-      'Post the developer\'s real questions and STOP. The question text is shown as-is and pauses the step until they answer. Each question needs at least two words plus context (the SPL, the window, the error). Never send a schema probe such as "test".',
+      'Post the developer\'s real questions and STOP. The question text is shown as-is and pauses the step until they answer. Each question needs at least two words plus context (the SPL, the window, the error). Never send a schema probe such as "test". Options are distinct decisions or instructions the step can act on right away (recommended first), never a restatement of the question or a request to "provide the information"; end an option with a colon when you need typed details.',
     read_only: false,
   },
   post_update: {
@@ -1105,7 +1106,13 @@ const legacyInputs: Record<string, z.ZodType<ToolArgs>> = {
             .max(4000)
             .optional()
             .describe("What you already found: the error, the SPL, the time window, the link"),
-          options: z.array(z.string().max(500)).max(8).optional(),
+          options: z
+            .array(z.string().max(500))
+            .max(8)
+            .optional()
+            .describe(
+              'Options are distinct answers the step can act on right away: each one a concrete decision or instruction (your recommendation first). Never restate the question or tell the developer to provide information in their answer; when you need typed details, end the option with a colon (for example "Use this SPL window:"). Settle what you can with your tools first and ask only what only the developer can decide or provide.',
+            ),
         }),
       )
       .min(1)

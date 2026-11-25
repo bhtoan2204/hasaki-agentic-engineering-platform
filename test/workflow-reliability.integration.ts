@@ -22,6 +22,7 @@ import {
 import { claimJob } from "../src/workflow/scheduler.ts";
 import { settleBackground } from "../src/workflow/background.ts";
 import { decisionsOf } from "../src/workflow/decisions.ts";
+import { BLOCKED_ANSWERS, enforceVerdict } from "../src/agent/independentReview.ts";
 
 before(async () => {
   // Recovery uses scripted executors; installed CLI authentication is outside this fixture's contract.
@@ -630,4 +631,92 @@ test("a checkpoint from an invalidated generation cannot supply a continuation",
   assert.ok(fresh.attempt.generation > begun.attempt.generation);
   assert.equal(fresh.input.pending?.resume, undefined);
   await cancelRun(run.id);
+});
+
+const OLD_SUGGESTION =
+  "Provide the missing information in your answer and re-verify (the PR still requires a PASS)";
+
+test("a BLOCKED verification stores executable options and a complete suggested answer, never the old placeholder", async () => {
+  const { run, job, begun } = await claimed();
+  const decided = enforceVerdict(
+    {
+      verdict: "BLOCKED",
+      findings: [],
+      summary: "reviewed",
+      blocked_reason:
+        "Root Cause First: presented as a root-cause fix but the investigation assessed the root cause as UNCONFIRMED",
+      blocked_kind: "root_cause",
+    },
+    {
+      repairsUsed: 0,
+      maxRepairs: 2,
+      repairTarget: "implement",
+      evidenceTarget: "root_cause",
+      heads: {},
+    },
+  );
+  assert.equal(decided.kind, "waiting_input");
+  await finishAttempt(job.id, job.fencing_token, begun.attempt.id, decided as never);
+  const [question] = (await rows(run.id)).questions;
+  assert.deepEqual(question.options, [
+    BLOCKED_ANSWERS.reclassifyPartial,
+    BLOCKED_ANSWERS.reinvestigate,
+    BLOCKED_ANSWERS.evidence,
+    BLOCKED_ANSWERS.reclassifyMitigation,
+    BLOCKED_ANSWERS.stop,
+  ]);
+  assert.equal(question.suggested_answer, BLOCKED_ANSWERS.reclassifyPartial);
+  assert.notEqual(question.suggested_answer, OLD_SUGGESTION);
+  await cancelRun(run.id);
+});
+
+test("an option that restates the question or asks the developer to provide information is not stored or suggested", async () => {
+  const { run, job, begun } = await claimed();
+  await finishAttempt(job.id, job.fencing_token, begun.attempt.id, {
+    kind: "waiting_input",
+    questions: [
+      {
+        question: "How should it proceed?",
+        options: [OLD_SUGGESTION, "How should it proceed", "Retry with the QC token"],
+      },
+      { question: "Which window?", options: [OLD_SUGGESTION] },
+    ],
+  });
+  const [withOne, none] = (await rows(run.id)).questions;
+  assert.deepEqual(withOne.options, ["Retry with the QC token"]);
+  assert.equal(withOne.suggested_answer, "Retry with the QC token");
+  assert.deepEqual(none.options, []);
+  assert.equal(none.suggested_answer, null, "nothing to pre-fill: the developer types the answer");
+  await cancelRun(run.id);
+});
+
+test("an option that needs details is rejected when sent bare and accepted with the details", async () => {
+  const { run, job, begun } = await claimed();
+  await finishAttempt(job.id, job.fencing_token, begun.attempt.id, {
+    kind: "waiting_input",
+    questions: [
+      {
+        question: "What window should the SPL use?",
+        options: ["Use this window:", "Use the last 24 hours"],
+      },
+    ],
+  });
+  const [question] = (await rows(run.id)).questions;
+  assert.equal(
+    question.suggested_answer,
+    "Use the last 24 hours",
+    "never the one that needs typing",
+  );
+  await assert.rejects(
+    () => answerQuestions({ [question.id]: "Use this window:" }),
+    /needs your details/,
+  );
+  assert.equal(
+    (await rows(run.id)).questions[0].status,
+    "open",
+    "the rejected answer changed nothing",
+  );
+  await answerQuestions({ [question.id]: "Use this window: 10:40 to 10:50" });
+  assert.equal((await rows(run.id)).questions[0].status, "answered");
+  assert.equal((await getRun(run.id)).status, "COMPLETED", "a valid answer resumes the run");
 });

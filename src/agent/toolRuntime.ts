@@ -5,6 +5,7 @@ import { join } from "node:path";
 const progressExec = promisify(execFile);
 import type { PolicyContext } from "./toolPolicy.ts";
 import { execution } from "../auth/execution.ts";
+import { questionRow } from "../workflow/questionOptions.ts";
 import { assertRunScopeReadable, requireRunRepositoryAccess } from "../repos/access.ts";
 import { pool, q, one, withTx, type Db } from "../db/pool.ts";
 import { runEvents } from "../workflow/events.ts";
@@ -136,7 +137,12 @@ export async function journalToolCall(
   args: unknown,
   result: string,
 ) {
-  env.policy?.loopDetector?.record(name, args, status === "ok" ? "ok" : status === "denied" ? "denied" : "error", result);
+  env.policy?.loopDetector?.record(
+    name,
+    args,
+    status === "ok" ? "ok" : status === "denied" ? "denied" : "error",
+    result,
+  );
   // Evidence is redacted, bounded and owner-scoped. SQL aggregation, rather than increments, makes retrying writes safe.
   await withTx(async (c) => {
     await q(
@@ -218,8 +224,8 @@ export async function postClarification(
           env.attemptId,
           x.question,
           x.context ?? "",
-          JSON.stringify(x.options ?? []),
-          x.options?.[0] ?? null,
+          JSON.stringify(questionRow(x).options),
+          questionRow(x).suggested,
         ],
       );
     return questions.length;
@@ -231,15 +237,26 @@ export async function refreshToolProgress(policy?: PolicyContext) {
   if (!policy?.loopDetector || !policy.workspaces.length) return;
   // Progress is a loop-detector hint, never verification evidence. Observe git metadata and
   // changed-file stat identities; do not read and hash every dirty file on each read-only call.
-  const state = await Promise.all(policy.workspaces.map(async path => {
-    const { stdout: status } = await progressExec("git", ["-C", path, "status", "--porcelain=v1", "-z", "--untracked-files=normal"], { maxBuffer: 4 << 20 });
-    const files = status.split("\0").filter(Boolean).map(entry => entry.slice(3));
-    const metadata = await Promise.all(files.map(async file => {
-      const st = await lstat(join(path, file)).catch(() => null);
-      return [file, st?.size, st?.mtimeMs, st?.ctimeMs];
-    }));
-    const { stdout: head } = await progressExec("git", ["-C", path, "rev-parse", "HEAD"]);
-    return { path, head, status, metadata };
-  })).catch(() => null);
+  const state = await Promise.all(
+    policy.workspaces.map(async (path) => {
+      const { stdout: status } = await progressExec(
+        "git",
+        ["-C", path, "status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        { maxBuffer: 4 << 20 },
+      );
+      const files = status
+        .split("\0")
+        .filter(Boolean)
+        .map((entry) => entry.slice(3));
+      const metadata = await Promise.all(
+        files.map(async (file) => {
+          const st = await lstat(join(path, file)).catch(() => null);
+          return [file, st?.size, st?.mtimeMs, st?.ctimeMs];
+        }),
+      );
+      const { stdout: head } = await progressExec("git", ["-C", path, "rev-parse", "HEAD"]);
+      return { path, head, status, metadata };
+    }),
+  ).catch(() => null);
   if (state) policy.loopDetector.observeProgress(hashOf(state));
 }

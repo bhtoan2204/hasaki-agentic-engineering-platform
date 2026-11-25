@@ -8,6 +8,7 @@ import {
   validateContinuation,
 } from "./checkpoints.ts";
 import { reapExpiredLeases as reapExpiredJobs } from "./recovery.ts";
+import { answerProblem, questionRow } from "./questionOptions.ts";
 import {
   findRun,
   stepsOf,
@@ -141,11 +142,7 @@ import {
   recordClarification,
   recordHumanApproval,
 } from "./autonomy.ts";
-import {
-  checkpointView,
-  isRecoverable,
-  latestRecoverable,
-} from "./checkpointView.ts";
+import { checkpointView, isRecoverable, latestRecoverable } from "./checkpointView.ts";
 import {
   resolveProfile,
   classifyComplexity,
@@ -1393,6 +1390,10 @@ export async function answerQuestions(
         "SELECT * FROM workflow_questions WHERE run_id = $1 AND id = ANY($2) AND status = 'open' FOR UPDATE",
         [runId, ids],
       );
+      for (const x of qs) {
+        const problem = answerProblem(x.options, String(answers[x.id]));
+        if (problem) throw new EngineError(problem, 400);
+      }
       if (qs.length) {
         await q(
           c,
@@ -2124,8 +2125,8 @@ export async function insertQuestions(
         attemptId,
         x.question,
         x.context ?? "",
-        json(x.options ?? []),
-        x.suggested_answer ?? x.options?.[0] ?? null,
+        json(questionRow(x).options),
+        questionRow(x).suggested,
       ],
     );
 }
@@ -2418,7 +2419,7 @@ async function applyResult(
         result.target,
         { feedback: result.feedback },
         afterCommit,
-        `re-executed by ${step.key} (developer decision after test failure)`,
+        `re-executed by ${step.key} (${result.reason ?? "developer decision after test failure"})`,
       );
       return;
     }

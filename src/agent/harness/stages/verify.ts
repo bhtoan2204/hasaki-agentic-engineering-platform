@@ -26,6 +26,7 @@ import {
   evidenceDrift,
   independentSubmissionGap,
   normalizeVerdict,
+  evidenceTargetFor,
   repairTargetFor,
   reviewEvidenceKey,
   reviewStall,
@@ -146,6 +147,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         ...v,
         verdict: "BLOCKED",
         blocked_reason: `deterministic scope violation without renewed approval: ${unresolved.join(" | ")}`,
+        blocked_kind: "scope",
       };
     const drift = await evidenceDrift(
       ws.map((w) => ({ repo: w.repo, path: w.path })),
@@ -156,6 +158,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
         ...v,
         verdict: "BLOCKED",
         blocked_reason: `the verdict no longer matches the code: ${drift.join("; ")}`,
+        blocked_kind: "stale",
       };
     // The material evidence this verdict judged. Recorded on every verdict (FAIL included) so that a repeat of the same
     // FAIL on the same evidence — a repair that changed nothing — is recognised instead of being repaired again.
@@ -186,7 +189,7 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       );
       const stall = reviewStall(prior, v, { heads: evidence.heads, baseTips, evidenceKey });
       if (stall) {
-        v = { ...v, verdict: "BLOCKED", blocked_reason: stall.reason };
+        v = { ...v, verdict: "BLOCKED", blocked_reason: stall.reason, blocked_kind: "no_progress" };
         await ctx.log("system", `independent verification: ${stall.reason}`, {
           verdict: "BLOCKED",
           no_progress: true,
@@ -229,9 +232,22 @@ export async function verifyStage(s: LifecycleState): Promise<ExecResult | void>
       `independent verification: ${v.verdict}${v.findings.length ? ` (${v.findings.length} finding(s))` : ""}`,
       { verdict: v.verdict },
     );
+    // The same BLOCKED reason after a human answer: the question must not offer verifying again unchanged.
+    const priorBlocked =
+      v.verdict === "BLOCKED"
+        ? await one<{ reason: string | null }>(
+            pool,
+            `SELECT a.output->>'blocked_reason' AS reason FROM workflow_step_attempts a
+              WHERE a.step_id = $1 AND a.output->>'verdict' = 'BLOCKED' AND ${SINCE_HUMAN_REEXECUTE}
+              ORDER BY a.id DESC LIMIT 1`,
+            [ctx.step.id, ctx.run.id],
+          )
+        : null;
     const decided = enforceVerdict(v, {
       repairsUsed,
       maxRepairs,
+      repeated: !!priorBlocked?.reason && priorBlocked.reason === v.blocked_reason,
+      evidenceTarget: evidenceTargetFor(ctx.run.graph, ctx.step.key),
       repairTarget: repairTargetFor(ctx.run.graph, ctx.step.key),
       heads: evidence?.heads ?? {},
       baseTips,

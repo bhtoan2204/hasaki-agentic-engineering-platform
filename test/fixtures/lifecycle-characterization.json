@@ -71,6 +71,7 @@
         "findings": [],
         "summary": "",
         "blocked_reason": "Xác minh strict cần kết quả test thật từ bước test phía trước, nhưng chưa có bước nào chạy.",
+        "blocked_kind": "test_evidence",
         "verified_heads": {},
         "verified_at": "<timestamp>",
         "approved": false,
@@ -80,8 +81,10 @@
         {
           "question": "Independent verification is BLOCKED: Xác minh strict cần kết quả test thật từ bước test phía trước, nhưng chưa có bước nào chạy.. How should it proceed?",
           "options": [
-            "Provide the missing information in your answer and re-verify (the PR still requires a PASS)"
-          ]
+            "Re-run the independent verification on the current code (the PR still needs a PASS)",
+            "Stop this run"
+          ],
+          "suggested_answer": "Re-run the independent verification on the current code (the PR still needs a PASS)"
         }
       ]
     },

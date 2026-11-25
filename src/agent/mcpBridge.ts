@@ -18,7 +18,7 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
   {
     name: "ask_user",
     description:
-      'Post the developer\'s real questions and STOP. The question text is shown as-is and pauses the step. Include context. Do not send a schema probe such as "test".',
+      'Post the developer\'s real questions and STOP. The question text is shown as-is and pauses the step. Include context. Do not send a schema probe such as "test". Options must be decisions or instructions the step can act on right away, never a restatement of the question or a request to provide information (end an option with a colon when you need typed details).',
     inputSchema: {
       type: "object",
       properties: {
@@ -30,7 +30,12 @@ export const PLATFORM_BRIDGE_TOOLS: BridgeTool[] = [
             properties: {
               question: { type: "string" },
               context: { type: "string" },
-              options: { type: "array", items: { type: "string" } },
+              options: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  'Options are distinct answers the step can act on right away: each one a concrete decision or instruction (your recommendation first). Never restate the question or tell the developer to provide information in their answer; when you need typed details, end the option with a colon (for example "Use this SPL window:"). Settle what you can with your tools first and ask only what only the developer can decide or provide.',
+              },
             },
             required: ["question"],
           },

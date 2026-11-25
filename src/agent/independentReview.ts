@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
-import type { ExecResult, StepSpec } from "../workflow/types.ts";
+import type { ExecResult, QuestionInput, StepSpec } from "../workflow/types.ts";
+import { needsDetails } from "../workflow/questionOptions.ts";
 import { approvedScopeIn } from "./evidence.ts";
 
 /**
@@ -32,6 +33,8 @@ export interface VerdictOutput {
   findings: Finding[];
   summary: string;
   blocked_reason?: string;
+  /** Why it is BLOCKED (see BlockedKind): decides which answers the question offers. */
+  blocked_kind?: BlockedKind;
   /** Scope review (evidence-gated workflows): the verifier's check of the diff against the approved scope. */
   scope_check?: Record<string, unknown>;
   /** Root Cause First gate: platform signals the reviewer's PASS did not accept, and what it listed instead. */
@@ -176,11 +179,16 @@ export function independentSubmissionGap(
 export function normalizeVerdict(raw: unknown): VerdictOutput {
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? record(raw) : {};
   const summary = typeof o.summary === "string" ? o.summary : "";
-  const blocked = (reason: string, findings: Finding[] = []): VerdictOutput => ({
+  const blocked = (
+    reason: string,
+    findings: Finding[] = [],
+    kind: BlockedKind = "verifier_output",
+  ): VerdictOutput => ({
     verdict: "BLOCKED",
     findings,
     summary,
     blocked_reason: reason,
+    blocked_kind: kind,
   });
   const hasVerdict = o.verdict !== undefined && o.verdict !== null;
   const named = typeof o.verdict === "string" ? o.verdict.trim().toUpperCase() : "";
@@ -235,7 +243,11 @@ export function normalizeVerdict(raw: unknown): VerdictOutput {
   if (verdict === "FAIL" && !findings.length)
     return blocked("FAIL without any finding — nothing to repair", findings);
   if (verdict === "BLOCKED")
-    return blocked(String(o.blocked_reason ?? "").trim() || "verifier could not decide", findings);
+    return blocked(
+      String(o.blocked_reason ?? "").trim() || "verifier could not decide",
+      findings,
+      "other",
+    );
   return { verdict, findings, summary };
 }
 
@@ -260,14 +272,16 @@ export function enforceScopeReview(
   );
   const out: VerdictOutput = { ...v, scope_check: c ?? undefined } as VerdictOutput;
   if (v.verdict !== "PASS") return out;
-  const blocked = (reason: string): VerdictOutput => ({
+  const blocked = (reason: string, kind: BlockedKind = "scope"): VerdictOutput => ({
     ...out,
     verdict: "BLOCKED",
     blocked_reason: reason,
+    blocked_kind: kind,
   });
   if (!c)
     return blocked(
       "scope review missing: a PASS must include scope_check against the approved proposal",
+      "verifier_output",
     );
   const listed = (k: string) => {
     const v = c[k];
@@ -315,6 +329,207 @@ export function findingsFeedback(v: VerdictOutput, round: number, max: number) {
 }
 
 /**
+ * Why a verdict is BLOCKED, as the platform knows it (set where the block is produced). It decides which answers make
+ * sense: a malformed verdict is cured by verifying again, an unconfirmed root cause is not, and typing more text into a
+ * re-run cannot change a deterministic gate.
+ */
+export type BlockedKind =
+  | "verifier_output" // the verifier's submission broke the contract: verifying again can fix it
+  | "scope" // the diff leaves the approved scope, or an assumption was implemented as fact
+  | "root_cause" // the change claims a root-cause fix the investigation never established
+  | "proof" // no platform-run regression proof / no regression evidence for the claimed fix
+  | "stale" // the verdict no longer matches the code under review
+  | "uncommitted" // the code under review is not bound to a commit
+  | "no_progress" // a repair loop repeated itself on unchanged evidence
+  | "test_evidence" // strict verification without real test results
+  | "other"; // the verifier itself could not decide
+
+export const BLOCKED_PREFIX = "Independent verification is BLOCKED: ";
+
+/**
+ * The answers a BLOCKED question offers. Each is a decision the platform executes (send the change back, stop) or an
+ * instruction the verifier reads; an entry ending with ":" needs the developer's details after it (see
+ * questionOptions.ts). Never "provide the missing information": the gates are deterministic over the upstream steps'
+ * outputs, so only a step that re-runs can change what they see.
+ */
+export const BLOCKED_ANSWERS = {
+  rerun: "Re-run the independent verification on the current code (the PR still needs a PASS)",
+  reclassifyPartial:
+    "Reclassify the change as PARTIAL_FIX: send it back to the implementer to record that the root cause is unconfirmed, then re-verify",
+  reclassifyMitigation:
+    "Reclassify the change as MITIGATION: send it back to the implementer to record that it only reduces the symptom, then re-verify",
+  reinvestigate:
+    "Re-investigate the root cause with the available tools (re-runs the investigation step and everything after it, approvals included)",
+  evidence: "Add root-cause evidence I have (logs, query results, file:line):",
+  fixProof:
+    "Send it back to the implementer to make the regression test fail before the fix and pass after it, then re-verify",
+  fixScope:
+    "Send it back to the implementer to bring the diff back inside the approved scope, then re-verify",
+  commit: "Send it back to the implementer to commit its changes, then re-verify",
+  instructions: "Send it back to the implementer with these instructions:",
+  guidance: "Re-run the verification with this guidance for the verifier:",
+  stop: "Stop this run",
+} as const;
+type BlockedAnswer = keyof typeof BLOCKED_ANSWERS;
+
+/** The answers worth offering for a blocker, best first. Only decisions the workflow can carry out are listed. */
+function blockedAnswers(
+  kind: BlockedKind,
+  can: { repair: boolean; investigate: boolean; repeated: boolean },
+): BlockedAnswer[] {
+  const rerun: BlockedAnswer[] = can.repeated ? [] : ["rerun"];
+  const repair = (...a: BlockedAnswer[]): BlockedAnswer[] => (can.repair ? a : []);
+  const investigate = (...a: BlockedAnswer[]): BlockedAnswer[] => (can.investigate ? a : []);
+  const list: BlockedAnswer[] = (() => {
+    switch (kind) {
+      case "root_cause":
+        return [
+          ...repair("reclassifyPartial"),
+          ...investigate("reinvestigate", "evidence"),
+          ...repair("reclassifyMitigation"),
+        ];
+      case "proof":
+        return repair("fixProof", "reclassifyPartial", "instructions");
+      case "scope":
+        return repair("fixScope", "instructions");
+      case "uncommitted":
+        return repair("commit");
+      case "no_progress":
+        return repair("instructions");
+      case "test_evidence":
+        return rerun;
+      case "stale":
+        return rerun;
+      case "verifier_output":
+        return [...rerun, "guidance"];
+      default:
+        return [...rerun, "guidance", ...repair("instructions")];
+    }
+  })();
+  return [...list, "stop"];
+}
+
+/**
+ * The question a BLOCKED verdict asks. The text and context keep the verifier's own words; the options are the decisions
+ * above for this kind of blocker, so every complete option unblocks the step and none restates the question.
+ */
+export function blockedQuestion(
+  v: VerdictOutput,
+  can: { repair: boolean; investigate: boolean; repeated: boolean },
+): QuestionInput {
+  const options = blockedAnswers(v.blocked_kind ?? "other", can).map((k) => BLOCKED_ANSWERS[k]);
+  const notes = [
+    can.repeated
+      ? "The same blocker came back after your last answer, so verifying again without a change is not offered."
+      : "",
+    options.some(needsDetails)
+      ? `Options ending with ":" need your details typed after the colon; the others can be sent as they are.`
+      : "",
+  ];
+  return {
+    question: `${BLOCKED_PREFIX}${v.blocked_reason ?? "verifier could not decide"}. How should it proceed?`,
+    context: [v.summary, ...notes].filter(Boolean).join("\n\n") || undefined,
+    options,
+    suggested_answer: options.find((o) => !needsDetails(o)),
+  };
+}
+
+const answeredWith = (answer: string, key: BlockedAnswer) => {
+  const label = BLOCKED_ANSWERS[key];
+  const text = answer.trim();
+  if (!needsDetails(label)) return text.toLowerCase() === label.toLowerCase() ? "" : null;
+  if (!text.toLowerCase().startsWith(label.toLowerCase())) return null;
+  const details = text.slice(label.length).trim();
+  return details || null;
+};
+
+/**
+ * What the developer's answer to a BLOCKED question does. A decision becomes the existing ExecResult: send the change
+ * back (re-execute the implementer or the investigation with feedback) or stop. Anything else (verify again, guidance,
+ * free text) returns null and is read by the verifier as before. Developer-supplied evidence is never taken as a fact:
+ * it goes to the investigation step as unverified information, so the gate keeps judging what the platform verified.
+ */
+export function blockedResolution(
+  answer: { question: string; answer: string },
+  can: { repairTarget: string | null; evidenceTarget: string | null },
+): ExecResult | null {
+  const reason =
+    answer.question.startsWith(BLOCKED_PREFIX) &&
+    answer.question.slice(BLOCKED_PREFIX.length).replace(/\. How should it proceed\?$/, "");
+  if (!reason) return null;
+  const back = (key: BlockedAnswer, target: string | null, feedback: string): ExecResult | null =>
+    target
+      ? {
+          kind: "reexecute",
+          target,
+          feedback: `Independent verification was blocked: ${reason}. ${feedback}`,
+          output: { blocked_resolution: key },
+          reason: `developer decision after a blocked verification: ${BLOCKED_ANSWERS[key].split(":")[0]}`,
+        }
+      : null;
+  const reclassify = (kind: string, meaning: string) =>
+    `The developer decided to reclassify the change. Set remediation.kind to ${kind} (${meaning}), fill unresolved_cause with what is still unproven, list the risks and follow_ups, and keep the regression test. Do not claim in the code, the commit message or the summary that the root cause is fixed. Change code only where the reclassification requires it, commit, then submit_result again.`;
+  const details = (key: BlockedAnswer) => answeredWith(answer.answer, key);
+  if (answeredWith(answer.answer, "stop") !== null)
+    return {
+      kind: "failed",
+      error: `Stopped by the developer: independent verification was blocked (${reason})`,
+      retryable: false,
+    };
+  if (details("reclassifyPartial") !== null)
+    return back(
+      "reclassifyPartial",
+      can.repairTarget,
+      reclassify("PARTIAL_FIX", "the change reduces the defect but its cause is not established"),
+    );
+  if (details("reclassifyMitigation") !== null)
+    return back(
+      "reclassifyMitigation",
+      can.repairTarget,
+      reclassify("MITIGATION", "the change only reduces the symptom"),
+    );
+  if (details("reinvestigate") !== null)
+    return back(
+      "reinvestigate",
+      can.evidenceTarget,
+      "The developer asked to investigate the root cause again: look for the missing evidence with the available tools (logs, traces, code intelligence, knowledge) and record what you actually observed. Never raise the status without new verified evidence; when the data is not available, say so in missing_evidence.",
+    );
+  const evidence = details("evidence");
+  if (evidence)
+    return back(
+      "evidence",
+      can.evidenceTarget,
+      `The developer supplied this information. It is UNVERIFIED until you check it with the tools: classify it OBSERVED_FACT only with a source you actually saw, otherwise keep it as a hypothesis or assumption.\n${evidence}`,
+    );
+  if (details("fixProof") !== null)
+    return back(
+      "fixProof",
+      can.repairTarget,
+      "Write or repair the regression test named in remediation.regression_test so that it fails on the pre-fix source and passes on the fixed commit when the platform runs it; commit, then submit_result again.",
+    );
+  if (details("fixScope") !== null)
+    return back(
+      "fixScope",
+      can.repairTarget,
+      "Bring the diff back inside the approved scope (revert or split the out-of-scope changes, or list them in scope_deviations); commit, then submit_result again.",
+    );
+  if (details("commit") !== null)
+    return back(
+      "commit",
+      can.repairTarget,
+      "Commit every change in the worktree with the platform commit tool, then submit_result again.",
+    );
+  const instructions = details("instructions");
+  if (instructions)
+    return back(
+      "instructions",
+      can.repairTarget,
+      `Developer instructions (binding): ${instructions}`,
+    );
+  return null;
+}
+
+/**
  * Turn a verdict into the step result. `repairsUsed` = FAIL verdicts already recorded for this step in this run (all
  * generations). `heads` = the commit of every worktree the verdict judged.
  */
@@ -329,6 +544,10 @@ export function enforceVerdict(
     incrementalFrom?: number;
     /** reviewEvidenceKey of what this verdict judged (recorded on every verdict, FAIL included, to detect a stalled loop). */
     evidenceKey?: string;
+    /** The investigation step whose root-cause assessment gates the change, when the workflow has one. */
+    evidenceTarget?: string | null;
+    /** The same BLOCKED reason already came back after a human answer: verifying again unchanged cannot help. */
+    repeated?: boolean;
   },
 ): ExecResult {
   const output = {
@@ -347,13 +566,11 @@ export function enforceVerdict(
       kind: "waiting_input",
       output,
       questions: [
-        {
-          question: `Independent verification is BLOCKED: ${v.blocked_reason ?? "verifier could not decide"}. How should it proceed?`,
-          context: v.summary || undefined,
-          options: [
-            "Provide the missing information in your answer and re-verify (the PR still requires a PASS)",
-          ],
-        },
+        blockedQuestion(v, {
+          repair: !!opts.repairTarget,
+          investigate: !!opts.evidenceTarget,
+          repeated: opts.repeated === true,
+        }),
       ],
     } as ExecResult;
   if (opts.repairTarget && opts.repairsUsed < opts.maxRepairs)
@@ -461,6 +678,27 @@ export function verificationGate(
 
 export async function headOf(path: string) {
   return (await exec("git", ["-C", path, "rev-parse", "HEAD"])).stdout.trim();
+}
+
+/** The investigation step whose root-cause assessment gates the verdict: the nearest ancestor with config.evidence "root_cause". */
+export function evidenceTargetFor(
+  graph: {
+    steps: Array<Pick<StepSpec, "key" | "depends_on"> & { config?: Record<string, unknown> }>;
+  },
+  stepKey: string,
+): string | null {
+  const byKey = new Map(graph.steps.map((s) => [s.key, s]));
+  const seen = new Set<string>();
+  const queue = [...(byKey.get(stepKey)?.depends_on ?? [])];
+  while (queue.length) {
+    const k = queue.shift()!;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const s = byKey.get(k);
+    if (s?.config?.evidence === "root_cause") return k;
+    queue.push(...(s?.depends_on ?? []));
+  }
+  return null;
 }
 
 /** The repair target: the workflow's feedback step, else the nearest coding step upstream of the verifier. */
