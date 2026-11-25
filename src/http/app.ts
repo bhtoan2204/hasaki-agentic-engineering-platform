@@ -39,6 +39,8 @@ import {
   UPLOAD_BODY_LIMIT,
 } from "./bodyLimits.ts";
 import { applySecurityHeaders } from "./securityHeaders.ts";
+import { parseBody } from "./validate.ts";
+import { AttachmentBody, LoginBody, PasswordBody } from "./schemas.ts";
 import { ignoreError } from "../ignoreError.ts";
 
 const webDist = resolve(import.meta.dirname, "..", "..", "web", "dist");
@@ -313,8 +315,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       );
     }
     if (key === "POST /api/auth/login") {
-      const body = await readObject(req, bodyLimitFor(url.pathname));
-      const result = await login(String(body.username ?? ""), String(body.password ?? ""), req);
+      const body = parseBody(LoginBody, await readObject(req, bodyLimitFor(url.pathname)));
+      const result = await login(body.username, body.password, req);
       setSessionCookie(res, req, result.token);
       return send(res, 200, {
         user: { id: result.user.id, username: result.user.username, role: result.user.role },
@@ -347,8 +349,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return send(res, 200, { ok: true });
     }
     if (key === "POST /api/auth/password") {
-      const body = await readObject(req, bodyLimitFor(url.pathname));
-      await setPassword(actor.id, String(body.password ?? ""));
+      const body = parseBody(PasswordBody, await readObject(req, bodyLimitFor(url.pathname)));
+      await setPassword(actor.id, body.password);
       await logout(req);
       clearSessionCookie(res, req);
       return send(res, 200, { ok: true });
@@ -391,7 +393,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         await uploadAttachment(
           actor.id,
           positiveId(upload[1]),
-          await readObject(req, UPLOAD_BODY_LIMIT),
+          parseBody(AttachmentBody, await readObject(req, UPLOAD_BODY_LIMIT)),
         ),
       );
     }

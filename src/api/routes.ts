@@ -345,6 +345,21 @@ import { metricsSummary, poolGauges, runMetrics } from "./metrics.ts";
 import { dependencyMetrics } from "../git/nodeDependencies.ts";
 import { describeTool, listTools } from "../agent/toolRegistry.ts";
 import type { FeedbackMode } from "../workflow/replan.ts";
+import { parseBody } from "../http/validate.ts";
+import {
+  BitbucketBody,
+  CookieBody,
+  CreateUserBody,
+  CreateWorkflowBody,
+  EvidenceBody,
+  GithubBody,
+  GitlabBody,
+  GitlabSshKeyBody,
+  PasswordBody,
+  PublishWorkflowBody,
+  SetActiveBody,
+  TokenBody,
+} from "../http/schemas.ts";
 
 export { HttpError };
 
@@ -683,11 +698,12 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/workflows$/,
-    ({ body, actor }) => {
+    ({ body: raw, actor }) => {
+      const body = parseBody(CreateWorkflowBody, raw);
       const shared = body.shared === true;
       if (shared) requireAdmin(actor);
       return definitions.create({
-        key: String(body.key ?? ""),
+        key: body.key,
         spec: body.spec,
         publish: body.publish,
         changeNote: body.change_note,
@@ -765,7 +781,11 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/workflows\/([a-z0-9_-]+)\/publish$/,
     async (c) =>
-      definitions.publish(c.p[0], String(c.body.change_note ?? ""), await workflowOwner(c, c.p[0])),
+      definitions.publish(
+        c.p[0],
+        parseBody(PublishWorkflowBody, c.body).change_note,
+        await workflowOwner(c, c.p[0]),
+      ),
   ],
   [
     "POST",
@@ -1762,7 +1782,7 @@ export const routes: Route[] = [
     /^\/api\/runs\/(\d+)\/steps\/([a-z0-9_-]+)\/evidence$/,
     async (c) => (
       await requireRun(c.actor, num(c.p[0]), support(c)),
-      addEvidence(num(c.p[0]), c.p[1], c.body)
+      addEvidence(num(c.p[0]), c.p[1], parseBody(EvidenceBody, c.body))
     ),
   ],
   [
@@ -2557,7 +2577,7 @@ export const routes: Route[] = [
     "POST",
     /^\/api\/work\/token$/,
     async ({ body, actor }) => (
-      await setToken(String(body.token ?? ""), actor.id),
+      await setToken(parseBody(TokenBody, body).token, actor.id),
       authStatus(actor.id)
     ),
   ],
@@ -2637,7 +2657,7 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/integrations\/argocd\/token$/,
-    ({ body }) => setArgoToken(String(body.token ?? "")),
+    ({ body }) => setArgoToken(parseBody(TokenBody, body).token),
   ],
   ["POST", /^\/api\/integrations\/argocd\/logout$/, () => clearArgoToken()],
   // Splunk (production SIEM): pasted session cookie, read-only searches
@@ -2649,13 +2669,13 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/integrations\/splunk\/cookie$/,
-    ({ body }) => setSplunkCookie(String(body.cookie ?? "")),
+    ({ body }) => setSplunkCookie(parseBody(CookieBody, body).cookie),
   ],
   ["POST", /^\/api\/integrations\/splunk\/logout$/, () => clearSplunkCookie()],
   [
     "POST",
     /^\/api\/integrations\/splunk\/token$/,
-    ({ body }) => setSplunkToken(String(body.token ?? "")),
+    ({ body }) => setSplunkToken(parseBody(TokenBody, body).token),
   ],
   ["POST", /^\/api\/integrations\/splunk\/test$/, () => splunkTestConnection()],
   // Shared read-only service account: administrators only; members use it only when splunk.allowSharedToken is on.
@@ -2665,7 +2685,7 @@ export const routes: Route[] = [
     async ({ body, actor }) => {
       requireAdmin(actor);
       await audit(actor.id, "integration.splunk.shared_token", "integration", "splunk");
-      return setSharedSplunkToken(String(body.token ?? ""));
+      return setSharedSplunkToken(parseBody(TokenBody, body).token);
     },
   ],
   [
@@ -2952,10 +2972,18 @@ export const routes: Route[] = [
   // The platform workspace on this instance: readable repositories, their checkout state and latest index.
   ["GET", /^\/api\/workspace\/repositories$/, ({ actor }) => workspaceRepositories(actor.id)],
   ["GET", /^\/api\/integrations\/bitbucket$/, ({ actor }) => bitbucketStatus(actor.id)],
-  ["POST", /^\/api\/integrations\/bitbucket$/, ({ body, actor }) => setBitbucket(body, actor.id)],
+  [
+    "POST",
+    /^\/api\/integrations\/bitbucket$/,
+    ({ body, actor }) => setBitbucket(parseBody(BitbucketBody, body), actor.id),
+  ],
   ["POST", /^\/api\/integrations\/bitbucket\/clear$/, ({ actor }) => clearBitbucket(actor.id)],
   ["GET", /^\/api\/integrations\/github$/, ({ actor }) => githubStatus(actor.id)],
-  ["POST", /^\/api\/integrations\/github$/, ({ body, actor }) => setGithub(body, actor.id)],
+  [
+    "POST",
+    /^\/api\/integrations\/github$/,
+    ({ body, actor }) => setGithub(parseBody(GithubBody, body), actor.id),
+  ],
   ["POST", /^\/api\/integrations\/github\/clear$/, ({ actor }) => clearGithub(actor.id)],
   [
     "GET",
@@ -2989,12 +3017,16 @@ export const routes: Route[] = [
       gitlabStatus(actor.id)
     ),
   ],
-  ["POST", /^\/api\/integrations\/gitlab$/, ({ body, actor }) => setGitlab(body, actor.id)],
+  [
+    "POST",
+    /^\/api\/integrations\/gitlab$/,
+    ({ body, actor }) => setGitlab(parseBody(GitlabBody, body), actor.id),
+  ],
   ["POST", /^\/api\/integrations\/gitlab\/test$/, ({ body, actor }) => testGitlab(body, actor.id)],
   [
     "POST",
     /^\/api\/integrations\/gitlab\/ssh-key$/,
-    ({ body, actor }) => setGitlabSshKey(body, actor.id),
+    ({ body, actor }) => setGitlabSshKey(parseBody(GitlabSshKeyBody, body), actor.id),
   ],
   [
     "POST",
@@ -3010,7 +3042,7 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/integrations\/vault\/token$/,
-    ({ body }) => setVaultToken(String(body.token ?? "")),
+    ({ body }) => setVaultToken(parseBody(TokenBody, body).token),
   ],
   ["POST", /^\/api\/integrations\/vault\/logout$/, () => clearVaultToken()],
   // Kafka UI (QC): pasted session cookie, GET-only client
@@ -3022,7 +3054,7 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/integrations\/kafka\/cookie$/,
-    ({ body }) => setKafkaCookie(String(body.cookie ?? "")),
+    ({ body }) => setKafkaCookie(parseBody(CookieBody, body).cookie),
   ],
   ["POST", /^\/api\/integrations\/kafka\/logout$/, () => clearKafkaCookie()],
 
@@ -3030,21 +3062,14 @@ export const routes: Route[] = [
   [
     "POST",
     /^\/api\/users$/,
-    async ({ body, actor }) => (
-      requireAdmin(actor),
-      createUser({
-        username: String(body.username ?? ""),
-        password: String(body.password ?? ""),
-        role: body.role === "admin" ? "admin" : "member",
-      })
-    ),
+    async ({ body, actor }) => (requireAdmin(actor), createUser(parseBody(CreateUserBody, body))),
   ],
   [
     "POST",
     /^\/api\/users\/(\d+)\/password$/,
     async ({ p, body, actor }) => (
       requireAdmin(actor),
-      await setPassword(num(p[0]), String(body.password ?? "")),
+      await setPassword(num(p[0]), parseBody(PasswordBody, body).password),
       { ok: true }
     ),
   ],
@@ -3103,9 +3128,10 @@ export const routes: Route[] = [
     /^\/api\/users\/(\d+)\/active$/,
     async ({ p, body, actor }) => {
       requireAdmin(actor);
-      if (num(p[0]) === actor.id && body.active === false)
+      const { active } = parseBody(SetActiveBody, body);
+      if (num(p[0]) === actor.id && !active)
         throw new HttpError(400, "you cannot deactivate yourself");
-      await setActive(num(p[0]), body.active !== false);
+      await setActive(num(p[0]), active);
       return { ok: true };
     },
   ],
