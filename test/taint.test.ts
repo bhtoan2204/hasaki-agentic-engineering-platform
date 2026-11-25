@@ -28,6 +28,7 @@ test("sinks are declared for every mutating registry tool", async () => {
     .map((t) => t.name)
     .sort();
   assert.deepEqual(mutating, [
+    "argocd.restart",
     "kafka.publish",
     "qc_http.request",
     "runs.approve_step",

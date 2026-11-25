@@ -30,6 +30,14 @@ Routing: yêu cầu vận hành (kafka, publish, topic, tạo đơn, bảo hành
 - Giá trị cũ không bao giờ được đọc ra kết quả. Kết quả: `written: true, version, downstream_verified: false`; service vẫn cần restart/sync để nhận giá trị mới. Model đọc lại bằng `vault.keys` rồi `operations.verify`.
 - Chưa chạy thử với Vault QC thật: PATCH và policy của token (cần `patch`/`update` trên path) chưa được xác minh.
 
+## Argo CD restart (QC)
+
+- Tool `argocd.restart {app, workload?, app_namespace?}` (`restartTarget` / `restartWorkload` trong `src/integrations/argocd.ts`): gọi action `restart` của Argo CD (`POST /api/v1/applications/{app}/resource/actions/v2`) cho một Deployment/StatefulSet/DaemonSet. `readOnly: false`, `confirm: true`, không preauthorized.
+- Chỉ QC: từ chối nếu host Argo CD không phải QC, app hoặc namespace có dạng production. App có nhiều workload thì phải truyền `workload`.
+- Preflight đọc resource tree và đưa thời điểm tạo ReplicaSet/Pod mới nhất vào `version` của target (khoá idempotency, `operationKeyFor`), nên restart lần sau của cùng workload là operation mới; gửi lặp khi chưa có gì đổi vẫn bị chặn là `duplicate`.
+- Kết quả: `restarted: true, downstream_verified: false`. Model kiểm tra bằng `argocd.app_pods` (pod mới, restart, health) và `argocd.pod_logs` rồi `operations.verify`.
+- Cần token Argo CD của user có quyền action `restart` (RBAC). Chưa chạy thử với Argo CD QC thật.
+
 ## Operation (migration 078)
 
 `chat_operations`: lưu `pending → executing → succeeded | failed | unknown | rejected | expired | duplicate`.

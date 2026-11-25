@@ -3,7 +3,8 @@ import { personalSettings as settings, PersonalSession } from "./personal.ts";
 import { redactSecrets } from "./redact.ts";
 
 /**
- * Argo CD (QC) — read-only access for bug investigation: applications, their pods, and pod/workload logs.
+ * Argo CD (QC) — read access for bug investigation: applications, their pods, and pod/workload logs. The single write
+ * is `argocd.restart` (QC only, user-confirmed).
  *
  * Argo CD logs in through Keycloak SSO and keeps the session in the `argocd.token` cookie; the same JWT is accepted by the
  * REST API as `Authorization: Bearer`. The platform cannot run that SSO flow itself (the Keycloak client is confidential
@@ -122,12 +123,19 @@ async function rawGet(
   path: string,
   bearer: string,
   params?: Record<string, string | number | boolean | undefined>,
+  post?: { body: unknown },
 ): Promise<unknown> {
   const url = new URL(baseUrl() + path);
   for (const [k, v] of Object.entries(params ?? {}))
     if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${bearer}`, Accept: "application/json" },
+    method: post ? "POST" : "GET",
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      Accept: "application/json",
+      ...(post ? { "Content-Type": "application/json" } : {}),
+    },
+    body: post ? JSON.stringify(post.body) : undefined,
     signal: AbortSignal.timeout(30_000),
   });
   const text = await res.text();
@@ -179,6 +187,7 @@ type ArgoNode = {
   images?: string[];
   info?: { name: string; value: string }[];
   createdAt?: string;
+  version?: string;
   parentRefs?: { kind: string; name: string }[];
 };
 type ArgoLogEntry = {
@@ -436,4 +445,86 @@ export async function serviceEndpoints(appName: string, appNamespace?: string) {
     }
   }
   return endpointsFromArgo(app, tree, manifests);
+}
+
+const PRODUCTION = /(^|[^a-z])(prod|production|live|prd)([^a-z]|$)/i;
+const RESTARTABLE = ["Deployment", "StatefulSet", "DaemonSet"];
+
+/**
+ * The workload a restart would target, or an error: QC only, production never. `version` is the newest child
+ * (ReplicaSet/Pod) creation time, so a later restart of the same workload is a new operation.
+ */
+export async function restartTarget(a: { app: string; workload?: string; app_namespace?: string }) {
+  const host = new URL(baseUrl()).hostname;
+  if (!/(^|[.-])qc([.-]|\d|$)/i.test(host) || PRODUCTION.test(host))
+    throw new Error(`restart is refused: Argo CD ${host} is not a QC environment`);
+  if (PRODUCTION.test(a.app))
+    throw new Error(`restarting production (${a.app}) is never allowed from chat`);
+  const appNamespace = a.app_namespace || "argocd";
+  const j = (await get(`/api/v1/applications/${encodeURIComponent(a.app)}/resource-tree`, {
+    appNamespace,
+  })) as { nodes?: ArgoNode[] } | null;
+  const nodes = j?.nodes ?? [];
+  const found = nodes.filter(
+    (n) => RESTARTABLE.includes(n.kind) && (!a.workload || n.name === a.workload),
+  );
+  if (found.length !== 1)
+    throw new Error(
+      found.length
+        ? `${a.app} has several workloads (${found.map((n) => n.name).join(", ")}); pass workload`
+        : `no restartable workload${a.workload ? ` named ${a.workload}` : ""} in ${a.app}`,
+    );
+  const w = found[0];
+  if (PRODUCTION.test(w.namespace ?? ""))
+    throw new Error(`restarting production (${w.namespace}) is never allowed from chat`);
+  const version =
+    nodes
+      .filter((n) => n.parentRefs?.some((p) => p.kind === w.kind && p.name === w.name))
+      .map((n) => n.createdAt ?? "")
+      .sort()
+      .at(-1) || "none";
+  return {
+    app: a.app,
+    app_namespace: appNamespace,
+    kind: w.kind,
+    group: w.group ?? "apps",
+    api_version: w.version ?? "v1",
+    name: w.name,
+    namespace: w.namespace ?? "",
+    version,
+  };
+}
+
+/** Restart one workload (Argo CD resource action `restart`). Success means the action was accepted, not that new pods are ready. */
+export async function restartWorkload(a: {
+  app: string;
+  workload?: string;
+  app_namespace?: string;
+}) {
+  const t = await restartTarget(a);
+  await rawGet(
+    `/api/v1/applications/${encodeURIComponent(t.app)}/resource/actions/v2`,
+    requireToken(),
+    undefined,
+    {
+      body: {
+        appNamespace: t.app_namespace,
+        namespace: t.namespace,
+        resourceName: t.name,
+        version: t.api_version,
+        kind: t.kind,
+        group: t.group,
+        resourceActionParameters: [],
+        action: "restart",
+      },
+    },
+  );
+  return {
+    restarted: true as const,
+    app: t.app,
+    kind: t.kind,
+    name: t.name,
+    namespace: t.namespace,
+    downstream_verified: false as const,
+  };
 }

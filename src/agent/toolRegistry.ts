@@ -17,6 +17,8 @@ import {
   appPods,
   argoStatus,
   listApps,
+  restartTarget,
+  restartWorkload,
   podLogs,
   serviceEndpoints,
 } from "../integrations/argocd.ts";
@@ -573,6 +575,24 @@ export function registerBuiltinTools() {
     readOnly: true,
     available: argoAvailable,
     handler: ({ app, app_namespace }) => appPods(app, app_namespace),
+  });
+  registerIntegrationTool({
+    name: "argocd.restart",
+    summary:
+      "QC (Argo CD): rolling-restart ONE workload of an application (e.g. to pick up a changed Vault env). Needs the user's confirmation in chat.",
+    description:
+      "Mutating (QC only; production is always refused). Runs the Argo CD `restart` action on the app's Deployment/StatefulSet/DaemonSet: `workload` names it when the app has several. " +
+      "The call never runs directly: it becomes an operation the user confirms. Success means Argo CD accepted the action, NOT that new pods are healthy: check argocd.app_pods (new pod created_at, restarts, health) and argocd.pod_logs afterwards.",
+    input: z.object({
+      app: z.string().min(1),
+      workload: z.string().optional(),
+      app_namespace: z.string().optional(),
+    }),
+    readOnly: false,
+    confirm: true,
+    available: argoAvailable,
+    preflight: (a) => restartTarget(a),
+    handler: (a) => restartWorkload(a),
   });
   registerIntegrationTool({
     name: "argocd.service_endpoints",

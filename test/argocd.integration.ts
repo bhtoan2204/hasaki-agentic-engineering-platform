@@ -7,6 +7,8 @@ import { migrate } from "../src/db/migrate.ts";
 import { config } from "../src/config.ts";
 import {
   appPods,
+  restartTarget,
+  restartWorkload,
   argoStatus,
   clearArgoToken,
   listApps,
@@ -22,6 +24,7 @@ const jwt = (claims: object) =>
 const GOOD = jwt({ email: "dev@hasaki.vn", exp: Math.floor(Date.now() / 1000) + 3600 });
 let server: Server;
 const seen: URL[] = [];
+const posts: Array<{ path: string; body: unknown }> = [];
 
 before(async () => {
   await migrate();
@@ -56,16 +59,41 @@ before(async () => {
           },
         ],
       });
+    if (req.method === "POST" && url.pathname.endsWith("/resource/actions/v2")) {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        posts.push({ path: url.pathname, body: JSON.parse(raw) });
+        json(200, {});
+      });
+      return;
+    }
+    if (url.pathname === "/api/v1/applications/payment-multi-qc/resource-tree")
+      return json(200, {
+        nodes: [
+          { kind: "Deployment", group: "apps", version: "v1", name: "a", namespace: "payment" },
+          { kind: "Deployment", group: "apps", version: "v1", name: "b", namespace: "payment" },
+        ],
+      });
     if (url.pathname === "/api/v1/applications/payment-zalopay-qc/resource-tree")
       return json(200, {
         nodes: [
           {
             kind: "Deployment",
             group: "apps",
+            version: "v1",
             name: "payment-zalopay",
             namespace: "payment",
             health: { status: "Healthy" },
             images: ["zalopay:1.2.3"],
+          },
+          {
+            kind: "ReplicaSet",
+            group: "apps",
+            name: "payment-zalopay-7d",
+            namespace: "payment",
+            createdAt: "2026-11-25T02:00:00Z",
+            parentRefs: [{ kind: "Deployment", name: "payment-zalopay" }],
           },
           {
             kind: "Pod",
@@ -193,4 +221,50 @@ test("token is validated against Argo CD before saving; tools work and are read-
 
   assert.equal((await clearArgoToken()).loggedIn, false);
   assert.equal(argoStatus().user, null);
+});
+
+test("restartWorkload posts the restart action for the app's only workload (QC only)", async () => {
+  await setArgoToken(GOOD);
+  const saved = config.argocd.baseUrl;
+  config.argocd.baseUrl = saved.replace("127.0.0.1", "argocd-qc.localhost");
+  posts.length = 0;
+  try {
+    const r = await restartWorkload({ app: "payment-zalopay-qc" });
+    assert.deepEqual(r, {
+      restarted: true,
+      app: "payment-zalopay-qc",
+      kind: "Deployment",
+      name: "payment-zalopay",
+      namespace: "payment",
+      downstream_verified: false,
+    });
+    assert.deepEqual(posts, [
+      {
+        path: "/api/v1/applications/payment-zalopay-qc/resource/actions/v2",
+        body: {
+          appNamespace: "argocd",
+          namespace: "payment",
+          resourceName: "payment-zalopay",
+          version: "v1",
+          kind: "Deployment",
+          group: "apps",
+          resourceActionParameters: [],
+          action: "restart",
+        },
+      },
+    ]);
+    assert.equal(
+      (await restartTarget({ app: "payment-zalopay-qc" })).version,
+      "2026-11-25T02:00:00Z",
+      "newest ReplicaSet creation time keys the operation",
+    );
+    await assert.rejects(restartWorkload({ app: "payment-multi-qc" }), /several workloads/);
+    await assert.rejects(
+      restartWorkload({ app: "payment-zalopay-qc", workload: "nope" }),
+      /no restartable workload/,
+    );
+    assert.equal(posts.length, 1, "refused calls send nothing");
+  } finally {
+    config.argocd.baseUrl = saved;
+  }
 });
