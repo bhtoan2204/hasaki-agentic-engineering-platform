@@ -295,6 +295,8 @@ function Editor({ wfKey }: { wfKey: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   if (loading && !def) return <Loading />;
   if (error)
     return (
@@ -417,8 +419,6 @@ function Editor({ wfKey }: { wfKey: string }) {
     if (r.valid) toast(t("wfe.valid"), "ok");
     return r.valid;
   };
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
   /** One save/publish at a time: act() only disables the clicked button and is consumed by validate(). */
   const exclusive = async (job: () => Promise<void>) => {
     if (savingRef.current) return;

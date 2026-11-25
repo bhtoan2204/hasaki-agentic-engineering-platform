@@ -232,7 +232,7 @@ export function AgentSettings() {
     } finally {
       setBusy(false);
     }
-  }, [data, draft, busy, provider, defaultFields, setData]);
+  }, [data, draft, busy, provider, defaultFields, setData, t]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

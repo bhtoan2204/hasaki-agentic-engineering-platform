@@ -151,6 +151,7 @@ export function BitbucketState({
 export function RepositoryAccessAdmin({ only }: { only?: string }) {
   const { t } = useI18n();
   const matrix = useApi<Matrix>("/api/repository-access");
+  const [saving, setSaving] = useState(false);
   const audit = useApi<AccessAuditEntry[]>(
     `/api/repository-access/audit${only ? `?repository=${encodeURIComponent(only)}` : ""}`,
   );
@@ -173,7 +174,6 @@ export function RepositoryAccessAdmin({ only }: { only?: string }) {
     only ? r.name === only : !q.trim() || r.name.toLowerCase().includes(q.trim().toLowerCase()),
   );
   const reload = () => (matrix.reload(), audit.reload());
-  const [saving, setSaving] = useState(false);
   /** The checkboxes are not buttons, so act() cannot mark them busy: lock the whole matrix while one change is saved. */
   const locked = async (job: () => Promise<unknown>) => {
     setSaving(true);
