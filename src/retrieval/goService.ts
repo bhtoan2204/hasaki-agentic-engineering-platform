@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { config } from "../config.ts";
+import { log } from "../logging.ts";
 
 const goDir = resolve(import.meta.dirname, "../../go");
 
@@ -45,7 +46,7 @@ async function binary(): Promise<string | null> {
   const prebuilt = process.env.PLATFORM_GO_BIN;
   if (prebuilt) {
     if (existsSync(prebuilt)) return prebuilt;
-    console.error(`PLATFORM_GO_BIN ${prebuilt} does not exist; platform-go was not started`);
+    log.error(`PLATFORM_GO_BIN ${prebuilt} does not exist; platform-go was not started`);
     return null;
   }
   const bin = join(config.dataDir, "bin", "platform-go");
@@ -61,7 +62,7 @@ async function ensureSupervisor() {
   const sup = join(config.dataDir, "bin", "platform-supervise");
   if (existsSync(sup) && statSync(sup).mtimeMs >= newestGoSource()) return;
   if (!(await build(bin)))
-    console.error("platform-supervise was not built: supervised commands will fail to start");
+    log.error("platform-supervise was not built: supervised commands will fail to start");
 }
 
 function build(bin: string) {
@@ -75,7 +76,7 @@ function build(bin: string) {
         stdio: "inherit",
       },
     );
-    p.on("error", (e) => (console.error("platform-go build:", e.message), done(false)));
+    p.on("error", (e) => (log.error("platform-go build:", e.message), done(false)));
     p.on("exit", (code) => done(code === 0));
   });
 }
@@ -114,12 +115,12 @@ export function startGoService() {
         // The open stdin pipe is the liveness link: platform-go exits when this process dies.
         stdio: ["pipe", "inherit", "inherit"],
       });
-      child.on("error", (e) => console.error("platform-go:", e.message));
+      child.on("error", (e) => log.error("platform-go:", e.message));
       child.on("exit", (code, signal) => {
         child = null;
         if (stopping) return;
         delay = Date.now() - started > 60_000 ? 1000 : Math.min(delay * 2, 60_000);
-        console.error(`platform-go exited (${signal ?? code}); restarting in ${delay / 1000}s`);
+        log.error(`platform-go exited (${signal ?? code}); restarting in ${delay / 1000}s`);
         setTimeout(run, delay).unref();
       });
     };
@@ -128,7 +129,7 @@ export function startGoService() {
         bin = found;
         run();
       } else if (!found)
-        console.error(
+        log.error(
           "platform-go was not started; semantic retrieval stays lexical and Go engines fall back or fail",
         );
     });

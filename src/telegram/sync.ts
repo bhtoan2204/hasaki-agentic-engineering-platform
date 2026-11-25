@@ -25,6 +25,7 @@ import {
   tr,
   type Severity,
 } from "./format.ts";
+import { log } from "../logging.ts";
 
 /**
  * Outbound half of the gateway, driven by the elected receiver loop. Everything is state-based and keyed: a crash or a
@@ -477,7 +478,7 @@ async function deliverTurn(
   try {
     await delegationProposals(link, turnId, L);
   } catch (e) {
-    console.warn(
+    log.warn(
       `telegram gateway: delegation proposal of turn ${turnId} (retried): ${(e as Error).message.slice(0, 200)}`,
     );
     return "deferred";
@@ -579,7 +580,7 @@ export async function syncChatTurns() {
       );
       for (const t of done) if ((await deliverTurn(link, Number(t.id), L)) === "deferred") break;
     } catch (e) {
-      console.warn(
+      log.warn(
         `telegram gateway: chat sync for user ${link.user_id}: ${(e as Error).message.slice(0, 200)}`,
       );
     }
@@ -849,7 +850,7 @@ export async function syncRunWatches(force = false) {
           );
       });
     } catch (e) {
-      console.warn(`telegram gateway: run ${r.id} sync: ${(e as Error).message.slice(0, 200)}`);
+      log.warn(`telegram gateway: run ${r.id} sync: ${(e as Error).message.slice(0, 200)}`);
     }
   }
   await syncIntake();
@@ -971,12 +972,12 @@ export async function flushNotifications(now = new Date()) {
 /** One receiver-loop pass of the outbound gateway. Failures are logged and retried on the next pass. */
 export async function gatewayTick() {
   await syncChatTurns().catch((e) =>
-    console.warn(`telegram gateway: ${(e as Error).message.slice(0, 200)}`),
+    log.warn(`telegram gateway: ${(e as Error).message.slice(0, 200)}`),
   );
   await syncRunWatches().catch((e) =>
-    console.warn(`telegram gateway: ${(e as Error).message.slice(0, 200)}`),
+    log.warn(`telegram gateway: ${(e as Error).message.slice(0, 200)}`),
   );
   await flushNotifications().catch((e) =>
-    console.warn(`telegram gateway: ${(e as Error).message.slice(0, 200)}`),
+    log.warn(`telegram gateway: ${(e as Error).message.slice(0, 200)}`),
   );
 }

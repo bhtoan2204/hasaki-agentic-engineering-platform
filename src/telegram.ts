@@ -2,6 +2,7 @@ import { config } from "./config.ts";
 import type { OutputLocale } from "./agent/language.ts";
 import { getUserSecret } from "./auth/secrets.ts";
 import { preview, safeTelegramText } from "./telegram/client.ts";
+import { log } from "./logging.ts";
 
 /**
  * One-way Telegram notifications through the Bot API `sendMessage`. Optional: without a bot token and chat
@@ -120,7 +121,7 @@ async function postMessage(message: Record<string, unknown>, chatId = config.tel
     });
     if (!res.ok) {
       const body: { description?: unknown } | null = await res.json().catch(() => ({}));
-      console.error(
+      log.error(
         `telegram sendMessage failed: HTTP ${res.status} ${String(body?.description ?? "")
           .split(botToken)
           .join("***")
@@ -141,7 +142,7 @@ async function postMessage(message: Record<string, unknown>, chatId = config.tel
       err.cause?.code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY"
         ? " (TLS-intercepting proxy? start node with --use-system-ca or set NODE_EXTRA_CA_CERTS)"
         : "";
-    console.error(`telegram sendMessage failed: ${why.split(botToken).join("***")}${hint}`);
+    log.error(`telegram sendMessage failed: ${why.split(botToken).join("***")}${hint}`);
     return { ok: false };
   }
 }

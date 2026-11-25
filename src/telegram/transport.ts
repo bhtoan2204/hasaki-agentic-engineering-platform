@@ -9,6 +9,7 @@ import { advisoryKey, queue } from "./store.ts";
 import { quietNow } from "./format.ts";
 import { gatewayBusy, gatewayTick } from "./sync.ts";
 import { ingestUpdate, processInbox, telegramUpdateId } from "./updates.ts";
+import { log } from "../logging.ts";
 
 /** Session lock + renewable DB lease: dropped DB sessions cannot keep consuming after another owner takes over. */
 export async function claimConsumer(
@@ -361,7 +362,7 @@ export function startTelegramTransport() {
   const markActive = () => {
     failures = 0;
     if (!lastFailure) return;
-    console.log(`Telegram ${config.telegram.mode} receiver active`);
+    log.info(`Telegram ${config.telegram.mode} receiver active`);
     lastFailure = "";
   };
   const task = (async () => {
@@ -464,7 +465,7 @@ export function startTelegramTransport() {
         if (!stopping.signal.aborted) {
           const reason = consumerFailure(e);
           if (reason !== lastFailure)
-            console.warn(`Telegram ${mode} receiver unavailable: ${reason}; will retry`);
+            log.warn(`Telegram ${mode} receiver unavailable: ${reason}; will retry`);
           lastFailure = reason;
           failures++;
           await sleep(retryDelayMs(e, failures), undefined, { signal: stopping.signal }).catch(

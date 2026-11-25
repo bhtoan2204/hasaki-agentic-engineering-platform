@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { config } from "../config.ts";
+import { log } from "../logging.ts";
 
 export type SourceKind = "knowledge" | "skill" | "task_memory" | "lesson" | "chat_memory";
 
@@ -40,7 +41,7 @@ function fallback(reason: string, detail?: string): null {
   const now = Date.now();
   if (reason !== "disabled" && now - (lastLogged.get(reason) ?? 0) >= 60_000) {
     lastLogged.set(reason, now);
-    console.warn(
+    log.warn(
       `semantic retrieval unavailable (${reason}${detail ? `: ${detail}` : ""}); lexical ranking only`,
     );
   }

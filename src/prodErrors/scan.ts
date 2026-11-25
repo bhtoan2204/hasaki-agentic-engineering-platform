@@ -92,6 +92,7 @@ import {
   type ScanOptions,
   type ScanWindow,
 } from "./window.ts";
+import { log } from "../logging.ts";
 
 // ---------------------------------------------------------------- search
 
@@ -596,7 +597,7 @@ export async function finalizeScan(
   void scanId;
   const notified = trigger === "schedule" ? await notifyNew(w.day, w.hm) : 0;
   // Policy-controlled intake (no-op without a policy): one envelope per group, never per log row.
-  await ingestProdErrorGroups().catch((e) => console.error("intake:", (e as Error).message));
+  await ingestProdErrorGroups().catch((e) => log.error("intake:", (e as Error).message));
   return notified;
 }
 
@@ -747,7 +748,7 @@ let timer: NodeJS.Timeout | null = null;
 export function startProdErrorSchedule() {
   if (timer) return;
   if (!config.prodErrors.userId)
-    console.warn(
+    log.warn(
       "Scheduled production scans need an explicit local prodErrors.userId with its own Splunk login; manual scans remain available.",
     );
   timer = setInterval(() => void scheduleTick(), 30_000);
@@ -777,7 +778,7 @@ export async function scheduleTick(now = new Date()) {
       { requestedBy: userId, dedupeKey: `schedule:${z.date} ${z.hm}` },
     );
   } catch (e) {
-    console.error("prod error schedule:", (e as Error).message);
+    log.error("prod error schedule:", (e as Error).message);
   }
 }
 
