@@ -2,6 +2,7 @@ import pg from "pg";
 import { config } from "../config.ts";
 import { onCommittedWrite } from "../db/pool.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * In-process caches for data that is read often and written rarely. Every read that hits saves a database round trip
@@ -250,7 +251,10 @@ export async function startCacheInvalidation(
     if (stopped) return;
     log.error(`cache invalidation listener lost (${why}); caches bypassed until it reconnects`);
     retryTimer = setTimeout(
-      () => void startCacheInvalidation(connectionString, makeClient).catch(() => {}),
+      () =>
+        void startCacheInvalidation(connectionString, makeClient).catch(
+          ignoreError("cache.invalidation_restart"),
+        ),
       retryMs,
     );
     retryMs = Math.min(30_000, retryMs * 2);
@@ -271,7 +275,7 @@ export async function startCacheInvalidation(
     retryMs = 1000;
   } catch (e) {
     lost((e as Error).message);
-    c.end().catch(() => {});
+    c.end().catch(ignoreError("cache.listener_end"));
   }
 }
 
@@ -282,7 +286,7 @@ export async function stopCacheInvalidation() {
   const c = client;
   client = null;
   listener = "none";
-  await c?.end().catch(() => {});
+  await c?.end().catch(ignoreError("cache.listener_end"));
 }
 
 /** Bounded-cardinality snapshot for metrics: one row per cache (fixed names), no keys. */

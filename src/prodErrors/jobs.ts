@@ -12,6 +12,7 @@
 import { pool, one, q } from "../db/pool.ts";
 import { retrievalService } from "../retrieval/semantic.ts";
 import { scanNamespaces, scanWindow, type ScanOptions, type ScanWindow } from "./window.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 export type ScanTrigger = "manual" | "schedule";
 export type ScanEngine = "typescript" | "go";
@@ -136,7 +137,7 @@ function wakeGo() {
   if (!process.env.RETRIEVAL_INTERNAL_TOKEN) return;
   void retrievalService("/internal/v1/jobs/wake", { kind: "prod_error_scan" }, 2000)
     .then((r) => r.body?.cancel())
-    .catch(() => {});
+    .catch(ignoreError("prod_errors.wake_go"));
 }
 
 /**

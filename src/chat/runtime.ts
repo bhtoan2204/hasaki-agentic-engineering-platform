@@ -64,6 +64,7 @@ import type {
   TurnRow,
 } from "./types.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 type Providers = Record<AgentProvider, CompletionRunner>;
 let providerSeam: Providers | undefined;
@@ -267,7 +268,7 @@ export async function runTurn(
       .then((s) => {
         if (s?.status !== "running") ac.abort(new TurnCanceled("canceled"));
       })
-      .catch(() => {});
+      .catch(ignoreError("chat.turn_status_poll"));
   }, 1000);
   poll.unref?.();
   const deadline = AbortSignal.timeout(LIMITS.turnTimeoutMs);

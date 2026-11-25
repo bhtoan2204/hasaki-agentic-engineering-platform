@@ -39,6 +39,7 @@ import {
   UPLOAD_BODY_LIMIT,
 } from "./bodyLimits.ts";
 import { applySecurityHeaders } from "./securityHeaders.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 const webDist = resolve(import.meta.dirname, "..", "..", "web", "dist");
 const TYPES: Record<string, string> = {
@@ -484,9 +485,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
           const { status, body, outcomeUncertain } = errorResponse(e);
           if (outcomeUncertain) {
             // Keep the claim in progress if storing the error also fails. The write may already have committed.
-            await claim.finish(status, body, { outcomeUncertain }).catch(() => {});
+            await claim
+              .finish(status, body, { outcomeUncertain })
+              .catch(ignoreError("http.idempotency_finish_uncertain"));
           } else {
-            await claim.finish(status, body).catch(() => claim.release().catch(() => {}));
+            await claim
+              .finish(status, body)
+              .catch(() => claim.release().catch(ignoreError("http.idempotency_release")));
           }
         }
         throw e;

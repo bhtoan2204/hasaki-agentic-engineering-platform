@@ -21,6 +21,7 @@ import { getSharedSecret, putSharedSecret } from "../auth/secrets.ts";
 import { redactSecrets } from "./redact.ts";
 import { HttpError } from "../http/error.ts";
 import { repositories } from "../repos/service.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 export interface ProjectDatabase {
   id: number;
@@ -55,13 +56,7 @@ export interface ProjectDatabase {
  * column, syntax) means the database is reachable.
  */
 export type ErrorKind =
-  | "unreachable"
-  | "timeout"
-  | "auth"
-  | "database"
-  | "tls"
-  | "no_password"
-  | "unknown";
+  "unreachable" | "timeout" | "auth" | "database" | "tls" | "no_password" | "unknown";
 const CONNECTION_ERRORS: Record<string, ErrorKind> = {
   ECONNREFUSED: "unreachable",
   ENOTFOUND: "unreachable",
@@ -294,7 +289,7 @@ export function assertReadOnlySql(sql: string): string {
   if (/\/\*!/.test(sql))
     throw new HttpError(400, "MySQL executable comments (/*! … */) are not allowed");
   let out = "";
-  for (let i = 0; i < sql.length; ) {
+  for (let i = 0; i < sql.length;) {
     const c = sql[i],
       n = sql[i + 1];
     if (c === "'" || c === '"' || c === "`") {
@@ -387,7 +382,9 @@ const mysqlDriver: Driver = async (db, sql, maxRows) => {
   try {
     await new Promise<void>((res, rej) => conn.connect((e: unknown) => (e ? rej(e) : res())));
     // MySQL (milliseconds, SELECT only) and MariaDB (seconds) name the statement timeout differently.
-    await run(`SET SESSION MAX_EXECUTION_TIME = ${Math.floor(db.timeout_ms)}`).catch(() => {});
+    await run(`SET SESSION MAX_EXECUTION_TIME = ${Math.floor(db.timeout_ms)}`).catch(
+      ignoreError("database.mysql_statement_timeout"),
+    );
     await run(`SET SESSION max_statement_time = ${Math.ceil(db.timeout_ms / 1000)}`).catch(
       () => {},
     );

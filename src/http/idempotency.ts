@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { pool, one, q, json } from "../db/pool.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Idempotency-Key for POSTs that CREATE something (a run, a work item, evidence, a scan). State transitions (approve,
@@ -76,7 +77,7 @@ export async function claimIdempotency(
     .digest("hex");
   if (Date.now() - lastPrune > 3600_000) {
     lastPrune = Date.now();
-    void pruneIdempotency().catch(() => {});
+    void pruneIdempotency().catch(ignoreError("http.idempotency_prune"));
   }
   const inserted = await one(
     pool,

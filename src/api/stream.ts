@@ -7,6 +7,7 @@ import { pool } from "../db/pool.ts";
 import { sessionFromRequest } from "../auth/sessions.ts";
 import type { Actor } from "../authz/access.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Server-Sent Events relay for LISTEN/NOTIFY on `workflow_events` (migration 005). Each subscriber is authenticated,
@@ -86,7 +87,7 @@ let deliveries: Promise<void> = Promise.resolve();
 function fanOut(p: LivePayload) {
   if (!clients.size) return;
   const owner = ownerOf(p.run_id); // starts now, so lookups overlap; only the delivery below is ordered
-  owner.catch(() => {}); // reported by the chain below
+  owner.catch(ignoreError("event_stream.owner_lookup")); // reported by the chain below
   deliveries = deliveries
     .then(async () => {
       const ownerId = await owner;
@@ -197,7 +198,7 @@ export async function startEventStream() {
       // One broken connection can report several errors (terminated, then connection lost): reconnect once.
       if (stopped || dead) return;
       dead = true;
-      c.end().catch(() => {});
+      c.end().catch(ignoreError("event_stream.listener_end"));
       log.error("event stream listener:", e.message);
       listener = null;
       failed = true;
@@ -208,7 +209,7 @@ export async function startEventStream() {
     });
     await c.connect();
     await c.query("LISTEN workflow_events");
-    if (stopped) return void c.end().catch(() => {});
+    if (stopped) return void c.end().catch(ignoreError("event_stream.listener_end"));
     listener = c;
     if (failed) {
       failed = false;
@@ -228,7 +229,7 @@ export async function stopEventStream() {
   owners.clear();
   const c = listener;
   listener = null;
-  await c?.end().catch(() => {});
+  await c?.end().catch(ignoreError("event_stream.listener_end"));
 }
 
 function cursorParam(raw: string | string[] | null | undefined): number | null {

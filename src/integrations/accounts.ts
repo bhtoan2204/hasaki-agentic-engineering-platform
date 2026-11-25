@@ -22,6 +22,7 @@ import {
   getSharedSecret,
   putSharedSecret,
 } from "../auth/secrets.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Telegram and Bitbucket credentials managed from the Integrations page instead of environment variables.
@@ -203,7 +204,9 @@ export async function telegramChats(input: { botToken?: string }) {
     updates = await telegramApi<TelegramUpdate[]>(token, "getUpdates");
   } finally {
     if (locked)
-      await client.query("SELECT pg_advisory_unlock($1::int)", [advisoryKey(key)]).catch(() => {});
+      await client
+        .query("SELECT pg_advisory_unlock($1::int)", [advisoryKey(key)])
+        .catch(ignoreError("telegram_accounts.advisory_unlock"));
     client.release();
   }
   const chats = new Map<string, { id: string; name: string; type: string }>();

@@ -6,6 +6,7 @@ import type { Actor } from "../authz/access.ts";
 import { chatRepository } from "./repository.ts";
 import type { ChatEventKind, EventRow } from "./types.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Chat stream. Events live in `chat_events` (bounded payloads, one row per lifecycle step — never per token) and are
@@ -59,7 +60,7 @@ function fanOut(raw: { id: number; conversation_id: number; owner_id: number }) 
   );
   if (!targets.length) return;
   const fetched = chatRepository.getEvent(raw.id);
-  fetched.catch(() => {}); // reported by the chain below
+  fetched.catch(ignoreError("chat_stream.event_fetch")); // reported by the chain below
   deliveries = deliveries
     .then(async () => {
       const row = await fetched;
@@ -97,20 +98,20 @@ async function connect() {
     if (stopped || dead) return;
     dead = true;
     listener = null;
-    c.end().catch(() => {});
+    c.end().catch(ignoreError("chat_stream.listener_end"));
     log.error("chat stream listener:", e.message);
     const retry = () =>
       connect()
         .then(() => {
           // Notifications sent while LISTEN was down are lost: replay each client from its cursor.
-          for (const cl of clients) void catchUp(cl).catch(() => {});
+          for (const cl of clients) void catchUp(cl).catch(ignoreError("chat_stream.catch_up"));
         })
         .catch(() => !stopped && setTimeout(retry, 2000));
     setTimeout(retry, 2000);
   });
   await c.connect();
   await c.query("LISTEN chat_events");
-  if (stopped) return void c.end().catch(() => {});
+  if (stopped) return void c.end().catch(ignoreError("chat_stream.listener_end"));
   listener = c;
 }
 
@@ -127,7 +128,7 @@ export async function stopChatStream() {
   clients.clear();
   const l = listener;
   listener = null;
-  await l?.end().catch(() => {});
+  await l?.end().catch(ignoreError("chat_stream.listener_end"));
   stopped = false;
 }
 

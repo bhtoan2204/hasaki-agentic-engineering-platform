@@ -7,6 +7,7 @@ import { attachExistingWindowsChrome, existingChromeOwner } from "./existingWork
 import { startWorkSso } from "./workSso.ts";
 import { windowsChromeRelay } from "./windowsChromeRelay.ts";
 import { config } from "./config.ts";
+import { ignoreError } from "./ignoreError.ts";
 
 export type ConnectionState = "idle" | "waiting" | "connected" | "cancelled" | "timeout" | "error";
 type Session = {
@@ -82,7 +83,9 @@ async function finish(s: Session, state: ConnectionState, error?: string) {
     s.relay = undefined;
   }
   await Promise.race([
-    s.external ? Promise.resolve() : s.browser?.close().catch(() => {}),
+    s.external
+      ? Promise.resolve()
+      : s.browser?.close().catch(ignoreError("workchrome.browser_close")),
     new Promise((r) => setTimeout(r, 2000).unref()),
   ]);
   s.relay?.close();
@@ -238,7 +241,7 @@ export async function openChrome(
         }
       }
       if (s.state !== "waiting") {
-        if (!s.external) await s.browser?.close().catch(() => {});
+        if (!s.external) await s.browser?.close().catch(ignoreError("workchrome.browser_close"));
         s.relay?.close();
         s.stop?.();
         return;

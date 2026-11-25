@@ -16,6 +16,7 @@ import {
   handleGatewayCallback,
   parseCommand,
 } from "./gateway.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 const validId = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
 const denied = "Action unavailable or unauthorized / Thao tác không khả dụng hoặc không được phép.";
@@ -529,7 +530,7 @@ async function handleUpdate(update: TelegramUpdate, retry = false) {
           ...answer,
           text: "Temporarily unavailable; retry / Tạm thời lỗi; hãy thử lại",
           show_alert: true,
-        }).catch(() => {});
+        }).catch(ignoreError("telegram.answer_callback"));
         ackLost = true;
       }
     }

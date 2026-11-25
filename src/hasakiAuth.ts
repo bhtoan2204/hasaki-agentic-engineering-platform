@@ -3,6 +3,7 @@ import { deleteUserSecret, getUserSecret, putUserSecret } from "./auth/secrets.t
 import { existingChromeOwner } from "./existingWorkChrome.ts";
 import { HttpError } from "./http/error.ts";
 import { cancelChrome, connectionStatus, localChromeEnabled, openChrome } from "./workChrome.ts";
+import { ignoreError } from "./ignoreError.ts";
 
 /** Personal tokens are verified before encryption; Chrome sessions are isolated per actor. */
 const tokens = new Map<number, { value: string; exp: number }>();
@@ -55,7 +56,7 @@ export async function setToken(raw: string, userId: number, valid = () => true) 
 }
 
 export async function authStatus(userId: number) {
-  await getToken(userId).catch(() => {});
+  await getToken(userId).catch(ignoreError("hasaki_auth.status_token"));
   const token = userId ? tokens.get(userId) : undefined;
   const now = Date.now() / 1000;
   const valid = !!token && (token.exp === 0 || token.exp - 30 > now);

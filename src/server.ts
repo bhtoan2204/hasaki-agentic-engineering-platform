@@ -40,6 +40,7 @@ import { recoverInstanceTurns } from "./chat/runtime.ts";
 import { childGroups } from "./workflow/local.ts";
 import { stopSupervised } from "./agent/process/supervisor.ts";
 import { log } from "./logging.ts";
+import { ignoreError } from "./ignoreError.ts";
 
 // The Claude Agent SDK (and detect-libc) call process.report.getReport() to tell glibc from musl. By default a report
 // resolves every open socket's peer with a SYNCHRONOUS reverse-DNS lookup on the main thread; over VPN each lookup
@@ -99,7 +100,7 @@ await new Promise<void>((resolve, reject) => {
       ? `port ${config.port} is already in use: another platform server is running. Not starting.`
       : `cannot listen: ${e.message}`,
   );
-  await instanceHeartbeat.stop().catch(() => {});
+  await instanceHeartbeat.stop().catch(ignoreError("server.heartbeat_stop"));
   process.exit(1);
 });
 log.info(`workflow platform on ${config.publicUrl} (instance ${config.instanceId})`);

@@ -9,6 +9,7 @@ import { startRun } from "../workflow/engine.ts";
 import { activeRunForWorkItem } from "../workflow/runRepository.ts";
 import { EngineError } from "../workflow/mutations.ts";
 import { workItems } from "./service.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Policy-controlled intake (sources: Hasaki Work items, production error groups). Import stays import-only unless an
@@ -479,7 +480,7 @@ async function flagRunningChanges() {
     await notify(
       `⚠️ Intake item #${r.id}: the source was ${r.source_closed ? "closed" : "updated"} while run #${r.run_id} is active — check whether to stop or re-plan it`,
       `/runs/${r.run_id}`,
-    ).catch(() => {});
+    ).catch(ignoreError("intake.notify"));
 }
 
 async function finishRunningItems() {
@@ -724,7 +725,7 @@ async function startEligible(it: ItemRow, p: IntakePolicy, now: Date) {
     await notify(
       `🤖 Intake: ${it.workflow} started for ${it.source} item #${it.id} (run #${run.id})`,
       `/runs/${run.id}`,
-    ).catch(() => {});
+    ).catch(ignoreError("intake.notify"));
     return Number(run.id);
   } catch (e) {
     const msg = (e as Error).message;

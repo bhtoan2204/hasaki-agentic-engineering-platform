@@ -14,6 +14,7 @@ import {
   type LogEvent,
 } from "../investigation/events.ts";
 import { formatInZone, parseTimeModifier } from "../investigation/time.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Splunk (production SIEM) — read-only searches for bug and incident investigation.
@@ -610,7 +611,9 @@ async function searchJob(
       );
     if (done) break;
     if (Date.now() > deadline) {
-      await call("POST", `${path}/control`, a, { action: "cancel" }, 15).catch(() => {});
+      await call("POST", `${path}/control`, a, { action: "cancel" }, 15).catch(
+        ignoreError("splunk.cancel_search"),
+      );
       throw new Error(`Splunk search quá ${timeout}s, đã huỷ`);
     }
     await new Promise((r) => setTimeout(r, Number(process.env.SPLUNK_POLL_MS ?? 1500)));

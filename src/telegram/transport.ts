@@ -10,6 +10,7 @@ import { quietNow } from "./format.ts";
 import { gatewayBusy, gatewayTick } from "./sync.ts";
 import { ingestUpdate, processInbox, telegramUpdateId } from "./updates.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /** Session lock + renewable DB lease: dropped DB sessions cannot keep consuming after another owner takes over. */
 export async function claimConsumer(
@@ -41,7 +42,9 @@ export async function releaseConsumer(client: pg.PoolClient, owner: string, key 
       [key, owner],
     );
   } finally {
-    await client.query("SELECT pg_advisory_unlock($1::int)", [advisoryKey(key)]).catch(() => {});
+    await client
+      .query("SELECT pg_advisory_unlock($1::int)", [advisoryKey(key)])
+      .catch(ignoreError("telegram.advisory_unlock"));
   }
 }
 export async function persistPollingBatch(
@@ -373,14 +376,18 @@ export function startTelegramTransport() {
         await refreshTelegramCredentials().catch(() => {});
       }
       if (!config.telegram.botToken || config.telegram.mode === "off") {
-        await sleep(2000, undefined, { signal: stopping.signal }).catch(() => {});
+        await sleep(2000, undefined, { signal: stopping.signal }).catch(
+          ignoreError("telegram.sleep_aborted"),
+        );
         continue;
       }
       let client: pg.PoolClient;
       try {
         client = await consumerPool.connect();
       } catch {
-        await sleep(2000, undefined, { signal: stopping.signal }).catch(() => {});
+        await sleep(2000, undefined, { signal: stopping.signal }).catch(
+          ignoreError("telegram.sleep_aborted"),
+        );
         continue;
       }
       const owner = randomUUID(),
@@ -395,7 +402,9 @@ export function startTelegramTransport() {
       try {
         claim = await claimConsumer(client, owner, mode, key);
         if (!claim) {
-          await sleep(2000, undefined, { signal: session.signal }).catch(() => {});
+          await sleep(2000, undefined, { signal: session.signal }).catch(
+            ignoreError("telegram.sleep_aborted"),
+          );
           continue;
         }
         heartbeat = setInterval(() => {
@@ -474,7 +483,8 @@ export function startTelegramTransport() {
         }
       } finally {
         if (heartbeat) clearInterval(heartbeat);
-        if (claim) await releaseConsumer(client, owner, key).catch(() => {});
+        if (claim)
+          await releaseConsumer(client, owner, key).catch(ignoreError("telegram.release_consumer"));
         client.off("error", abort);
         stopping.signal.removeEventListener("abort", abort);
         client.release();

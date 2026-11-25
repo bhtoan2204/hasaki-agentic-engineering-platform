@@ -38,6 +38,7 @@ import {
   SIGNOZ_TRUNCATED,
 } from "./scan.ts";
 import { windowOf, type ScanRequest, type ScanTrigger } from "./jobs.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 type Reply = { status: number; body: unknown; headers?: Record<string, string> };
 const fail = (
@@ -171,7 +172,7 @@ function progressWriter(id: number, fence: number) {
          'pct',GREATEST(COALESCE((progress->>'pct')::int,0), 5 + round($3 * 0.85)::int))
        WHERE id=$1 AND fencing_token=$2 AND status='running'`,
       [id, fence, Math.round(p.pct), p.state ?? null, p.scanned, p.matched],
-    ).catch(() => {});
+    ).catch(ignoreError("prod_errors.scan_progress"));
   };
 }
 
