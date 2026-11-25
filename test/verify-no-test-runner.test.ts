@@ -78,6 +78,41 @@ test("a repository with a test script or a test file still needs evidence that t
   }
 });
 
+test("a selected repository with no changes against its base has no tests to run; a failed or missing diff does not make that claim", async () => {
+  const dir = await nodeRepo({ "go.mod": "module x\n", "a/a.go": "package a\n" });
+  const run = (changedFiles?: (p: string) => Promise<string[]>) =>
+    verifyWorkspaces(
+      [{ repo: "background", path: dir }],
+      [dir],
+      { ...verifyConfig({ verify: { command: "go test ./..." } }, "x")!, baseline: null as null },
+      0,
+      new AbortController().signal,
+      {
+        run: async () => ({
+          code: 0,
+          output: "== go build ./...\nno Go packages changed\n",
+          timedOut: false,
+        }),
+        changedFiles,
+      },
+    ).then((r) => r.repos[0]);
+  try {
+    const none = await run(async () => []);
+    assert.equal(none.status, "not_applicable");
+    assert.equal(none.passed, true);
+    assert.match(none.note ?? "", /no changes against its base/);
+    assert.equal((await run(async () => ["a/a.go"])).status, "not_executed", "a changed file");
+    assert.equal((await run()).status, "not_executed", "no diff available");
+    assert.equal(
+      (await run(() => Promise.reject(new Error("no base ref")))).status,
+      "not_executed",
+      "the diff could not be read",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("Go packages without test files are not applicable once go build passed", async () => {
   const dir = await nodeRepo({
     "go.mod": "module x\n",

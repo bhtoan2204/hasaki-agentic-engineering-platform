@@ -1266,13 +1266,18 @@ export async function verifyWorkspaces(
             : ev.skipped
               ? `exit 0, but every test was skipped (${ev.skipped})`
               : "exit 0, but the output contains no evidence that any test ran";
-          const files = deps.changedFiles ? await deps.changedFiles(p).catch(() => []) : [];
+          const changed = deps.changedFiles ? await deps.changedFiles(p).catch(() => null) : null;
+          const files = changed ?? [];
           const policy = [cfg.notApplicable, GENERATED_ONLY].find((x) =>
             notApplicableCovers(x, files),
           );
           if (policy) {
             entry.status = "not_applicable";
             entry.note = `no executable tests apply: ${policy.reason}`;
+          } else if (changed && !changed.length) {
+            entry.status = "not_applicable";
+            entry.note =
+              "no executable tests apply: this repository has no changes against its base";
           } else if (await staticChecksOnly(p, r.output)) {
             entry.status = "not_applicable";
             entry.note =

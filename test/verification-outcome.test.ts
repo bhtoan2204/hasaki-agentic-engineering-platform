@@ -30,7 +30,7 @@ const cfg = (extra: Partial<VerifyConfig> = {}): VerifyConfig => ({
   allowTestWeakening: false,
   ...extra,
 });
-const verify = (path: string, output: string, code: number | null, c: VerifyConfig, files: string[] = []) =>
+const verify = (path: string, output: string, code: number | null, c: VerifyConfig, files: string[] = ["app/x.go"]) =>
   verifyWorkspaces([{ repo: "app", path }], [path], c, 1, new AbortController().signal, {
     run: async () => ({ code, timedOut: false, output }),
     diffTests: async () => "",
@@ -82,7 +82,7 @@ test("NOT_APPLICABLE only comes from the workflow policy and only for covered, n
     const ok = await verify(r.path, "", 0, cfg({ notApplicable: policy }), ["docs/a/b.md", "README.md"]);
     assert.equal(ok.repos[0].outcome, "NOT_APPLICABLE");
     assert.equal(ok.passed, true);
-    for (const files of [["src/a.ts"], ["docs/a.md", "src/a.ts"], ["docs/x.test.ts"], []]) {
+    for (const files of [["src/a.ts"], ["docs/a.md", "src/a.ts"], ["docs/x.test.ts"]]) {
       const bad = await verify(r.path, "", 0, cfg({ notApplicable: policy }), files);
       assert.equal(bad.repos[0].outcome, "NOT_EXECUTED", files.join());
     }
