@@ -10,6 +10,7 @@ import { fixtureGit } from "./fixtures.ts";
 import { changedCloneCount, diffFootprint } from "./ponytailMetrics.ts";
 import type { ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
+import { log } from "../logging.ts";
 export const liveWorkRoot = (evaluationId: unknown, caseRunId: unknown) =>
   join(config.dataDir, "evaluation-work", String(evaluationId), String(caseRunId), "live");
 // postmaster.pid may name a reused pid: only a postgres process serving this directory counts.
@@ -193,7 +194,7 @@ export async function executeLiveCase(
       retryable: false,
     };
   await cleanupLiveWork(ctx.run.id, root).catch((error) =>
-    console.error(`live evaluation cleanup failed: ${(error as Error).message}`),
+    log.error(`live evaluation cleanup failed: ${(error as Error).message}`),
   );
   return {
     kind: "completed",

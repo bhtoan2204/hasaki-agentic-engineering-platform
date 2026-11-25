@@ -64,6 +64,7 @@ import type { ExecutionContext } from "../workflow/executors/registry.ts";
  */
 import { traceLog } from "../workflow/trace.ts";
 import { codeActScopeValue, withCodeActScope } from "../codeact/scope.ts";
+import { log } from "../logging.ts";
 
 export interface PlatformToolEnv {
   /** Set once submit_result recorded a valid output; each provider turn gets a fresh env, so a repair turn may submit again. */
@@ -339,7 +340,7 @@ export async function dispatchPlatformTool(
         started,
         nativeArgs,
         result,
-      ).catch((error) => console.error(`tool audit persistence failed: ${safeDiagnostics(error)}`));
+      ).catch((error) => log.error(`tool audit persistence failed: ${safeDiagnostics(error)}`));
       return result;
     },
   );
@@ -724,7 +725,7 @@ async function readKnowledge(args: ToolArgs, env: PlatformToolEnv): Promise<stri
         env.attemptId,
         JSON.stringify({ key, version: k.version, offset, end: offset + body.length }),
       ],
-    ).catch((error) => console.error(`skill read trace failed: ${safeDiagnostics(error)}`));
+    ).catch((error) => log.error(`skill read trace failed: ${safeDiagnostics(error)}`));
   const notice = isExternal(k.metadata) && offset === 0 ? `${externalNotice(k.metadata)}\n\n` : "";
   return `# ${k.title} (${k.key} v${k.version})\n\n${notice}${body}${offset + limit < k.content.length ? `\n[truncated: read_knowledge key=${k.key} offset=${offset + limit} for the next page]` : ""}`;
 }

@@ -52,6 +52,7 @@ import { budgetStop } from "./budget.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { noteDecision } from "../../../workflow/decisions.ts";
+import { log } from "../../../logging.ts";
 
 /** Prompt assembly and the provider turn (resumed session first, rebuilt prompt when the session is gone). */
 export async function executeStage(s: LifecycleState): Promise<ExecResult | void> {
@@ -322,7 +323,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
     try {
       await ctx.recordMetrics(snapshot);
     } catch (error) {
-      console.error(
+      log.error(
         `attempt ${ctx.attempt.id}: telemetry persistence failed: ${safeDiagnostics(error)}`,
       );
     }
@@ -443,7 +444,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
           ...new Set([...metrics.skills_loaded, ...reads.map((r) => r.key)]),
         ];
       } catch (error) {
-        console.error(`attempt ${ctx.attempt.id}: skill tracing failed: ${safeDiagnostics(error)}`);
+        log.error(`attempt ${ctx.attempt.id}: skill tracing failed: ${safeDiagnostics(error)}`);
       }
       await writeTelemetry(metrics as unknown as Record<string, unknown>);
     }
@@ -649,7 +650,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
         mode: deliveryMode,
         previous: previousDelivery,
         workspaceHash,
-      }).catch((e) => console.error("context delivery record:", (e as Error).message));
+      }).catch((e) => log.error("context delivery record:", (e as Error).message));
   }
 
   if (resume || ctx.input.pending?.resume)

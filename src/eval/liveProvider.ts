@@ -21,6 +21,7 @@ import { LiveBudget, liveRuntime, remainingLiveBudgets } from "./liveRuntime.ts"
 import type { ConfigurationSchema } from "./configuration.ts";
 import { getExecutor, type ExecutionContext } from "../workflow/executors/registry.ts";
 import type { ExecResult } from "../workflow/types.ts";
+import { log } from "../logging.ts";
 const exec = promisify(execFile);
 const LIVE_ALLOWED_TOOLS = [
   "Read",
@@ -114,7 +115,7 @@ export async function isolatedDatabase(root: string) {
     };
   } catch (error) {
     await stopIsolatedDatabase(data).catch((cleanup) =>
-      console.error(`isolated database cleanup failed: ${(cleanup as Error).message}`),
+      log.error(`isolated database cleanup failed: ${(cleanup as Error).message}`),
     );
     throw error;
   }
@@ -147,7 +148,7 @@ export async function executeLiveProviderPhase(
     // An abort may be a lease loss whose re-execution still needs the workspace.
     if ((!result || result.kind === "failed") && !ctx.signal.aborted)
       await cleanupLiveWork(ctx.run.id, liveWorkRoot(phase.evaluation_id, phase.case_run_id)).catch(
-        (error) => console.error(`live evaluation cleanup failed: ${(error as Error).message}`),
+        (error) => log.error(`live evaluation cleanup failed: ${(error as Error).message}`),
       );
     if (locked)
       await connection
@@ -393,9 +394,7 @@ async function executeLiveProviderPhaseLocked(
       await db
         .dispose()
         .catch((error) =>
-          console.error(
-            `live evaluation database left for eval:cleanup: ${(error as Error).message}`,
-          ),
+          log.error(`live evaluation database left for eval:cleanup: ${(error as Error).message}`),
         );
     }
   }

@@ -15,6 +15,7 @@ import { executeStage } from "./stages/execute.ts";
 import { outputStage } from "./stages/output.ts";
 import { verifyStage } from "./stages/verify.ts";
 import { finalizeStage } from "./stages/finalize.ts";
+import { log } from "../../logging.ts";
 
 export const AGENT_STAGES: Stages<LifecycleState> = {
   preflight: preflightStage,
@@ -53,12 +54,12 @@ export const agentExecutor: StepExecutor = {
             evidence,
           );
         } catch (error) {
-          console.error(`harness evidence persistence failed: ${(error as Error).message}`);
+          log.error(`harness evidence persistence failed: ${(error as Error).message}`);
         }
       }
     } finally {
       await captureContextContinuity(ctx, result).catch((error) =>
-        console.error(`context continuity persistence failed: ${contextPackFailure(error)}`),
+        log.error(`context continuity persistence failed: ${contextPackFailure(error)}`),
       );
     }
   },

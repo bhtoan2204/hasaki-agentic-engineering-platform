@@ -2,6 +2,7 @@ import { config } from "../../config.ts";
 import { one, pool } from "../../db/pool.ts";
 import { workspacesOf } from "../../git/provider.ts";
 import type { HarnessFailureCode } from "./failure.ts";
+import { log } from "../../logging.ts";
 
 export type StopReason = "canceled" | "timeout" | "idle";
 
@@ -48,7 +49,7 @@ export function superviseTurn(opts: {
     try {
       opts.stop(why);
     } catch (error) {
-      console.error(`stopping the provider turn failed: ${(error as Error).message}`);
+      log.error(`stopping the provider turn failed: ${(error as Error).message}`);
     }
   };
   const onAbort = () => end("canceled");
