@@ -3,6 +3,7 @@ import { chatRepository } from "./repository.ts";
 import { emitChatEvent } from "./events.ts";
 import { ChatTurnError, chatFailure, type ChatFailure } from "./failures.ts";
 import type { TraceItem } from "./types.ts";
+import { log } from "../logging.ts";
 
 const FENCE = "```chat-tool";
 const ESCALATE = "```chat-escalate";
@@ -150,9 +151,7 @@ export class TurnStream {
   }
 
   private enqueue(fn: () => Promise<void>) {
-    this.chain = this.chain
-      .then(fn)
-      .catch((e) => console.error("chat stream:", (e as Error).message));
+    this.chain = this.chain.then(fn).catch((e) => log.error("chat stream:", (e as Error).message));
     return this.chain;
   }
 

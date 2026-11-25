@@ -7,6 +7,7 @@ import { emitChatEvent } from "./events.ts";
 import { LIMITS } from "./policy.ts";
 import { whenNoTurnRuns, whenTurnSettles } from "./turnActivity.ts";
 import type { ConversationRow, TitleSource } from "./types.ts";
+import { log } from "../logging.ts";
 
 const TITLE_TIMEOUT_MS = 20_000;
 
@@ -169,7 +170,7 @@ export async function generateConversationTitle(
     );
   } catch (e) {
     if (!(e instanceof NoTitleInTests))
-      console.error(`chat title ${conversationId}: ${(e as Error)?.message ?? e}`);
+      log.error(`chat title ${conversationId}: ${(e as Error)?.message ?? e}`);
     // Keep/ensure fallback — never leave the conversation untitled after a failed generate.
     if (conversation.title_source === "none" || !conversation.title.trim()) {
       const row = await chatRepository.updateTitleIfSource(
@@ -252,7 +253,7 @@ export function scheduleTitleGeneration(
   }
   if (existing && !opts.force) return;
   if (jobs.size >= TITLE_SCHEDULING.maxQueued) {
-    console.error(
+    log.error(
       `chat title ${conversationId}: ${jobs.size} titles waiting; keeping the fallback title`,
     );
     return;

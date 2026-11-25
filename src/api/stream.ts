@@ -6,6 +6,7 @@ import { config } from "../config.ts";
 import { pool } from "../db/pool.ts";
 import { sessionFromRequest } from "../auth/sessions.ts";
 import type { Actor } from "../authz/access.ts";
+import { log } from "../logging.ts";
 
 /**
  * Server-Sent Events relay for LISTEN/NOTIFY on `workflow_events` (migration 005). Each subscriber is authenticated,
@@ -95,7 +96,7 @@ function fanOut(p: LivePayload) {
         else send(cl, p);
       }
     })
-    .catch((e) => console.error("event stream fan-out:", (e as Error).message));
+    .catch((e) => log.error("event stream fan-out:", (e as Error).message));
 }
 
 /**
@@ -197,7 +198,7 @@ export async function startEventStream() {
       if (stopped || dead) return;
       dead = true;
       c.end().catch(() => {});
-      console.error("event stream listener:", e.message);
+      log.error("event stream listener:", e.message);
       listener = null;
       failed = true;
       // Connected browsers keep the stream but must not trust it for now: they switch to their polling fallback.
@@ -213,7 +214,7 @@ export async function startEventStream() {
       failed = false;
       // Notifications sent while LISTEN was down are lost; replay them to every client from what it last saw.
       for (const cl of clients)
-        catchUp(cl, cl.cursor).catch((e) => console.error("event stream resync:", e.message));
+        catchUp(cl, cl.cursor).catch((e) => log.error("event stream resync:", e.message));
     }
   };
   await connect();
@@ -299,14 +300,14 @@ export async function handleStream(
       // A database hiccup (e.g. a connection timeout over VPN) must not become an unhandled rejection: that would
       // terminate the whole server and every step running in it. Keep the stream; the next ping re-checks the session.
       .catch((e) => {
-        console.error("event stream session check:", (e as Error).message);
+        log.error("event stream session check:", (e as Error).message);
         res.write(": ping\n\n");
       });
   }, 20_000);
   try {
     await catchUp(self, after);
   } catch (e) {
-    console.error("event stream replay:", (e as Error).message);
+    log.error("event stream replay:", (e as Error).message);
     hello(self, { reset: true });
   }
 }

@@ -5,6 +5,7 @@ import { sessionFromRequest } from "../auth/sessions.ts";
 import type { Actor } from "../authz/access.ts";
 import { chatRepository } from "./repository.ts";
 import type { ChatEventKind, EventRow } from "./types.ts";
+import { log } from "../logging.ts";
 
 /**
  * Chat stream. Events live in `chat_events` (bounded payloads, one row per lifecycle step — never per token) and are
@@ -69,7 +70,7 @@ function fanOut(raw: { id: number; conversation_id: number; owner_id: number }) 
         else write(c, row);
       }
     })
-    .catch((e) => console.error("chat stream fan-out:", (e as Error).message));
+    .catch((e) => log.error("chat stream fan-out:", (e as Error).message));
 }
 
 async function connect() {
@@ -97,7 +98,7 @@ async function connect() {
     dead = true;
     listener = null;
     c.end().catch(() => {});
-    console.error("chat stream listener:", e.message);
+    log.error("chat stream listener:", e.message);
     const retry = () =>
       connect()
         .then(() => {
@@ -189,7 +190,7 @@ export async function handleChatStream(
   req.on("close", release);
   const after =
     cursorParam(req.headers["last-event-id"]) ?? cursorParam(url.searchParams.get("after"));
-  await ensureListener().catch((e) => console.error("chat stream listen:", (e as Error).message));
+  await ensureListener().catch((e) => log.error("chat stream listen:", (e as Error).message));
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",

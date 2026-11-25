@@ -63,6 +63,7 @@ import type {
   MessageRow,
   TurnRow,
 } from "./types.ts";
+import { log } from "../logging.ts";
 
 type Providers = Record<AgentProvider, CompletionRunner>;
 let providerSeam: Providers | undefined;
@@ -101,7 +102,8 @@ export function parseToolCalls(text: string): Array<{ tool: string; arguments: u
   if (raw == null) return null;
   try {
     const parsed: unknown = JSON.parse(raw.trim());
-    const envelope = parsed && typeof parsed === "object" && "calls" in parsed ? parsed.calls : null;
+    const envelope =
+      parsed && typeof parsed === "object" && "calls" in parsed ? parsed.calls : null;
     const calls: readonly unknown[] = Array.isArray(envelope)
       ? envelope
       : Array.isArray(parsed)
@@ -159,9 +161,12 @@ export function addUsage(
   u.output_tokens = u.output_tokens == null || output == null ? null : u.output_tokens + output;
   const cacheRead = m.tokens?.cache_read ?? m.tokens?.cache_read_input_tokens;
   const cacheWrite = m.tokens?.cache_creation ?? m.tokens?.cache_creation_input_tokens;
-  u.cache_read_tokens = u.cache_read_tokens == null || cacheRead == null ? null : u.cache_read_tokens + cacheRead;
+  u.cache_read_tokens =
+    u.cache_read_tokens == null || cacheRead == null ? null : u.cache_read_tokens + cacheRead;
   u.cache_creation_tokens =
-    u.cache_creation_tokens == null || cacheWrite == null ? null : u.cache_creation_tokens + cacheWrite;
+    u.cache_creation_tokens == null || cacheWrite == null
+      ? null
+      : u.cache_creation_tokens + cacheWrite;
   u.cost_usd = u.cost_usd == null || m.cost_usd == null ? null : u.cost_usd + m.cost_usd;
   return u;
 }
@@ -200,11 +205,7 @@ export function withholdRevoked<T extends Pick<MessageRow, "role" | "content" | 
 }
 
 /** The turn's phase and its phase.updated event, written by one statement. */
-async function phase(
-  turn: TurnRow,
-  name: ExecutionPhase,
-  data: Record<string, unknown> = {},
-) {
+async function phase(turn: TurnRow, name: ExecutionPhase, data: Record<string, unknown> = {}) {
   await chatRepository.setPhaseWithEvent(turn.id, name, data, {
     conversationId: turn.conversation_id,
     ownerId: turn.owner_id,
@@ -228,7 +229,12 @@ async function finishCanceled(turn: TurnRow) {
     });
 }
 
-async function finishFailed(turn: TurnRow, failure: ChatFailure, metrics?: Record<string, unknown>, attempts?: ProviderAttempt[]) {
+async function finishFailed(
+  turn: TurnRow,
+  failure: ChatFailure,
+  metrics?: Record<string, unknown>,
+  attempts?: ProviderAttempt[],
+) {
   const done = await chatRepository.finishTurn(turn.id, "failed", {
     error: failure.message,
     failure: { ...failure },
@@ -274,14 +280,15 @@ export async function runTurn(
   try {
     await executeTurn(turn, signal, providers, stream);
   } catch (e) {
-    await savePartial(turn, stream).catch((err) => console.error("chat partial answer:", (err as Error).message));
+    await savePartial(turn, stream).catch((err) =>
+      log.error("chat partial answer:", (err as Error).message),
+    );
     await closeStream(stream);
     if (ac.signal.aborted || e instanceof TurnCanceled) await finishCanceled(turn);
     else {
-      const failure =
-        deadline.aborted
-          ? chatFailure("TURN_TIMEOUT", `Turn exceeded ${LIMITS.turnTimeoutMs / 1000}s`)
-          : asChatFailure(e);
+      const failure = deadline.aborted
+        ? chatFailure("TURN_TIMEOUT", `Turn exceeded ${LIMITS.turnTimeoutMs / 1000}s`)
+        : asChatFailure(e);
       await recordContinuation(turn.id, { status: "failed", failure });
       await finishFailed(turn, failure);
     }
@@ -309,17 +316,26 @@ async function resumeBrief(ownerId: number, cont: Continuation, readable: string
   });
   const refs = cont.completed.map((c) => c.evidence_ref).filter((r): r is string => !!r);
   const rows = refs.length
-    ? (await chatRepository.toolCallsOf(cont.conversation_id ?? 0)).filter((r) => r.evidence_ref && refs.includes(r.evidence_ref))
+    ? (await chatRepository.toolCallsOf(cont.conversation_id ?? 0)).filter(
+        (r) => r.evidence_ref && refs.includes(r.evidence_ref),
+      )
     : [];
   const evidence = rows
     .filter((r) => r.repositories.every((repo) => readable.includes(repo)))
     .slice(-6)
-    .map((r) => ({ ref: r.evidence_ref!, tool: r.tool, body: boundedContextJson(r.result).slice(0, 1500) }));
+    .map((r) => ({
+      ref: r.evidence_ref!,
+      tool: r.tool,
+      body: boundedContextJson(r.result).slice(0, 1500),
+    }));
   return continuationBrief(cont, refreshed, evidence);
 }
 
 function toolResultError(result: unknown) {
-  return result && typeof result === "object" && "error" in result && typeof result.error === "string"
+  return result &&
+    typeof result === "object" &&
+    "error" in result &&
+    typeof result.error === "string"
     ? result.error
     : null;
 }
@@ -344,7 +360,9 @@ async function recordContinuation(
     const message = await chatRepository.messageOfTurn(turn.id, "user");
     if (!conversation || !message) return;
     const prev = conversation.continuation ?? null;
-    const calls = (await chatRepository.toolCallsOf(turn.conversation_id)).filter((c) => c.turn_id === turn.id);
+    const calls = (await chatRepository.toolCallsOf(turn.conversation_id)).filter(
+      (c) => c.turn_id === turn.id,
+    );
     const ops = await operationsOf(turn.conversation_id, turn.owner_id);
     const tracked = new Set(prev?.operations.map((o) => o.id) ?? []);
     const routing = turn.routing as { path?: string; continued?: boolean };
@@ -371,14 +389,17 @@ async function recordContinuation(
       },
       routing.continued === true,
     );
-    await chatRepository.setContinuation(turn.conversation_id, next ? { ...next, conversation_id: turn.conversation_id } : null);
+    await chatRepository.setContinuation(
+      turn.conversation_id,
+      next ? { ...next, conversation_id: turn.conversation_id } : null,
+    );
   } catch (e) {
-    console.error("chat continuation:", (e as Error).message);
+    log.error("chat continuation:", (e as Error).message);
   }
 }
 
 const closeStream = (stream: TurnStream) =>
-  stream.close().catch((err) => console.error("chat stream close:", (err as Error).message));
+  stream.close().catch((err) => log.error("chat stream close:", (err as Error).message));
 
 /** A stopped or failed turn keeps the answer text it had streamed; the turn status marks it as partial. */
 async function savePartial(turn: TurnRow, stream: TurnStream) {
@@ -417,10 +438,16 @@ async function executeTurn(
   await emitChatEvent({ ...ids, kind: "routing.started", data: { mode: turn.mode } });
 
   const mentions: ResolvedMention[] = await resolveMentions(turn.owner_id, userMessage.content);
-  if (mentions.length) await chatRepository.setMentions(userMessage.id, mentions.map(publicMention));
+  if (mentions.length)
+    await chatRepository.setMentions(userMessage.id, mentions.map(publicMention));
 
   const prior = await chatRepository.latestTurnWithUser(conversation.id, turn.id);
-  let routing = routeTurnIntelligent(turn.mode, userMessage.content, mentions, prior?.route ?? null);
+  let routing = routeTurnIntelligent(
+    turn.mode,
+    userMessage.content,
+    mentions,
+    prior?.route ?? null,
+  );
   // An unfinished request (blocked tool, pending operation…) is resumed by a follow-up instead of starting over.
   const unfinished = conversation.continuation ?? null;
   const follow = continuesGoal(userMessage.content, unfinished, routing);
@@ -429,7 +456,9 @@ async function executeTurn(
       ...routing,
       route: unfinished.route as typeof routing.route,
       effective_mode:
-        turn.mode === "AUTO" ? (unfinished.effective_mode as typeof routing.effective_mode) : routing.effective_mode,
+        turn.mode === "AUTO"
+          ? (unfinished.effective_mode as typeof routing.effective_mode)
+          : routing.effective_mode,
       path: "tools",
       reason: `continues the unfinished request of turn #${unfinished.goal_turn_id} (${follow.reason})`,
       source: "context",
@@ -453,8 +482,8 @@ async function executeTurn(
     strategy === "auto"
       ? conversation.provider && conversation.provider !== "auto"
         ? conversation.provider
-        : turn.requested_provider ?? turn.provider
-      : turn.provider ?? conversation.provider;
+        : (turn.requested_provider ?? turn.provider)
+      : (turn.provider ?? conversation.provider);
   const fallbackEnabled = conversation.fallback_enabled === true || strategy === "auto";
 
   await phase(turn, "validating_provider");
@@ -463,7 +492,11 @@ async function executeTurn(
   // Images go to a provider that can read them: AUTO only admits vision providers, a manual choice that cannot is refused.
   const images = await imagesForTurn(turn.owner_id, conversation.id, userMessage.id);
   if (images.length) {
-    if (strategy === "manual" && preferred && !VISION_PROVIDERS.includes(preferred as AgentProvider))
+    if (
+      strategy === "manual" &&
+      preferred &&
+      !VISION_PROVIDERS.includes(preferred as AgentProvider)
+    )
       throw new ChatTurnError(
         chatFailure(
           "PROVIDER_CAPABILITY",
@@ -530,9 +563,7 @@ async function executeTurn(
     ]),
   ];
   // No explicit scope and no mention: infer it from the request over what the user can already read.
-  const inferred = !repositories.length
-    ? resolveRepositories(userMessage.content, accessible)
-    : [];
+  const inferred = !repositories.length ? resolveRepositories(userMessage.content, accessible) : [];
   if (inferred.length) {
     repositories = inferred.map((r) => r.name);
     await emitChatEvent({
@@ -586,7 +617,11 @@ async function executeTurn(
       media_type: d.media_type,
       bytes: d.bytes,
       warnings: t?.extraction.warnings ?? ["could not be read"],
-      excerpt: excerpt + (text.length > excerpt.length ? `\n… (${text.length - excerpt.length} more characters: documents.read)` : ""),
+      excerpt:
+        excerpt +
+        (text.length > excerpt.length
+          ? `\n… (${text.length - excerpt.length} more characters: documents.read)`
+          : ""),
     });
   }
 
@@ -731,8 +766,7 @@ async function executeTurn(
           }
         : await executeChatTool(binding, call.tool, call.arguments, signal);
       seen.add(key);
-      const evidenceRef =
-        outcome.status === "ok" ? `chat:${conversation.id}:tool:${row.id}` : null;
+      const evidenceRef = outcome.status === "ok" ? `chat:${conversation.id}:tool:${row.id}` : null;
       const durationMs = Date.now() - t0;
       await chatRepository.finishToolCall(row.id, {
         status: outcome.status,
@@ -743,9 +777,24 @@ async function executeTurn(
       });
       usage.tool_calls++;
       stream.tool(row.id, call.tool, outcome.status, durationMs);
-      const read = outcome.result as { key?: string; version?: number; title?: string; owner?: string } | null;
-      if (call.tool === "knowledge.get" && outcome.status === "ok" && read?.key && read.version != null)
-        stream.knowledge({ key: read.key, version: read.version, title: read.title ?? read.key, owner: read.owner ?? "shared" });
+      const read = outcome.result as {
+        key?: string;
+        version?: number;
+        title?: string;
+        owner?: string;
+      } | null;
+      if (
+        call.tool === "knowledge.get" &&
+        outcome.status === "ok" &&
+        read?.key &&
+        read.version != null
+      )
+        stream.knowledge({
+          key: read.key,
+          version: read.version,
+          title: read.title ?? read.key,
+          owner: read.owner ?? "shared",
+        });
       await emitChatEvent({
         ...ids,
         kind: outcome.status === "ok" ? "tool.completed" : "tool.failed",
@@ -764,9 +813,7 @@ async function executeTurn(
           tool: call.tool,
           ref: evidenceRef,
           label: outcome.label,
-          ...(outcome.repositories.length === 1
-            ? { repository: outcome.repositories[0] }
-            : {}),
+          ...(outcome.repositories.length === 1 ? { repository: outcome.repositories[0] } : {}),
         };
         citations.push(citation);
         for (const r of outcome.repositories.slice(1))
@@ -925,7 +972,12 @@ async function executeTurn(
           await emitChatEvent({
             ...ids,
             kind: "routing.completed",
-            data: { ...routing, path: "tools", escalated: true, reason: "the direct answer needed platform tools" },
+            data: {
+              ...routing,
+              path: "tools",
+              escalated: true,
+              reason: "the direct answer needed platform tools",
+            },
           });
           continue;
         }
@@ -948,9 +1000,14 @@ async function executeTurn(
         }
       }
 
-      if (final == null) throw new ChatTurnError(chatFailure("INCOMPLETE_OUTPUT", "no answer within the step budget"));
+      if (final == null)
+        throw new ChatTurnError(
+          chatFailure("INCOMPLETE_OUTPUT", "no answer within the step budget"),
+        );
       if (!final.trim())
-        throw new ChatTurnError(chatFailure("INCOMPLETE_OUTPUT", "provider returned an empty answer"));
+        throw new ChatTurnError(
+          chatFailure("INCOMPLETE_OUTPUT", "provider returned an empty answer"),
+        );
 
       attemptRec.ok = true;
       attemptRec.finished_at = new Date().toISOString();
@@ -981,7 +1038,10 @@ async function executeTurn(
       });
       lastFailure = failure;
       avoid.add(admission.provider);
-      if (!mayFallback(failure, strategy, fallbackEnabled) || attempt + 1 >= ADMISSION.maxProviderAttempts)
+      if (
+        !mayFallback(failure, strategy, fallbackEnabled) ||
+        attempt + 1 >= ADMISSION.maxProviderAttempts
+      )
         throw new ChatTurnError({ ...failure, fallback_attempted: attempts.length > 1 });
       // Reuse toolResults already collected — do not clear authorized evidence.
       continue;
@@ -998,7 +1058,10 @@ async function executeTurn(
 
   for (const r of knowledgeRefs)
     if (r.disclosure === "inline")
-      citations.push({ ref: `knowledge:${r.key}@v${r.version}`, label: `${r.title} v${r.version}` });
+      citations.push({
+        ref: `knowledge:${r.key}@v${r.version}`,
+        label: `${r.title} v${r.version}`,
+      });
   for (const m of mentions)
     if (m.resolved && m.repository)
       citations.push({
@@ -1067,22 +1130,18 @@ export function abortLocal(turnId: number) {
 export async function recoverInstanceTurns() {
   for (const t of await chatRepository.runningTurnsOf(config.instanceId)) {
     if (active.has(t.id)) continue;
-    if (t.draft) await chatRepository.insertPartialAnswer(t.id, t.conversation_id, stripToolBlocks(t.draft));
-    await finishFailed(
-      t,
-      chatFailure("INTERRUPTED", "interrupted: the platform restarted"),
-    );
+    if (t.draft)
+      await chatRepository.insertPartialAnswer(t.id, t.conversation_id, stripToolBlocks(t.draft));
+    await finishFailed(t, chatFailure("INTERRUPTED", "interrupted: the platform restarted"));
   }
 }
 
 export async function recoverStaleTurns(conversationId: number) {
   for (const t of await chatRepository.staleTurns(conversationId)) {
     if (active.has(t.id)) continue;
-    if (t.draft) await chatRepository.insertPartialAnswer(t.id, t.conversation_id, stripToolBlocks(t.draft));
-    await finishFailed(
-      t,
-      chatFailure("INTERRUPTED", "interrupted: the worker instance stopped"),
-    );
+    if (t.draft)
+      await chatRepository.insertPartialAnswer(t.id, t.conversation_id, stripToolBlocks(t.draft));
+    await finishFailed(t, chatFailure("INTERRUPTED", "interrupted: the worker instance stopped"));
   }
 }
 
