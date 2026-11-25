@@ -1,0 +1,25 @@
+{
+  "_comment": "Reachable Go vulnerabilities that existed when the govulncheck gate was introduced (2026-11-26). They do not fail CI, but each needs a fix: all four are fixed by golang.org/x/net v0.60.0 (go get golang.org/x/net@v0.60.0). Remove an entry when it is fixed; scripts/govulncheck-gate.ts warns once it expires or stops being reported.",
+  "allow": [
+    {
+      "id": "GO-2026-6603",
+      "reason": "golang.org/x/net@v0.59.0, fixed in v0.60.0; reported at gate introduction, upgrade pending (not done in the CI phase to keep runtime unchanged)",
+      "expires": "2027-02-26"
+    },
+    {
+      "id": "GO-2026-6611",
+      "reason": "golang.org/x/net@v0.59.0, fixed in v0.60.0; reported at gate introduction, upgrade pending (not done in the CI phase to keep runtime unchanged)",
+      "expires": "2027-02-26"
+    },
+    {
+      "id": "GO-2026-6612",
+      "reason": "golang.org/x/net@v0.59.0, fixed in v0.60.0; reported at gate introduction, upgrade pending (not done in the CI phase to keep runtime unchanged)",
+      "expires": "2027-02-26"
+    },
+    {
+      "id": "GO-2026-6617",
+      "reason": "golang.org/x/net@v0.59.0, fixed in v0.60.0; reported at gate introduction, upgrade pending (not done in the CI phase to keep runtime unchanged)",
+      "expires": "2027-02-26"
+    }
+  ]
+}

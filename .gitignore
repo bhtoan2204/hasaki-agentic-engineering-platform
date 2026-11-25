@@ -7,6 +7,7 @@ web/dist/
 .req94-baseline/
 req94-*.log
 .eval/
+.coverage/
 
 # Go build and test artifacts (`go test -c`, `npm run build:go`, profiles).
 *.test

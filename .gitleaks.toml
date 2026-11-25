@@ -1,0 +1,12 @@
+# Secret scanning (.github/workflows/security.yml). Extends the default ruleset; only what is listed here is exempt.
+title = "hasaki-orbit gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public material that is not a secret"
+paths = [
+  # AWS RDS public CA bundle (certificates only, no private keys): see certs/README.md.
+  '''^certs/global-bundle\.pem$''',
+]

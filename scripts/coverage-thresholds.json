@@ -1,0 +1,17 @@
+{
+  "_comment": "Floors (percent) to stop regressions, not targets. Measured 2026-11-26 with unit + integration tests together (npm run test:coverage): src/auth lines 94.75 branches 75.84; src/authz lines 87.30 branches 70.73; src/workflow lines 96.57 branches 87.05. Each floor is the measured value rounded down, minus 1 point of margin for tests that skip on some machines. Raise them when coverage rises; never lower them to make a change pass.",
+  "floors": {
+    "src/auth": {
+      "lines": 93,
+      "branches": 74
+    },
+    "src/authz": {
+      "lines": 86,
+      "branches": 69
+    },
+    "src/workflow": {
+      "lines": 95,
+      "branches": 86
+    }
+  }
+}

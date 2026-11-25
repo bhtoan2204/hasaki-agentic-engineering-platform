@@ -1,0 +1,66 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 2 * * 1"
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
+jobs:
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # The audit reads package-lock.json only; nothing is installed. Fails at high and above (production dependencies).
+      - run: npm audit --omit=dev --audit-level=high
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+      # Fails on a reachable vulnerability that is not in go/govulncheck-allowlist.json.
+      - run: node --disable-warning=ExperimentalWarning scripts/govulncheck-gate.ts
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks (pinned, checksum-verified)
+        run: |
+          f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLo "/tmp/$f" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$f"
+          echo "${GITLEAKS_SHA256}  /tmp/$f" | sha256sum -c -
+          tar -xzf "/tmp/$f" -C /tmp gitleaks
+      # Whole history on a push or schedule, only the pull request's commits on a PR. Config: .gitleaks.toml.
+      - name: Scan pull request commits
+        if: github.event_name == 'pull_request'
+        run: /tmp/gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" .
+      - name: Scan history
+        if: github.event_name != 'pull_request'
+        run: /tmp/gitleaks git --config .gitleaks.toml --redact --no-banner .

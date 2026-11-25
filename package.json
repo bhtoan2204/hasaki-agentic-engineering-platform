@@ -13,6 +13,8 @@
     "predev": "sh scripts/ensure-bwrap.sh",
     "dev": "node --watch --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.ts",
     "test": "node --disable-warning=ExperimentalWarning --import ./test/env.ts --test test/*.test.ts",
+    "test:coverage": "node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=4 --experimental-test-coverage --test-coverage-include=src/auth/** --test-coverage-include=src/authz/** --test-coverage-include=src/workflow/** --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=.coverage/lcov.info test/*.test.ts test/*.integration.ts",
+    "coverage:check": "node --disable-warning=ExperimentalWarning scripts/coverage-check.ts",
     "test:integration": "node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=8 test/*.integration.ts",
     "test:all": "npm test && npm run test:integration",
     "eval:investigation": "node --disable-warning=ExperimentalWarning src/cli/evalInvestigation.ts",

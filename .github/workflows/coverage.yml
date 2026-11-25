@@ -1,0 +1,73 @@
+name: coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22
+  # Same pinned, checksum-verified ripgrep as ci.yml (code search falls back to it).
+  RIPGREP_VERSION: 15.1.0
+  RIPGREP_SHA256: 1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599
+
+# Separate from the test shards in ci.yml: runs unit and integration tests once, in one process tree, with V8 coverage,
+# and checks the floors in scripts/coverage-thresholds.json (src/auth, src/authz, src/workflow only).
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - id: modules
+        uses: actions/cache@v5
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - name: Install PostgreSQL 17 and verification sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17 bubblewrap
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - name: Install ripgrep (pinned, checksum-verified)
+        run: |
+          f="ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSLo "/tmp/$f" "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/$f"
+          echo "${RIPGREP_SHA256}  /tmp/$f" | sha256sum -c -
+          mkdir -p ~/.local/ripgrep
+          tar -xzf "/tmp/$f" -C ~/.local/ripgrep --strip-components=1
+          echo "$HOME/.local/ripgrep" >> "$GITHUB_PATH"
+      - name: Tests with coverage
+        run: |
+          mkdir -p .coverage
+          npm run test:coverage
+      - name: Coverage floors
+        run: npm run coverage:check
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: .coverage/lcov.info

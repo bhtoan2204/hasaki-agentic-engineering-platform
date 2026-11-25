@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: docker.io/pgvector/pgvector:pg17
+    image: docker.io/pgvector/pgvector:0.8.2-pg17
     container_name: hasaki-orbit-db
     environment:
       POSTGRES_USER: platform
@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: docker.io/ollama/ollama:latest
+    image: docker.io/ollama/ollama:0.40.16
     container_name: hasaki-orbit-ollama
     ports:
       - "127.0.0.1:11434:11434"
@@ -32,7 +32,7 @@ services:
     restart: unless-stopped
 
   ollama-init:
-    image: docker.io/ollama/ollama:latest
+    image: docker.io/ollama/ollama:0.40.16
     container_name: hasaki-orbit-ollama-init
     depends_on:
       ollama:
