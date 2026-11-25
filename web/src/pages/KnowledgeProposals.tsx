@@ -147,9 +147,10 @@ function Section({
 export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () => void }) {
   const { t } = useI18n();
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("pending");
-  const list = useApi<ProposalSummary[]>(`/api/knowledge-proposals${status ? `?status=${status}` : ""}`, [
-    status,
-  ]);
+  const list = useApi<ProposalSummary[]>(
+    `/api/knowledge-proposals${status ? `?status=${status}` : ""}`,
+    [status],
+  );
   // Bulk review: only pending proposals are selectable; the selection is dropped whenever the list changes.
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -362,7 +363,12 @@ function Diff({ lines }: { lines: Array<{ op: string; line: string }> }) {
 
 function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
   const { t } = useI18n();
-  const { data: p, error, loading, reload } = useApi<ProposalDetailData>(`/api/knowledge-proposals/${id}`, [id]);
+  const {
+    data: p,
+    error,
+    loading,
+    reload,
+  } = useApi<ProposalDetailData>(`/api/knowledge-proposals/${id}`, [id]);
   const [comment, setComment] = useState("");
   const [edit, setEdit] = useState<{
     content: string;
@@ -799,7 +805,7 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 placeholder={t("kp.commentPh")}
               />
             </Field>
-            <div className="rv-consequence small">
+            <div className="kp-consequence small">
               <CheckCircle2 size={14} color="var(--st-ok)" />
               <span>{t(`kp.effect.${p.change_type}`)}</span>
               <XCircle size={14} color="var(--st-err)" />
