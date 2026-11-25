@@ -1,6 +1,8 @@
-import { withTx } from "../db/pool.ts";
+import { one, pool, withTx } from "../db/pool.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
-import { startRun } from "../workflow/engine.ts";
+import { startRun, type StartRunInput } from "../workflow/engine.ts";
+import { EngineError } from "../workflow/mutations.ts";
+import { runEvents } from "../workflow/events.ts";
 import { activeRunForWorkItem, listRuns } from "../workflow/runRepository.ts";
 import { workItemRepository, type ImportInput, type WorkItemRow } from "./repository.ts";
 
@@ -37,6 +39,7 @@ export const workItems = {
     project?: string;
     code?: string;
     ownerId?: number;
+    payload?: Record<string, unknown>;
   }) {
     if (!x.title?.trim()) throw new Error("title is required");
     const ownerId = await requireWorkItemOwner(x.ownerId);
@@ -51,8 +54,84 @@ export const workItems = {
         description: x.description ?? "",
         project: x.project ?? "",
         ownerId,
+        payload: x.payload,
       });
     });
+  },
+
+  /**
+   * A bug found on QC for an earlier task (the parent): creates the bug work item, linked to the parent, and starts the
+   * bug-from-task run on it. The run continues the parent's own branch in each repository the parent changed, so the
+   * fix or improvement lands on the parent's pull request instead of a new branch.
+   */
+  async bugFollowUp(
+    x: {
+      parentId: number;
+      title?: string;
+      description: string;
+      ownerId: number;
+    } & Pick<
+      StartRunInput,
+      "version" | "start" | "profile" | "outputLocale" | "agentProvider" | "autonomy"
+    >,
+  ) {
+    const description = x.description?.trim();
+    if (!description) throw new EngineError("describe the bug found on QC", 400);
+    const parent = await workItemRepository.get(x.parentId);
+    if (!parent) throw new EngineError("parent work item not found", 404);
+    const { branches, pull_requests } = await workItemRepository.branches(parent.id);
+    const repositories = Object.keys(branches);
+    if (!repositories.length)
+      throw new EngineError(
+        `${parent.code} has no branch yet: there is nothing to continue. Start a normal bug investigation instead`,
+        409,
+      );
+    const title = (x.title?.trim() || description.split("\n")[0]).slice(0, 200);
+    const bug = await withTx(async (c) => {
+      const n = await one<{ n: number }>(
+        c,
+        "SELECT count(*)::int AS n FROM work_items WHERE payload->>'parent_code' = $1",
+        [parent.code],
+      );
+      return workItemRepository.insertManual(c, await workItemRepository.nextId(c), {
+        code: `${parent.code}-BUG-${(n?.n ?? 0) + 1}`,
+        title: `[Bug] ${title}`,
+        description,
+        project: parent.project,
+        ownerId: x.ownerId,
+        payload: { kind: "bug", parent_code: parent.code, parent_id: parent.id, branches },
+      });
+    });
+    const run = await startRun({
+      definitionKey: "bug-from-task",
+      version: x.version,
+      workItemId: bug.id,
+      ownerId: x.ownerId,
+      inputs: {
+        parent_task: parent.code,
+        parent_pull_requests: pull_requests,
+        branches,
+        repositories,
+      },
+      start: x.start,
+      profile: x.profile,
+      outputLocale: x.outputLocale,
+      agentProvider: x.agentProvider,
+      autonomy: x.autonomy,
+    });
+    const parentRun = await one<{ id: number }>(
+      pool,
+      "SELECT id FROM workflow_runs WHERE work_item_id = $1 ORDER BY id DESC LIMIT 1",
+      [parent.id],
+    );
+    if (parentRun)
+      await runEvents.add(
+        pool,
+        parentRun.id,
+        "system",
+        `QC bug ${bug.code} (run #${run.id}) continues the branch of this task`,
+      );
+    return { bug_item: bug, run };
   },
 
   /** Import or refresh only. Starting a run requires an explicit action or stored automation policy. */

@@ -2030,6 +2030,37 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
   },
 ];
 
+const FOLLOW_UP_NOTE =
+  "This bug was found on QC for an earlier task (inputs.parent_task). That task's own branch is already checked out for this run, so the fix is committed on it and updates its pull request. " +
+  "Start from what the earlier task changed (git.commits, git.commit and git.file_history on that branch) and decide whether the QC symptom is a defect of that change (fix it) or a behaviour it should have had (improve it). " +
+  "Stay inside the earlier task's change unless the root cause lies elsewhere, and say so then. ";
+const BUG_INVESTIGATION = TEMPLATES.find((t) => t.key === "bug-investigation")!.spec as {
+  description: string;
+  steps: GraphStep[];
+};
+/** A QC bug of an earlier task: the bug-investigation flow, on the parent's own branch (started by workItems.bugFollowUp). */
+TEMPLATES.push({
+  key: "bug-from-task",
+  spec: {
+    ...BUG_INVESTIGATION,
+    name: "QC Bug of a Task",
+    description:
+      "A bug found on QC for an earlier task: analysis on that task's change → root cause → fix proposal → approval → fix on the task's own branch → regression tests → review → PR. " +
+      "Start it with POST /api/work-items/:id/bug-followups on the earlier task",
+    inputs: {
+      parent_task: { description: "code of the earlier task the bug comes from", required: true },
+    },
+    steps: BUG_INVESTIGATION.steps.map((s) => {
+      const config = (s.config ?? {}) as Record<string, unknown>;
+      if (s.key === "analyze")
+        return { ...s, config: { ...config, instructions: FOLLOW_UP_NOTE + config.instructions } };
+      if (s.key === "confirm_repos")
+        return { ...s, config: { ...config, auto_approve_preselected: true } };
+      return s;
+    }),
+  },
+});
+
 // Not seeded: an admin installs it as a private workflow (POST /api/workflows with this key and spec) so only they run it.
 export const PONYTAIL_PILOT_TEMPLATE = {
   key: "ponytail-nonproduction-pilot",

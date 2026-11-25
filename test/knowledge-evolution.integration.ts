@@ -1029,6 +1029,52 @@ test("reuse-first-development is seeded as a managed skill and applies to analys
   assert.ok(!(await forStep("discover", "integration")).includes("reuse-first-development"));
 });
 
+test("architectural-consistency is seeded as a managed skill for analysis, planning, implementation and review steps, and complements reuse-first-development", async () => {
+  const { seedKnowledge, KNOWLEDGE_SEEDS } = await import("../src/knowledge/service.ts");
+  await seedKnowledge();
+  const item = await knowledge.get("architectural-consistency");
+  assert.ok(item, "registered in Knowledge & Skills");
+  assert.equal(item.title, "Architectural Consistency & Abstraction");
+  assert.equal(item.category, "agent_skill");
+  assert.equal(item.scope_type, "GLOBAL");
+  const seed = KNOWLEDGE_SEEDS.find((s) => s.key === "architectural-consistency")!;
+  assert.equal(
+    seed.metadata?.description,
+    "Ensure agents reuse existing architectural patterns and abstractions, avoid duplicated cross-cutting logic, and maintain consistency with the existing codebase.",
+  );
+  assert.notEqual(
+    seed.conflict_key,
+    KNOWLEDGE_SEEDS.find((s) => s.key === "reuse-first-development")!.conflict_key,
+  );
+  const at = new Date();
+  const forStep = async (stepKey: string, stepType: string) =>
+    resolveKnowledge(await knowledge.candidates(pool, null, at), {
+      organization: "hasaki",
+      project: "OMS",
+      repositories: ["oms-api"],
+      workflowKey: "bug-from-task",
+      stepKey,
+      stepType,
+      text: "gift lines promotion",
+      explicit: [],
+      now: at,
+    }).applied.map((k) => k.key);
+  for (const [k, t] of [
+    ["analyze", "agent"],
+    ["fix_proposal", "agent"],
+    ["review", "agent"],
+    ["implement", "coding_agent"],
+  ]) {
+    const applied = await forStep(k, t);
+    assert.ok(applied.includes("architectural-consistency"), `${k} gets it`);
+    assert.ok(
+      applied.includes("reuse-first-development"),
+      `${k} still gets reuse-first-development`,
+    );
+  }
+  assert.ok(!(await forStep("discover", "integration")).includes("architectural-consistency"));
+});
+
 test("minimal-comments and codebase-gardening are seeded as GLOBAL coding standards and reaches implementation and review steps", async () => {
   const { seedKnowledge } = await import("../src/knowledge/service.ts");
   await seedKnowledge();

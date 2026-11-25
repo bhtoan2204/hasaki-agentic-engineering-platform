@@ -627,6 +627,25 @@ export const routes: Route[] = [
     ),
   ],
   [
+    "POST",
+    /^\/api\/work-items\/(\d+)\/bug-followups$/,
+    async (c) => (
+      await requireWorkItem(c.actor, num(c.p[0]), support(c)),
+      workItems.bugFollowUp({
+        parentId: num(c.p[0]),
+        title: c.body.title,
+        description: String(c.body.description ?? ""),
+        version: c.body.version,
+        start: c.body.start,
+        profile: c.body.profile,
+        outputLocale: localeOf(c.body),
+        agentProvider: providerOf(c.body),
+        ownerId: c.actor.id,
+        autonomy: c.body.autonomy,
+      })
+    ),
+  ],
+  [
     "GET",
     /^\/api\/work-items\/(\d+)\/cost$/,
     async (c) => (

@@ -106,14 +106,47 @@ export const workItemRepository = {
       description: string;
       project: string;
       ownerId: number;
+      payload?: Record<string, unknown>;
     },
   ) {
     const row = await one<WorkItemRow>(
       db,
-      "INSERT INTO work_items (id, code, source, title, description, project, owner_id) VALUES ($1, $2, 'manual', $3, $4, $5, $6) RETURNING *",
-      [id, input.code, input.title, input.description, input.project, input.ownerId],
+      "INSERT INTO work_items (id, code, source, title, description, project, owner_id, payload) VALUES ($1, $2, 'manual', $3, $4, $5, $6, $7) RETURNING *",
+      [
+        id,
+        input.code,
+        input.title,
+        input.description,
+        input.project,
+        input.ownerId,
+        json(input.payload ?? {}),
+      ],
     );
     return row!;
+  },
+
+  /**
+   * The branch each repository of a work item was worked on: the pull request's source branch, else the branch of the
+   * newest worktree of its runs. This is where a follow-up of the item continues.
+   */
+  async branches(id: number, db: Db = pool) {
+    const prs = await q<{ repo: string; source_branch: string; url: string }>(
+      db,
+      "SELECT repo, source_branch, url FROM pull_requests WHERE work_item_id = $1 ORDER BY id DESC",
+      [id],
+    );
+    const worktrees = await q<{ repo: string; branch: string }>(
+      db,
+      `SELECT DISTINCT ON (w.repo) w.repo, w.branch
+         FROM execution_workspaces w JOIN workflow_runs r ON r.id = w.run_id
+        WHERE r.work_item_id = $1 AND w.subtask_id IS NULL
+        ORDER BY w.repo, w.created_at DESC`,
+      [id],
+    );
+    const branches: Record<string, string> = {};
+    for (const w of worktrees) branches[w.repo] = w.branch;
+    for (const p of [...prs].reverse()) branches[p.repo] = p.source_branch;
+    return { branches, pull_requests: prs.map((p) => p.url).filter(Boolean) };
   },
 
   lockByCode(db: Db, code: string, ownerId: number) {
