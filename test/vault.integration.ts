@@ -219,6 +219,7 @@ test("token validated before saving; list/keys work on KV v1 and v2; secret valu
   valid = false;
   assert.equal((await vaultStatus(true)).expired, true);
   valid = true;
+  await setVaultToken(TOKEN);
 });
 
 const withWritableQc = async (fn: () => Promise<void>) => {
