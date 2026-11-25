@@ -222,6 +222,11 @@ export interface Config {
   notifyWebhook: string;
   /** Public URL of this platform, used in notifications. */
   publicUrl: string;
+  /**
+   * Reverse proxies in front of this server that append to X-Forwarded-For (TRUSTED_PROXY_HOPS). 0 = none: the header is
+   * ignored and the socket address is the client IP (login throttling keys on it).
+   */
+  http: { trustedProxyHops: number };
   /** Claude model override; empty = Claude Code default. */
   model: string;
   maxConcurrent: number;
@@ -754,6 +759,7 @@ const defaults: Config = {
   platform: { repositoryUrl: "", trustedOperatorIsolation: false, testDatabaseAdminUrl: "" },
   notifyWebhook: "",
   publicUrl: "",
+  http: { trustedProxyHops: 0 },
   model: "",
   maxConcurrent: 1,
   maxTurns: 300,
@@ -1163,6 +1169,11 @@ function load(): Config {
     cfg.platform.testDatabaseAdminUrl = process.env.PLATFORM_TEST_DATABASE_ADMIN_URL;
   cfg.notifyWebhook = process.env.NOTIFY_WEBHOOK ?? cfg.notifyWebhook;
   if (process.env.PORT) cfg.port = Number(process.env.PORT);
+  if (process.env.TRUSTED_PROXY_HOPS !== undefined)
+    cfg.http.trustedProxyHops = Math.min(
+      8,
+      Math.max(0, Math.floor(Number(process.env.TRUSTED_PROXY_HOPS)) || 0),
+    );
   if (!cfg.publicUrl) cfg.publicUrl = `http://localhost:${cfg.port}`;
   mkdirSync(cfg.dataDir, { recursive: true });
   if (LIVE) {

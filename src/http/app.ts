@@ -1,9 +1,10 @@
 import { acceptWebhook } from "../telegram/transport.ts";
 import { SharedAbort } from "./sharedAbort.ts";
 import { handleInternal } from "../prodErrors/gateway.ts";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import { isTransientDbError, pool } from "../db/pool.ts";
 import { execution } from "../auth/execution.ts";
 import { loadPersonalIntegrations } from "../integrations/loadPersonal.ts";
@@ -31,8 +32,15 @@ import { compress, compressedStatic, COMPRESS_MIN_BYTES, pickEncoding } from "./
 import { count, observe } from "../runtimeMetrics.ts";
 import { config } from "../config.ts";
 import { logError } from "../logging.ts";
+import {
+  bodyLimitFor,
+  DEFAULT_BODY_LIMIT,
+  TELEGRAM_WEBHOOK_BODY_LIMIT,
+  UPLOAD_BODY_LIMIT,
+} from "./bodyLimits.ts";
+import { applySecurityHeaders } from "./securityHeaders.ts";
 
-const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
+const webDist = resolve(import.meta.dirname, "..", "..", "web", "dist");
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -45,13 +53,39 @@ const TYPES: Record<string, string> = {
 
 const COMPRESSIBLE = new Set([".html", ".js", ".css", ".svg", ".json"]);
 
+/** Static files kept in memory by mtime, so a request does not re-read the bundle; bounded in total bytes. */
+const STATIC_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const STATIC_FILE_MAX_BYTES = 8 * 1024 * 1024;
+const fileCache = new Map<string, { mtimeMs: number; body: Buffer }>();
+let fileCacheBytes = 0;
+
+async function readStatic(file: string, mtimeMs: number, size: number): Promise<Buffer> {
+  const hit = fileCache.get(file);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.body;
+  const body = await readFile(file);
+  if (hit) fileCacheBytes -= hit.body.length;
+  fileCache.delete(file);
+  if (size <= STATIC_FILE_MAX_BYTES) {
+    // Map keeps insertion order: evict the oldest entries until the new one fits.
+    for (const [key, old] of fileCache) {
+      if (fileCacheBytes + body.length <= STATIC_CACHE_MAX_BYTES) break;
+      fileCache.delete(key);
+      fileCacheBytes -= old.body.length;
+    }
+    fileCache.set(file, { mtimeMs, body });
+    fileCacheBytes += body.length;
+  }
+  return body;
+}
+
 async function serveFile(
   req: IncomingMessage,
   res: ServerResponse,
   file: string,
   cache = "no-cache",
 ) {
-  const body = readFileSync(file);
+  const info = statSync(file);
+  const body = await readStatic(file, info.mtimeMs, info.size);
   const type = TYPES[extname(file)] ?? "application/octet-stream";
   const encoding =
     COMPRESSIBLE.has(extname(file)) && body.length >= 1024
@@ -61,7 +95,7 @@ async function serveFile(
     res.writeHead(200, { "Content-Type": type, "Cache-Control": cache });
     return void res.end(body);
   }
-  const out = await compressedStatic(file, statSync(file).mtimeMs, body, encoding);
+  const out = await compressedStatic(file, info.mtimeMs, body, encoding);
   res.writeHead(200, {
     "Content-Type": type,
     "Cache-Control": cache,
@@ -74,9 +108,18 @@ async function serveFile(
 
 async function serveStatic(url: URL, req: IncomingMessage, res: ServerResponse) {
   if (url.pathname.startsWith("/api/")) return false;
-  const rel = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, "");
-  const file = join(webDist, rel);
-  if (rel && file.startsWith(webDist) && existsSync(file) && statSync(file).isFile())
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url.pathname);
+  } catch {
+    throw new HttpError(400, "Malformed URL");
+  }
+  if (decoded.includes("\0") || decoded.includes("\\")) throw new HttpError(400, "Malformed URL");
+  const rel = normalize(decoded).replace(/^\/+/, "");
+  const file = resolve(webDist, rel);
+  if (file !== webDist && !file.startsWith(webDist + sep))
+    throw new HttpError(400, "Malformed URL");
+  if (rel && isFile(file))
     return (
       await serveFile(
         req,
@@ -95,23 +138,38 @@ async function serveStatic(url: URL, req: IncomingMessage, res: ServerResponse) 
     return true;
   }
   const index = join(webDist, "index.html");
-  if (existsSync(index)) return (await serveFile(req, res, index), true);
+  if (isFile(index)) return (await serveFile(req, res, index), true);
   res
     .writeHead(503, { "Content-Type": "text/plain; charset=utf-8" })
     .end("UI not built yet: run `npm run build` (npm start does it automatically).");
   return true;
 }
 
-async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unknown> {
+function isFile(path: string) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Thrown for an oversized body; handle() answers it with Connection: close and drops the unread rest of the body. */
+class BodyTooLarge extends HttpError {
+  constructor() {
+    super(413, "Body too large");
+  }
+}
+
+async function readJson(req: IncomingMessage, maxBytes = DEFAULT_BODY_LIMIT): Promise<unknown> {
+  // A declared length over the limit is refused before a single body byte is read.
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > maxBytes) throw new BodyTooLarge();
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > maxBytes) {
-      req.resume();
-      throw new HttpError(413, "Body too large");
-    }
+    if (bytes > maxBytes) throw new BodyTooLarge();
     chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
@@ -122,7 +180,11 @@ async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unkn
   }
 }
 
-async function readObject(req: IncomingMessage, maxBytes = Infinity, nullAsEmpty = false) {
+async function readObject(
+  req: IncomingMessage,
+  maxBytes = DEFAULT_BODY_LIMIT,
+  nullAsEmpty = false,
+) {
   const body = await readJson(req, maxBytes);
   if (body === null && nullAsEmpty) return {};
   if (body === null || typeof body !== "object" || Array.isArray(body))
@@ -201,6 +263,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://x");
   const method = req.method ?? "GET";
   const key = `${method} ${url.pathname}`;
+  applySecurityHeaders(req, res);
   try {
     // platform-go's internal gateway (bearer token, loopback only); never reached through a browser session.
     if (url.pathname.startsWith("/internal/") && (await handleInternal(req, res, url))) return;
@@ -214,7 +277,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         200,
         await acceptWebhook(
           req.headers["x-telegram-bot-api-secret-token"],
-          await readJson(req, 262144),
+          await readJson(req, TELEGRAM_WEBHOOK_BODY_LIMIT),
         ),
       );
     }
@@ -238,7 +301,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       );
     }
     if (key === "POST /api/auth/login") {
-      const body = await readObject(req);
+      const body = await readObject(req, bodyLimitFor(url.pathname));
       const result = await login(String(body.username ?? ""), String(body.password ?? ""), req);
       setSessionCookie(res, req, result.token);
       return send(res, 200, {
@@ -272,7 +335,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       return send(res, 200, { ok: true });
     }
     if (key === "POST /api/auth/password") {
-      const body = await readObject(req);
+      const body = await readObject(req, bodyLimitFor(url.pathname));
       await setPassword(actor.id, String(body.password ?? ""));
       await logout(req);
       clearSessionCookie(res, req);
@@ -313,7 +376,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         res,
         200,
         // 10 MB document as base64 plus the JSON envelope.
-        await uploadAttachment(actor.id, positiveId(upload[1]), await readObject(req, 14_200_000)),
+        await uploadAttachment(
+          actor.id,
+          positiveId(upload[1]),
+          await readObject(req, UPLOAD_BODY_LIMIT),
+        ),
       );
     }
     const image = method === "GET" && url.pathname.match(/^\/api\/chat\/attachments\/(\d+)$/);
@@ -357,7 +424,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       if (!m || routeMethod !== method) continue;
       // Budget endpoints also accept JSON null to clear an existing budget.
       const legacyNullBudget = /^\/api\/(?:runs|work-items)\/\d+\/budget$/.test(url.pathname);
-      const body = method === "POST" ? await readObject(req, Infinity, legacyNullBudget) : {};
+      const body =
+        method === "POST"
+          ? await readObject(req, bodyLimitFor(url.pathname), legacyNullBudget)
+          : {};
       // Create-type POSTs with an Idempotency-Key: a repeat replays the first response instead of creating twice.
       const idemKey = req.headers["idempotency-key"];
       const claim =
@@ -417,6 +487,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
   } catch (e) {
     if (res.headersSent) return;
     const { status, body } = errorResponse(e);
+    if (e instanceof BodyTooLarge) {
+      // Do not read the rest of an oversized body: answer, then close the connection.
+      res.setHeader("Connection", "close");
+      res.once("finish", () => req.destroy());
+    }
     if (status >= 500) {
       logError("http.request_failed", "HTTP request failed", e, {
         method,

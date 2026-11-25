@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pool, q, one } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
+import { clientIp } from "../http/clientIp.ts";
 import { randomToken, safeEqual, sessionHash } from "./crypto.ts";
 import { verifyPassword } from "./password.ts";
 import { assertUsername, publicUser, userByUsername, type PublicUser } from "./users.ts";
@@ -19,13 +20,6 @@ const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILS = 8;
 
 export type SessionUser = PublicUser & { csrf: string };
-
-function clientIp(req: IncomingMessage) {
-  const fwd = String(req.headers["x-forwarded-for"] ?? "")
-    .split(",")[0]
-    ?.trim();
-  return (fwd || req.socket.remoteAddress || "").slice(0, 80);
-}
 
 export function cookieSecure(req: IncomingMessage) {
   if (process.env.COOKIE_SECURE === "1") return true;
@@ -82,6 +76,23 @@ async function tooMany(username: string, ip: string) {
     [ip, since],
   );
   return (byName?.n ?? 0) >= MAX_FAILS || (byIp?.n ?? 0) >= MAX_FAILS * 3;
+}
+
+const LOGIN_ATTEMPT_RETENTION_DAYS = 30;
+const PRUNE_BATCH = 5000;
+
+/**
+ * Deletes login attempts past retention, one bounded batch per call (the throttle only reads the last 15 minutes;
+ * the (username, created_at) and (ip, created_at) indexes from 016_auth.sql serve both throttle lookups).
+ */
+export async function pruneLoginAttempts(limit = PRUNE_BATCH, now = Date.now()) {
+  const cutoff = new Date(now - LOGIN_ATTEMPT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const rows = await q(
+    pool,
+    "DELETE FROM login_attempts WHERE id IN (SELECT id FROM login_attempts WHERE created_at < $1 ORDER BY created_at LIMIT $2) RETURNING id",
+    [cutoff, limit],
+  );
+  return rows.length;
 }
 
 async function record(username: string, ip: string, success: boolean) {

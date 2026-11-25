@@ -1,4 +1,5 @@
 import { startTelegramTransport } from "./telegram/transport.ts";
+import { pruneLoginAttempts } from "./auth/sessions.ts";
 import { enforceAutonomyTimeouts } from "./chat/autonomy.ts";
 import { radarTick } from "./radar/scan.ts";
 import { dispatchDelegations } from "./workflow/delegationDispatch.ts";
@@ -116,6 +117,13 @@ registerReconcileTask("causal_memory", async () => {
   if (Date.now() - causalCheckedAt < 30 * 60_000) return;
   causalCheckedAt = Date.now();
   await invalidateCausalMemories();
+});
+// Failed/successful login attempts past retention are deleted in bounded batches (every 10 minutes).
+let loginAttemptsPrunedAt = 0;
+registerReconcileTask("login_attempts", async () => {
+  if (Date.now() - loginAttemptsPrunedAt < 10 * 60_000) return;
+  loginAttemptsPrunedAt = Date.now();
+  for (let batch = 0; batch < 20; batch++) if ((await pruneLoginAttempts()) < 5000) break;
 });
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
