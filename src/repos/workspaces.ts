@@ -20,6 +20,7 @@ import { alignCheckoutToBase } from "./checkoutBase.ts";
 import { ensureFreshBase, ensureFreshLocalBase, lastFreshness } from "./freshness.ts";
 import { overlapsLiveApplication } from "../platform/selfDevelopment.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 const exec = promisify(execFile);
 
@@ -54,8 +55,10 @@ export async function repositoryLock<T>(
     await c.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [key]);
     return await action();
   } finally {
-    await c.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [key]).catch(() => {});
-    await c.query("RESET lock_timeout").catch(() => {});
+    await c
+      .query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [key])
+      .catch(ignoreError("repos.workspace_advisory_unlock"));
+    await c.query("RESET lock_timeout").catch(ignoreError("repos.workspace_reset_lock_timeout"));
     c.release();
   }
 }

@@ -9,6 +9,7 @@ import { languagePolicy, outputLocale, type OutputLocale } from "../../agent/lan
 import { agentProvider, type AgentProvider } from "../../agent/provider.ts";
 import { completeForRun } from "../../agent/complete.ts";
 import { TEST_POLICY } from "../templates.ts";
+import { ignoreError } from "../../ignoreError.ts";
 
 /**
  * Human-in-the-loop handling of a failed test step (after automatic retries are exhausted):
@@ -100,7 +101,9 @@ export function parseNodeTest(output: string): Array<{ file: string; test: strin
     if (/failureType: 'subtestsFailed'/.test(yaml)) continue;
     const loc = yaml.match(/location: '(?:file:\/\/)?([^':]+)/)?.[1] ?? "";
     out.push({
-      file: loc.includes("/test/") ? `test/${loc.split("/test/").pop()}` : loc.split("/").pop() || "(node test)",
+      file: loc.includes("/test/")
+        ? `test/${loc.split("/test/").pop()}`
+        : loc.split("/").pop() || "(node test)",
       test: m[2].replace(/^'(.*)'$/, "$1"),
       log: yaml.slice(0, 2000),
     });
@@ -210,7 +213,9 @@ export function diagnose(input: {
           reason = "network/infrastructure error in the log; no baseline evidence";
         } else {
           category = "insufficient";
-          reason = b?.note ? `no baseline evidence (${b.note})` : "no baseline evidence for this failure";
+          reason = b?.note
+            ? `no baseline evidence (${b.note})`
+            : "no baseline evidence for this failure";
         }
         failures.push({
           repo: r.repo,
@@ -327,11 +332,15 @@ async function askClaude<T>(
   ctx?: ExecutionContext,
   provider: AgentProvider = "claude",
 ): Promise<T> {
-  const done = await completeForRun({ ...(ctx?.run ?? {}), agent_provider: provider }, prompt, ctx?.signal);
+  const done = await completeForRun(
+    { ...(ctx?.run ?? {}), agent_provider: provider },
+    prompt,
+    ctx?.signal,
+  );
   if (ctx)
     await ctx
       .recordMetrics({ advisor: done.metrics, advisor_cost_usd: done.metrics.cost_usd })
-      .catch(() => {});
+      .catch(ignoreError("executor.record_metrics"));
   const out = done.text;
   const j = out.match(/\{[\s\S]*\}/)?.[0];
   if (!j) throw new Error("no JSON from advisor");
@@ -370,7 +379,9 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
               "Some logs show network/infrastructure errors: when a test reaches remote infrastructure it did not start itself,",
               "suggest “Fix then retest” so the test is rewritten with mocks or deleted, not a plain rerun.",
             ]
-          : ["Do not speculate about databases, Elasticsearch or other infrastructure: no log shows such an error."]),
+          : [
+              "Do not speculate about databases, Elasticsearch or other infrastructure: no log shows such an error.",
+            ]),
         'Reply JSON only: {"text": "...", "suggestion": "..."}.',
         '<untrusted_input source="test_output">',
         compact(d),

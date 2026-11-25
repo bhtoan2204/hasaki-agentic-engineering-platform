@@ -13,6 +13,7 @@ import { resolveRepoPath, unsafeRelativePath } from "./repos/paths.ts";
 import { overlapsLiveApplication } from "./platform/selfDevelopment.ts";
 import { promisify } from "node:util";
 import { config } from "./config.ts";
+import { ignoreError } from "./ignoreError.ts";
 
 const exec = promisify(execFile);
 
@@ -138,7 +139,9 @@ export async function prepareBranch(
     await git(repoPath, "worktree", "add", wt, branch);
     // Continuing an existing branch: catch up with origin when the local copy is only behind (never rewrites history).
     if (opts.mustExist && (await refExists(repoPath, `refs/remotes/origin/${branch}`)))
-      await git(wt, "merge", "--ff-only", `origin/${branch}`).catch(() => {});
+      await git(wt, "merge", "--ff-only", `origin/${branch}`).catch(
+        ignoreError("git.fast_forward_existing_branch"),
+      );
     return { repo, branch, path: wt, createdFrom: "existing local branch" };
   }
   if (await refExists(repoPath, `refs/remotes/origin/${branch}`)) {
@@ -175,7 +178,10 @@ export async function prepareBranch(
   if (!(await refExists(repoPath, base))) throw new Error(`${repo}: base branch ${base} not found`);
   if (opts.baseCommit) {
     // The revision the run analysed and planned against. It must exist; nothing is invented when it does not.
-    if (!/^[0-9a-f]{40}$/.test(opts.baseCommit) || !(await refExists(repoPath, `${opts.baseCommit}^{commit}`)))
+    if (
+      !/^[0-9a-f]{40}$/.test(opts.baseCommit) ||
+      !(await refExists(repoPath, `${opts.baseCommit}^{commit}`))
+    )
       throw new Error(
         `${repo}: the run's pinned base ${opts.baseCommit.slice(0, 12)} is not available in the checkout (nothing was created)`,
       );
@@ -211,7 +217,9 @@ export async function pushBranch(
   try {
     if (expectedSha) {
       await git(path, "push", "origin", `${expectedSha}:refs/heads/${branch}`);
-      await git(path, "branch", "--set-upstream-to", `origin/${branch}`, branch).catch(() => {});
+      await git(path, "branch", "--set-upstream-to", `origin/${branch}`, branch).catch(
+        ignoreError("git.set_upstream"),
+      );
     } else await git(path, "push", "-u", "origin", branch);
   } catch (e) {
     if (!/non-fast-forward|fetch first|\[rejected\]/.test((e as Error).message)) throw e;
@@ -414,8 +422,7 @@ export async function unregisterMissingWorktree(repoPath: string, path: string) 
  */
 export async function mergeBranchInto(path: string, branch: string): Promise<void> {
   repositoryBranch(branch);
-  if (await worktreePorcelain(path))
-    throw new Error(`worktree ${path} has uncommitted changes`);
+  if (await worktreePorcelain(path)) throw new Error(`worktree ${path} has uncommitted changes`);
   try {
     await git(
       path,
@@ -429,7 +436,7 @@ export async function mergeBranchInto(path: string, branch: string): Promise<voi
       branch,
     );
   } catch (e) {
-    await git(path, "merge", "--abort").catch(() => {});
+    await git(path, "merge", "--abort").catch(ignoreError("git.merge_abort"));
     throw new Error(
       `merge of ${branch} failed: ${String((e as Error).message ?? e).split("\n")[0]}`,
     );

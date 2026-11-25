@@ -15,6 +15,7 @@ import { livePolicy } from "./autonomy.ts";
 import { reexecuteStep } from "./engine.ts";
 import type { RunRow } from "./types.ts";
 import { log } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Delivery lifecycle of a published pull request, kept apart from run completion. Remote state is the authority for
@@ -506,7 +507,7 @@ async function notifyTransition(
       : s.state === "MERGED" || s.state === "CLOSED"
         ? `ℹ️ PR ${row.repo} ${s.state.toLowerCase()}`
         : `⚠️ PR ${row.repo}: ${s.state} — ${s.reasons[0] ?? ""}`;
-  await notify(text, row.url).catch(() => {});
+  await notify(text, row.url).catch(ignoreError("pr_lifecycle.notify"));
 }
 
 /** Delivery view of a run: one row per PR and the aggregate. */

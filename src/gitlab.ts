@@ -14,6 +14,7 @@ import {
   type MergeReadiness,
   type PipelineSummary,
 } from "./git/model.ts";
+import { ignoreError } from "./ignoreError.ts";
 
 /**
  * GitLab REST v4 client for gitlab.com and allow-listed self-hosted instances (config.gitlab.instances).
@@ -285,7 +286,7 @@ export async function glab<T = unknown>(
     }
     if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
       if (!last) {
-        await res.body?.cancel().catch(() => {});
+        await res.body?.cancel().catch(ignoreError("gitlab.cancel_response_body"));
         await sleep(res.status === 429 ? retryAfterMs(res, attempt) : backoffMs(attempt));
         continue;
       }

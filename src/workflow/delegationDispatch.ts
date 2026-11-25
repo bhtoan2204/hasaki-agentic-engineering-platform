@@ -19,6 +19,7 @@ import {
 import type { AttemptRow, RunRow, StepRow } from "./types.ts";
 import { logError } from "../logging.ts";
 import { redactSecrets } from "../integrations/redact.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 const TERMINAL_RUN = ["COMPLETED", "FAILED", "CANCELED"];
 const cancelsChildren = (status: string) => status === "CANCELED" || status === "FAILED";
@@ -397,7 +398,7 @@ let again = false;
 export async function dispatchDelegations(): Promise<Awaited<ReturnType<typeof pass>>> {
   if (running) {
     again = true;
-    await running.catch(() => {});
+    await running.catch(ignoreError("delegation.await_running_pass"));
     if (running) return running;
   }
   again = false;

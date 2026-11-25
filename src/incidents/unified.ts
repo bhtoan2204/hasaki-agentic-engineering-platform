@@ -28,6 +28,7 @@ import {
   type CodeLocation,
   type Reconciliation,
 } from "./reconcile.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 const exec = promisify(execFile);
 export const RUNTIME_WORKFLOW = "production-incident-investigation";
@@ -43,7 +44,11 @@ const lockKey = (s: string) => createHash("sha256").update(s).digest().readBigIn
 
 async function groupOf(fp: string) {
   if (!FP.test(fp)) throw new HttpError(400, "invalid fingerprint");
-  const g = await one<GroupRow>(pool, "SELECT *, day::text AS day FROM prod_error_groups WHERE fingerprint=$1", [fp]);
+  const g = await one<GroupRow>(
+    pool,
+    "SELECT *, day::text AS day FROM prod_error_groups WHERE fingerprint=$1",
+    [fp],
+  );
   if (!g) throw new HttpError(404, "incident not found");
   return g;
 }
@@ -59,7 +64,13 @@ async function workspace(db: Db, fp: string, ownerId: number) {
   return Number(r!.id);
 }
 
-async function link(db: Db, investigationId: number, runId: number, kind: "runtime" | "bug_hunt" | "fix", source: string) {
+async function link(
+  db: Db,
+  investigationId: number,
+  runId: number,
+  kind: "runtime" | "bug_hunt" | "fix",
+  source: string,
+) {
   await q(
     db,
     `INSERT INTO incident_investigation_runs (investigation_id, run_id, kind, link_source) VALUES ($1,$2,$3,$4)
@@ -120,7 +131,9 @@ interface LinkedRun {
 
 const parseLocation = (s: string | null | undefined): CodeLocation | null => {
   const m = /^([\w.-]+):([\w./-]+):(\d+)$/.exec(String(s ?? "").trim());
-  return m ? { repository: m[1], file: m[2], line_start: Number(m[3]), line_end: Number(m[3]) } : null;
+  return m
+    ? { repository: m[1], file: m[2], line_start: Number(m[3]), line_end: Number(m[3]) }
+    : null;
 };
 
 /** Bounded freshness: has the cited file changed between the evidence commit and the repository's current base? */
@@ -138,19 +151,28 @@ function freshness() {
       );
     return cache.get(repo)!;
   };
-  return async (loc: CodeLocation, commit: string | null): Promise<{ stale: boolean; base: string | null; note?: string }> => {
+  return async (
+    loc: CodeLocation,
+    commit: string | null,
+  ): Promise<{ stale: boolean; base: string | null; note?: string }> => {
     const head = await base(loc.repository);
-    if (!commit || !head) return { stale: false, base: head, note: "freshness not checked (no commit or checkout)" };
+    if (!commit || !head)
+      return { stale: false, base: head, note: "freshness not checked (no commit or checkout)" };
     if (head.startsWith(commit) || commit.startsWith(head)) return { stale: false, base: head };
-    if (++checks > MAX_FRESHNESS_CHECKS) return { stale: false, base: head, note: "freshness check budget exhausted" };
+    if (++checks > MAX_FRESHNESS_CHECKS)
+      return { stale: false, base: head, note: "freshness check budget exhausted" };
     const path = await checkoutOf(loc.repository);
     // exit 0: unchanged; 1: changed; anything else (unknown commit): cannot tell → not claimed fresh either way.
-    const r = await exec("git", ["-C", path!, "diff", "--quiet", commit, head, "--", loc.file], { timeout: 10_000 }).then(
+    const r = await exec("git", ["-C", path!, "diff", "--quiet", commit, head, "--", loc.file], {
+      timeout: 10_000,
+    }).then(
       () => 0,
       (e: { code?: number }) => (typeof e.code === "number" ? e.code : 2),
     );
     if (r === 1) return { stale: true, base: head };
-    return r === 0 ? { stale: false, base: head } : { stale: false, base: head, note: "evidence commit not in the checkout" };
+    return r === 0
+      ? { stale: false, base: head }
+      : { stale: false, base: head, note: "evidence commit not in the checkout" };
   };
 }
 
@@ -175,21 +197,49 @@ async function collect(ownerId: number, runs: LinkedRun[], readable: Set<string>
     // Defense in depth: a link to another user's run is never read (and is reported, not silently dropped).
     if (Number(r.owner_id) !== ownerId) {
       items.push({
-        ref: `run:${r.run_id}`, source: r.kind === "bug_hunt" ? "bug_hunt" : "runtime", run_id: r.run_id, kind: "runtime_finding",
-        statement: "", location: null, commit: null, refs: [], valid: false, invalid_reason: "run owned by another user",
+        ref: `run:${r.run_id}`,
+        source: r.kind === "bug_hunt" ? "bug_hunt" : "runtime",
+        run_id: r.run_id,
+        kind: "runtime_finding",
+        statement: "",
+        location: null,
+        commit: null,
+        refs: [],
+        valid: false,
+        invalid_reason: "run owned by another user",
       });
       continue;
     }
     if (r.kind === "bug_hunt") {
-      const h = await one<{ id: number; report: { partial?: boolean } | null; revisions: Record<string, string> | null }>(
-        pool, "SELECT id, report, revisions FROM bug_hunts WHERE run_id=$1 AND requested_by=$2", [r.run_id, ownerId]);
-      const steps = await q<{ key: string; status: string }>(pool, "SELECT key, status FROM workflow_steps WHERE run_id=$1", [r.run_id]);
+      const h = await one<{
+        id: number;
+        report: { partial?: boolean } | null;
+        revisions: Record<string, string> | null;
+      }>(pool, "SELECT id, report, revisions FROM bug_hunts WHERE run_id=$1 AND requested_by=$2", [
+        r.run_id,
+        ownerId,
+      ]);
+      const steps = await q<{ key: string; status: string }>(
+        pool,
+        "SELECT key, status FROM workflow_steps WHERE run_id=$1",
+        [r.run_id],
+      );
       const status = huntStatus(r.status, steps, h?.report ?? null);
       const rows = h
-        ? await q<{ id: number; repository: string; commit: string; file_path: string; function: string; line_start: number; line_end: number;
-            category: string; bug_verification_status: EvidenceItem["bug_verification"]; incident_causality_status: EvidenceItem["causality"];
-            basis: string; finding: Record<string, unknown> }>(
-            pool, "SELECT * FROM bug_hunt_findings WHERE hunt_id=$1 ORDER BY id", [h.id])
+        ? await q<{
+            id: number;
+            repository: string;
+            commit: string;
+            file_path: string;
+            function: string;
+            line_start: number;
+            line_end: number;
+            category: string;
+            bug_verification_status: EvidenceItem["bug_verification"];
+            incident_causality_status: EvidenceItem["causality"];
+            basis: string;
+            finding: Record<string, unknown>;
+          }>(pool, "SELECT * FROM bug_hunt_findings WHERE hunt_id=$1 ORDER BY id", [h.id])
         : [];
       for (const f of rows) {
         const i: EvidenceItem = {
@@ -198,7 +248,13 @@ async function collect(ownerId: number, runs: LinkedRun[], readable: Set<string>
           run_id: r.run_id,
           kind: "code_defect",
           statement: `${f.category}: ${String(f.finding.hypothesis ?? f.finding.actual ?? "").slice(0, 300)}`,
-          location: { repository: f.repository, file: f.file_path, line_start: f.line_start, line_end: f.line_end, function: f.function },
+          location: {
+            repository: f.repository,
+            file: f.file_path,
+            line_start: f.line_start,
+            line_end: f.line_end,
+            function: f.function,
+          },
           commit: f.commit,
           bug_verification: f.bug_verification_status,
           causality: f.incident_causality_status,
@@ -209,7 +265,13 @@ async function collect(ownerId: number, runs: LinkedRun[], readable: Set<string>
         await check(i);
         items.push(i);
       }
-      sources.push({ run_id: r.run_id, kind: "bug_hunt", run_status: r.status, outcome: status, missing: [] });
+      sources.push({
+        run_id: r.run_id,
+        kind: "bug_hunt",
+        run_status: r.status,
+        outcome: status,
+        missing: [],
+      });
     } else if (r.kind === "runtime") {
       const out = (
         await one<{ output: Record<string, unknown> | null }>(
@@ -240,25 +302,49 @@ async function collect(ownerId: number, runs: LinkedRun[], readable: Set<string>
         await check(i);
         items.push(i);
       }
-      for (const [n, f] of ((out?.findings ?? []) as Array<{ statement: string; classification: string; evidence_refs: string[]; code_location?: string }>)
+      for (const [n, f] of (
+        (out?.findings ?? []) as Array<{
+          statement: string;
+          classification: string;
+          evidence_refs: string[];
+          code_location?: string;
+        }>
+      )
         .slice(0, 30)
         .entries())
         items.push({
-          ref: `run:${r.run_id}:finding:${n}`, source: "runtime", run_id: r.run_id, kind: "runtime_finding",
-          statement: `[${f.classification}] ${f.statement}`, location: parseLocation(f.code_location), commit: null,
-          refs: f.evidence_refs ?? [], valid: true,
+          ref: `run:${r.run_id}:finding:${n}`,
+          source: "runtime",
+          run_id: r.run_id,
+          kind: "runtime_finding",
+          statement: `[${f.classification}] ${f.statement}`,
+          location: parseLocation(f.code_location),
+          commit: null,
+          refs: f.evidence_refs ?? [],
+          valid: true,
         });
       const impact = round
-        ? round.impact.objects.map((o) => `${o.field}: ${o.lower_bound ? "≥ " : ""}${o.distinct} (${round.impact.failure_events} failure log lines)`)
+        ? round.impact.objects.map(
+            (o) =>
+              `${o.field}: ${o.lower_bound ? "≥ " : ""}${o.distinct} (${round.impact.failure_events} failure log lines)`,
+          )
         : [];
       sources.push({
-        run_id: r.run_id, kind: "runtime", run_status: r.status,
+        run_id: r.run_id,
+        kind: "runtime",
+        run_status: r.status,
         outcome: round?.outcome ?? (out ? String(out.status ?? "") : null),
         missing: (round?.missing ?? []).map((m) => `${m.objective}: ${m.needed}`),
         impact,
       });
     } else {
-      sources.push({ run_id: r.run_id, kind: "fix", run_status: r.status, outcome: null, missing: [] });
+      sources.push({
+        run_id: r.run_id,
+        kind: "fix",
+        run_status: r.status,
+        outcome: null,
+        missing: [],
+      });
     }
   }
   return { items, sources, revisions };
@@ -267,7 +353,13 @@ async function collect(ownerId: number, runs: LinkedRun[], readable: Set<string>
 /** Which cause each existing fix run addresses (from its own inputs), so a second fix is never started for it. */
 async function fixCauses(investigationId: number, fixRuns: LinkedRun[], items: EvidenceItem[]) {
   const recorded = new Map(
-    (await q<{ run_id: number | null; cause_key: string }>(pool, "SELECT run_id, cause_key FROM incident_fix_tasks WHERE investigation_id=$1", [investigationId]))
+    (
+      await q<{ run_id: number | null; cause_key: string }>(
+        pool,
+        "SELECT run_id, cause_key FROM incident_fix_tasks WHERE investigation_id=$1",
+        [investigationId],
+      )
+    )
       .filter((r) => r.run_id != null)
       .map((r) => [Number(r.run_id), r.cause_key]),
   );
@@ -311,7 +403,10 @@ async function metricsOf(runIds: number[]) {
   const runs: Record<number, RunMetrics> = {};
   for (const id of runIds) {
     const m = rows.find((r) => Number(r.run_id) === id);
-    runs[id] = { ...(m ? { ...m, run_id: undefined } : emptyMetrics()), latency_ms: lat.find((l) => Number(l.id) === id)?.ms ?? null };
+    runs[id] = {
+      ...(m ? { ...m, run_id: undefined } : emptyMetrics()),
+      latency_ms: lat.find((l) => Number(l.id) === id)?.ms ?? null,
+    };
     delete (runs[id] as { run_id?: unknown }).run_id;
   }
   const all = Object.values(runs);
@@ -323,7 +418,8 @@ async function metricsOf(runIds: number[]) {
       output_tokens: a.output_tokens + m.output_tokens,
       cache_read_tokens: a.cache_read_tokens + m.cache_read_tokens,
       cost_usd: m.cost_usd == null ? a.cost_usd : (a.cost_usd ?? 0) + m.cost_usd,
-      cost_availability: a.cost_availability === m.cost_availability ? a.cost_availability : "partial",
+      cost_availability:
+        a.cost_availability === m.cost_availability ? a.cost_availability : "partial",
       attempt_ms: a.attempt_ms + m.attempt_ms,
       latency_ms: Math.max(a.latency_ms ?? 0, m.latency_ms ?? 0),
     }),
@@ -343,8 +439,15 @@ interface RunMetrics {
   latency_ms?: number | null;
 }
 const emptyMetrics = (): RunMetrics => ({
-  llm_attempts: 0, turns: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cost_usd: null,
-  cost_availability: "unavailable", attempt_ms: 0, latency_ms: null,
+  llm_attempts: 0,
+  turns: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_tokens: 0,
+  cost_usd: null,
+  cost_availability: "unavailable",
+  attempt_ms: 0,
+  latency_ms: null,
 });
 
 // ---------------------------------------------------------------- the workbench read model
@@ -357,7 +460,11 @@ async function ownerFor(actor: Actor, fp: string, opts: { support?: boolean; own
   return opts.ownerId;
 }
 
-export async function getWorkbench(fp: string, actor: Actor, opts: { support?: boolean; ownerId?: number } = {}) {
+export async function getWorkbench(
+  fp: string,
+  actor: Actor,
+  opts: { support?: boolean; ownerId?: number } = {},
+) {
   const g = await groupOf(fp);
   const ownerId = await ownerFor(actor, fp, opts);
   const investigationId = await workspace(pool, fp, ownerId);
@@ -373,8 +480,13 @@ export async function getWorkbench(fp: string, actor: Actor, opts: { support?: b
   for (const r of runs) r.run_id = Number(r.run_id);
   const readable = new Set(await readableOf(ownerId));
   const { items, sources, revisions } = await collect(ownerId, runs, readable);
-  const fixes = await fixCauses(investigationId, runs.filter((r) => r.kind === "fix"), items);
-  for (const s of sources) if (s.kind === "fix") s.cause_key = fixes.find((f) => f.run_id === s.run_id)?.cause_key ?? null;
+  const fixes = await fixCauses(
+    investigationId,
+    runs.filter((r) => r.kind === "fix"),
+    items,
+  );
+  for (const s of sources)
+    if (s.kind === "fix") s.cause_key = fixes.find((f) => f.run_id === s.run_id)?.cause_key ?? null;
   const rec = reconcile(items, sources);
   // Cache validity: the verification contract, the access scope (owner; per-item validity under the owner's current
   // permissions) and, per evidence item, its source ref, commit, verdicts and freshness against the current revision,
@@ -394,7 +506,10 @@ export async function getWorkbench(fp: string, actor: Actor, opts: { support?: b
   const progress = async (r: LinkedRun | undefined) => {
     if (!r) return null;
     const steps = await q<{ key: string; name: string; status: string }>(
-      pool, "SELECT key, name, status FROM workflow_steps WHERE run_id=$1 ORDER BY position", [r.run_id]);
+      pool,
+      "SELECT key, name, status FROM workflow_steps WHERE run_id=$1 ORDER BY position",
+      [r.run_id],
+    );
     return {
       run_id: r.run_id,
       status: r.status,
@@ -413,23 +528,56 @@ export async function getWorkbench(fp: string, actor: Actor, opts: { support?: b
     fingerprint: fp,
     investigation_id: investigationId,
     owner_id: ownerId,
-    incident: { service: g.service, signature: g.signature, severity: g.severity, last_at: g.last_at },
+    incident: {
+      service: g.service,
+      signature: g.signature,
+      severity: g.severity,
+      last_at: g.last_at,
+    },
     rca: version
-      ? { ...rec, version: version.version as number | null, created_at: version.created_at as string | null }
+      ? {
+          ...rec,
+          version: version.version as number | null,
+          created_at: version.created_at as string | null,
+        }
       : { ...rec, version: null as number | null, created_at: null as string | null },
     runtime: await progress(latestRun("runtime")),
     bug_hunt: hunt
-      ? { ...(await progress(hunt)), hunt_id: (await one<{ id: number }>(pool, "SELECT id FROM bug_hunts WHERE run_id=$1", [hunt.run_id]))?.id ?? null }
+      ? {
+          ...(await progress(hunt)),
+          hunt_id:
+            (
+              await one<{ id: number }>(pool, "SELECT id FROM bug_hunts WHERE run_id=$1", [
+                hunt.run_id,
+              ])
+            )?.id ?? null,
+        }
       : null,
     runs: runs.map((r) => ({
-      run_id: r.run_id, kind: r.kind, status: r.status, title: r.title, link_source: r.link_source,
+      run_id: r.run_id,
+      kind: r.kind,
+      status: r.status,
+      title: r.title,
+      link_source: r.link_source,
       cause_key: sources.find((s) => s.run_id === r.run_id)?.cause_key ?? null,
-      created_at: r.created_at, finished_at: r.finished_at, metrics: metrics.runs[r.run_id] ?? null,
+      created_at: r.created_at,
+      finished_at: r.finished_at,
+      metrics: metrics.runs[r.run_id] ?? null,
     })),
     evidence: items.map((i) => ({
-      ref: i.ref, source: i.source, run_id: i.run_id, kind: i.kind, statement: i.statement.slice(0, 400), location: i.location,
-      commit: i.commit, bug_verification: i.bug_verification ?? null, causality: i.causality ?? null,
-      hypothesis_status: i.hypothesis_status ?? null, valid: i.valid, invalid_reason: i.invalid_reason ?? null, stale: !!i.stale,
+      ref: i.ref,
+      source: i.source,
+      run_id: i.run_id,
+      kind: i.kind,
+      statement: i.statement.slice(0, 400),
+      location: i.location,
+      commit: i.commit,
+      bug_verification: i.bug_verification ?? null,
+      causality: i.causality ?? null,
+      hypothesis_status: i.hypothesis_status ?? null,
+      valid: i.valid,
+      invalid_reason: i.invalid_reason ?? null,
+      stale: !!i.stale,
     })),
     fix_tasks: await q(
       pool,
@@ -443,7 +591,9 @@ export async function getWorkbench(fp: string, actor: Actor, opts: { support?: b
       ...metrics.total,
       verified_rcas: confirmedVersions,
       cost_per_verified_rca:
-        confirmedVersions && metrics.total.cost_usd != null ? metrics.total.cost_usd / confirmedVersions : null,
+        confirmedVersions && metrics.total.cost_usd != null
+          ? metrics.total.cost_usd / confirmedVersions
+          : null,
       reconciliation_llm_calls: 0,
     },
   };
@@ -460,9 +610,14 @@ async function materialize(
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
-    await c.query("SELECT id FROM incident_investigations WHERE id=$1 FOR UPDATE", [investigationId]);
+    await c.query("SELECT id FROM incident_investigations WHERE id=$1 FOR UPDATE", [
+      investigationId,
+    ]);
     const same = await one<{ version: number; status: string; created_at: string }>(
-      c, "SELECT version, status, created_at FROM incident_rca_versions WHERE investigation_id=$1 AND inputs_hash=$2", [investigationId, hash]);
+      c,
+      "SELECT version, status, created_at FROM incident_rca_versions WHERE investigation_id=$1 AND inputs_hash=$2",
+      [investigationId, hash],
+    );
     const terminal = sources.some((s) => s.kind !== "fix" && !ACTIVE.includes(s.run_status));
     if (same || !terminal) {
       await c.query("COMMIT");
@@ -473,20 +628,32 @@ async function materialize(
       `INSERT INTO incident_rca_versions (investigation_id, version, status, inputs_hash, report)
        VALUES ($1, COALESCE((SELECT max(version) FROM incident_rca_versions WHERE investigation_id=$1), 0) + 1, $2, $3, $4)
        RETURNING version, status, created_at`,
-      [investigationId, rec.status, hash, JSON.stringify({ contract: VERIFICATION_CONTRACT, revisions, runs: sources, ...rec })],
+      [
+        investigationId,
+        rec.status,
+        hash,
+        JSON.stringify({ contract: VERIFICATION_CONTRACT, revisions, runs: sources, ...rec }),
+      ],
     );
-    await c.query("UPDATE incident_investigations SET updated_at = now() WHERE id=$1", [investigationId]);
+    await c.query("UPDATE incident_investigations SET updated_at = now() WHERE id=$1", [
+      investigationId,
+    ]);
     await c.query("COMMIT");
     return v;
   } catch (e) {
-    await c.query("ROLLBACK").catch(() => {});
+    await c.query("ROLLBACK").catch(ignoreError("incidents.rollback"));
     throw e;
   } finally {
     c.release();
   }
 }
 
-export async function rcaVersion(fp: string, actor: Actor, version: number, opts: { support?: boolean; ownerId?: number } = {}) {
+export async function rcaVersion(
+  fp: string,
+  actor: Actor,
+  version: number,
+  opts: { support?: boolean; ownerId?: number } = {},
+) {
   const ownerId = await ownerFor(actor, fp, opts);
   const v = await one(
     pool,
@@ -508,12 +675,21 @@ export async function rcaVersion(fp: string, actor: Actor, version: number, opts
 function digest(wb: Awaited<ReturnType<typeof getWorkbench>>, source: "bug_hunt" | "runtime") {
   const pick = wb.evidence
     .filter((e) => e.source === source && e.valid && !e.stale && e.kind !== "runtime_finding")
-    .filter((e) => (source === "bug_hunt" ? ["CONFIRMED", "SUSPECTED"].includes(e.bug_verification ?? "") : e.hypothesis_status === "SUPPORTED"))
+    .filter((e) =>
+      source === "bug_hunt"
+        ? ["CONFIRMED", "SUSPECTED"].includes(e.bug_verification ?? "")
+        : e.hypothesis_status === "SUPPORTED",
+    )
     .slice(0, MAX_DIGEST_LINES);
   if (!pick.length) return { text: "", refs: [] as string[] };
   const lines = pick.map((e) => {
-    const loc = e.location ? `${e.location.repository}:${e.location.file}:${e.location.line_start ?? ""}` : "no code location";
-    const verdict = source === "bug_hunt" ? `defect ${e.bug_verification}, causality ${e.causality}` : `hypothesis ${e.hypothesis_status}`;
+    const loc = e.location
+      ? `${e.location.repository}:${e.location.file}:${e.location.line_start ?? ""}`
+      : "no code location";
+    const verdict =
+      source === "bug_hunt"
+        ? `defect ${e.bug_verification}, causality ${e.causality}`
+        : `hypothesis ${e.hypothesis_status}`;
     return `- [${e.ref}] ${loc} — ${verdict}: ${e.statement.slice(0, 200)}`;
   });
   return {
@@ -526,11 +702,17 @@ function digest(wb: Awaited<ReturnType<typeof getWorkbench>>, source: "bug_hunt"
   };
 }
 
-export async function startRuntime(fp: string, actor: Actor, body: { force?: unknown; provider?: unknown } = {}) {
+export async function startRuntime(
+  fp: string,
+  actor: Actor,
+  body: { force?: unknown; provider?: unknown } = {},
+) {
   const g = await groupOf(fp);
   const c = await pool.connect();
   try {
-    await c.query("SELECT pg_advisory_lock($1::bigint)", [lockKey(`incident_runtime:${actor.id}:${fp}`)]);
+    await c.query("SELECT pg_advisory_lock($1::bigint)", [
+      lockKey(`incident_runtime:${actor.id}:${fp}`),
+    ]);
     const investigationId = await workspace(c, fp, actor.id);
     const prior = await one<{ id: number; status: string }>(
       c,
@@ -544,7 +726,10 @@ export async function startRuntime(fp: string, actor: Actor, body: { force?: unk
     }
     // A completed RCA is reused, never re-run implicitly: a re-run is an explicit, separate (paid) choice.
     if (prior && body.force !== true)
-      throw new HttpError(409, `runtime RCA run #${prior.id} already completed for this incident; re-run explicitly to refresh it`);
+      throw new HttpError(
+        409,
+        `runtime RCA run #${prior.id} already completed for this incident; re-run explicitly to refresh it`,
+      );
     const wb = await getWorkbench(fp, actor);
     const d = digest(wb, "bug_hunt");
     let run;
@@ -552,7 +737,12 @@ export async function startRuntime(fp: string, actor: Actor, body: { force?: unk
       run = await startRun({
         definitionKey: RUNTIME_WORKFLOW,
         title: `[Runtime RCA] ${g.service}: ${g.signature}`.slice(0, 160),
-        inputs: { request: describeGroup(g) + d.text, environment: "production", fingerprint: fp, prior_evidence: d.refs },
+        inputs: {
+          request: describeGroup(g) + d.text,
+          environment: "production",
+          fingerprint: fp,
+          prior_evidence: d.refs,
+        },
         agentProvider: body.provider ? String(body.provider) : undefined,
         ownerId: actor.id,
       });
@@ -561,17 +751,28 @@ export async function startRuntime(fp: string, actor: Actor, body: { force?: unk
       throw e;
     }
     await link(c, investigationId, Number(run.id), "runtime", "workbench");
-    await audit(actor.id, "prod_errors.incident.runtime.start", "prod_error_group", fp, { run_id: run.id, prior_evidence: d.refs });
+    await audit(actor.id, "prod_errors.incident.runtime.start", "prod_error_group", fp, {
+      run_id: run.id,
+      prior_evidence: d.refs,
+    });
     return { created: true, run_id: Number(run.id) };
   } finally {
-    await c.query("SELECT pg_advisory_unlock_all()").catch(() => {});
+    await c
+      .query("SELECT pg_advisory_unlock_all()")
+      .catch(ignoreError("incidents.advisory_unlock"));
     c.release();
   }
 }
 
-export async function startHunt(fp: string, actor: Actor, body: { repositories?: unknown; provider?: unknown; force?: unknown }) {
+export async function startHunt(
+  fp: string,
+  actor: Actor,
+  body: { repositories?: unknown; provider?: unknown; force?: unknown },
+) {
   await groupOf(fp);
-  const repos = Array.isArray(body.repositories) ? [...new Set(body.repositories.map(String))].sort() : [];
+  const repos = Array.isArray(body.repositories)
+    ? [...new Set(body.repositories.map(String))].sort()
+    : [];
   const done = repos.length
     ? await one<{ id: number; run_id: number }>(
         pool,
@@ -581,19 +782,37 @@ export async function startHunt(fp: string, actor: Actor, body: { repositories?:
       )
     : null;
   if (done && body.force !== true)
-    throw new HttpError(409, `bug hunt #${done.id} already completed for these repositories; re-run explicitly to refresh it`);
+    throw new HttpError(
+      409,
+      `bug hunt #${done.id} already completed for these repositories; re-run explicitly to refresh it`,
+    );
   const wb = await getWorkbench(fp, actor);
   const d = digest(wb, "runtime");
-  const r = await startBugHunt(fp, actor, { repositories: body.repositories, provider: body.provider, context: d.text, prior_evidence: d.refs });
+  const r = await startBugHunt(fp, actor, {
+    repositories: body.repositories,
+    provider: body.provider,
+    context: d.text,
+    prior_evidence: d.refs,
+  });
   const investigationId = await workspace(pool, fp, actor.id);
   await link(pool, investigationId, r.run_id, "bug_hunt", "workbench");
   return r;
 }
 
 /** Both workflows, only because the user asked for both (never automatic). */
-export async function startBoth(fp: string, actor: Actor, body: { repositories?: unknown; provider?: unknown; force?: unknown }) {
-  const runtime = await startRuntime(fp, actor, body).catch((e) => ({ error: (e as Error).message, status: (e as HttpError).status ?? 500 }));
-  const hunt = await startHunt(fp, actor, body).catch((e) => ({ error: (e as Error).message, status: (e as HttpError).status ?? 500 }));
+export async function startBoth(
+  fp: string,
+  actor: Actor,
+  body: { repositories?: unknown; provider?: unknown; force?: unknown },
+) {
+  const runtime = await startRuntime(fp, actor, body).catch((e) => ({
+    error: (e as Error).message,
+    status: (e as HttpError).status ?? 500,
+  }));
+  const hunt = await startHunt(fp, actor, body).catch((e) => ({
+    error: (e as Error).message,
+    status: (e as HttpError).status ?? 500,
+  }));
   return { runtime, bug_hunt: hunt };
 }
 
@@ -602,32 +821,64 @@ export async function startBoth(fp: string, actor: Actor, body: { repositories?:
  * (unique reservation first, so concurrent clicks and both workflows' findings converge on one task). Routed to the
  * existing fix flows; the incident investigation itself stays read-only.
  */
-export async function createFix(fp: string, actor: Actor, body: { cause_key?: unknown; confirm?: unknown }) {
-  if (body.confirm !== true) throw new HttpError(400, "creating a fix task needs explicit confirmation");
+export async function createFix(
+  fp: string,
+  actor: Actor,
+  body: { cause_key?: unknown; confirm?: unknown },
+) {
+  if (body.confirm !== true)
+    throw new HttpError(400, "creating a fix task needs explicit confirmation");
   const key = String(body.cause_key ?? "");
   const wb = await getWorkbench(fp, actor);
   const cause = wb.rca.causes.find((c) => c.key === key);
   if (!cause) throw new HttpError(404, "cause not found");
   if (!cause.code_fixable || !cause.fix_target)
-    throw new HttpError(400, "this cause is not an eligible code defect (no verified code location): no code fix task");
+    throw new HttpError(
+      400,
+      "this cause is not an eligible code defect (no verified code location): no code fix task",
+    );
   if (cause.level === "unknown" && cause.defect !== "CONFIRMED")
-    throw new HttpError(400, "neither the defect nor its causality is established: verify before creating a fix task");
+    throw new HttpError(
+      400,
+      "neither the defect nor its causality is established: verify before creating a fix task",
+    );
   // A fix already started for this cause (from the hunt UI, the investigation panel or here) is reused.
-  const existingFix = wb.runs.find((r) => r.kind === "fix" && r.cause_key === key && !["FAILED", "CANCELED"].includes(r.status));
+  const existingFix = wb.runs.find(
+    (r) => r.kind === "fix" && r.cause_key === key && !["FAILED", "CANCELED"].includes(r.status),
+  );
   const investigationId = wb.investigation_id;
   const reserved = await one<{ id: number }>(
     pool,
     `INSERT INTO incident_fix_tasks (investigation_id, cause_key, source, created_by) VALUES ($1,$2,$3,$4)
      ON CONFLICT (investigation_id, cause_key) DO NOTHING RETURNING id`,
-    [investigationId, key, JSON.stringify({ target: cause.fix_target, supporting: cause.supporting, rca_version: wb.rca.version }), actor.id],
+    [
+      investigationId,
+      key,
+      JSON.stringify({
+        target: cause.fix_target,
+        supporting: cause.supporting,
+        rca_version: wb.rca.version,
+      }),
+      actor.id,
+    ],
   );
   if (!reserved) {
     const t = await one<{ run_id: number | null; work_item_id: number | null }>(
-      pool, "SELECT run_id, work_item_id FROM incident_fix_tasks WHERE investigation_id=$1 AND cause_key=$2", [investigationId, key]);
-    return { created: false, run_id: t?.run_id == null ? null : Number(t.run_id), work_item_id: t?.work_item_id ?? null };
+      pool,
+      "SELECT run_id, work_item_id FROM incident_fix_tasks WHERE investigation_id=$1 AND cause_key=$2",
+      [investigationId, key],
+    );
+    return {
+      created: false,
+      run_id: t?.run_id == null ? null : Number(t.run_id),
+      work_item_id: t?.work_item_id ?? null,
+    };
   }
   if (existingFix) {
-    await q(pool, "UPDATE incident_fix_tasks SET run_id=$2 WHERE id=$1", [reserved.id, existingFix.run_id]);
+    await q(pool, "UPDATE incident_fix_tasks SET run_id=$2 WHERE id=$1", [
+      reserved.id,
+      existingFix.run_id,
+    ]);
     return { created: false, run_id: existingFix.run_id, work_item_id: null };
   }
   try {
@@ -636,11 +887,20 @@ export async function createFix(fp: string, actor: Actor, body: { cause_key?: un
       t.finding_id != null && t.hunt_id != null
         ? await createFixTask(t.hunt_id, t.finding_id, actor)
         : await startFixFromInvestigation(Number(t.run_id)).then((x) => ({
-            run_id: Number(x.run_id), work_item_id: null as number | null, created: !x.existing,
+            run_id: Number(x.run_id),
+            work_item_id: null as number | null,
+            created: !x.existing,
           }));
-    await q(pool, "UPDATE incident_fix_tasks SET run_id=$2, work_item_id=$3 WHERE id=$1", [reserved.id, r.run_id, r.work_item_id ?? null]);
+    await q(pool, "UPDATE incident_fix_tasks SET run_id=$2, work_item_id=$3 WHERE id=$1", [
+      reserved.id,
+      r.run_id,
+      r.work_item_id ?? null,
+    ]);
     await link(pool, investigationId, Number(r.run_id), "fix", "workbench");
-    await audit(actor.id, "prod_errors.incident.fix_task", "prod_error_group", fp, { cause_key: key, run_id: r.run_id });
+    await audit(actor.id, "prod_errors.incident.fix_task", "prod_error_group", fp, {
+      cause_key: key,
+      run_id: r.run_id,
+    });
     return { created: r.created, run_id: Number(r.run_id), work_item_id: r.work_item_id ?? null };
   } catch (e) {
     await q(pool, "DELETE FROM incident_fix_tasks WHERE id=$1", [reserved.id]);

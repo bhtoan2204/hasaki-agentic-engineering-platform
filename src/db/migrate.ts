@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type pg from "pg";
 import { pool } from "./pool.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dirname, "..", "..", "migrations");
 const LOCK_ID = 727_001; // pg_advisory_lock key: only one process migrates at a time
@@ -74,7 +75,9 @@ export async function migrate(db: pg.Pool = pool, migrations = loadMigrations())
     }
     return done;
   } finally {
-    await c.query("SELECT pg_advisory_unlock($1)", [LOCK_ID]).catch(() => {});
+    await c
+      .query("SELECT pg_advisory_unlock($1)", [LOCK_ID])
+      .catch(ignoreError("migrate.advisory_unlock"));
     c.release();
   }
 }

@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { workspaceBaseBranch } from "../../repos/service.ts";
 import { config } from "../../config.ts";
 import { pool, q, json } from "../../db/pool.ts";
+import { ignoreError } from "../../ignoreError.ts";
 
 const exec = promisify(execFile);
 
@@ -256,7 +257,9 @@ export async function goBaseline(
         }
       }
     } finally {
-      await git(workspace, "worktree", "remove", "--force", dir).catch(() => {});
+      await git(workspace, "worktree", "remove", "--force", dir).catch(
+        ignoreError("baseline.worktree_remove"),
+      );
     }
   }
   return { sha, report, cached };

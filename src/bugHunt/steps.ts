@@ -40,6 +40,7 @@ import {
   type Decision,
   type ReproOutcome,
 } from "./logic.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 const exec = promisify(execFile);
 const git = async (cwd: string, args: string[], max = 16 << 20) =>
@@ -676,7 +677,7 @@ export async function bugHuntReproduce(ctx: ExecutionContext): Promise<ExecResul
         command: valid.command,
       });
     } finally {
-      await rm(dir, { recursive: true, force: true }).catch(() => {});
+      await rm(dir, { recursive: true, force: true }).catch(ignoreError("bug_hunt.remove_tmp"));
     }
   }
   await ctx.log(
@@ -1092,7 +1093,7 @@ async function persistFindings(
     ]);
     await c.query("COMMIT");
   } catch (e) {
-    await c.query("ROLLBACK").catch(() => {});
+    await c.query("ROLLBACK").catch(ignoreError("bug_hunt.rollback"));
     throw e;
   } finally {
     c.release();

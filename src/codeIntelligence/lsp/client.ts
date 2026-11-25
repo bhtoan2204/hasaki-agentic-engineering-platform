@@ -5,6 +5,7 @@
  * call hierarchy, shutdown). Requests carry a deadline and an AbortSignal; both send `$/cancelRequest`.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { ignoreError } from "../../ignoreError.ts";
 
 export interface LspCommand {
   command: string;
@@ -283,7 +284,9 @@ export class LspClient {
 
   async close() {
     if (this.alive) {
-      await this.request("shutdown", null, { timeoutMs: 1000 }).catch(() => {});
+      await this.request("shutdown", null, { timeoutMs: 1000 }).catch(
+        ignoreError("lsp.client_shutdown"),
+      );
       this.notify("exit", null);
     }
     const exited = new Promise<void>((r) => {

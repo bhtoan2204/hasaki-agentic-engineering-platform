@@ -38,6 +38,7 @@ export type {
 } from "./importTypes.ts";
 import { hashOf } from "../workflow/definitions.ts";
 import { createProposal } from "./proposals.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * Import the knowledge that already lives in the source repositories into the registry:
@@ -683,11 +684,13 @@ export function serializedImport<T>(dryRun: boolean | undefined, fn: () => Promi
       return await fn();
     } finally {
       activeLock = null;
-      await client.query("SELECT pg_advisory_unlock($1)", [IMPORT_LOCK]).catch(() => {});
-      await client.end().catch(() => {});
+      await client
+        .query("SELECT pg_advisory_unlock($1)", [IMPORT_LOCK])
+        .catch(ignoreError("knowledge_import.advisory_unlock"));
+      await client.end().catch(ignoreError("knowledge_import.client_end"));
     }
   });
-  importQueue = run.catch(() => {});
+  importQueue = run.catch(ignoreError("knowledge_import.queue_chain"));
   return run;
 }
 

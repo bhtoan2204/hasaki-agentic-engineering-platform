@@ -11,6 +11,7 @@ import { startRun, EngineError } from "../workflow/engine.ts";
 import { describeGroup, type GroupRow } from "../prodErrors/scan.ts";
 import { workItems } from "../workitems/service.ts";
 import { config } from "../config.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 export const BUG_HUNT_WORKFLOW = "production-bug-hunt";
 const MAX_REPOSITORIES = 3;
@@ -106,7 +107,7 @@ export async function startBugHunt(
     });
     return { created: true, hunt_id: Number(hunt!.id), run_id: Number(run.id) };
   } finally {
-    await c.query("SELECT pg_advisory_unlock_all()").catch(() => {});
+    await c.query("SELECT pg_advisory_unlock_all()").catch(ignoreError("bug_hunt.advisory_unlock"));
     c.release();
   }
 }

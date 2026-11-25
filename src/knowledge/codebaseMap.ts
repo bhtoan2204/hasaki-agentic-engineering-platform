@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.ts";
 import { fresh } from "../codeIntelligence/search.ts";
 import { effectiveSql } from "../codeIntelligence/store.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 export interface MapSymbol {
   repository: string;
@@ -64,7 +65,7 @@ export async function indexedCodebaseMap(
       failed = error as Error;
       return "";
     } finally {
-      await client.query("ROLLBACK").catch(() => {});
+      await client.query("ROLLBACK").catch(ignoreError("code_map.rollback"));
       client.release(failed);
     }
   };

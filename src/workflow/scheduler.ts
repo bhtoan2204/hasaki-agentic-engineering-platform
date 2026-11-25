@@ -40,6 +40,7 @@ import { settleBackground } from "./background.ts";
 import type { ExecResult, ExecutionFingerprint, JobRow } from "./types.ts";
 import { noteDecision } from "./decisions.ts";
 import { log, logError } from "../logging.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * WorkflowScheduler: PostgreSQL-backed job claiming. No in-memory queue: any number of processes can run
@@ -681,7 +682,7 @@ export function startScheduler(opts: SchedulerOptions = config.scheduler) {
     reapExpiredLeases().catch((e) => log.error("reaper:", e.message));
     dispatchRunEffects().catch((e) => log.error("run effects:", e.message));
     // The shared promise has already logged any failure.
-    void reconcileAutomaticHandoff().catch(() => {});
+    void reconcileAutomaticHandoff().catch(ignoreError("scheduler.automatic_handoff"));
     purgeDebugEventsThrottled().catch((e) => log.error("trace retention:", e.message));
   };
   const reaper = setInterval(reconcile, Math.max(5, opts.leaseSeconds / 2) * 1000);

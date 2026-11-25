@@ -11,6 +11,7 @@ import { repositoryBranch } from "../../repos/remote.ts";
 import { classify, goBaseline, parseGoTest } from "./baseline.ts";
 import type { ExecResult, RunRow, StepRow } from "../types.ts";
 import type { Untyped } from "../../untyped.ts";
+import { ignoreError } from "../../ignoreError.ts";
 
 /** The part of the executor context this action uses (kept local: registry.ts sits in the agent import cycle). */
 export interface ExecutionContext {
@@ -232,9 +233,11 @@ export async function mergeAndPush(
         `${w.repo}: ${target} moved while merging; merging again (${attempt}/${PUSH_ATTEMPTS})`,
       );
     } finally {
-      await git(w.path, "worktree", "remove", "--force", dir).catch(() => {});
+      await git(w.path, "worktree", "remove", "--force", dir).catch(
+        ignoreError("branch_merge.worktree_remove"),
+      );
       rmSync(dir, { recursive: true, force: true });
-      await git(w.path, "worktree", "prune").catch(() => {});
+      await git(w.path, "worktree", "prune").catch(ignoreError("branch_merge.worktree_remove"));
     }
   }
   throw new Error(`${target} kept moving: gave up after ${PUSH_ATTEMPTS} attempts`);

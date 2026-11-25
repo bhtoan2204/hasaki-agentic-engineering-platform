@@ -2,6 +2,7 @@ import { z } from "zod";
 import { config } from "./config.ts";
 import { currentUserId } from "./auth/execution.ts";
 import { getUserSecret } from "./auth/secrets.ts";
+import { ignoreError } from "./ignoreError.ts";
 
 const API = "https://api.bitbucket.org/2.0";
 
@@ -76,7 +77,7 @@ async function call(creds: BitbucketCredentials, path: string, init: RequestInit
     },
   });
   if (!res.ok) {
-    await res.body?.cancel().catch(() => {});
+    await res.body?.cancel().catch(ignoreError("bitbucket.cancel_response_body"));
     throw new Error(
       `Bitbucket ${res.status}: check credentials and repository permissions in Integrations`,
     );
@@ -139,7 +140,7 @@ export async function openPullRequest(
       method: "PUT",
       body,
     });
-    await updated.body?.cancel().catch(() => {});
+    await updated.body?.cancel().catch(ignoreError("bitbucket.cancel_response_body"));
     return { url: pr.links.html.href, created: false, note: "Existing PR updated." };
   }
   const created = await responseBody(

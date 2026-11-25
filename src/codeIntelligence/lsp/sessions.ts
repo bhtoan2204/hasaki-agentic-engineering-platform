@@ -20,6 +20,7 @@ import {
   SANDBOX_HOME,
 } from "../../agent/isolation.ts";
 import { LspClient, type LspCommand } from "./client.ts";
+import { ignoreError } from "../../ignoreError.ts";
 
 export type Language = "go" | "ts";
 export class LspUnavailable extends Error {}
@@ -130,7 +131,7 @@ function scheduleIdle(e: Entry) {
 async function retire(e: Entry) {
   if (sessions.get(e.key) === e) sessions.delete(e.key);
   if (e.idle) clearTimeout(e.idle);
-  await e.client.then((c) => c.close()).catch(() => {});
+  await e.client.then((c) => c.close()).catch(ignoreError("lsp.session_close"));
 }
 
 /** A live session for this exact workspace state, started (and its predecessors retired) if needed. */
@@ -174,7 +175,8 @@ export async function closeAllSessions() {
 
 /** Tests only: simulate a crash of every running server. */
 export function killSessionsForTests() {
-  for (const e of sessions.values()) void e.client.then((c) => c.kill()).catch(() => {});
+  for (const e of sessions.values())
+    void e.client.then((c) => c.kill()).catch(ignoreError("lsp.kill_for_tests"));
 }
 
 /** Tests only: process ids of the running servers. */

@@ -100,6 +100,7 @@ import { recheckBeforePublish } from "../autonomy.ts";
 import { gitMounts, removeSandboxState } from "../../agent/isolation.ts";
 import type { ExecResult } from "../types.ts";
 import type { ExecutionContext, StepExecutor } from "./registry.ts";
+import { ignoreError } from "../../ignoreError.ts";
 
 // ---------------------------------------------------------------- human_input
 
@@ -962,7 +963,7 @@ async function repositoryDiscovery(ctx: ExecutionContext): Promise<ExecResult> {
       .recordMetrics({
         code_intelligence: { repository_ranking_latency: Date.now() - rankingStarted },
       })
-      .catch(() => {});
+      .catch(ignoreError("executor.record_metrics"));
   let method = "deterministic";
   // Repositories already chosen (explicitly or reused from an earlier run of this work item): nothing to rediscover.
   if (ctx.run.selected_repositories.length && cfg.reuse_selected !== false && !rediscover) {

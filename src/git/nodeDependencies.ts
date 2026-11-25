@@ -20,6 +20,7 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import { join, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { ignoreError } from "../ignoreError.ts";
 const exec = promisify(execFile);
 
 /**
@@ -312,11 +313,23 @@ async function hasDependencies(workspace: string) {
  * package.json (npm would then resolve the newest versions in each range instead of the locked ones).
  */
 async function yarnLocked(workspace: string) {
-  if (!(await access(join(workspace, "yarn.lock")).then(() => true, () => false))) return false;
-  const version = await exec("yarn", ["--version"], { timeout: 5000, encoding: "utf8" }).then((r) => r.stdout.trim(), () => "");
+  if (
+    !(await access(join(workspace, "yarn.lock")).then(
+      () => true,
+      () => false,
+    ))
+  )
+    return false;
+  const version = await exec("yarn", ["--version"], { timeout: 5000, encoding: "utf8" }).then(
+    (r) => r.stdout.trim(),
+    () => "",
+  );
   if (!version.startsWith("1.")) return false;
   const manifest = JSON.parse(await readFile(join(workspace, "package.json"), "utf8"));
-  const npmLock = await readFile(join(workspace, "package-lock.json"), "utf8").then((t) => JSON.parse(t), () => null);
+  const npmLock = await readFile(join(workspace, "package-lock.json"), "utf8").then(
+    (t) => JSON.parse(t),
+    () => null,
+  );
   return !lockMatchesManifest(npmLock, manifest);
 }
 
@@ -359,8 +372,7 @@ async function completeInstall(workspace: string) {
     };
     const installedVersion = async (dir: string) =>
       JSON.parse(await readFile(join(workspace, dir, "package.json"), "utf8")).version as
-        | string
-        | undefined;
+        string | undefined;
     for (const name of Object.keys(required)) {
       if (!/^(?:@[a-z0-9_.-]+\/)?[a-z0-9_.-]+$/i.test(name)) return false;
       const installed = await installedVersion(join("node_modules", name));
@@ -531,7 +543,7 @@ async function validate(workspace: string, opts: DependencyOptions): Promise<Val
     snapshot: snapshotDigest(entries),
     files: entries.length,
     checkedAt: now,
-  }).catch(() => {});
+  }).catch(ignoreError("node_dependencies.write_evidence"));
   return { ready: true, mode: "full" };
 }
 
@@ -653,7 +665,9 @@ export async function withInstallLock<T>(
   } finally {
     // Release only a lock that is still ours (it may have been taken over after a very long install).
     if ((await readOwner(lock))?.token === token)
-      await takeOver(lock, { pid: process.pid, token, at: 0 } as LockOwner, token).catch(() => {});
+      await takeOver(lock, { pid: process.pid, token, at: 0 } as LockOwner, token).catch(
+        ignoreError("node_dependencies.release_lock"),
+      );
   }
 }
 
@@ -777,30 +791,40 @@ async function install(
     const flags = ["--ignore-scripts", "--no-audit", "--no-fund"];
     if (await yarnLocked(workspace)) {
       // yarn.lock is the authoritative lock: install exactly those versions, never rewriting it.
-      const yarnFlags = ["--ignore-scripts", "--non-interactive", "--cache-folder", join(npmCache, "yarn")];
+      const yarnFlags = [
+        "--ignore-scripts",
+        "--non-interactive",
+        "--cache-folder",
+        join(npmCache, "yarn"),
+      ];
       try {
         await exec("yarn", ["install", "--frozen-lockfile", ...yarnFlags], runOpts);
       } catch (e) {
-        if (!/lockfile needs to be updated/i.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message)))
+        if (
+          !/lockfile needs to be updated/i.test(
+            String((e as { stderr?: unknown }).stderr ?? (e as Error).message),
+          )
+        )
           throw e;
         await exec("yarn", ["install", "--pure-lockfile", ...yarnFlags], runOpts);
       }
-    } else try {
-      await exec(
-        "npm",
-        [ci ? "ci" : "install", ...(!ci ? ["--no-package-lock"] : []), ...flags],
-        runOpts,
-      );
-    } catch (e) {
-      // The repository's own lock file is out of sync with package.json (npm ci EUSAGE): install from package.json
-      // without reading or rewriting the lock, so the worktree stays clean.
-      if (
-        !ci ||
-        !/EUSAGE|in sync/.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message))
-      )
-        throw e;
-      await exec("npm", ["install", "--no-package-lock", ...flags], runOpts);
-    }
+    } else
+      try {
+        await exec(
+          "npm",
+          [ci ? "ci" : "install", ...(!ci ? ["--no-package-lock"] : []), ...flags],
+          runOpts,
+        );
+      } catch (e) {
+        // The repository's own lock file is out of sync with package.json (npm ci EUSAGE): install from package.json
+        // without reading or rewriting the lock, so the worktree stays clean.
+        if (
+          !ci ||
+          !/EUSAGE|in sync/.test(String((e as { stderr?: unknown }).stderr ?? (e as Error).message))
+        )
+          throw e;
+        await exec("npm", ["install", "--no-package-lock", ...flags], runOpts);
+      }
     // Evidence only for the exact state that was requested, and only after a complete installation.
     if (before && before === (await dependencyFingerprint(workspace, opts)))
       await recordDependencies(workspace, opts);
