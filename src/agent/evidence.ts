@@ -420,7 +420,7 @@ const HIGH_PATTERNS: Array<[RegExp, string]> = [
     "assigns a business status/state",
   ],
   [
-    /\b(?:change|adjust|recalculat|modify|update|compute|round)\w*\b[^.;\n]{0,40}\b(?:amount|total|price|fee|balance|refund|payout)s?\b/i,
+    /\b(?:change|adjust|recalculat|modify|update|compute|round)\w*\b(?:(?!\b(?:after|before|only|when|if|once|then|until|unless|while)\b)[^.;\n]){0,40}\b(?:amount|total|price|fee|balance|refund|payout)s?\b(?!-)/i,
     "changes a monetary amount",
   ],
   [

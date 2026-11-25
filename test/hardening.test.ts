@@ -462,6 +462,14 @@ test("provenance: platform verifies repository, commit, file and lines; fake cit
     (await verifyClaimProvenance({ ...fact, repository: "payments" }, env)).reason!,
     /not available to this run/,
   );
+  assert.match(
+    (await verifyClaimProvenance({ ...fact, repository: "svc, other" }, env)).reason!,
+    /several repositories: use one claim per repository/,
+  );
+  assert.match(
+    (await verifyClaimProvenance({ ...fact, file_path: "go.mod; pkg/tracing/" }, env)).reason!,
+    /several paths: use one claim per file/,
+  );
   assert.equal((await verifyClaimProvenance({ ...fact, commit: "" }, env)).status, "UNVERIFIED");
   assert.equal(
     (await verifyClaimProvenance({ ...fact, file_path: "../../etc/passwd" }, env)).status,
@@ -673,7 +681,8 @@ test("pre-publish gate: a rebase or a base merge that keeps the change keeps tes
 
 test("workspace fingerprints include untracked files beyond the old 500-file cap", async () => {
   const path = repo();
-  for (let i = 0; i < 501; i++) write(path, `untracked/${String(i).padStart(4, "0")}.txt`, "before");
+  for (let i = 0; i < 501; i++)
+    write(path, `untracked/${String(i).padStart(4, "0")}.txt`, "before");
   const before = await worktreeFingerprint(path);
   write(path, "untracked/0500.txt", "after");
   assert.notEqual((await worktreeFingerprint(path)).fingerprint, before.fingerprint);

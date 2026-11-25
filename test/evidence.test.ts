@@ -245,6 +245,14 @@ test("fix risk classification has a deterministic floor (generic, EN + VI)", () 
   assert.equal(detectRisk(["Cập nhật trạng thái đơn hàng khi có mã vận đơn"]).risk, "HIGH");
   assert.equal(detectRisk(["Retry the callback with backoff"]).risk, "MEDIUM");
   assert.equal(detectRisk(["Increase the HTTP timeout"]).risk, "MEDIUM");
+  assert.equal(
+    detectRisk([
+      "Set TransactionCode only after the aggregate amount-match has resolved a transaction, to link the trace span.",
+    ]).risk,
+    "LOW",
+    "naming an amount check is not changing an amount",
+  );
+  assert.equal(detectRisk(["Adjust the amount when the refund is partial"]).risk, "HIGH");
   const out = normalizeInvestigationOutput("fix_proposal", {
     summary: "Mark shipped when tracking exists",
     changes: [

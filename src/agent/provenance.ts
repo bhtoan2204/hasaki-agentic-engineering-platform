@@ -166,6 +166,10 @@ export async function verifyClaimProvenance(
   if (file) {
     const repo = String(raw?.repository ?? "").trim();
     if (!repo) return mark("UNVERIFIED", "file cited without a repository");
+    if (/[,;\s]/.test(repo))
+      return mark("UNVERIFIED", "names several repositories: use one claim per repository");
+    if (/[;,]/.test(String(file)))
+      return mark("UNVERIFIED", "lists several paths: use one claim per file");
     const n = normalizeScopePath(file, repo);
     if ("invalid" in n) return mark("UNVERIFIED", `file path not checkable: ${n.invalid}`);
     const path = await env.repoPath(repo);

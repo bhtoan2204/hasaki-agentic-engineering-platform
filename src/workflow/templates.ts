@@ -384,7 +384,7 @@ const CLAIMS_CONTRACT =
   "claims: [{ id, claim, classification: 'OBSERVED_FACT'|'CODE_FACT'|'HYPOTHESIS'|'ASSUMPTION'|'CONFIRMED_ROOT_CAUSE', source_type?, source_ref?, repository?, commit?, file_path?, line_range?, confidence: 'low'|'medium'|'high', verification_status: 'verified'|'unverified'|'missing'|'contradicted', supports?: string[], contradicts?: string[] }]";
 const EVIDENCE_RULES =
   "Evidence rules: classify every critical claim. OBSERVED_FACT needs an observable source (production_log, api_response, database, test_output, screenshot, user_report…) and a source_ref you actually saw; " +
-  "CODE_FACT needs repository, file_path, line_range and the commit you read. Earlier agent outputs are opinions, not evidence: repeating a hypothesis never makes it a fact. " +
+  "CODE_FACT needs repository, file_path, line_range and the commit you read, and names exactly one repository, one file (not a directory) and one commit: split a claim that spans several repositories or files into one claim each, or the platform cannot verify it and lowers your conclusion. Earlier agent outputs are opinions, not evidence: repeating a hypothesis never makes it a fact. " +
   "If a source (logs/Splunk, database, external API docs) was not available to you, list it under missing_evidence and do not claim it was inspected. " +
   "Never copy secrets or raw customer payloads into claims; cite a reference instead. Use low/medium/high, never numeric confidence.";
 const REQUIRED_TESTS_RULE =
