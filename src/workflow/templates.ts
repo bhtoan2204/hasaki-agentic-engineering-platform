@@ -1461,15 +1461,30 @@ export const TEMPLATES: Array<{ key: string; spec: Record<string, unknown> }> = 
       feedback_step: "refactor",
       replan_step: "analyze",
       inputs: {
-        repositories: { description: "repository to refactor", required: true },
+        repositories: {
+          description: "repository to refactor (discovered from the task when empty)",
+          required: false,
+        },
         goal: { description: "refactoring goal", required: true },
       },
       steps: [
         {
-          key: "select",
+          key: "discover",
           type: "integration",
+          name: "Repository Discovery",
+          config: DISCOVER,
+        },
+        // Passes straight through with the repositories the run was started with, or a clear discovery; asks otherwise.
+        {
+          key: "select",
+          type: "human_approval",
           name: "Select Repository",
-          config: { action: "select_repositories" },
+          depends_on: ["discover"],
+          config: {
+            ...CONFIRM_REPOS,
+            auto_approve_preselected: true,
+            auto_approve_unambiguous: true,
+          },
         },
         {
           key: "analyze",
