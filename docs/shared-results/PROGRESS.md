@@ -506,3 +506,31 @@ Done:
   older readable one exists (fail closed).
 - The "Reused" badge is also shown on the reader's own result and on a running one; it means "shared", not "someone
   else's".
+
+## Fix 1 (CI)
+
+Latest failing run: `security` on the push of `55c693e` (run 45816234507). `ci` and `codeql` of the same push passed.
+
+| Job                | Result                                            |
+| ------------------ | ------------------------------------------------- |
+| security / secrets | **failed**: step "Scan history", `leaks found: 7` |
+| security / others  | npm-audit and govulncheck passed                  |
+
+- **Class:** CI check (secret scan), not type/lint/build and not a test. It is not flaky. It is caused by this feature:
+  the base `77fa3e3` passed, and all 7 findings are in the commit `dc3d1a9` that added the key tests.
+- **Cause:** gitleaks rule `generic-api-key` matched high-entropy hex literals assigned to names ending in `key`:
+  - 5 error fingerprints (20 hex characters, the plan's example fingerprint) in `test/shared-key.test.ts` (lines 36, 46, 301) and `test/shared-analyses-schema.integration.ts` (lines 85, 116);
+  - 2 expected sha256 dedup keys (64 hex characters) in `test/shared-key.test.ts` (lines 174, 175).
+    All 7 were checked by shape (without printing the values): hex fingerprints and hashes of fixture data, not credentials.
+- **Fix:** the 7 findings were appended to `.gitleaks-baseline.json`, the mechanism the repository already uses for exactly this
+  (commit `655e0bf`, "baseline the historic false positives so new leaks still fail the job"). The earlier 76 entries are
+  untouched (the diff only adds lines). History cannot be rewritten, so an allowlist rule was not added: it would also hide
+  real secrets in these file paths.
+- **Verified locally** with the CI's pinned gitleaks 8.30.1 (checksum checked) and the CI's exact command:
+  `gitleaks git --config .gitleaks.toml --baseline-path .gitleaks-baseline.json --redact --no-banner .` gives
+  `622 commits scanned, no leaks found`, exit 0. Before the change: `leaks found: 7`, exit 1.
+- **Not changed:** no test was edited, skipped or loosened. `test/shared-results-validity.integration.ts` was not touched
+  (the C3 test in REVIEW.md stays as it is).
+- **Remaining:** new tests that assign a hex literal to a `*key` name will trigger the same rule again; either keep them out of
+  that shape (for example build the value with a helper) or add them to the baseline. The `coverage` workflow of the same
+  push was still running when this was written.
