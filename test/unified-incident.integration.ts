@@ -21,12 +21,17 @@ import {
   type ExecutionContext,
 } from "../src/workflow/executors/registry.ts";
 import { caseFingerprint } from "../src/eval/bugHuntFixtures.ts";
-import { createFixTask, startBugHunt } from "../src/bugHunt/service.ts";
+import { createFixTask, startBugHunt, startBugHuntShared } from "../src/bugHunt/service.ts";
+import { config } from "../src/config.ts";
+import { settleBackground } from "../src/workflow/background.ts";
+import { resetSharingHooks, setSharingHooks, type SharedEvent } from "../src/sharing/hooks.ts";
 import {
   getWorkbench,
   rcaVersion,
   startRuntime,
+  startRuntimeShared,
   startHunt,
+  startHuntShared,
   startBoth,
   createFix,
   RUNTIME_WORKFLOW,
@@ -591,4 +596,94 @@ test("discovery: a hunt started from the existing Bug Hunter UI (not the workben
     (await getWorkbench(fp, other)).runs.some((r) => r.run_id === h.run_id),
     false,
   );
+});
+
+// ---- shared results (flag SHARED_RESULTS_PROD_ERRORS): a run started with prior evidence is never shared (REVIEW.md C1)
+// Its prompt carries the starter's own evidence of the other workflow (file locations, statements, log hypotheses) and the
+// key does not, so sharing it would leak that evidence across permissions and merge different analyses.
+const sharedRowsOf = (fp: string) =>
+  q<{ kind: string; status: string }>(
+    pool,
+    "SELECT kind, status FROM shared_analyses WHERE error_key = $1 ORDER BY id",
+    [fp],
+  );
+async function withSharing<T>(fn: (events: SharedEvent[]) => Promise<T>) {
+  const events: SharedEvent[] = [];
+  resetSharingHooks();
+  setSharingHooks({ observe: (e) => void events.push(e) });
+  // A hunt's key needs the repository's base commit (refs/remotes/origin/<branch>), which a remote-less fixture lacks.
+  fx.git("update-ref", "refs/remotes/origin/main", fx.revision);
+  config.sharedResults.prodErrors = true;
+  try {
+    return await fn(events);
+  } finally {
+    config.sharedResults.prodErrors = false;
+    await settleBackground();
+    resetSharingHooks();
+  }
+}
+
+test("C1 hunt: a hunt started with prior evidence neither reads nor publishes a shared result; one without it still does", async () => {
+  const fp = caseFingerprint("race-condition");
+  await withSharing(async (events) => {
+    const hinted = await startHuntShared(fp, owner, {
+      repositories: [repo],
+      provider: "codex",
+    });
+    assert.ok(hinted.run_id, "the hunt itself runs as before");
+    await cancelRun(hinted.run_id);
+    const clean = events.length;
+    assert.ok(clean > 0, "control: a hunt without evidence is looked up and claimed");
+    assert.deepEqual(
+      (await sharedRowsOf(fp)).map((r) => r.kind),
+      ["prod_error.bug_hunt"],
+    );
+
+    events.length = 0;
+    const withEvidence = await startBugHuntShared(caseFingerprint("race-condition"), other, {
+      repositories: [repo],
+      provider: "codex",
+      context:
+        "\nPrior evidence from the Runtime RCA of this incident (UNVERIFIED hints):\n- [run:1] x",
+      prior_evidence: ["run:1:finding:1"],
+    });
+    assert.ok(withEvidence.run_id, "a hunt with evidence runs as before");
+    assert.equal(withEvidence.shared, undefined, "and is not answered from a shared result");
+    assert.deepEqual(events, [], "no lookup, no claim, no wait, nothing published");
+    assert.equal((await sharedRowsOf(fp)).length, 1, "only the evidence-free claim exists");
+    await cancelRun(withEvidence.run_id);
+  });
+});
+
+test("C1 RCA: a runtime RCA started with the hunt's evidence neither reads nor publishes a shared result; without evidence it does", async () => {
+  const withEvidenceFp = caseFingerprint("transaction-consistency");
+  await withSharing(async (events) => {
+    // Control: no evidence of the other workflow, so the RCA is shared (looked up and claimed).
+    const plain = await startRuntimeShared(caseFingerprint("correct-code-suspected"), owner, {});
+    assert.ok("run_id" in plain && plain.run_id, "runs as before");
+    assert.ok(
+      events.some((e) => e.outcome === "miss"),
+      "control: an evidence-free RCA is shared",
+    );
+    await cancelRun((plain as { run_id: number }).run_id);
+
+    // The owner's own hunt of this incident gives the workbench evidence for the RCA's prompt.
+    const h = await startHunt(withEvidenceFp, owner, { repositories: [repo], provider: "codex" });
+    assert.equal(await drive(h.run_id), "COMPLETED");
+    const evidence = (await getWorkbench(withEvidenceFp, owner)).evidence.filter(
+      (e) => e.source === "bug_hunt" && e.valid && !e.stale,
+    );
+    events.length = 0;
+    const r = await startRuntimeShared(withEvidenceFp, owner, {});
+    assert.ok("run_id" in r && r.run_id, "runs as before");
+    const used =
+      ((await getRun((r as { run_id: number }).run_id)).inputs.prior_evidence as string[]) ?? [];
+    if (sandbox)
+      assert.ok(used.length > 0 && evidence.length > 0, "the run did carry the hunt's evidence");
+    if (used.length) {
+      assert.deepEqual(events, [], "so: no lookup, no claim, nothing published");
+      assert.deepEqual(await sharedRowsOf(withEvidenceFp), []);
+    } else assert.ok(events.length > 0, "no evidence reached the prompt: it is shared as usual");
+    await cancelRun((r as { run_id: number }).run_id);
+  });
 });

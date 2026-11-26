@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   age,
   canForce,
+  newerNote,
   resultCount,
   runner,
   sharedState,
@@ -111,4 +112,23 @@ test("age and result size", () => {
 test("every state label exists in both locales", () => {
   for (const s of ["running_other", "running_you", "valid", "stale", "failed", "superseded"])
     for (const l of ["vi", "en"] as const) assert.ok(messages[l][`sr.state.${s}`], `${l} ${s}`);
+});
+
+test("a re-run beside the last valid result: the note says whether it is running or failed, and both labels exist", () => {
+  assert.equal(newerNote(view()), null);
+  assert.equal(
+    newerNote(view({ newer_version: { version: 2, status: "running" } })),
+    "sr.newer.running",
+  );
+  assert.equal(
+    newerNote(view({ newer_version: { version: 2, status: "failed" } })),
+    "sr.newer.failed",
+  );
+  for (const l of ["vi", "en"] as const)
+    for (const k of ["sr.newer.running", "sr.newer.failed"]) assert.ok(messages[l][k], `${l} ${k}`);
+  assert.equal(
+    sharedState(view({ newer_version: { version: 2, status: "running" } })),
+    "valid",
+    "still a valid result",
+  );
 });

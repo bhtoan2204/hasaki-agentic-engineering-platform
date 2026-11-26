@@ -5,6 +5,7 @@ import { useI18n } from "../i18n/index.tsx";
 import {
   age,
   canForce,
+  newerNote,
   resultCount,
   runner,
   sharedState,
@@ -84,6 +85,11 @@ export function SharedAnalysisCard({
           </span>
         )}
       </p>
+      {newerNote(view) && (
+        <p className="small muted" data-testid="shared-newer">
+          {t(newerNote(view)!)}
+        </p>
+      )}
       {state === "stale" && (
         <p className="small shared-warn" role="status" data-testid="shared-stale">
           {t("sr.staleWarning")}

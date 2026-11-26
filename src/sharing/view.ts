@@ -4,6 +4,9 @@ import type { SharedActor } from "./hooks.ts";
 import type { SharedRow } from "./repository.ts";
 import type { LookupResult } from "./service.ts";
 
+/** A newer version of the analysis's key that is running (a re-run) or failed, beside this last valid one. */
+export type NewerVersion = { version: number; status: "running" | "failed" };
+
 /**
  * What the API tells a caller about a shared analysis (step 7 renders it): how old it is, who ran it and with what, how
  * often it was reused, what holds a failed one back, and, for a production error, the occurrences now next to the occurrences when it was
@@ -13,7 +16,7 @@ import type { LookupResult } from "./service.ts";
  * (the access check has passed by then). Callers describe only rows the actor may read.
  */
 export async function describeAnalysis(
-  r: LookupResult | { outcome: "read"; analysis: SharedRow },
+  r: LookupResult | { outcome: "read"; analysis: SharedRow; newer?: NewerVersion },
   actor: SharedActor,
   now = new Date(),
 ) {
@@ -58,6 +61,7 @@ export async function describeAnalysis(
       key: a.key,
     },
     reuse: { count: a.reuse_count, last_at: a.last_reused_at },
+    ...("newer" in r && r.newer ? { newer_version: r.newer } : {}),
     ...(a.status === "failed" || retry.state !== "none"
       ? {
           failure: {

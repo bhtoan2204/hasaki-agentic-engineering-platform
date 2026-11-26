@@ -191,14 +191,14 @@ Done:
 - `failed` is never served and not cached forever: the count of failures in a row is carried into the next version of the
   key; the key may start again after `min(retry cap, 2^failures)` minutes (2, 4, 8, ... 60) and not at all after
   `MAX_ATTEMPTS` (3) except by a force re-run. During backoff a request gets `bypass` (it runs its own analysis outside sharing, as
-  today). A failed latest version that follows a valid one holds the key too (the older valid is not served meanwhile).
+  today). (Corrected by C3: a valid older version is still served, with a note, while the latest version failed; see the C3 section.)
 - A run **canceled by a person is not a failure**: attempts stay, no backoff, the key is free at once.
   (A decision of mine: the plan says "failed: retry with backoff"; a cancel is not the analysis failing.)
 
 **Force re-run: a new version, never an overwrite** (as decided in the plan, section 4.4)
 
-- `force` claims version N+1 (trigger `force`, audit row `shared_analysis.force`). Version N stays `valid` and served while
-  N+1 runs; when N+1 is published, **in the same statement** every older valid version of the key becomes `superseded`. A
+- `force` claims version N+1 (trigger `force`, audit row `shared_analysis.force`). Version N stays `valid` while N+1 runs (it is served to readers since C3; before C3 the code answered `wait`, which
+  contradicted this note); when N+1 is published, **in the same statement** every older valid version of the key becomes `superseded`. A
   failed force leaves N in place.
 - Single-flight is unchanged: a force beside a running analysis gets `wait` (no third run); five parallel forces start nothing.
 - A member who may not read the existing valid result cannot force over it (`bypass`): that would supersede the result for
@@ -239,7 +239,7 @@ Done:
 ### Decisions to confirm
 
 1. **Marking stale by subject** needs the old key's readable parts; this is the only reason for the new index. A result is
-   marked stale when someone _claims_ a newer key of its subject, not when the code merely moves. If nobody asks, the old
+   marked stale when someone _claims_ (corrected by C4: when someone **publishes**) a newer key of its subject, not when the code merely moves. If nobody asks, the old
    result stays `valid` until its TTL (it is never served anyway, since its key no longer matches any request).
 2. **Backoff and attempts count only the analysis's own failures** (run failed, nothing produced, timeout), not a cancel.
 3. **A failed force does not make the key `bypass` forever**: it is a failed latest version, so the normal backoff applies
@@ -534,3 +534,125 @@ Latest failing run: `security` on the push of `55c693e` (run 45816234507). `ci` 
 - **Remaining:** new tests that assign a hex literal to a `*key` name will trigger the same rule again; either keep them out of
   that shape (for example build the value with a helper) or add them to the baseline. The `coverage` workflow of the same
   push was still running when this was written.
+
+## Review fixes (from REVIEW.md)
+
+State tracker (update after every item; a new session continues from the first unchecked item). Commits: the user said no
+commits for this series, so every item is in the working tree, uncommitted.
+
+- [x] 0. CI (gitleaks baseline): committed as `c979fb1` (see Fix 1)
+- [x] 1. C1 prior evidence is never shared
+- [x] 2. C2 definition resolved with the owner; personal definitions not shared
+- [x] 3. C3 serve the newest readable valid version while the latest is running or failed
+- [x] 4. C4 stale on publish; model in the RCA subject; commit_changed only for a descendant
+- [x] stop point after 4 reached: summary given, waiting for the user's answers (see "Open decisions after C1–C4")
+- [ ] 5. N6 scrub · 6. N8 RCA without log access · 7. N1, N3, N5, N7 · 8. N2 · 9. N9 · 10. N4 (docs only) · 11. Q1–Q9, tests
+
+### C1: a run started with prior evidence is not shared (done)
+
+- **Rule:** no lookup, no claim, no publish, no wait for a run whose prompt carries the other workflow's evidence, in both
+  directions: a runtime RCA with the member's bug-hunt digest (`unified.ts`, `!d.refs.length`), and a bug hunt with the
+  member's RCA digest (`bugHunt/service.ts`, no `prior_evidence` and no `context`). The run itself starts exactly as
+  before. The other callers (`POST /bug-hunts` without context, the RCA without a hunt) are shared as before.
+- **Tests (red first, then green)** in `test/unified-incident.integration.ts`, using the existing real hunt harness:
+  - hunt: a hunt with evidence started by a second member while a shared hunt of the same incident is running used to be
+    attached to it (`wait`, no run of its own); now it runs its own run, the `observe` hook sees no event and no row is
+    written; the control (no evidence) is still looked up and claimed;
+  - RCA: with the owner's verified hunt in the workbench the RCA used to be claimed (`miss`); now no event and no row; the
+    control (no evidence) is still shared.
+    The RCA test needs the sandbox (bwrap) to get evidence; without it the same test asserts the shared path instead (the
+    evidence is empty then).
+- **Not sure:** the rule skips sharing whenever any evidence reaches the prompt, so a member who ran both workflows never
+  produces or consumes a shared result for that incident; that costs reuse but is the safe side. A later change could put the
+  evidence into the key instead. A shared row published before this fix (flags are off by default) is not re-checked.
+- **Test environment:** the remote-less fixture repo has no `refs/remotes/origin/main`, so the hunt key cannot be built;
+  the test creates the ref in the fixture repository only.
+- **Full run:** unit 1519/1519; integration 1245 pass, 3 fail, 2 skipped. The 3 failures are `qc-operations` and
+  `token-delta` (unrelated chat tests); they pass alone 2 of 2 runs, so they look load-dependent. Re-checked after the next
+  item.
+- **Re-check:** the next full integration run (after C2) was 1249 pass, 0 fail; the 3 chat failures did not recur.
+
+### C2: the key resolves the owner's definition; a personal copy is never shared (done)
+
+- `analysisContext(db, key, provider, at?, ownerId?)` resolves the definition like `startRun` does (the owner's copy first)
+  and returns `personal: true` when that is not the shared definition (it compares the definition id with the shared one;
+  both lookups go through the existing version cache, no new SQL). The rubric and the workflow version in the key come from
+  the definition the run really uses.
+- The three flows pass the actor's id and return `null` when `personal` is true: the caller starts the run exactly as before
+  and nothing is looked up, claimed or published. Nobody can be served another member's personal prompt.
+- **Test (red first):** `shared-results-lookup.integration.ts`, "C2": for each of the three workflows a member with a
+  personal copy resolves it (`personal`), gets `null` from the flow and claims nothing, while another member is shared as
+  before. Before the fix the personal-copy member was claimed.
+- **Not sure / not done:** the backfill keeps its own `personal_definition` skip. A member who creates a personal copy
+  **after** a result was published is simply no longer served from the store (they run their own). Owner-specific skills and
+  knowledge (REVIEW.md note) are still not in the key.
+
+### C3: the newest readable valid version is served while a re-run runs or failed (done)
+
+- **Lookup** (`service.ts`): when the latest version is `running` or `failed`, the candidates are the valid versions of the key
+  (new query `validVersions`, only in that state: a hit on a valid latest is still one SELECT). Each candidate is checked
+  with `servable` and `canRead`; the newest readable one is a **hit** with `newer: {version, status}`. A servable
+  candidate nobody-readable still gives `bypass` with no row (never replaced by the caller's run).
+- **Consequences:** while a re-run runs, readers get v1, not `wait`. When the re-run failed, readers get v1; **no v3 is
+  started beside a valid v1, even after the backoff** (the force is the way to retry). With no valid candidate (first run,
+  stale, expired) nothing changes: `wait` or the backoff rules. A force still never starts beside a running one (`wait`).
+- **Read API** (`read.ts`): the same rule per kind and for the code-assessment subject, with `validForError` and
+  `validForRepositories`; the view has `newer_version` (only when the reader may read the newer row too). The card shows a
+  one-line note (running or failed).
+- **Tests (red first):** the two assertions that described the wrong behaviour were corrected in
+  `shared-results-validity.integration.ts` ("force re-run is a NEW VERSION…": the reader gets a hit on v1 with the note, no third
+  run; "a failed force leaves the last valid result…": a hit on v1, still a hit after the backoff, a force then starts v3).
+  New tests: expired v1 beside a running v2 waits, and an unreadable v1 is never replaced; per-candidate access with two valid
+  versions; the read API for an assessment (running, then failed, and no access) and for an RCA; the card note (unit).
+- **Step 4 notes above were wrong** about this point ("readers keep a valid result during a re-run"): they described the
+  plan, not the code. This section replaces them.
+- **Cases checked:** v1 valid + v2 running (hit v1, note); + v2 failed (hit v1, note; also after the backoff); force over a
+  failed v2 (v3 starts); force beside a running v2 (`wait`); v1 expired + v2 running (wait); v1 unreadable + v2 running
+  (bypass, no row); two valid versions with different access (newest readable served); no readable candidate (bypass);
+  first run with no valid version (wait, as before); the read API per kind and for the assessment subject.
+- **Not checked:** a publish of v2 between the lookup of the latest row and the lookup of the valid versions (the caller then
+  gets `wait` on a row that has just settled; the next poll shows it; not reproducible without a hook); several instances
+  at once; the hit statement count in the running/failed state (one more SELECT than a plain hit, by design).
+
+### C4: stale on publish, model in the RCA subject, commit_changed only for a descendant (done)
+
+- **When:** `markReplaced` moved from the claim (`service.ts`) to `settleSharedAnalyses` after a successful publish, in the
+  background (it may ask git; settling does not wait). It is in the new `stale.ts`. A claimed run that fails or never finishes
+  takes nothing away. (Step 4's text "marked stale when someone claims" was the old behaviour.)
+- **Direction and order:** `olderOfSubject` only returns valid rows **published before** the new one (`finished_at <`), so two
+  publications of one subject never stale each other (test with two settles at once: exactly one valid remains).
+- **commit_changed:** a reason only when, for **every** repository that moved, the new commit is a descendant of the old one.
+  `descends` is a new hook (default `ancestry.ts`: `git merge-base --is-ancestor` in the registered checkout, 30 s timeout).
+  A rewind, a divergent branch, an unknown commit or repository, a missing checkout or a git error is **unknown/false: the old
+  result stays valid**, still shown with its age (`freshness.age_seconds`); nothing is marked on a guess. The other reasons
+  (definition, rubric, model, contract) need no git and still stale at publish. Every other repository check is part of that
+  rule: one unknown repository among several keeps the old result.
+- **RCA subject:** includes the model identity (`key_parts.model` without the `#cfg:…` suffix). Another provider's RCA is another
+  subject and no longer stales it; the same models under a changed configuration (`#cfg` differs) still stale it with
+  `model_changed`. Decision of mine on the wording "model fingerprint": the configuration fingerprint was left out of the
+  subject on purpose, so a configuration change still invalidates (otherwise the old row would just linger until its TTL).
+- **Tests (red first):** `shared-results-validity.integration.ts` (stale only after publish and still served meanwhile; a failed
+  new run leaves the old result; ancestor / rewind / unknown / all-unknown-hook / age shown; two publications never stale each
+  other; RCA across providers and under a changed configuration; rubric, definition, model at publish) and
+  `shared-results-ancestry.integration.ts` (the default check on real git history: descendant, rewind, divergent branch, unknown
+  commit, unknown repository, no checkout). Tests of steps 3-6 that expected staling at claim were changed to publish (the
+  behaviour changed by design): validity, observability (metrics: `published` 3, the stale log line).
+- **Cases checked:** claim without publish (old valid and served); run failed after claim; ancestor, rewind, divergent, unknown,
+  one-of-two-repositories unknown; reverse publication order (the later publication of an older commit does not stale the
+  newer result); two publications at once; other provider (RCA); config change (RCA); rubric/definition/model; real git.
+- **Not checked:** the default check against a remote-backed repository (needs a clone/fetch); a git timeout path; many
+  instances publishing at once (single process only); the backfill (it does not call `markReplaced`: older rows of a subject
+  are not staled by a backfilled one).
+- **Same gap remains for assessments and bug hunts (not changed, your decision):** another provider's result of the same subject
+  still stales an earlier one with `model_changed` at publish (the model is in the key but only the RCA subject includes it).
+  Making it part of every kind's subject is the same one-line change in `olderOfSubject`.
+
+## Open decisions after C1–C4 (waiting for the user)
+
+1. **Commits:** you answered "no commit needed", so C1–C4 are in the working tree, uncommitted (one commit per item was
+   asked for; say if you want them split or committed, and the `func:` code if so).
+2. **Provider in the subject for assessments and bug hunts:** extend the RCA rule to them (see above)?
+3. **`#cfg` left out of the RCA subject:** keep, or include the whole model fingerprint?
+4. **C1:** members who ran both workflows never share that incident's results (safe side). Put the evidence refs into the key
+   instead later?
+5. Q3 (RCA read rule) and Q7 (who may force): still unanswered; see item 11 of the series.

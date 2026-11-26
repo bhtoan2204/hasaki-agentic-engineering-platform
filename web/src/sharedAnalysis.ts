@@ -31,6 +31,8 @@ export interface SharedView {
     cost_usd: number | null;
   };
   reuse: { count: number; last_at: string | null };
+  /** A newer version of this analysis is running (a re-run) or failed; this one is the last valid result. */
+  newer_version?: { version: number; status: "running" | "failed" };
   failure?: {
     attempts: number;
     reason: string | null;
@@ -83,6 +85,10 @@ export function staleReasons(v: SharedView): Array<{ key: string; repos?: string
       return { key: `sr.reason.${code}`, ...(repos ? { repos: repos.split(",").join(", ") } : {}) };
     });
 }
+
+/** The note under a result that a newer version is running or has failed, as a message key. */
+export const newerNote = (v: SharedView) =>
+  v.newer_version ? `sr.newer.${v.newer_version.status}` : null;
 
 /** A force re-run makes sense for a settled result (also failed or out of attempts), never beside a running one. */
 export const canForce = (v: SharedView) => v.status !== "running";

@@ -57,7 +57,11 @@ after(async () => {
 beforeEach(() => {
   resetSharingHooks();
   // Metrics and logs come from the DEFAULT observe hook; access is not what this suite tests.
-  setSharingHooks({ canRead: (row, actor) => row.created_by === actor.id });
+  setSharingHooks({
+    canRead: (row, actor) => row.created_by === actor.id,
+    // A, then B: the new commit descends from the old one.
+    descends: async (_repo, ancestor, commit) => ancestor === A && commit === B,
+  });
   config.sharedResults.prodErrors = true;
   config.sharedResults.codeAssessment = true;
   config.sharedResults.maxAttempts = 3;
@@ -132,7 +136,7 @@ test("metrics: hit rate, runs avoided, tokens saved, force re-runs and stale res
   const forced = await lookupOrStart(request(key, { force: true }));
   assert.equal(forced.outcome, "forced");
   await finish(runIdOf(forced));
-  await lookupOrStart(request(assessKey(repo, B)));
+  await finish(runIdOf(await lookupOrStart(request(assessKey(repo, B)))));
   await settleBackground();
   const m = metrics();
   assert.deepEqual(
@@ -144,7 +148,7 @@ test("metrics: hit rate, runs avoided, tokens saved, force re-runs and stale res
       published: m.published,
       stale: m.stale,
     },
-    { miss: 2, wait: 1, hit: 2, forced: 1, published: 2, stale: 1 },
+    { miss: 2, wait: 1, hit: 2, forced: 1, published: 3, stale: 1 },
   );
   assert.equal(m.lookups, 6);
   assert.equal(m.avoided_runs, 3, "two hits and one single-flight wait");
@@ -179,7 +183,9 @@ test("logs: one line per hit, miss, single-flight wait, stale and failed-retry, 
   assert.match(published[0], /^shared result published: .* analysis=\d+ v=1 run=\d+/);
   const hit = await logged(() => lookupOrStart(request(key)));
   assert.match(hit[0], /^shared result hit: .* ms=\d+/);
-  const stale = await logged(() => lookupOrStart(request(assessKey(repo, B))));
+  const stale = await logged(async () =>
+    finish(runIdOf(await lookupOrStart(request(assessKey(repo, B))))),
+  );
   assert.ok(
     stale.some(
       (l) =>

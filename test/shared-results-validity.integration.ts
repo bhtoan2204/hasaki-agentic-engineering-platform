@@ -20,6 +20,14 @@ import { resetSharingHooks, setSharingHooks } from "../src/sharing/hooks.ts";
 import { describeAnalysis } from "../src/sharing/view.ts";
 import { byId } from "../src/sharing/repository.ts";
 
+// A, B, C is a linear history; any other commit is unknown (null), as for a repository with no checkout.
+const HISTORY_HOOK = async (_repo: string, ancestor: string, commit: string) => {
+  const h = ["a", "b", "c"].map((x) => x.repeat(40));
+  const [i, j] = [h.indexOf(ancestor), h.indexOf(commit)];
+  return i < 0 || j < 0 ? null : i < j;
+};
+let errSeq = 0;
+const errorKeyFor = () => (++errSeq).toString(16).padStart(20, "d");
 const SCOPE = "0b6f1a52-3c1e-4c8a-9d57-1f2a3b4c5d6e";
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -40,7 +48,10 @@ before(async () => {
     key: "shared-validity-fixture",
     spec: {
       name: "validity fixture",
-      steps: [{ key: "assess", type: "command", config: { command: "true" } }],
+      steps: [
+        { key: "assess", type: "command", config: { command: "true" } },
+        { key: "report", type: "command", config: { command: "true" } },
+      ],
     },
   });
 });
@@ -51,7 +62,11 @@ after(async () => {
 beforeEach(() => {
   resetSharingHooks();
   // These suites test lookup, validity and retry; access (step 5) is tested in shared-results-access.integration.ts.
-  setSharingHooks({ observe: () => {}, canRead: (row, actor) => row.created_by === actor.id });
+  setSharingHooks({
+    observe: () => {},
+    canRead: (row, actor) => row.created_by === actor.id,
+    descends: HISTORY_HOOK,
+  });
   config.sharedResults.prodErrors = true;
   config.sharedResults.codeAssessment = true;
   config.sharedResults.maxAttempts = 3;
@@ -121,7 +136,7 @@ const complete = async (runId: number, output: unknown = { findings: [] }) => {
   await q(pool, "UPDATE workflow_runs SET status = 'COMPLETED' WHERE id = $1", [runId]);
   await q(
     pool,
-    "UPDATE workflow_steps SET status = 'COMPLETED', output = $2 WHERE run_id = $1 AND key = 'assess'",
+    "UPDATE workflow_steps SET status = 'COMPLETED', output = $2 WHERE run_id = $1 AND key IN ('assess', 'report')",
     [runId, JSON.stringify(output)],
   );
 };
@@ -141,7 +156,7 @@ const failRun = async (key: SharedKey, status = "FAILED") => {
 };
 
 // ---- stale rules
-test("code moved: the result for the old commit is stale (commit_changed) once the new commit is analysed", async () => {
+test("code moved: the old result goes stale (commit_changed) when the result for the descendant commit is PUBLISHED, not when it is claimed", async () => {
   const name = repo();
   const old = assessKey(name, { commit: A });
   await publish(old);
@@ -154,12 +169,99 @@ test("code moved: the result for the old commit is stale (commit_changed) once t
     "a new commit is a new key: never served from the old result",
   );
   await settleBackground();
+  assert.equal(
+    (await rowsOf(old))[0].status,
+    "valid",
+    "claimed, not published: the old result is still valid",
+  );
+  assert.equal((await lookupOrStart(request(old))).outcome, "hit", "and still served");
+  await complete(runIdOf(second));
+  await settleSharedAnalyses();
+  await settleBackground();
   const [row] = await rowsOf(old);
   assert.equal(row.status, "stale");
   assert.equal(row.stale_reason, `commit_changed:${name}`);
 });
 
-test("rubric, definition and model changes make the old result stale with the matching reason", async () => {
+test("C4: a new run that fails leaves the old result valid (nothing was staled at claim)", async () => {
+  const name = repo();
+  const old = assessKey(name, { commit: A });
+  await publish(old);
+  await failRun(assessKey(name, { commit: B }));
+  await settleBackground();
+  assert.equal((await rowsOf(old))[0].status, "valid");
+  assert.equal((await lookupOrStart(request(old))).outcome, "hit");
+});
+
+test("C4: commit_changed only when the new commit is a descendant of the old one in EVERY changed repository; otherwise the old result is kept", async () => {
+  // A, B, C is a linear history (the test's descends hook). An older commit, or an unknown relation, never stales.
+  const cases: Array<[string, string, string, boolean]> = [
+    ["descendant", A, C, true],
+    ["new is an ancestor (rewind)", C, A, false],
+    ["unknown commits", A, "d".repeat(40), false],
+  ];
+  for (const [label, was, now, stale] of cases) {
+    const name = repo();
+    const old = assessKey(name, { commit: was });
+    await publish(old);
+    await publish(assessKey(name, { commit: now }));
+    await settleBackground();
+    assert.equal((await rowsOf(old))[0].status, stale ? "stale" : "valid", label);
+  }
+  const name = repo();
+  const old = assessKey(name, { commit: A });
+  await publish(old);
+  setSharingHooks({ descends: async () => null });
+  await publish(assessKey(name, { commit: B }));
+  await settleBackground();
+  const [kept] = await rowsOf(old);
+  assert.equal(kept.status, "valid", "the relation cannot be determined: the old result is kept");
+  const view = await describeAnalysis(await lookupOrStart(request(old)), { id: alice });
+  assert.equal(view.status, "valid");
+  assert.equal(
+    typeof view.freshness.age_seconds,
+    "number",
+    "with its age, so the reader can judge it",
+  );
+});
+
+test("C4: two publications of one subject never stale each other: only the older publication goes stale, whichever order they settle in", async () => {
+  const name = repo();
+  const m1 = assessKey(name, { model: "claude/claude-opus-5-5#cfg:test" });
+  const m2 = assessKey(name, { model: "codex/gpt-5#cfg:test" });
+  const [r1, r2] = [await lookupOrStart(request(m1)), await lookupOrStart(request(m2))];
+  await complete(runIdOf(r1));
+  await complete(runIdOf(r2));
+  await Promise.all([settleSharedAnalyses(), settleSharedAnalyses()]);
+  await settleBackground();
+  const statuses = [...(await rowsOf(m1)), ...(await rowsOf(m2))].map((r) => r.status).sort();
+  assert.deepEqual(statuses, ["stale", "valid"], "exactly one stays valid");
+});
+
+test("C4: the RCA subject includes the model, so another provider does not stale it; the same models under a changed configuration do", async () => {
+  const fp = errorKeyFor();
+  const keyFor = (model: string) =>
+    runtimeRcaKey({
+      scope: SCOPE,
+      errorKey: fp,
+      contract: "unified-rca/v1",
+      workflow: { key: "production-incident-investigation", version: 1 },
+      rubricHash: rubricHash({ instructions: "rca" }),
+      model,
+    });
+  const codex = keyFor("codex/gpt-5#cfg:aaaa");
+  const rca = { errorKey: fp };
+  await publish(codex, alice, rca);
+  await publish(keyFor("claude/claude-opus-5-5#cfg:bbbb"), alice, rca);
+  await settleBackground();
+  assert.equal((await rowsOf(codex))[0].status, "valid", "another provider is another subject");
+  await publish(keyFor("codex/gpt-5#cfg:cccc"), alice, rca);
+  await settleBackground();
+  const [row] = await rowsOf(codex);
+  assert.deepEqual([row.status, row.stale_reason], ["stale", "model_changed"]);
+});
+
+test("rubric, definition and model changes make the old result stale (when the new one is published) with the matching reason", async () => {
   for (const [change, reason] of [
     [{ rubric: "assess more carefully" }, "rubric_changed"],
     [{ version: 2 }, "definition_changed"],
@@ -170,7 +272,7 @@ test("rubric, definition and model changes make the old result stale with the ma
     await publish(old);
     const next = assessKey(name, change);
     assert.notEqual(next.key, old.key);
-    assert.equal((await lookupOrStart(request(next))).outcome, "miss");
+    await publish(next);
     await settleBackground();
     const [row] = await rowsOf(old);
     assert.deepEqual([row.status, row.stale_reason], ["stale", reason], JSON.stringify(change));
@@ -366,9 +468,16 @@ test("force re-run is a NEW VERSION: the old one stays valid and served until th
   const meanwhile = await lookupOrStart(request(key, alice));
   assert.equal(
     meanwhile.outcome,
-    "wait",
-    "nobody starts a third run: the forced one is the one in flight",
+    "hit",
+    "readers keep the valid v1 while the re-run is in progress (plan 4.4)",
   );
+  assert.equal(meanwhile.analysis!.version, 1);
+  assert.deepEqual(
+    (meanwhile as { newer?: unknown }).newer,
+    { version: 2, status: "running" },
+    "with a note that a newer version is running",
+  );
+  assert.equal((await rowsOf(key)).length, 2, "and nobody starts a third run");
   await complete(runIdOf(forced), { findings: [{ id: "NEW" }] });
   await settleSharedAnalyses();
   rows = await rowsOf(key);
@@ -409,10 +518,91 @@ test("a failed force leaves the last valid result in place", async () => {
       [2, "failed"],
     ],
   );
+  const after = await lookupOrStart(request(key));
+  assert.equal(
+    after.outcome,
+    "hit",
+    "the last good result is served, not hidden by the failed re-run",
+  );
+  assert.equal(after.analysis!.version, 1);
+  assert.deepEqual((after as { newer?: unknown }).newer, { version: 2, status: "failed" });
+  await q(
+    pool,
+    "UPDATE shared_analyses SET next_retry_at = now() - interval '1 second' WHERE kind = $1 AND key = $2",
+    [key.kind, key.key],
+  );
   assert.equal(
     (await lookupOrStart(request(key))).outcome,
-    "bypass",
-    "the failed latest version holds the key; the valid v1 is not served meanwhile",
+    "hit",
+    "and after the backoff nobody starts a v3 beside a valid v1",
+  );
+  assert.equal((await rowsOf(key)).length, 2);
+  const again = await lookupOrStart(request(key, alice, { force: true }));
+  assert.equal(again.outcome, "forced", "a force is the way to retry");
+  assert.equal(again.analysis!.version, 3);
+});
+
+test("C3: while a newer version runs, an expired v1 is not served (it waits), and a valid v1 the caller may not read is never replaced", async () => {
+  const key = assessKey(repo());
+  await publish(key, alice);
+  const forced = await lookupOrStart(request(key, alice, { force: true }));
+  assert.equal(forced.outcome, "forced");
+  await q(
+    pool,
+    "UPDATE shared_analyses SET valid_until = now() - interval '1 minute' WHERE kind = $1 AND key = $2 AND version = 1",
+    [key.kind, key.key],
+  );
+  assert.equal(
+    (await lookupOrStart(request(key, alice))).outcome,
+    "wait",
+    "v1 is expired: nothing to serve",
+  );
+  await q(
+    pool,
+    "UPDATE shared_analyses SET valid_until = now() + interval '1 day' WHERE kind = $1 AND key = $2 AND version = 1",
+    [key.kind, key.key],
+  );
+  const refused = await lookupOrStart(request(key, bob));
+  assert.deepEqual(
+    [refused.outcome, refused.analysis],
+    ["bypass", null],
+    "bob may read neither version",
+  );
+});
+
+test("C3: access is checked on each candidate version: the newest one the caller may read is served", async () => {
+  const key = assessKey(repo());
+  const claim = await lookupOrStart(request(key, alice));
+  await complete(runIdOf(claim));
+  await settleSharedAnalyses();
+  // Two valid versions are not a state the publish statement produces; the lookup must still not trust one check for all.
+  await q(
+    pool,
+    `INSERT INTO shared_analyses (kind, key, version, status, key_parts, scope_repos, created_by, trigger, result, finished_at, valid_until)
+     SELECT kind, key, 2, 'valid', key_parts, scope_repos, $3, 'manual', '{"v":2}', now(), now() + interval '1 day'
+       FROM shared_analyses WHERE kind = $1 AND key = $2 AND version = 1`,
+    [key.kind, key.key, bob],
+  );
+  await q(
+    pool,
+    `INSERT INTO shared_analyses (kind, key, version, status, key_parts, scope_repos, created_by, trigger)
+     SELECT kind, key, 3, 'running', key_parts, scope_repos, $3, 'force' FROM shared_analyses WHERE kind = $1 AND key = $2 AND version = 1`,
+    [key.kind, key.key, bob],
+  );
+  setSharingHooks({ canRead: (row) => row.version === 1 });
+  const r = await lookupOrStart(request(key, alice));
+  assert.equal(r.outcome, "hit");
+  assert.equal(
+    r.analysis!.version,
+    1,
+    "v2 is newer but unreadable for this caller: v1 is the newest readable",
+  );
+  setSharingHooks({ canRead: () => false });
+  const none = await lookupOrStart(request(key, alice));
+  assert.deepEqual(
+    [none.outcome, none.analysis],
+    ["bypass", null],
+    "no readable candidate: nothing crosses",
   );
 });
 
@@ -702,7 +892,7 @@ test("a stale result's answer carries the reason and is not served", async () =>
   const name = repo();
   const old = assessKey(name);
   await publish(old);
-  await lookupOrStart(request(assessKey(name, { commit: B })));
+  await publish(assessKey(name, { commit: B }));
   await settleBackground();
   const latest = await lookupOrStart(request(old));
   assert.equal(latest.outcome, "miss", "stale is never served");

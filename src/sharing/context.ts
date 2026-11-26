@@ -14,6 +14,8 @@ export interface AnalysisContext {
   model: string;
   /** Providers of the agent steps (for provenance; not part of the key by itself: the model part covers them). */
   providers: string[];
+  /** The run's owner has a personal copy of the workflow: what they run is not the shared definition (never shared). */
+  personal: boolean;
   /** The skills the rubric pins, with their version, sorted by key. */
   pinned: Array<{ key: string; version: number }>;
 }
@@ -39,9 +41,13 @@ export async function analysisContext(
   definitionKey: string,
   provider: string | undefined,
   at?: RunContextAt,
+  ownerId?: number | null,
 ): Promise<AnalysisContext> {
-  const dv = await definitions.version(definitionKey, at?.version, db, null);
+  // The definition a run of this owner would use: startRun resolves the owner's own copy before the shared one.
+  const dv = await definitions.version(definitionKey, at?.version, db, ownerId ?? null);
   if (!dv) throw new Error(`workflow "${definitionKey}" has no published version`);
+  const shared = ownerId ? await definitions.version(definitionKey, at?.version, db, null) : dv;
+  const personal = !shared || shared.definition_id !== dv.definition_id;
   const cfg = at ? at.configuration : await loadAgentConfiguration(db);
   const chosen = resolveAgentProvider(provider || cfg.default_provider);
   const steps = dv.spec.steps.filter((s) => s.type === "agent" || s.type === "coding_agent");
@@ -106,6 +112,7 @@ export async function analysisContext(
     rubricHash: rubric,
     model: `${models.join("+") || `${chosen}/cli-default`}#cfg:${configuration}`,
     providers: providers.length ? providers : [chosen],
+    personal,
     pinned: versions
       .map((v) => ({ key: v.key, version: Number(v.current_version) }))
       .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),

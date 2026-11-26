@@ -6,23 +6,23 @@ import { background } from "../workflow/background.ts";
 import { ignoreError } from "../ignoreError.ts";
 import type { SharedKey } from "./key.ts";
 import { sharingHooks, type SharedActor, type SharedOutcomeName } from "./hooks.ts";
-import { retryState, staleReason } from "./policy.ts";
+import { retryState } from "./policy.ts";
 import { scrubText } from "./scrub.ts";
 import {
   attachRun,
   byId,
   insertRunning,
   latestVersion,
-  markStale,
-  olderOfSubject,
   recordUse,
+  validVersions,
   type Provenance,
   type SharedRow,
 } from "./repository.ts";
 
 /**
  * Lookup-before-compute with single-flight (docs/shared-results/PLAN.md, section 4.2):
- *  hit    a servable result the caller may read: returned, no model call;
+ *  hit    a servable result the caller may read: returned, no model call. While a re-run (a newer version) is running or has
+ *         failed, this is the newest valid version the caller may read, with a note about the newer one;
  *  wait   an analysis of this key is running and the caller may read it: no second run, the caller waits on it;
  *  miss   nothing usable: this call claimed the key and started the analysis in the SAME transaction as the claim;
  *  forced the same as a miss, but the caller asked for a re-run: a NEW VERSION of the key (the previous valid version is
@@ -41,7 +41,12 @@ import {
  * statement, run in the background after the answer is ready: it adds no query to the caller's wait.
  */
 export type LookupResult =
-  | { outcome: "hit"; analysis: SharedRow }
+  | {
+      outcome: "hit";
+      analysis: SharedRow;
+      /** A newer version of this key is running (a re-run) or failed; the served one is the last valid result. */
+      newer?: { version: number; status: "running" | "failed" };
+    }
   | { outcome: "wait"; analysis: SharedRow }
   | { outcome: "miss" | "forced"; analysis: SharedRow; runId: number }
   | { outcome: "bypass"; analysis: SharedRow | null };
@@ -112,18 +117,40 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
   for (let attempt = 1; ; attempt++) {
     const now = new Date();
     const latest = await latestVersion(pool, kind, key);
-    if (latest?.status === "valid" && hooks.servable(latest, now)) {
-      // A valid result the caller may not read is never replaced by the caller's own run (a hit or a force): that would
-      // supersede it for everyone who may read it. The caller runs unshared.
-      if (!(await hooks.canRead(latest, r.actor))) {
-        note("bypass", latest, null, { reason: "access" });
-        return { outcome: "bypass", analysis: null };
+    // The version a reader gets: the latest one when it is valid, otherwise (a re-run is running, or it failed) the newest
+    // valid version the caller may read. Access is checked on every candidate version, not once for the key.
+    const candidates =
+      latest?.status === "valid"
+        ? [latest]
+        : latest && (latest.status === "running" || latest.status === "failed")
+          ? await validVersions(pool, kind, key)
+          : [];
+    let served: SharedRow | null = null;
+    let unreadable = false;
+    for (const c of candidates) {
+      if (!hooks.servable(c, now)) continue;
+      if (await hooks.canRead(c, r.actor)) {
+        served = c;
+        break;
       }
-      if (!r.force) {
-        use(latest, "hit");
-        note("hit", latest, latest.source_run_id, { tokensSaved: saved(latest) ?? undefined });
-        return { outcome: "hit", analysis: latest };
-      }
+      unreadable = true;
+    }
+    // A valid result the caller may not read is never replaced by the caller's own run (a hit or a force): that would
+    // supersede it for everyone who may read it. The caller runs unshared.
+    if (!served && unreadable) {
+      note("bypass", latest, null, { reason: "access" });
+      return { outcome: "bypass", analysis: null };
+    }
+    if (served && !r.force) {
+      const newer =
+        latest &&
+        latest.id !== served.id &&
+        (latest.status === "running" || latest.status === "failed")
+          ? { version: latest.version, status: latest.status }
+          : undefined;
+      use(served, "hit");
+      note("hit", served, served.source_run_id, { tokensSaved: saved(served) ?? undefined });
+      return { outcome: "hit", analysis: served, ...(newer ? { newer } : {}) };
     }
     if (latest?.status === "running") {
       if (!(await hooks.canRead(latest, r.actor))) {
@@ -169,10 +196,6 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
       const outcome = r.force ? "forced" : "miss";
       use(claimed.row, outcome);
       note(outcome, claimed.row, claimed.runId);
-      // Older results of this subject that this key replaces are stale from now on (commit, rubric, model... changed).
-      background("shared stale", () =>
-        markReplaced(claimed.row).catch(ignoreError("shared.stale")),
-      );
       return { outcome, analysis: claimed.row, runId: claimed.runId };
     } catch (e) {
       // Another request or instance claimed the key between our lookup and our insert: look again (now a wait, or
@@ -181,29 +204,6 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
       note("lost_race", null);
     }
   }
-}
-
-/** Mark valid results of the same subject under another key stale, with what changed. */
-export async function markReplaced(row: SharedRow) {
-  let marked = 0;
-  for (const older of await olderOfSubject(pool, row)) {
-    const reason = staleReason(older.key_parts, row.key_parts);
-    if (!reason) continue;
-    if (!(await markStale(pool, older.id, reason))) continue;
-    marked++;
-    sharingHooks().observe({
-      kind: row.kind,
-      outcome: "stale",
-      analysisId: older.id,
-      version: older.version,
-      runId: null,
-      actorId: null,
-      key: older.key,
-      scope: typeof older.key_parts.scope === "string" ? older.key_parts.scope : null,
-      reason,
-    });
-  }
-  return marked;
 }
 
 export type WaitResult =

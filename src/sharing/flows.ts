@@ -11,8 +11,8 @@ import type { AnalysisContext } from "./context.ts";
 
 /**
  * The three analyses wrapped by lookup-before-compute. Each returns null when sharing does not apply (its flag is off,
- * or the key cannot be established, e.g. a repository's current commit is unknown); the caller then does exactly what it
- * did before. `start` is the caller's own run start, called inside the claim transaction.
+ * the key cannot be established, e.g. a repository's current commit is unknown, or the actor runs a personal copy of the
+ * workflow, which is not the shared definition the key describes); the caller then does exactly what it did before. `start` is the caller's own run start, called inside the claim transaction.
  */
 type Start = (tx: {
   client: pg.PoolClient;
@@ -55,7 +55,8 @@ export async function sharedCodeAssessment(x: {
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.codeAssessment || !x.commits) return null;
-  const ctx = await analysisContext(pool, ASSESS_WORKFLOW, x.provider);
+  const ctx = await analysisContext(pool, ASSESS_WORKFLOW, x.provider, undefined, x.actor.id);
+  if (ctx.personal) return null;
   const key = codeAssessmentKey({
     scope: await installationId(),
     repos: repoCommits(x.commits),
@@ -84,7 +85,8 @@ export async function sharedRuntimeRca(x: {
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.prodErrors) return null;
-  const ctx = await analysisContext(pool, RCA_WORKFLOW, x.provider);
+  const ctx = await analysisContext(pool, RCA_WORKFLOW, x.provider, undefined, x.actor.id);
+  if (ctx.personal) return null;
   const key = runtimeRcaKey({
     scope: await installationId(),
     errorKey: x.fingerprint,
@@ -113,7 +115,8 @@ export async function sharedBugHunt(x: {
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.prodErrors || !x.commits) return null;
-  const ctx = await analysisContext(pool, HUNT_WORKFLOW, x.provider);
+  const ctx = await analysisContext(pool, HUNT_WORKFLOW, x.provider, undefined, x.actor.id);
+  if (ctx.personal) return null;
   const key = bugHuntKey({
     scope: await installationId(),
     errorKey: x.fingerprint,

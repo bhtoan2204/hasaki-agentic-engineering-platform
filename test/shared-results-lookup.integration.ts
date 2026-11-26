@@ -14,7 +14,7 @@ import { settleSharedAnalyses } from "../src/sharing/settle.ts";
 import { resetSharingHooks, setSharingHooks, sharingHooks } from "../src/sharing/hooks.ts";
 import { analysisContext } from "../src/sharing/context.ts";
 import { installationId } from "../src/sharing/scope.ts";
-import { sharedCodeAssessment } from "../src/sharing/flows.ts";
+import { sharedBugHunt, sharedCodeAssessment, sharedRuntimeRca } from "../src/sharing/flows.ts";
 
 let alice = 0;
 let bob = 0;
@@ -402,4 +402,79 @@ test("the key of a real flow: the definition version, rubric and model come from
   );
   assert.match(await installationId(), /^[0-9a-f-]{36}$/);
   assert.ok(sharingHooks());
+});
+
+// ---- C2 (REVIEW.md): the key resolves the definition the way the run does (the owner's own copy first)
+test("C2: a member with a personal copy of the workflow resolves it, and is never shared; another member is shared as before", async () => {
+  const carol = (
+    await createUser({ username: "share-carol", password: "share-carol-password", role: "member" })
+  ).id;
+  const spec = {
+    name: "my copy",
+    steps: [{ key: "assess", type: "command", config: { command: "true" } }],
+  };
+  const real = (actor: number) => async (tx: Parameters<LookupRequest["start"]>[0]) =>
+    Number(
+      (
+        await startRun(
+          { definitionKey: "shared-fixture", ownerId: actor, start: false, title: "c2" },
+          tx,
+        )
+      ).id,
+    );
+  const commits = { c2repo: "a".repeat(40) };
+  const flows = [
+    [
+      "codebase-assessment",
+      (id: number, start: ReturnType<typeof real>) =>
+        sharedCodeAssessment({ actor: { id }, focus: "", commits, start }),
+    ],
+    [
+      "production-incident-investigation",
+      (id: number, start: ReturnType<typeof real>) =>
+        sharedRuntimeRca({
+          actor: { id },
+          fingerprint: "c2c2c2c2c2c2c2c2c2c2",
+          contract: "v1",
+          start,
+        }),
+    ],
+    [
+      "production-bug-hunt",
+      (id: number, start: ReturnType<typeof real>) =>
+        sharedBugHunt({
+          actor: { id },
+          fingerprint: "c2c2c2c2c2c2c2c2c2c3",
+          commits,
+          start,
+        }),
+    ],
+  ] as const;
+  for (const [key, flow] of flows) {
+    await definitions.create({ key, spec, ownerId: carol });
+    assert.equal(
+      (await analysisContext(pool, key, undefined, undefined, carol)).personal,
+      true,
+      `${key}: carol's run uses her copy`,
+    );
+    assert.equal((await analysisContext(pool, key, undefined, undefined, alice)).personal, false);
+    assert.equal(
+      (await analysisContext(pool, key, undefined)).personal,
+      false,
+      "no owner: the shared one",
+    );
+    let started = 0;
+    const counting = async (tx: Parameters<LookupRequest["start"]>[0]) => (
+      started++,
+      real(carol)(tx)
+    );
+    assert.equal(
+      await flow(carol, counting),
+      null,
+      `${key}: not shared: the caller starts the run as before`,
+    );
+    assert.equal(started, 0, "nothing was claimed through the shared path");
+    const shared = await flow(alice, real(alice));
+    assert.ok(shared && shared.outcome === "miss", `${key}: another member is shared as before`);
+  }
 });

@@ -246,6 +246,39 @@ export async function keyExists(db: Db, kind: SharedKind, key: string) {
   ]));
 }
 
+/** The valid versions of one key, newest first (a re-run may be running or have failed beside them). */
+export async function validVersions(db: Db, kind: SharedKind, key: string) {
+  const rows = await q<SharedRow>(
+    db,
+    `${SELECT} WHERE a.kind = $1 AND a.key = $2 AND a.status = 'valid' ORDER BY a.version DESC LIMIT 5`,
+    [kind, key],
+  );
+  return rows.map((r) => shape(r)!);
+}
+
+/** The valid analyses of one kind of one production error in this scope, newest first. */
+export async function validForError(db: Db, errorKey: string, kind: SharedKind, scope: string) {
+  const rows = await q<SharedRow>(
+    db,
+    `${SELECT} WHERE a.error_key = $1 AND a.kind = $2 AND a.key_parts->>'scope' = $3 AND a.status = 'valid'
+      ORDER BY a.id DESC LIMIT 5`,
+    [errorKey, kind, scope],
+  );
+  return rows.map((r) => shape(r)!);
+}
+
+/** The valid code assessments of exactly these repositories and this (stored) focus, newest first. */
+export async function validForRepositories(db: Db, repos: string[], focus: string, scope: string) {
+  const rows = await q<SharedRow>(
+    db,
+    `${SELECT} WHERE a.kind = 'code_assessment' AND a.scope_repos = $1 AND COALESCE(a.key_parts->>'focus', '') = $2
+                AND a.key_parts->>'scope' = $3 AND a.status = 'valid'
+      ORDER BY a.id DESC LIMIT 5`,
+    [repos, focus, scope],
+  );
+  return rows.map((r) => shape(r)!);
+}
+
 /** The latest version (any status) of each kind of analysis of one production error in this scope. */
 export function latestForError(
   db: Db,
@@ -372,13 +405,19 @@ export async function fail(
   return rows.length > 0;
 }
 
-/** Valid rows of the same subject as `row` (same kind, repositories, error and focus) under another key. */
-export function olderOfSubject(db: Db, row: SharedRow) {
+/**
+ * Valid rows of the same subject as the published `row` (same kind, repositories, error and focus; for an RCA also the same
+ * model identity, so another provider's RCA is another subject) under another key, published BEFORE it: of two
+ * publications of one subject only the older one can be replaced by the newer one, never the other way round.
+ */
+export function olderOfSubject(db: Db, row: SharedRow, modelIdentity: string) {
   return q<{ id: number; key: string; version: number; key_parts: Record<string, unknown> }>(
     db,
     `SELECT id, key, version, key_parts FROM shared_analyses
       WHERE kind = $1 AND status = 'valid' AND key <> $2 AND scope_repos = $3 AND error_key IS NOT DISTINCT FROM $4
-        AND key_parts->>'scope' = $5 AND ($1 <> 'code_assessment' OR key_parts->>'focus' = $6)`,
+        AND key_parts->>'scope' = $5 AND ($1 <> 'code_assessment' OR key_parts->>'focus' = $6)
+        AND ($1 <> 'prod_error.runtime_rca' OR split_part(key_parts->>'model', '#', 1) = $7)
+        AND finished_at < $8`,
     [
       row.kind,
       row.key,
@@ -386,6 +425,8 @@ export function olderOfSubject(db: Db, row: SharedRow) {
       row.error_key,
       row.key_parts.scope,
       row.key_parts.focus ?? null,
+      modelIdentity,
+      row.finished_at,
     ],
   );
 }

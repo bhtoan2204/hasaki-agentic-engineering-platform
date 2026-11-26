@@ -5,7 +5,10 @@ import type { SharedKind } from "./types.ts";
 import { sharingHooks } from "./hooks.ts";
 import { validUntil } from "./policy.ts";
 import { SCRUB_VERSION } from "./scrub.ts";
-import { expireDue, fail, publish, settleable, type PublishFacts } from "./repository.ts";
+import { markReplaced } from "./stale.ts";
+import { byId, expireDue, fail, publish, settleable, type PublishFacts } from "./repository.ts";
+import { background } from "../workflow/background.ts";
+import { ignoreError } from "../ignoreError.ts";
 
 /**
  * What a finished run leaves for others: the snapshot of the analysis (scrubbed through the hook before it is stored). Null when
@@ -152,6 +155,13 @@ export async function settleSharedAnalyses(limit = 50) {
         scope: r.scope,
         ...(why ? { reason: why } : {}),
       });
+      // Older results of this subject that this one replaces become stale now, not when the run was claimed. In the
+      // background: it may ask git, and settling must not wait for it.
+      if (!why)
+        background("shared stale", async () => {
+          const row = await byId(pool, id);
+          if (row) await markReplaced(row).catch(ignoreError("shared.stale"));
+        });
     }
   }
   return settled;

@@ -265,3 +265,56 @@ test("flags off: the read API answers as if nothing were shared", async () => {
     bug_hunt: null,
   });
 });
+
+test("C3: while a re-run runs or after it failed, the read API still returns the last valid result with a note", async () => {
+  const name = await repo(["api-alice", "api-bob"]);
+  const key = assessKey(name);
+  const id = await publish(key, "api-alice");
+  const forced = await lookupOrStart({ ...request(key, "api-alice"), force: true });
+  assert.equal(forced.outcome, "forced");
+  const url = `/api/code-scans/shared?repositories=${name}`;
+  const running = await bob<{
+    shared: {
+      analysis_id: number;
+      status: string;
+      version: number;
+      newer_version: unknown;
+      result: unknown;
+    };
+  }>(url);
+  assert.equal(running.body.shared.analysis_id, id, "v1, not the running v2");
+  assert.equal(running.body.shared.status, "valid");
+  assert.deepEqual(running.body.shared.newer_version, { version: 2, status: "running" });
+  assert.ok(running.body.shared.result);
+  await q(pool, "UPDATE workflow_runs SET status = 'FAILED' WHERE id = $1", [
+    forced.outcome === "forced" ? forced.runId : 0,
+  ]);
+  await settleSharedAnalyses();
+  const failed = await bob<{ shared: { analysis_id: number; newer_version: unknown } }>(url);
+  assert.equal(failed.body.shared.analysis_id, id);
+  assert.deepEqual(failed.body.shared.newer_version, { version: 2, status: "failed" });
+  const noAccess = await admin(url);
+  assert.deepEqual(noAccess.body, { shared: null }, "a reader without access gets neither version");
+});
+
+test("C3: the same for a production error's RCA", async () => {
+  const fp = (++seq).toString(16).padStart(20, "0");
+  const key = runtimeRcaKey({
+    scope,
+    errorKey: fp,
+    contract: "v1",
+    workflow: { key: "production-incident-investigation", version: 1 },
+    rubricHash: rubricHash({ instructions: "rca" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  await putUserSecret(ids["api-alice"], "splunk_token", JSON.stringify({ token: "t" }));
+  const id = await publish(key, "api-alice", { summary: "pool exhausted" });
+  const forced = await lookupOrStart({ ...request(key, "api-alice"), force: true });
+  assert.equal(forced.outcome, "forced");
+  const r = await alice<{
+    runtime_rca: { analysis_id: number; status: string; newer_version: unknown };
+  }>(`/api/prod-errors/${fp}/shared`);
+  assert.equal(r.body.runtime_rca.analysis_id, id);
+  assert.equal(r.body.runtime_rca.status, "valid");
+  assert.deepEqual(r.body.runtime_rca.newer_version, { version: 2, status: "running" });
+});

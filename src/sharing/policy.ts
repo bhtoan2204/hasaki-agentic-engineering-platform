@@ -53,15 +53,19 @@ export function retryState(
 export const canStart = (latest: Parameters<typeof retryState>[0], now: Date) =>
   retryState(latest, now).state === "none";
 
+export type KeyChange =
+  | { code: "commit_changed"; moved: Array<{ repo: string; was: string | undefined; now: string }> }
+  | { code: "definition_changed" | "contract_changed" | "rubric_changed" | "model_changed" };
+
 /**
- * Why `older` no longer matches what a request would ask for now: the parts of its key that differ from `newer`. Only
- * keys of the same subject (same error, repositories and focus) are compared. Empty when nothing differs.
+ * What differs between the parts of `older` and of `newer` (two keys of one subject: same error, repositories and focus).
+ * Empty when nothing differs.
  */
-export function staleReason(
+export function changesBetween(
   older: Record<string, unknown>,
   newer: Record<string, unknown>,
-): string {
-  const reasons: string[] = [];
+): KeyChange[] {
+  const changes: KeyChange[] = [];
   if (JSON.stringify(older.repos) !== JSON.stringify(newer.repos)) {
     const was = new Map(
       ((older.repos as string[]) ?? []).map((r) => r.split("@") as [string, string]),
@@ -69,12 +73,28 @@ export function staleReason(
     const moved = ((newer.repos as string[]) ?? [])
       .map((r) => r.split("@") as [string, string])
       .filter(([repo, commit]) => was.get(repo) !== commit)
-      .map(([repo]) => repo);
-    reasons.push(`commit_changed:${moved.join(",")}`);
+      .map(([repo, now]) => ({ repo, was: was.get(repo), now }));
+    changes.push({ code: "commit_changed", moved });
   }
-  if (older.workflow !== newer.workflow) reasons.push("definition_changed");
-  if (older.contract !== newer.contract) reasons.push("contract_changed");
-  if (older.rubric !== newer.rubric) reasons.push("rubric_changed");
-  if (older.model !== newer.model) reasons.push("model_changed");
-  return reasons.join(";");
+  if (older.workflow !== newer.workflow) changes.push({ code: "definition_changed" });
+  if (older.contract !== newer.contract) changes.push({ code: "contract_changed" });
+  if (older.rubric !== newer.rubric) changes.push({ code: "rubric_changed" });
+  if (older.model !== newer.model) changes.push({ code: "model_changed" });
+  return changes;
 }
+
+/** The stale reason as stored: "commit_changed:a,b;model_changed". */
+export const formatReasons = (changes: KeyChange[]) =>
+  changes
+    .map((c) =>
+      c.code === "commit_changed" ? `${c.code}:${c.moved.map((m) => m.repo).join(",")}` : c.code,
+    )
+    .join(";");
+
+/** Why `older` no longer matches what a request would ask for now (see changesBetween), as stored. */
+export const staleReason = (older: Record<string, unknown>, newer: Record<string, unknown>) =>
+  formatReasons(changesBetween(older, newer));
+
+/** The model's identity without the configuration fingerprint ("claude/opus#cfg:ab12" → "claude/opus"). */
+export const modelIdentity = (parts: Record<string, unknown>) =>
+  String(parts.model ?? "").split("#")[0];

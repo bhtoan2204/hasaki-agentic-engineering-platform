@@ -759,17 +759,19 @@ async function runtimeOrShared(
     let run;
     try {
       // Shared results (flag SHARED_RESULTS_PROD_ERRORS): an RCA another member ran, or is running, for this incident;
-      // `force` is a new version of it (still never beside a running one).
-      const shared = sharing
-        ? await sharedRuntimeRca({
-            actor,
-            fingerprint: fp,
-            contract: VERIFICATION_CONTRACT,
-            provider: body.provider ? String(body.provider) : undefined,
-            force: body.force === true,
-            start: async (tx) => Number((await start(tx)).id),
-          })
-        : null;
+      // `force` is a new version of it (still never beside a running one). A run whose prompt carries this member's own
+      // bug-hunt evidence is neither served from nor published to the shared store: the key does not include that evidence.
+      const shared =
+        sharing && !d.refs.length
+          ? await sharedRuntimeRca({
+              actor,
+              fingerprint: fp,
+              contract: VERIFICATION_CONTRACT,
+              provider: body.provider ? String(body.provider) : undefined,
+              force: body.force === true,
+              start: async (tx) => Number((await start(tx)).id),
+            })
+          : null;
       if (
         shared &&
         shared.outcome !== "miss" &&

@@ -2,6 +2,7 @@ import { canStart, isServable } from "./policy.ts";
 import { canReadShared } from "./access.ts";
 import { scrubResult } from "./scrub.ts";
 import { recordSharedEvent } from "./telemetry.ts";
+import { isDescendant } from "./ancestry.ts";
 import type { SharedRow } from "./repository.ts";
 import type { SharedKind } from "./key.ts";
 import type { SharedEvent } from "./types.ts";
@@ -28,6 +29,8 @@ export interface SharingHooks {
   mayStart(latest: SharedRow | null, now: Date): boolean;
   scrub(kind: SharedKind, result: unknown): unknown;
   observe(event: SharedEvent): void;
+  /** Is `commit` a descendant of `ancestor` in the repository? null: cannot be told (nothing is then marked stale). */
+  descends(repo: string, ancestor: string, commit: string): Promise<boolean | null>;
 }
 
 export const DEFAULT_HOOKS: SharingHooks = {
@@ -36,6 +39,7 @@ export const DEFAULT_HOOKS: SharingHooks = {
   mayStart: (latest, now) => canStart(latest, now),
   scrub: (kind, result) => scrubResult(kind, result),
   observe: (e) => recordSharedEvent(e),
+  descends: (repo, ancestor, commit) => isDescendant(repo, ancestor, commit),
 };
 
 let current: SharingHooks = DEFAULT_HOOKS;

@@ -114,9 +114,11 @@ async function huntOrShared(
     let run;
     try {
       // Shared results (flag SHARED_RESULTS_PROD_ERRORS): a hunt of the same incident at the same commits by another
-      // member, or the one running now. The commits are only resolved when the flag is on.
+      // member, or the one running now. The commits are only resolved when the flag is on. A hunt whose prompt carries the
+      // starter's own runtime-RCA evidence is neither served from nor published to the shared store: the key does not
+      // include that evidence.
       const shared =
-        sharing && config.sharedResults.prodErrors
+        sharing && config.sharedResults.prodErrors && !body.prior_evidence?.length && !body.context
           ? await sharedBugHunt({
               actor,
               fingerprint,
