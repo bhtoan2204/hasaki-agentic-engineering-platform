@@ -163,3 +163,31 @@ test("child processes do not inherit the platform's own secrets", () => {
   });
   assert.deepEqual(out, { PATH: "/bin", OPENAI_API_KEY: "k" });
 });
+
+test("shared results: both flags default off, each is its own switch, and the TTLs are validated integers", () => {
+  const flags = "[config.sharedResults.prodErrors, config.sharedResults.codeAssessment]";
+  assert.equal(load({}, flags).out, "[false,false]", "off unless asked: behaviour as before");
+  assert.equal(load({ SHARED_RESULTS_PROD_ERRORS: "true" }, flags).out, "[true,false]");
+  assert.equal(load({ SHARED_RESULTS_CODE_ASSESSMENT: "on" }, flags).out, "[false,true]");
+  assert.equal(
+    load({ SHARED_RESULTS_PROD_ERRORS: "no", SHARED_RESULTS_CODE_ASSESSMENT: "0" }, flags).out,
+    "[false,false]",
+  );
+  assert.equal(
+    load({}, "config.sharedResults.ttl").out,
+    JSON.stringify({ runtimeRcaHours: 24, bugHuntDays: 30, codeAssessmentDays: 30 }),
+  );
+  assert.equal(
+    load(
+      {
+        SHARED_RESULTS_TTL_RCA_HOURS: "6",
+        SHARED_RESULTS_TTL_BUG_HUNT_DAYS: "7",
+        SHARED_RESULTS_TTL_CODE_ASSESSMENT_DAYS: "14",
+      },
+      "config.sharedResults.ttl",
+    ).out,
+    JSON.stringify({ runtimeRcaHours: 6, bugHuntDays: 7, codeAssessmentDays: 14 }),
+  );
+  for (const bad of ["abc", "0", "-3", "2.5"])
+    assert.notEqual(load({ SHARED_RESULTS_TTL_RCA_HOURS: bad }, "1").status, 0, bad);
+});

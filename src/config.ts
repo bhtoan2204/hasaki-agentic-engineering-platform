@@ -332,6 +332,16 @@ export interface Config {
    * needs an intake policy for source "radar".
    */
   radar: { enabled: boolean; intervalSeconds: number; maxSeries: number; maxIngestPerScan: number };
+  /**
+   * Shared results (src/sharing, docs/shared-results/PLAN.md): reuse of production error and code assessment analyses
+   * across members. One flag per kind; both default off, and off means no lookup and no publish (behaviour as before).
+   */
+  sharedResults: {
+    prodErrors: boolean;
+    codeAssessment: boolean;
+    /** How long a published result is served before it is stale (hours / days, per kind). */
+    ttl: { runtimeRcaHours: number; bugHuntDays: number; codeAssessmentDays: number };
+  };
   /** LOCAL checkout overrides, never synchronized to PostgreSQL. */
   repositories: Record<string, string>;
   /** LOCAL: shared registry entries this machine never checks out (no startup checkout warning). */
@@ -883,6 +893,11 @@ const defaults: Config = {
   },
   analytics: { timeoutMs: 15000 },
   radar: { enabled: LIVE, intervalSeconds: 300, maxSeries: 500, maxIngestPerScan: 5 },
+  sharedResults: {
+    prodErrors: false,
+    codeAssessment: false,
+    ttl: { runtimeRcaHours: 24, bugHuntDays: 30, codeAssessmentDays: 30 },
+  },
   codeIntelligence: {
     enabled: LIVE,
     includeGenerated: false,
@@ -1315,6 +1330,27 @@ function load(): Config {
       .filter(Boolean);
   const semantic = cfg.retrieval.semantic;
   cfg.radar.enabled = flag("RADAR_ENABLED", cfg.radar.enabled);
+  const shared = cfg.sharedResults;
+  shared.prodErrors = flag("SHARED_RESULTS_PROD_ERRORS", shared.prodErrors);
+  shared.codeAssessment = flag("SHARED_RESULTS_CODE_ASSESSMENT", shared.codeAssessment);
+  shared.ttl.runtimeRcaHours = integer(
+    "SHARED_RESULTS_TTL_RCA_HOURS",
+    shared.ttl.runtimeRcaHours,
+    1,
+    24 * 365,
+  );
+  shared.ttl.bugHuntDays = integer(
+    "SHARED_RESULTS_TTL_BUG_HUNT_DAYS",
+    shared.ttl.bugHuntDays,
+    1,
+    3650,
+  );
+  shared.ttl.codeAssessmentDays = integer(
+    "SHARED_RESULTS_TTL_CODE_ASSESSMENT_DAYS",
+    shared.ttl.codeAssessmentDays,
+    1,
+    3650,
+  );
   if (process.env.RADAR_INTERVAL_SECONDS)
     cfg.radar.intervalSeconds = Math.max(60, Number(process.env.RADAR_INTERVAL_SECONDS) || 300);
   semantic.enabled = flag("RETRIEVAL_SEMANTIC_ENABLED", semantic.enabled);
