@@ -95,6 +95,8 @@ export interface StartRunInput {
   start?: boolean;
   /** Execution profile: AUTO (default, deterministic classification) or a manual override. */
   profile?: ProfileChoice;
+  /** Optional pre-resolved profile decision (e.g. shared-result lookup) so AUTO classification does not run twice or inside a claim tx. */
+  profileDecision?: ProfileDecision;
   /** Language of summaries, questions and reports. Omitted → vi. Invalid values are rejected. */
   outputLocale?: "vi" | "en";
   /** Run default provider. Omitted → platform default (Claude unless configured). Agent steps can override it. */
@@ -206,17 +208,6 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
     selected = names;
     reusedRepositories = false;
   }
-  // Deterministic discovery signal for profile selection (no LLM).
-  const text = [wi?.title, wi?.description, input.title, JSON.stringify(inputs)]
-    .filter(Boolean)
-    .join("\n");
-  const ranked = rankRepositories(
-    (await repositories.list(c)).filter((r) => allowed.includes(r.name)),
-    { text, project },
-  );
-  const positive = ranked.filter(
-    (r) => r.score > 0 && !r.reasons.every((x) => x.startsWith("mapped to project")),
-  );
   const priorFailureRuns = wi
     ? Number(
         (
@@ -228,25 +219,41 @@ export async function resolveRunGraph(c: Db, input: StartRunInput): Promise<Reso
         )?.n ?? 0,
       )
     : 0;
-  const decision0 = await classifyWithFallback(
-    {
-      title: wi?.title ?? input.title ?? "",
-      description: wi?.description ?? String(inputs.description ?? ""),
-      project,
-      repositories: selected,
-      knownRepository: positive.length && !isAmbiguous(positive) ? positive[0].repo : null,
-      matchingRepositories: positive.length,
-      declaredRisk: (inputs.risk as string) ?? wi?.payload?.risk ?? null,
-      provider: input.agentProvider ?? config.agent.defaultProvider ?? null,
-      evidence:
-        selected.length === 1
-          ? await collectMicroEvidence(selected[0], inputs.files, priorFailureRuns)
-          : undefined,
-    },
-    input.profile ?? "AUTO",
-    (prompt) =>
-      completeForRun({ agent_provider: input.agentProvider }, prompt, AbortSignal.timeout(5000)),
-  );
+  let decision0: ProfileDecision;
+  if (input.profileDecision && (input.profile == null || input.profile === "AUTO")) {
+    decision0 = input.profileDecision;
+  } else {
+    // Deterministic discovery signal for profile selection (no LLM).
+    const text = [wi?.title, wi?.description, input.title, JSON.stringify(inputs)]
+      .filter(Boolean)
+      .join("\n");
+    const ranked = rankRepositories(
+      (await repositories.list(c)).filter((r) => allowed.includes(r.name)),
+      { text, project },
+    );
+    const positive = ranked.filter(
+      (r) => r.score > 0 && !r.reasons.every((x) => x.startsWith("mapped to project")),
+    );
+    decision0 = await classifyWithFallback(
+      {
+        title: wi?.title ?? input.title ?? "",
+        description: wi?.description ?? String(inputs.description ?? ""),
+        project,
+        repositories: selected,
+        knownRepository: positive.length && !isAmbiguous(positive) ? positive[0].repo : null,
+        matchingRepositories: positive.length,
+        declaredRisk: (inputs.risk as string) ?? wi?.payload?.risk ?? null,
+        provider: input.agentProvider ?? config.agent.defaultProvider ?? null,
+        evidence:
+          selected.length === 1
+            ? await collectMicroEvidence(selected[0], inputs.files, priorFailureRuns)
+            : undefined,
+      },
+      input.profile ?? "AUTO",
+      (prompt) =>
+        completeForRun({ agent_provider: input.agentProvider }, prompt, AbortSignal.timeout(5000)),
+    );
+  }
   const complexity = classifyComplexity(decision0, { priorFailureRuns }, inputs.complexity);
   let decision: ProfileDecision & { complexity: typeof complexity } = {
     ...decision0,

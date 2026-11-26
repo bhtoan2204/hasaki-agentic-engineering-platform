@@ -196,6 +196,19 @@ function build(kind: SharedKind, parts: Record<string, unknown>): SharedKey {
   return { kind, key: sha256(canonicalJson(full)), parts: full };
 }
 
+export const SHARED_PROFILES = ["MICRO", "FAST", "STANDARD", "DEEP"] as const;
+export type SharedProfile = (typeof SHARED_PROFILES)[number];
+const PROFILES = new Set<string>(SHARED_PROFILES);
+
+/** Execution profile normalized and validated for keys (default STANDARD so omitted matches default). */
+export function profileOf(profile: string | null | undefined): SharedProfile {
+  if (profile == null) return "STANDARD";
+  const p = typeof profile === "string" ? profile.trim().toUpperCase() : "";
+  if (!p) return "STANDARD";
+  if (!PROFILES.has(p)) throw new KeyError(`invalid profile: ${profile}`);
+  return p as SharedProfile;
+}
+
 export interface RuntimeRcaKeyInput {
   scope: string;
   /** The group fingerprint. */
@@ -206,6 +219,8 @@ export interface RuntimeRcaKeyInput {
   rubricHash: string;
   /** From `modelOf`. */
   model: string;
+  /** Execution profile (MICRO|FAST|STANDARD|DEEP). Omitted/empty → STANDARD. */
+  profile?: string | null;
 }
 export function runtimeRcaKey(i: RuntimeRcaKeyInput): SharedKey {
   return build("prod_error.runtime_rca", {
@@ -215,6 +230,7 @@ export function runtimeRcaKey(i: RuntimeRcaKeyInput): SharedKey {
     contract: required("contract", i.contract, 60),
     rubric: hashOf("rubric hash", i.rubricHash),
     model: required("model", i.model, 200),
+    profile: profileOf(i.profile),
   });
 }
 
@@ -225,6 +241,7 @@ export interface BugHuntKeyInput {
   workflow: WorkflowRef;
   rubricHash: string;
   model: string;
+  profile?: string | null;
 }
 export function bugHuntKey(i: BugHuntKeyInput): SharedKey {
   return build("prod_error.bug_hunt", {
@@ -234,6 +251,7 @@ export function bugHuntKey(i: BugHuntKeyInput): SharedKey {
     workflow: workflowOf(i.workflow),
     rubric: hashOf("rubric hash", i.rubricHash),
     model: required("model", i.model, 200),
+    profile: profileOf(i.profile),
   });
 }
 
@@ -243,6 +261,7 @@ export interface CodeAssessmentKeyInput {
   focus?: string | null;
   project?: string | null;
   outputLocale?: string | null;
+  profile?: string | null;
   workflow: WorkflowRef;
   rubricHash: string;
   model: string;
@@ -254,6 +273,7 @@ export function codeAssessmentKey(i: CodeAssessmentKeyInput): SharedKey {
     focus: normalizeFocus(i.focus),
     project: normalizeProject(i.project),
     locale: localeOf(i.outputLocale),
+    profile: profileOf(i.profile),
     workflow: workflowOf(i.workflow),
     rubric: hashOf("rubric hash", i.rubricHash),
     model: required("model", i.model, 200),

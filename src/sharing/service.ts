@@ -37,8 +37,9 @@ import {
  * a running one. The claim and the run commit together, so a crash before the commit leaves neither a claim nor a run, and
  * a crash after it leaves a run whose end the reconcile task settles (settle.ts).
  *
- * The hit path is one SELECT (the row, its runner's name included). Recording the use and the reuse counter is one
- * statement, run in the background after the answer is ready: it adds no query to the caller's wait.
+ * Lookup itself runs one latestVersion SELECT (plus validVersions only when a newer version is running/failed), followed by
+ * `canReadShared` (cached repo grants when warm or 3 SELECTs when cold; 1 batched `user_secrets` query for personal log
+ * access on runtime RCA), and one background statement to record the use and reuse counter.
  */
 export type LookupResult =
   | {

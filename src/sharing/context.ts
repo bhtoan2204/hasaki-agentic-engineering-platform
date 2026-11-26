@@ -5,19 +5,38 @@ import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import type { AgentConfiguration } from "../agent/configuration.ts";
 import { resolveAgentProvider } from "../agent/provider.ts";
 import { resolveStepAgent } from "../agent/stepAgent.ts";
-import { canonicalJson, rubricHash, sha256, type WorkflowRef } from "./key.ts";
+import {
+  classifyProfile,
+  resolveProfile,
+  type Profile,
+  type ProfileDecision,
+} from "../workflow/profiles.ts";
+import type { WorkflowSpec } from "../workflow/types.ts";
+import { canonicalJson, profileOf, rubricHash, sha256, type WorkflowRef } from "./key.ts";
 
 /** What makes two runs of one workflow "the same analysis", read before any run exists. */
 export interface AnalysisContext {
   workflow: WorkflowRef;
   rubricHash: string;
   model: string;
+  profile: Profile;
+  /** Live deterministic AUTO decision passed into startRun so classification never runs twice or inside a claim tx. */
+  profileDecision?: ProfileDecision;
   /** Providers of the agent steps (for provenance; not part of the key by itself: the model part covers them). */
   providers: string[];
   /** The run's owner has a personal copy of the workflow: what they run is not the shared definition (never shared). */
   personal: boolean;
   /** The skills the rubric pins, with their version, sorted by key. */
   pinned: Array<{ key: string; version: number }>;
+}
+
+/** Deterministic inputs used to resolve execution profile (AUTO) without an LLM call. */
+export interface ProfileInputs {
+  profile?: string | null;
+  title?: string;
+  description?: string;
+  project?: string;
+  repositories?: string[];
 }
 
 /** A past run's context (backfill): its definition version, its frozen agent configuration, the skills as of its start. */
@@ -27,14 +46,77 @@ export interface RunContextAt {
   startedAt: Date;
 }
 
+function resolveSharedProfile(
+  spec: WorkflowSpec | null,
+  input: ProfileInputs | undefined,
+  provider: string | null,
+): { profile: Profile; profileDecision?: ProfileDecision; spec: WorkflowSpec | null } {
+  const explicit = input?.profile != null && input.profile !== "" ? profileOf(input.profile) : null;
+  if (explicit) {
+    if (!spec) return { profile: explicit, spec: null };
+    const applied = resolveProfile(spec, {
+      profile: explicit,
+      requested: explicit,
+      confidence: "high",
+      reasons: [],
+      warnings: [],
+      signals: {
+        high_risk_term: null,
+        multi_repo_terms: false,
+        big_change_terms: null,
+        small_change_terms: null,
+        bug_terms: null,
+        repositories: [],
+        matching_repositories: 0,
+        declared_risk: null,
+        implementation_complexity: "unknown",
+        business_risk: "unknown",
+      },
+    });
+    return { profile: applied.decision.profile, spec: applied.spec };
+  }
+  const raw = classifyProfile(
+    {
+      title: input?.title ?? "",
+      description: input?.description ?? "",
+      project: input?.project ?? "",
+      repositories: input?.repositories ?? [],
+      knownRepository: null,
+      matchingRepositories: 0,
+      declaredRisk: null,
+      provider,
+    },
+    "AUTO",
+  );
+  if (!spec) return { profile: raw.profile, profileDecision: raw, spec: null };
+  const resolved = resolveProfile(spec, raw);
+  return {
+    profile: resolved.decision.profile,
+    profileDecision: resolved.decision,
+    spec: resolved.spec,
+  };
+}
+
+/** Resolve execution profile for a code-assessment query without reading secrets or calling any LLM. */
+export async function codeAssessmentProfile(
+  db: Db,
+  ownerId: number | null,
+  input: Pick<ProfileInputs, "profile" | "title" | "project" | "repositories">,
+): Promise<Profile> {
+  if (input.profile != null && input.profile !== "") return profileOf(input.profile);
+  const dv = await definitions.version("codebase-assessment", undefined, db, ownerId);
+  return resolveSharedProfile(dv?.spec ?? null, input, null).profile;
+}
+
 /**
- * The definition, rubric and model parts of a key, as a run started now would use them:
+ * The definition, rubric, profile and model parts of a key, as a run started now would use them:
  *  - workflow: the latest published version of the shared definition (what startRun resolves);
  *  - rubric: the instructions, output contracts and schemas of every agent step of that version, plus the skills those
  *    steps name, at their current version;
- *  - model: each agent step's provider/model as resolveStepAgent gives it, plus a fingerprint of the configuration of
- *    the providers involved. A run's execution profile (AUTO) is only decided inside startRun, so the profiles of the
- *    configuration are part of the fingerprint: any change of a model, for any profile, is a new key (never fewer keys).
+ *  - profile: deterministic AUTO classification (zero LLM call, never inside a claim transaction) or an explicit
+ *    run.profile (backfill);
+ *  - model: each agent step's provider/model as resolveStepAgent gives it for that profile, plus a fingerprint of the
+ *    configuration of the providers involved.
  */
 export async function analysisContext(
   db: Db,
@@ -42,6 +124,7 @@ export async function analysisContext(
   provider: string | undefined,
   at?: RunContextAt,
   ownerId?: number | null,
+  profileInputs?: ProfileInputs,
 ): Promise<AnalysisContext> {
   // The definition a run of this owner would use: startRun resolves the owner's own copy before the shared one.
   const dv = await definitions.version(definitionKey, at?.version, db, ownerId ?? null);
@@ -50,10 +133,14 @@ export async function analysisContext(
   const personal = !shared || shared.definition_id !== dv.definition_id;
   const cfg = at ? at.configuration : await loadAgentConfiguration(db);
   const chosen = resolveAgentProvider(provider || cfg.default_provider);
-  const steps = dv.spec.steps.filter((s) => s.type === "agent" || s.type === "coding_agent");
+  const resolved = resolveSharedProfile(dv.spec, profileInputs, chosen);
+  const rubricSteps = dv.spec.steps.filter((s) => s.type === "agent" || s.type === "coding_agent");
+  const agentSteps = (resolved.spec ?? dv.spec).steps.filter(
+    (s) => s.type === "agent" || s.type === "coding_agent",
+  );
   const skillKeys = [
     ...new Set(
-      steps.flatMap((s) =>
+      rubricSteps.flatMap((s) =>
         Array.isArray(s.config?.skills) ? (s.config.skills as unknown[]).map(String) : [],
       ),
     ),
@@ -74,7 +161,7 @@ export async function analysisContext(
         );
   const rubric = rubricHash({
     instructions: canonicalJson(
-      steps.map((s) => ({
+      rubricSteps.map((s) => ({
         key: s.key,
         instructions: s.config?.instructions ?? null,
         output_contract: s.config?.output_contract ?? null,
@@ -83,10 +170,10 @@ export async function analysisContext(
     ),
     pinned: versions.map((v) => ({ key: v.key, version: Number(v.current_version) })),
   });
-  const agents = steps
+  const agents = agentSteps
     .map((s) =>
       resolveStepAgent(
-        { agent_provider: chosen, profile: null, agent_configuration: cfg },
+        { agent_provider: chosen, profile: resolved.profile, agent_configuration: cfg },
         {
           type: s.type,
           config: (s.config ?? {}) as Record<string, unknown>,
@@ -111,6 +198,8 @@ export async function analysisContext(
     workflow: { key: definitionKey, version: dv.version },
     rubricHash: rubric,
     model: `${models.join("+") || `${chosen}/cli-default`}#cfg:${configuration}`,
+    profile: resolved.profile,
+    ...(resolved.profileDecision ? { profileDecision: resolved.profileDecision } : {}),
     providers: providers.length ? providers : [chosen],
     personal,
     pinned: versions

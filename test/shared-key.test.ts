@@ -163,6 +163,7 @@ test("keys are sha256 hex of the canonical parts, carry kind, version and scope,
     "error",
     "kind",
     "model",
+    "profile",
     "rubric",
     "scope",
     "v",
@@ -171,12 +172,18 @@ test("keys are sha256 hex of the canonical parts, carry kind, version and scope,
   assert.equal(k.parts.workflow, "production-incident-investigation@17");
   assert.equal(k.parts.model, "claude/claude-opus-5-5");
   assert.equal(RUBRIC, "80e2790e151d7b91e7157fa3992738b38709404d01e911ed5a7ee2da8b4e2f6b");
-  assert.equal(k.key, "b5c089640fd0da0609d3f67ade904d5c4056c129c4b0fdf3471ab2f2e47725ff");
-  assert.equal(hunt().key, "6c39e77f780748dcd136fc73a3e203e197cdb6dfaa9e09319f00ff7ccff115c4");
+  assert.equal(
+    k.key,
+    ["6c59e6033bccf0bf", "2a1f9f21ee031721", "28f66724a1484502", "86020f15358629a2"].join(""),
+  );
+  assert.equal(
+    hunt().key,
+    ["b0c6295638d96367", "cd9841d348f0ed7a", "2593c57f2480f176", "7cdb11ac7593fb7a"].join(""),
+  );
   assert.equal(
     assess({ focus: "  Refund   Flow ", workflow: { key: "codebase-assessment", version: 12 } })
       .key,
-    ["e7fca4b5ed0f7b6f", "d4389cb8b57c5eca", "8e1c217a4ea9f281", "8b0300950b19aa67"].join(""),
+    ["8ecfe769715a0f74", "2c7884a781192041", "57cb08384fe04dce", "39a9253edf209be2"].join(""),
   );
 });
 
@@ -234,6 +241,21 @@ test("code assessment: the repository order does not matter; the focus, project 
   assert.equal(assess({ project: "OMS" }).parts.project, "oms");
   assert.notEqual(assess({ project: "OMS" }).key, assess({ project: "Payment" }).key);
   assert.notEqual(assess({ project: "OMS" }).key, assess({ project: "" }).key);
+
+  // N2: execution profile is part of all three keys (defaults to STANDARD, KEY_VERSION stays 1).
+  assert.equal(KEY_VERSION, 1);
+  assert.equal(rca().parts.profile, "STANDARD");
+  assert.equal(hunt().parts.profile, "STANDARD");
+  assert.equal(assess().parts.profile, "STANDARD");
+  assert.equal(assess({ profile: null }).key, assess({ profile: "STANDARD" }).key);
+  assert.equal(assess({ profile: " deep " }).key, assess({ profile: "DEEP" }).key);
+  assert.notEqual(rca({ profile: "DEEP" }).key, rca({ profile: "STANDARD" }).key);
+  assert.notEqual(hunt({ profile: "DEEP" }).key, hunt({ profile: "STANDARD" }).key);
+  assert.notEqual(assess({ profile: "DEEP" }).key, assess({ profile: "STANDARD" }).key);
+  assert.notEqual(assess({ profile: "FAST" }).key, assess({ profile: "MICRO" }).key);
+  assert.throws(() => assess({ profile: "TURBO" }), KeyError);
+  assert.throws(() => rca({ profile: "TURBO" }), KeyError);
+  assert.throws(() => hunt({ profile: "TURBO" }), KeyError);
 });
 
 test("normalizeFocus: case, whitespace and Unicode form (composed and decomposed Vietnamese are the same text)", () => {

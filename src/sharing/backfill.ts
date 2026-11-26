@@ -60,6 +60,7 @@ interface Candidate {
   source_revisions: Record<string, { commit?: string }> | null;
   output_locale: string | null;
   project: string;
+  profile: string;
   started_at: Date | null;
   finished_at: Date | null;
   hunt_fingerprint: string | null;
@@ -90,9 +91,10 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
   const current = new Map<string, Promise<AnalysisContext>>();
   // Keys handled in this pass (a dry-run writes nothing, so the database cannot tell it a key is already taken).
   const seen = new Set<string>();
-  const today = (workflow: string, provider: string) => {
-    const k = `${workflow}|${provider}`;
-    if (!current.has(k)) current.set(k, analysisContext(pool, workflow, provider));
+  const today = (workflow: string, provider: string, profile: string) => {
+    const k = `${workflow}|${provider}|${profile}`;
+    if (!current.has(k))
+      current.set(k, analysisContext(pool, workflow, provider, undefined, undefined, { profile }));
     return current.get(k)!;
   };
   if (opts.restart && apply)
@@ -111,7 +113,7 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
       pool,
       `SELECT r.id, r.definition_key, v.version AS definition_version, d.owner_id IS NULL AS shared_definition,
               r.agent_provider, r.agent_configuration, r.owner_id, r.inputs, r.selected_repositories, r.source_revisions,
-              r.output_locale, COALESCE(w.project, r.inputs->>'project', '') AS project,
+              r.output_locale, COALESCE(w.project, r.inputs->>'project', '') AS project, r.profile,
               r.started_at, r.finished_at, h.fingerprint AS hunt_fingerprint
          FROM workflow_runs r
          JOIN workflow_definition_versions v ON v.id = r.definition_version_id
@@ -164,15 +166,22 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
     if (!run.agent_configuration || !run.started_at || !run.finished_at) skip("not_recorded");
     const until = validUntil(kind, new Date(run.finished_at!));
     if (until.getTime() <= Date.now()) skip("expired");
-    const now = await today(run.definition_key, run.agent_provider);
+    const now = await today(run.definition_key, run.agent_provider, run.profile);
     if (run.definition_version !== now.workflow.version) skip("definition_changed");
     let then: AnalysisContext;
     try {
-      then = await analysisContext(pool, run.definition_key, run.agent_provider, {
-        version: run.definition_version,
-        configuration: refreshEnvironmentDefaults(parseAgentConfiguration(run.agent_configuration)),
-        startedAt: new Date(run.started_at!),
-      });
+      then = await analysisContext(
+        pool,
+        run.definition_key,
+        run.agent_provider,
+        {
+          version: run.definition_version,
+          configuration: refreshEnvironmentDefaults(parseAgentConfiguration(run.agent_configuration)),
+          startedAt: new Date(run.started_at!),
+        },
+        undefined,
+        { profile: run.profile },
+      );
     } catch {
       return skip("not_recorded");
     }

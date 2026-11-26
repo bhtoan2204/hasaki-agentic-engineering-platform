@@ -21,6 +21,22 @@ export async function getUserSecret(userId: number, kind: string): Promise<strin
   return decryptSecret(row.ciphertext);
 }
 
+/** Fetch multiple user secret ciphertexts in one SELECT so callers can decrypt lazily and short-circuit. */
+export async function getUserSecretCiphertexts(
+  userId: number,
+  kinds: readonly string[],
+): Promise<Map<string, string>> {
+  const rows = await q<{ kind: string; ciphertext: string }>(
+    pool,
+    "SELECT kind, ciphertext FROM user_secrets WHERE user_id = $1 AND kind = ANY($2::text[])",
+    [userId, [...kinds]],
+  );
+  return new Map(rows.map((r) => [r.kind, r.ciphertext]));
+}
+
+export const decryptSecretIfPresent = (ciphertext: string | undefined): string | null =>
+  ciphertext ? decryptSecret(ciphertext) : null;
+
 export async function deleteUserSecret(userId: number, kind: string) {
   await q(pool, "DELETE FROM user_secrets WHERE user_id = $1 AND kind = $2", [userId, kind]);
 }

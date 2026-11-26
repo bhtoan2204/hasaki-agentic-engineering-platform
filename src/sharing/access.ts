@@ -1,9 +1,33 @@
+import { config } from "../config.ts";
 import { log } from "../logging.ts";
+import {
+  decryptSecretIfPresent,
+  getSharedSecret,
+  getUserSecretCiphertexts,
+} from "../auth/secrets.ts";
 import { listAccessibleRepositories } from "../repos/access.ts";
-import { splunkConfiguredFor } from "../integrations/splunk.ts";
-import { signozConfiguredFor } from "../integrations/signoz.ts";
+import {
+  hasPersonalSplunkSecret,
+  SPLUNK_SHARED_SECRET_KIND,
+  SPLUNK_USER_SECRET_KINDS,
+} from "../integrations/splunk.ts";
+import { isSignozConfigUsable, SIGNOZ_SECRET_KIND } from "../integrations/signoz.ts";
 import { installationId } from "./scope.ts";
 import type { SharedRow } from "./repository.ts";
+
+async function hasLogAccess(userId: number): Promise<boolean> {
+  // Fetch all personal log credential ciphertexts in one SELECT, decrypt lazily, and skip shared_secrets unless needed.
+  const ciphertexts = await getUserSecretCiphertexts(userId, [
+    ...SPLUNK_USER_SECRET_KINDS,
+    SIGNOZ_SECRET_KIND,
+  ]);
+  if (hasPersonalSplunkSecret(ciphertexts)) return true;
+  if (isSignozConfigUsable(decryptSecretIfPresent(ciphertexts.get(SIGNOZ_SECRET_KIND))))
+    return true;
+  return (
+    config.splunk.allowSharedToken && !!(await getSharedSecret(SPLUNK_SHARED_SECRET_KIND))
+  );
+}
 
 /**
  * Who may be served a shared analysis (docs/shared-results/PLAN.md, section 6.1), evaluated on every read and never stored:
@@ -17,8 +41,7 @@ import type { SharedRow } from "./repository.ts";
 export async function canReadShared(row: SharedRow, actor: { id: number }): Promise<boolean> {
   try {
     if ((row.key_parts as { scope?: unknown }).scope !== (await installationId())) return false;
-    if (row.kind === "prod_error.runtime_rca")
-      return (await splunkConfiguredFor(actor.id)) || (await signozConfiguredFor(actor.id));
+    if (row.kind === "prod_error.runtime_rca") return await hasLogAccess(actor.id);
     if (!row.scope_repos?.length) return false;
     const readable = new Set(
       (await listAccessibleRepositories(actor.id)).map((r) => r.repository.name),

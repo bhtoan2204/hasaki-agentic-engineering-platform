@@ -15,6 +15,9 @@ import { resetSharingHooks, setSharingHooks, sharingHooks } from "../src/sharing
 import { analysisContext } from "../src/sharing/context.ts";
 import { installationId } from "../src/sharing/scope.ts";
 import { sharedBugHunt, sharedCodeAssessment, sharedRuntimeRca } from "../src/sharing/flows.ts";
+import { repositories } from "../src/repos/service.ts";
+import { setRepositoryAccess } from "../src/repos/access.ts";
+import { loadAgentConfiguration, saveProviderConfiguration } from "../src/agent/configurationStore.ts";
 
 let alice = 0;
 let bob = 0;
@@ -529,4 +532,191 @@ test("N1: sharedCodeAssessment separates keys by outputLocale and project", asyn
   assert.notEqual(viOms!.analysis!.key, enOms!.analysis!.key);
   assert.notEqual(viOms!.analysis!.key, viPayment!.analysis!.key);
   assert.equal(viOmsCase!.analysis!.id, viOms!.analysis!.id);
+});
+
+test("N2: profile (STANDARD vs DEEP) resolves without LLM, picks profile model config, separates keys, and avoids double classification in startRun", async () => {
+  const admin = (
+    await createUser({ username: "share-n2-admin", password: "share-n2-admin-password", role: "admin" })
+  ).id;
+  const r1 = `n2-repo-${++seq}`;
+  const r2 = `n2-repo-${++seq}`;
+  for (const name of [r1, r2]) {
+    const row = (await repositories.upsert(name, {}))!;
+    await setRepositoryAccess(row, alice, "write", admin);
+  }
+  const orig = await loadAgentConfiguration(pool);
+  await saveProviderConfiguration("claude", orig.providers.claude.revision, {
+    defaults: { model: "claude-sonnet-4-6" },
+    profiles: {
+      STANDARD: { agent: { model: "claude-sonnet-4-6" } },
+      DEEP: { agent: { model: "claude-opus-4-6" } },
+    },
+  });
+  try {
+    const ctxStd = await analysisContext(pool, "codebase-assessment", "claude", undefined, alice, {
+      repositories: [r1],
+      title: `Codebase assessment ${r1}`,
+    });
+    const ctxDeep = await analysisContext(pool, "codebase-assessment", "claude", undefined, alice, {
+      repositories: [r1],
+      title: `Codebase assessment ${r1} — refactor auth`,
+    });
+    const ctxMulti = await analysisContext(pool, "codebase-assessment", "claude", undefined, alice, {
+      repositories: [r1, r2],
+      title: `Codebase assessment ${r1}`,
+    });
+    assert.equal(ctxStd.profile, "STANDARD");
+    assert.equal(ctxDeep.profile, "DEEP");
+    assert.equal(ctxMulti.profile, "DEEP");
+    assert.ok(ctxStd.model.startsWith("claude/claude-sonnet-4-6#cfg:"), ctxStd.model);
+    assert.ok(ctxDeep.model.startsWith("claude/claude-opus-4-6#cfg:"), ctxDeep.model);
+    assert.equal(ctxStd.profileDecision?.requested, "AUTO");
+
+    const seenProfiles: string[] = [];
+    const assessStd = await sharedCodeAssessment({
+      actor: { id: alice },
+      focus: "",
+      title: `Codebase assessment ${r1}`,
+      provider: "claude",
+      commits: { [r1]: "a".repeat(40) },
+      start: async (tx, profileDecision) => {
+        assert.ok(profileDecision, "N2: pre-resolved profileDecision is passed to startRun");
+        seenProfiles.push(profileDecision.profile);
+        return Number(
+          (
+            await startRun(
+              {
+                definitionKey: "codebase-assessment",
+                repositories: [r1],
+                inputs: { repositories: [r1] },
+                title: `Codebase assessment ${r1}`,
+                agentProvider: "claude",
+                ownerId: alice,
+                start: false,
+                profileDecision,
+              },
+              tx,
+            )
+          ).id,
+        );
+      },
+    });
+    const assessDeep = await sharedCodeAssessment({
+      actor: { id: alice },
+      focus: "refactor auth",
+      title: `Codebase assessment ${r1} — refactor auth`,
+      provider: "claude",
+      commits: { [r1]: "a".repeat(40) },
+      start: async (tx, profileDecision) => {
+        assert.ok(profileDecision);
+        seenProfiles.push(profileDecision.profile);
+        return Number(
+          (
+            await startRun(
+              {
+                definitionKey: "codebase-assessment",
+                repositories: [r1],
+                inputs: { repositories: [r1], focus: "refactor auth" },
+                title: `Codebase assessment ${r1} — refactor auth`,
+                agentProvider: "claude",
+                ownerId: alice,
+                start: false,
+                profileDecision,
+              },
+              tx,
+            )
+          ).id,
+        );
+      },
+    });
+    assert.deepEqual(seenProfiles, ["STANDARD", "DEEP"]);
+    assert.equal(assessStd?.outcome, "miss");
+    assert.equal(assessDeep?.outcome, "miss");
+    assert.notEqual(assessStd!.analysis!.key, assessDeep!.analysis!.key);
+
+    const runDeep = await one<{ profile: string; profile_decision: { requested?: string } }>(
+      pool,
+      "SELECT profile, profile_decision FROM workflow_runs WHERE id = $1",
+      [assessDeep!.outcome === "miss" ? assessDeep!.runId : 0],
+    );
+    assert.equal(runDeep?.profile, "DEEP");
+    assert.equal(runDeep?.profile_decision?.requested, "AUTO");
+
+    // Cache wait/hit re-uses DEEP without invoking start/classifier.
+    let startsDeep = 0;
+    const waitDeep = await sharedCodeAssessment({
+      actor: { id: alice },
+      focus: "refactor auth",
+      title: `Codebase assessment ${r1} — refactor auth`,
+      provider: "claude",
+      commits: { [r1]: "a".repeat(40) },
+      start: async () => (startsDeep++, 0),
+    });
+    assert.equal(waitDeep?.outcome, "wait");
+    assert.equal(waitDeep?.analysis?.id, assessDeep?.analysis?.id);
+    assert.equal(startsDeep, 0);
+
+    // RCA and BugHunt also isolate by profile.
+    const rcaStd = await sharedRuntimeRca({
+      actor: { id: alice },
+      fingerprint: "a1b2c3d4e5f60718293a",
+      contract: "v1",
+      title: "[Runtime RCA] api: pool exhausted",
+      provider: "claude",
+      start: async (tx) =>
+        Number(
+          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-rca-s" }, tx))
+            .id,
+        ),
+    });
+    const rcaDeep = await sharedRuntimeRca({
+      actor: { id: alice },
+      fingerprint: "a1b2c3d4e5f60718293a",
+      contract: "v1",
+      title: "[Runtime RCA] api: refactor connection pool",
+      provider: "claude",
+      start: async (tx) =>
+        Number(
+          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-rca-d" }, tx))
+            .id,
+        ),
+    });
+    assert.equal(rcaStd?.outcome, "miss");
+    assert.equal(rcaDeep?.outcome, "miss");
+    assert.notEqual(rcaStd!.analysis!.key, rcaDeep!.analysis!.key);
+
+    const huntOne = await sharedBugHunt({
+      actor: { id: alice },
+      fingerprint: "a1b2c3d4e5f60718293b",
+      title: "[Bug Hunt] api: null pointer",
+      provider: "claude",
+      commits: { [r1]: "a".repeat(40) },
+      start: async (tx) =>
+        Number(
+          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-h1" }, tx))
+            .id,
+        ),
+    });
+    const huntTwo = await sharedBugHunt({
+      actor: { id: alice },
+      fingerprint: "a1b2c3d4e5f60718293b",
+      title: "[Bug Hunt] api: null pointer",
+      provider: "claude",
+      commits: { [r1]: "a".repeat(40), [r2]: "a".repeat(40) },
+      start: async (tx) =>
+        Number(
+          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-h2" }, tx))
+            .id,
+        ),
+    });
+    assert.equal(huntOne?.outcome, "miss");
+    assert.equal(huntTwo?.outcome, "miss");
+    assert.notEqual(huntOne!.analysis!.key, huntTwo!.analysis!.key);
+  } finally {
+    const cur = await loadAgentConfiguration(pool);
+    await saveProviderConfiguration("claude", cur.providers.claude.revision, {
+      defaults: orig.providers.claude.defaults,
+      profiles: orig.providers.claude.profiles,
+    });
+  }
 });

@@ -140,7 +140,11 @@ export const codeFindingsRoutes: Route[] = [
         const reuse = await reusableScan(actor.id, repos, focus, commitsNow);
         if (reuse) return reuse;
       }
-      const start = (tx?: Parameters<typeof startRun>[1]) =>
+      const title = typeof body.title === "string" ? body.title.slice(0, 200) : undefined;
+      const start = (
+        tx?: Parameters<typeof startRun>[1],
+        profileDecision?: Parameters<typeof startRun>[0]["profileDecision"],
+      ) =>
         startRun(
           {
             definitionKey: "codebase-assessment",
@@ -150,9 +154,10 @@ export const codeFindingsRoutes: Route[] = [
               ...(project ? { project } : {}),
               ...(focus ? { focus } : {}),
             },
-            title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
+            title,
             outputLocale,
             agentProvider,
+            ...(profileDecision ? { profileDecision } : {}),
             ownerId: actor.id,
           },
           tx,
@@ -165,10 +170,11 @@ export const codeFindingsRoutes: Route[] = [
           focus,
           project,
           outputLocale,
+          title,
           provider: agentProvider,
           commits: await commitsNow(repos),
           force: body.force === true,
-          start: async (tx) => Number((await start(tx)).id),
+          start: async (tx, pd) => Number((await start(tx, pd)).id),
         });
         if (shared && (shared.outcome === "miss" || shared.outcome === "forced"))
           return { started: true, run_id: shared.runId, shared: await sharedView(shared, actor) };

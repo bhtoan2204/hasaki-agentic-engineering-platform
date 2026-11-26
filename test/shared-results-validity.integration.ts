@@ -100,6 +100,7 @@ const request = (
   key,
   actor: { id: actor, username: actor === alice ? "valid-alice" : "valid-bob" },
   scopeRepos: ((key.parts.repos as string[] | undefined) ?? []).map((r) => r.split("@")[0]),
+  errorKey: (key.parts.error as string | undefined) ?? null,
   provenance: {
     provider: "claude",
     model: "claude/claude-opus-5-5#cfg:test",
@@ -1079,4 +1080,98 @@ test("N7: a row that throws during settle does not block later rows, and TTL exp
   }
   const [expiredRow2] = await rowsOf(kExpired2);
   assert.deepEqual([expiredRow2.status, expiredRow2.stale_reason], ["stale", "ttl"]);
+});
+
+test("N2: STANDARD and DEEP are separate subjects and do not stale each other across all three kinds", async () => {
+  const r = repo();
+  const assessStd = codeAssessmentKey({
+    scope: SCOPE,
+    repos: [{ repo: r, commit: A }],
+    focus: "",
+    profile: "STANDARD",
+    workflow: { key: "codebase-assessment", version: 1 },
+    rubricHash: rubricHash({ instructions: "assess" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  const assessDeep = codeAssessmentKey({
+    scope: SCOPE,
+    repos: [{ repo: r, commit: B }],
+    focus: "",
+    profile: "DEEP",
+    workflow: { key: "codebase-assessment", version: 1 },
+    rubricHash: rubricHash({ instructions: "assess" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  const errHunt = errorKeyFor();
+  const huntStd = bugHuntKey({
+    scope: SCOPE,
+    errorKey: errHunt,
+    repos: [{ repo: r, commit: A }],
+    profile: "STANDARD",
+    workflow: { key: "production-bug-hunt", version: 1 },
+    rubricHash: rubricHash({ instructions: "hunt" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  const huntDeep = bugHuntKey({
+    scope: SCOPE,
+    errorKey: errHunt,
+    repos: [{ repo: r, commit: B }],
+    profile: "DEEP",
+    workflow: { key: "production-bug-hunt", version: 1 },
+    rubricHash: rubricHash({ instructions: "hunt" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  const errRca = errorKeyFor();
+  const rcaStd = runtimeRcaKey({
+    scope: SCOPE,
+    errorKey: errRca,
+    contract: "v1",
+    profile: "STANDARD",
+    workflow: { key: "production-incident-investigation", version: 1 },
+    rubricHash: rubricHash({ instructions: "rca" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  const rcaDeep = runtimeRcaKey({
+    scope: SCOPE,
+    errorKey: errRca,
+    contract: "v1",
+    profile: "DEEP",
+    workflow: { key: "production-incident-investigation", version: 2 },
+    rubricHash: rubricHash({ instructions: "rca" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  const huntReq = (key: SharedKey) =>
+    request(key, alice, {
+      errorKey: errHunt,
+      start: async (tx) => {
+        const runId = Number(
+          (
+            await startRun(
+              {
+                definitionKey: "shared-validity-fixture",
+                ownerId: alice,
+                start: false,
+                title: `validity ${key.key.slice(0, 8)}`,
+              },
+              tx,
+            )
+          ).id,
+        );
+        await tx.client.query(
+          "INSERT INTO bug_hunts (fingerprint, run_id, requested_by, repositories, scope_key, report) VALUES ($1, $2, $3, $4, $5, $6)",
+          [errHunt, runId, alice, [r], r, JSON.stringify({ confirmed: [] })],
+        );
+        return runId;
+      },
+    });
+  await publish(assessStd);
+  await publish(assessDeep);
+  await publish(huntStd, alice, huntReq(huntStd));
+  await publish(huntDeep, alice, huntReq(huntDeep));
+  await publish(rcaStd);
+  await publish(rcaDeep);
+  await settleBackground();
+  assert.equal((await rowsOf(assessStd))[0].status, "valid");
+  assert.equal((await rowsOf(huntStd))[0].status, "valid");
+  assert.equal((await rowsOf(rcaStd))[0].status, "valid");
 });

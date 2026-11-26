@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.ts";
 import { resolveOutputLocale } from "../agent/language.ts";
 import { audit } from "../authz/access.ts";
+import { codeAssessmentProfile } from "./context.ts";
 import { normalizeFocus, normalizeProject } from "./key.ts";
 import { sharingHooks, type SharedActor } from "./hooks.ts";
 import {
@@ -80,22 +81,28 @@ export async function sharedForError(fingerprint: string, actor: SharedActor) {
   return out;
 }
 
-/** The current code assessment of exactly these repositories, focus, project and locale (see `current`; an older commit shows as stale). */
+/** The current code assessment of exactly these repositories, focus, project, locale and profile (see `current`; an older commit shows as stale). */
 export async function sharedForRepositories(
   repos: string[],
   focus: string,
   actor: SharedActor,
-  opts: { project?: string; outputLocale?: string } = {},
+  opts: { project?: string; outputLocale?: string; title?: string; profile?: string } = {},
 ) {
   if (!enabledKinds().includes("code_assessment") || !repos.length) return null;
   const sorted = [...new Set(repos)].sort();
   const stored = scrubText(normalizeFocus(focus));
   const project = normalizeProject(opts.project);
   const locale = resolveOutputLocale(opts.outputLocale);
+  const profile = await codeAssessmentProfile(pool, null, {
+    profile: opts.profile,
+    title: opts.title,
+    project,
+    repositories: sorted,
+  });
   const scope = await installationId();
   return current(
-    await latestForRepositories(pool, sorted, stored, scope, project, locale),
-    () => validForRepositories(pool, sorted, stored, scope, project, locale),
+    await latestForRepositories(pool, sorted, stored, scope, project, locale, profile),
+    () => validForRepositories(pool, sorted, stored, scope, project, locale, profile),
     actor,
   );
 }

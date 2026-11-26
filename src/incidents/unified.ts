@@ -740,11 +740,15 @@ async function runtimeOrShared(
       );
     const wb = await getWorkbench(fp, actor);
     const d = digest(wb, "bug_hunt");
-    const start = (tx?: Parameters<typeof startRun>[1]) =>
+    const title = `[Runtime RCA] ${g.service}: ${g.signature}`.slice(0, 160);
+    const start = (
+      tx?: Parameters<typeof startRun>[1],
+      profileDecision?: Parameters<typeof startRun>[0]["profileDecision"],
+    ) =>
       startRun(
         {
           definitionKey: RUNTIME_WORKFLOW,
-          title: `[Runtime RCA] ${g.service}: ${g.signature}`.slice(0, 160),
+          title,
           inputs: {
             request: describeGroup(g) + d.text,
             environment: "production",
@@ -752,6 +756,7 @@ async function runtimeOrShared(
             prior_evidence: d.refs,
           },
           agentProvider: body.provider ? String(body.provider) : undefined,
+          ...(profileDecision ? { profileDecision } : {}),
           ownerId: actor.id,
         },
         tx,
@@ -767,9 +772,10 @@ async function runtimeOrShared(
               actor,
               fingerprint: fp,
               contract: VERIFICATION_CONTRACT,
+              title,
               provider: body.provider ? String(body.provider) : undefined,
               force: body.force === true,
-              start: async (tx) => Number((await start(tx)).id),
+              start: async (tx, pd) => Number((await start(tx, pd)).id),
             })
           : null;
       if (

@@ -97,16 +97,17 @@ async function repo(readers: string[]) {
   return name;
 }
 const assessKey = (
-  name: string,
+  name: string | string[],
   focus = "",
-  o: { project?: string; outputLocale?: string } = {},
+  o: { project?: string; outputLocale?: string; profile?: string } = {},
 ): SharedKey =>
   codeAssessmentKey({
     scope,
-    repos: [{ repo: name, commit: "a".repeat(40) }],
+    repos: (Array.isArray(name) ? name : [name]).map((repo) => ({ repo, commit: "a".repeat(40) })),
     focus,
     project: o.project,
     outputLocale: o.outputLocale,
+    profile: o.profile,
     workflow: { key: "codebase-assessment", version: 1 },
     rubricHash: rubricHash({ instructions: "assess" }),
     model: "claude/claude-opus-5-5#cfg:test",
@@ -348,4 +349,46 @@ test("N1: GET /api/code-scans/shared isolates assessments by project and output_
     `/api/code-scans/shared?repositories=${name}&project=oms&output_locale=en`,
   );
   assert.equal(hit.body.shared.analysis_id, enOmsId);
+});
+
+test("N2: GET /api/code-scans/shared matches profile by multi-repo, title, or explicit profile", async () => {
+  const r1 = await repo(["api-alice", "api-bob"]);
+  const r2 = await repo(["api-alice", "api-bob"]);
+  const stdId = await publish(assessKey(r1, "", { profile: "STANDARD" }), "api-alice");
+  const deepSingleId = await publish(
+    assessKey(r1, "refactor auth", { profile: "DEEP" }),
+    "api-alice",
+  );
+  const deepMultiId = await publish(assessKey([r1, r2], "", { profile: "DEEP" }), "api-alice");
+
+  assert.equal(
+    (await bob<{ shared: { analysis_id: number } }>(`/api/code-scans/shared?repositories=${r1}`)).body
+      .shared.analysis_id,
+    stdId,
+  );
+  assert.equal(
+    (
+      await bob<{ shared: { analysis_id: number } }>(
+        `/api/code-scans/shared?repositories=${r1}&focus=${encodeURIComponent("refactor auth")}&title=${encodeURIComponent("Code scan — refactor auth")}`,
+      )
+    ).body.shared.analysis_id,
+    deepSingleId,
+  );
+  assert.equal(
+    (await bob<{ shared: { analysis_id: number } }>(`/api/code-scans/shared?repositories=${r1},${r2}`))
+      .body.shared.analysis_id,
+    deepMultiId,
+  );
+  assert.equal(
+    (
+      await bob<{ shared: { analysis_id: number } }>(
+        `/api/code-scans/shared?repositories=${r1}&focus=${encodeURIComponent("refactor auth")}&profile=DEEP`,
+      )
+    ).body.shared.analysis_id,
+    deepSingleId,
+  );
+  assert.equal(
+    (await bob(`/api/code-scans/shared?repositories=${r1}&profile=INVALID`)).status,
+    400,
+  );
 });

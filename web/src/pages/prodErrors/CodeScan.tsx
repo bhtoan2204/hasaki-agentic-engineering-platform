@@ -194,12 +194,16 @@ export function CodeScan() {
     const id = setTimeout(() => setSharedFocus(focus.trim()), 400);
     return () => clearTimeout(id);
   }, [focus]);
+  const sharedTitle = targets.length
+    ? `${t("cs.runTitle")} ${repo || project}${sharedFocus ? ` — ${sharedFocus.slice(0, 80)}` : ""}`
+    : "";
   const shared = useApi<{ shared: SharedView | null }>(
     targets.length
       ? `/api/code-scans/shared?${new URLSearchParams({
           repositories: targets.join(","),
           focus: sharedFocus,
           ...(project ? { project } : {}),
+          title: sharedTitle,
         })}`
       : null,
   );

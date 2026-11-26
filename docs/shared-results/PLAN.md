@@ -91,10 +91,18 @@ request ──▶ key = sharedKey(kind, inputs)  (pure)
 - **A shared result is a scrubbed snapshot, not the source run.** Other users cannot open the source run: runs stay
   owner-only. The source run, owner and inputs are recorded as provenance; the payload a reuser sees is the scrubbed
   report: RCA report, bug-hunt report and findings, assessment findings.
-- **Reuse for Code Assessment** ingests the shared findings into the reuser's own `code_findings` (a sighting that
-  points at the shared result), so each user keeps their own status lifecycle.
-- **Reuse for Production Errors** links the shared result into the reuser's `incident_investigations` workspace as a
-  "shared" source. Their workbench shows it next to their own runs, and `createFix` stays per user.
+- **Reuse for Code Assessment** ~~ingests the shared findings into the reuser's own `code_findings` (a sighting that
+  points at the shared result), so each user keeps their own status lifecycle.~~ *(Deferred — N4)*: in Phase 1, a hit returns
+  the scrubbed shared view (`reused: "shared"`) and renders it on the Code Assessment card without mutating the reuser's
+  per-user `code_findings` / `code_finding_sightings` tables. Auto-ingestion with shared provenance & per-user triage
+  lifecycle requires schema/status rules (avoiding polluting personal triage queues or bypassing owner scoping) and is
+  explicitly deferred to Phase 2.
+- **Reuse for Production Errors** ~~links the shared result into the reuser's `incident_investigations` workspace as a
+  "shared" source. Their workbench shows it next to their own runs, and `createFix` stays per user.~~ *(Deferred — N4)*:
+  in Phase 1, a shared runtime RCA or shared bug hunt returns the scrubbed shared view (`shared`) on the Production Errors
+  workbench without inserting cross-owner rows into `incident_investigations` (`incident_investigation_sources`) or
+  feeding reconciled RCA / `createFix`. Allowing a shared analysis to drive reconciled conclusions and code fixes
+  requires explicit provenance/evidence-trust and invalidation rules across owners and is deferred to Phase 2.
 
 ## 3. Dedup keys
 
@@ -366,6 +374,35 @@ statuses. They get the scrubbed snapshot plus provenance (who, when, which model
 - **R6** Every step ends with `typecheck`, `lint`, the relevant unit and integration tests and `arch:check`, and
   updates `PROGRESS.md`.
 
-## 11. Open questions
+## 11. Open questions (decisions recorded)
 
-See the list at the end of the step-1 summary; answers will be recorded here.
+- **Q1 (scope / tenant boundary):** **Accepted proposal** (`scope = installation_id`, a single UUID stored in `settings`,
+  not per-machine `instanceId`). Users in one installation share the same keys; access boundaries are enforced per
+  lookup via `canReadShared` (repository grants/checks or log access), never embedded in keys.
+- **Q2 (production-error key identity):** **Option (a)** — reuse `prod_error_groups.fingerprint`
+  (`sha1(namespace, service, level, signature)[:20]`, message truncated at 400 chars). Option (b) (stack-frame hash) was
+  rejected because existing tables, Go scan, radar, and work items all join on `fingerprint`.
+- **Q3 (runtime RCA read rule):** **Accepted proposal + N8 hardening** — viewer must have incident access (all active
+  members) **and** own log-search capability (`splunk_token` / `splunk_cookie`, enabled `signoz`, or shared
+  `splunk_token` when `splunk.allowSharedToken` is enabled). By N8, members without log access are also blocked from
+  claiming or publishing a shared RCA so they cannot supersede log-backed RCAs.
+- **Q4 (model, profile, and config in key & subject):** **Accepted + expanded via C4 / Decision #2 / N2** — keys record
+  resolved `profile` (`MICRO|FAST|STANDARD|DEEP`), step provider/model(s) resolved for that profile, and `#cfg:<hash16>`
+  over provider defaults & profiles. `olderOfSubject` isolates subjects by both model identity (`split_part(model, '#', 1)`)
+  and `profile` across all three kinds; `#cfg` stays outside the subject so config changes still mark prior runs of the
+  same model+profile stale (`model_changed`).
+- **Q5 (commit pinning vs partial diff reuse):** **Accepted proposal** — full commit SHA (40 or 64 hex) per repository in
+  keys; stale `commit_changed` triggers on publish only when every moved repository's new commit is a confirmed descendant
+  (`git merge-base --is-ancestor`). Partial file/path-filtered reuse is deferred.
+- **Q6 (TTLs):** **Accepted defaults** — runtime RCA `24h`, bug hunt `30d`, code assessment `30d` (configurable via
+  `SHARED_RESULTS_TTL_*`).
+- **Q7 (who may force a re-run):** **Anyone who may read the result** (`canRead`), audited via `shared_analysis.force`.
+  Unreadable results bypass sharing rather than superseding another reader's result. (Confirmed after C1–C4; can later be
+  restricted to creator/admin without schema changes.)
+- **Q8–Q9 note (REVIEW.md reference reconciliation):** Only **Q1–Q7** were defined in this plan (`REVIEW.md` §"Note"
+  referenced `Q1–Q9`). No Q8 or Q9 exists in the document history. The remaining post-C1–C4 policy choices active in the
+  codebase (for confirmation) are:
+  - **Prior-evidence sharing (`C1`):** keep bypassing sharing whenever prior cross-workflow evidence is attached (keying
+    evidence refs deferred to a later phase);
+  - **Downstream auto-ingestion & linking (`N4`):** keep deferred to Phase 2 (see §2);
+  - **`KEY_VERSION`:** keep at `1` while feature flags default off and no production rows exist.

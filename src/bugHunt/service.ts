@@ -94,11 +94,15 @@ async function huntOrShared(
     );
     if (active)
       return { created: false, hunt_id: Number(active.id), run_id: Number(active.run_id) };
-    const start = (tx?: Parameters<typeof startRun>[1]) =>
+    const title = `[Bug Hunt] ${g.service}: ${g.signature}`.slice(0, 160);
+    const start = (
+      tx?: Parameters<typeof startRun>[1],
+      profileDecision?: Parameters<typeof startRun>[0]["profileDecision"],
+    ) =>
       startRun(
         {
           definitionKey: BUG_HUNT_WORKFLOW,
-          title: `[Bug Hunt] ${g.service}: ${g.signature}`.slice(0, 160),
+          title,
           // `context`: bounded, already-validated prior evidence of the same incident (unified workbench), as hints.
           inputs: {
             fingerprint,
@@ -107,6 +111,7 @@ async function huntOrShared(
           },
           repositories: repos,
           agentProvider: body.provider ? String(body.provider) : undefined,
+          ...(profileDecision ? { profileDecision } : {}),
           ownerId: actor.id,
         },
         tx,
@@ -122,10 +127,11 @@ async function huntOrShared(
           ? await sharedBugHunt({
               actor,
               fingerprint,
+              title,
               provider: body.provider ? String(body.provider) : undefined,
               commits: await currentBaseCommits(actor.id, [...repos].sort()),
               force: body.force === true,
-              start: async (tx) => Number((await start(tx)).id),
+              start: async (tx, pd) => Number((await start(tx, pd)).id),
             })
           : null;
       if (

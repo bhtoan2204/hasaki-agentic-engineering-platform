@@ -7,17 +7,22 @@ import { installationId } from "./scope.ts";
 import { lookupOrStart, type LookupResult } from "./service.ts";
 import type { SharedActor } from "./hooks.ts";
 import { audit } from "../authz/access.ts";
+import type { ProfileDecision } from "../workflow/profiles.ts";
 import type { AnalysisContext } from "./context.ts";
 
 /**
  * The three analyses wrapped by lookup-before-compute. Each returns null when sharing does not apply (its flag is off,
  * the key cannot be established, e.g. a repository's current commit is unknown, or the actor runs a personal copy of the
- * workflow, which is not the shared definition the key describes); the caller then does exactly what it did before. `start` is the caller's own run start, called inside the claim transaction.
+ * workflow, which is not the shared definition the key describes); the caller then does exactly what it did before. `start`
+ * is the caller's own run start, called inside the claim transaction with any pre-resolved profile decision.
  */
-type Start = (tx: {
-  client: pg.PoolClient;
-  afterCommit: (cb: () => unknown) => void;
-}) => Promise<number>;
+type Start = (
+  tx: {
+    client: pg.PoolClient;
+    afterCommit: (cb: () => unknown) => void;
+  },
+  profileDecision?: ProfileDecision,
+) => Promise<number>;
 
 const RCA_WORKFLOW = "production-incident-investigation";
 const HUNT_WORKFLOW = "production-bug-hunt";
@@ -50,6 +55,8 @@ export async function sharedCodeAssessment(x: {
   focus: string;
   project?: string;
   outputLocale?: string;
+  title?: string;
+  profile?: string;
   provider?: string;
   /** The base commit of every repository, as the run would read it; null when one cannot be established. */
   commits: Record<string, string> | null;
@@ -57,7 +64,13 @@ export async function sharedCodeAssessment(x: {
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.codeAssessment || !x.commits) return null;
-  const ctx = await analysisContext(pool, ASSESS_WORKFLOW, x.provider, undefined, x.actor.id);
+  const scopeRepos = Object.keys(x.commits).sort();
+  const ctx = await analysisContext(pool, ASSESS_WORKFLOW, x.provider, undefined, x.actor.id, {
+    title: x.title,
+    project: x.project,
+    repositories: scopeRepos,
+    profile: x.profile,
+  });
   if (ctx.personal) return null;
   const key = codeAssessmentKey({
     scope: await installationId(),
@@ -72,10 +85,10 @@ export async function sharedCodeAssessment(x: {
     await lookupOrStart({
       key,
       actor: x.actor,
-      scopeRepos: Object.keys(x.commits),
+      scopeRepos,
       force: x.force,
       provenance: provenanceOf(ctx),
-      start: x.start,
+      start: (tx) => x.start(tx, ctx.profileDecision),
     }),
   );
 }
@@ -84,12 +97,17 @@ export async function sharedRuntimeRca(x: {
   actor: SharedActor;
   fingerprint: string;
   contract: string;
+  title?: string;
+  profile?: string;
   provider?: string;
   force?: boolean;
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.prodErrors) return null;
-  const ctx = await analysisContext(pool, RCA_WORKFLOW, x.provider, undefined, x.actor.id);
+  const ctx = await analysisContext(pool, RCA_WORKFLOW, x.provider, undefined, x.actor.id, {
+    title: x.title,
+    profile: x.profile,
+  });
   if (ctx.personal) return null;
   const key = runtimeRcaKey({
     scope: await installationId(),
@@ -105,7 +123,7 @@ export async function sharedRuntimeRca(x: {
       errorKey: x.fingerprint,
       force: x.force,
       provenance: provenanceOf(ctx),
-      start: x.start,
+      start: (tx) => x.start(tx, ctx.profileDecision),
     }),
   );
 }
@@ -113,13 +131,20 @@ export async function sharedRuntimeRca(x: {
 export async function sharedBugHunt(x: {
   actor: SharedActor;
   fingerprint: string;
+  title?: string;
+  profile?: string;
   provider?: string;
   commits: Record<string, string> | null;
   force?: boolean;
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.prodErrors || !x.commits) return null;
-  const ctx = await analysisContext(pool, HUNT_WORKFLOW, x.provider, undefined, x.actor.id);
+  const scopeRepos = Object.keys(x.commits).sort();
+  const ctx = await analysisContext(pool, HUNT_WORKFLOW, x.provider, undefined, x.actor.id, {
+    title: x.title,
+    repositories: scopeRepos,
+    profile: x.profile,
+  });
   if (ctx.personal) return null;
   const key = bugHuntKey({
     scope: await installationId(),
@@ -133,10 +158,10 @@ export async function sharedBugHunt(x: {
       key,
       actor: x.actor,
       errorKey: x.fingerprint,
-      scopeRepos: Object.keys(x.commits),
+      scopeRepos,
       force: x.force,
       provenance: provenanceOf(ctx),
-      start: x.start,
+      start: (tx) => x.start(tx, ctx.profileDecision),
     }),
   );
 }

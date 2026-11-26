@@ -1,5 +1,6 @@
 import { HttpError } from "../../http/error.ts";
 import { positiveId as num } from "../../http/params.ts";
+import { KeyError, profileOf } from "../../sharing/key.ts";
 import { readSharedAnalysis, sharedForError, sharedForRepositories } from "../../sharing/read.ts";
 import type { Route } from "./types.ts";
 import { localeOf, support } from "./shared.ts";
@@ -27,11 +28,27 @@ export const sharedAnalysesRoutes: Route[] = [
       if (repos.length > 30) throw new HttpError(400, "repositories: at most 30");
       const focus = (c.url.searchParams.get("focus") ?? "").slice(0, 500);
       const project = (c.url.searchParams.get("project") ?? "").slice(0, 120);
+      const title = (c.url.searchParams.get("title") ?? "").slice(0, 200);
+      const rawProfile = c.url.searchParams.get("profile");
+      let profile: string | undefined;
+      if (rawProfile != null && rawProfile !== "") {
+        try {
+          profile = profileOf(rawProfile);
+        } catch (e) {
+          if (e instanceof KeyError) throw new HttpError(400, e.message);
+          throw e;
+        }
+      }
       const outputLocale = localeOf({
         output_locale: c.url.searchParams.get("output_locale") ?? undefined,
       });
       return {
-        shared: await sharedForRepositories(repos, focus, c.actor, { project, outputLocale }),
+        shared: await sharedForRepositories(repos, focus, c.actor, {
+          project,
+          outputLocale,
+          ...(title ? { title } : {}),
+          ...(profile ? { profile } : {}),
+        }),
       };
     },
   ],

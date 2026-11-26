@@ -267,7 +267,7 @@ export async function validForError(db: Db, errorKey: string, kind: SharedKind, 
   return rows.map((r) => shape(r)!);
 }
 
-/** The valid code assessments of exactly these repositories, focus, project and locale, newest first. */
+/** The valid code assessments of exactly these repositories, focus, project, locale and profile, newest first. */
 export async function validForRepositories(
   db: Db,
   repos: string[],
@@ -275,14 +275,17 @@ export async function validForRepositories(
   scope: string,
   project = "",
   locale = "vi",
+  profile = "STANDARD",
 ) {
   const rows = await q<SharedRow>(
     db,
     `${SELECT} WHERE a.kind = 'code_assessment' AND a.scope_repos = $1 AND COALESCE(a.key_parts->>'focus', '') = $2
                 AND a.key_parts->>'scope' = $3 AND COALESCE(a.key_parts->>'project', '') = $4
-                AND COALESCE(a.key_parts->>'locale', 'vi') = $5 AND a.status = 'valid'
+                AND COALESCE(a.key_parts->>'locale', 'vi') = $5
+                AND COALESCE(a.key_parts->>'profile', 'STANDARD') = $6
+                AND a.status = 'valid'
       ORDER BY a.id DESC LIMIT 5`,
-    [repos, focus, scope, project, locale],
+    [repos, focus, scope, project, locale, profile],
   );
   return rows.map((r) => shape(r)!);
 }
@@ -304,7 +307,7 @@ export function latestForError(
   );
 }
 
-/** The latest code assessment (any status, any commit) of exactly these repositories, focus, project and locale. */
+/** The latest code assessment (any status, any commit) of exactly these repositories, focus, project, locale and profile. */
 export function latestForRepositories(
   db: Db,
   repos: string[],
@@ -312,14 +315,16 @@ export function latestForRepositories(
   scope: string,
   project = "",
   locale = "vi",
+  profile = "STANDARD",
 ) {
   return one<SharedRow>(
     db,
     `${SELECT} WHERE a.kind = 'code_assessment' AND a.scope_repos = $1 AND COALESCE(a.key_parts->>'focus', '') = $2
                 AND a.key_parts->>'scope' = $3 AND COALESCE(a.key_parts->>'project', '') = $4
                 AND COALESCE(a.key_parts->>'locale', 'vi') = $5
+                AND COALESCE(a.key_parts->>'profile', 'STANDARD') = $6
       ORDER BY a.id DESC LIMIT 1`,
-    [repos, focus, scope, project, locale],
+    [repos, focus, scope, project, locale, profile],
   );
 }
 
@@ -438,6 +443,7 @@ export function olderOfSubject(db: Db, row: SharedRow, modelIdentity: string) {
           AND COALESCE(key_parts->>'project', '') = $9
           AND COALESCE(key_parts->>'locale', 'vi') = $10
         ))
+        AND COALESCE(key_parts->>'profile', 'STANDARD') = $11
         AND split_part(key_parts->>'model', '#', 1) = $7
         AND finished_at < $8`,
     [
@@ -451,6 +457,7 @@ export function olderOfSubject(db: Db, row: SharedRow, modelIdentity: string) {
       row.finished_at,
       row.key_parts.project ?? "",
       row.key_parts.locale ?? "vi",
+      row.key_parts.profile ?? "STANDARD",
     ],
   );
 }

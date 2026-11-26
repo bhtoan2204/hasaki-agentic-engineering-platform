@@ -550,3 +550,49 @@ test("N1, N3, N5: backfill uses outputLocale/project, scrubs focus, and clears t
     ),
   );
 });
+
+test("N2: backfill uses run.profile (e.g. DEEP) and matches live sharedCodeAssessment lookup", async () => {
+  await q(pool, "DELETE FROM settings WHERE key = $1", [BACKFILL_CURSOR]);
+  const r1 = await repoFor(alice);
+  const r2 = await repoFor(alice);
+  const deepRun = await startRun({
+    definitionKey: "codebase-assessment",
+    repositories: [r1, r2],
+    inputs: { repositories: [r1, r2] },
+    ownerId: alice,
+    start: false,
+    title: "assessment multi repo",
+  });
+  const deepId = Number(deepRun.id);
+  await q(
+    pool,
+    `UPDATE workflow_runs SET status = 'COMPLETED', started_at = now() - interval '1 hour', finished_at = now(),
+            source_revisions = $2 WHERE id = $1`,
+    [deepId, JSON.stringify({ [r1]: { commit: A }, [r2]: { commit: B } })],
+  );
+  await q(
+    pool,
+    "UPDATE workflow_steps SET status = 'COMPLETED', output = $2 WHERE run_id = $1 AND key = 'assess'",
+    [deepId, JSON.stringify({ findings: [{ title: "deep multi-repo finding" }] })],
+  );
+  const bf = await backfillSharedResults({ apply: true });
+  assert.equal(bf.inserted, 1);
+  const row = await one<{ key_parts: { profile?: string } }>(
+    pool,
+    "SELECT key_parts FROM shared_analyses WHERE source_run_id = $1 AND trigger = 'backfill'",
+    [deepId],
+  );
+  assert.equal(row?.key_parts?.profile, "DEEP");
+
+  let starts = 0;
+  const hit = await sharedCodeAssessment({
+    actor: { id: alice },
+    focus: "",
+    title: "assessment multi repo",
+    commits: { [r1]: A, [r2]: B },
+    start: async () => (starts++, 0),
+  });
+  assert.equal(hit?.outcome, "hit");
+  assert.equal(Number(hit!.analysis!.source_run_id), deepId);
+  assert.equal(starts, 0);
+});

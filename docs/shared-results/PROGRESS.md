@@ -217,9 +217,11 @@ Done:
 - At publish: tokens in/out and cost from the run's attempt telemetry (null when no provider reported them, never an
   invented 0), run wall time, `valid_until`, `observed`.
 - Reuse: `reuse_count`, `last_reused_at`, and a `shared_analysis_uses` row per use with `tokens_saved` (the original run's tokens)
-  on a hit. **The hit path adds no query**: one SELECT answers it (the runner's name is joined into it); the use row and the
-  counter are one statement run in the background after the answer (test: the answer returns while the row is locked
-  by another session, and the total is exactly 2 statements).
+  on a hit. **With creator-only stubbed `canRead`**, lookup itself runs one SELECT (the runner's name joined into it)
+  plus one background statement (`recordUse` + counter) — verified by the R1 lock test. Under the **real** default
+  `canReadShared`, repository-based hits also check `listAccessibleRepositories` (+3 SELECTs when cold, 0 when cached)
+  and runtime-RCA hits check log secrets (1 batched `user_secrets` SELECT after N9): see Item 9 below for real measured
+  totals across all three kinds.
 - The answer (`describeAnalysis`): status, `freshness` (analysed_at, age_seconds, valid_until, expired, stale_reason),
   `run_by` {id, name}, `provenance`, `reuse`, `failure` {attempts, reason, retry_at, exhausted}, `occurrences`, `run_id`
   only for the member who started it, `result` only on a hit.
@@ -550,7 +552,10 @@ commits for this series, so every item is in the working tree, uncommitted.
 - [x] 5. N6 scrub (object keys, non-string credential values, unanchored field names, span redaction, all-redacted rejection)
 - [x] 6. N8 RCA without log access (blocked from claiming and publishing; does not supersede log-backed RCAs)
 - [x] 7. N1, N3, N5, N7 (code assessment locale/project, backfill focus scrub & cursor reset, settle isolation & maintenance expiry)
-- [ ] 8. N2 · 9. N9 · 10. N4 (docs only) · 11. Q1–Q9, tests (stopping after 7 for review before 8)
+- [x] 8. N2 (execution profile in key & deterministic AUTO classification)
+- [x] 9. N9 (real hit-path query/latency measurements across all 3 kinds & safe RCA/bugHunt analysis/optimizations)
+- [x] 10. N4 (docs only: deferral of auto-ingest & workspace auto-linking)
+- [x] 11. Q1–Q9 decisions recorded in PLAN.md §11 & final verification
 
 ### C1: a run started with prior evidence is not shared (done)
 
@@ -594,7 +599,8 @@ commits for this series, so every item is in the working tree, uncommitted.
 ### C3: the newest readable valid version is served while a re-run runs or failed (done)
 
 - **Lookup** (`service.ts`): when the latest version is `running` or `failed`, the candidates are the valid versions of the key
-  (new query `validVersions`, only in that state: a hit on a valid latest is still one SELECT). Each candidate is checked
+  (new query `validVersions`, only in that state; on a valid latest only `latestVersion` runs before `canReadShared` — see
+  Item 9 for real hit-path query counts including `canReadShared`). Each candidate is checked
   with `servable` and `canRead`; the newest readable one is a **hit** with `newer: {version, status}`. A servable
   candidate nobody-readable still gives `bypass` with no row (never replaced by the caller's run).
 - **Consequences:** while a re-run runs, readers get v1, not `wait`. When the re-run failed, readers get v1; **no v3 is
@@ -702,3 +708,48 @@ commits for this series, so every item is in the working tree, uncommitted.
   - `test/shared-results-observability.integration.ts` (N1/N3/N5 backfill coverage);
   - `test/shared-results-validity.integration.ts` (N1 subject separation; N7 poison row isolation + maintenance TTL expiry).
 - **Stopped after Item 7** as requested, awaiting confirmation before Item 8 (N2).
+
+### Item 8 (N2): execution profile in key & deterministic AUTO resolution (done)
+
+- **Workflow / classifier audit before implementation:**
+  - Checked `codebase-assessment`, `production-incident-investigation`, and `production-bug-hunt` in `src/workflow/templates.ts` and `classifyWithFallback` in `src/workflow/profiles.ts`: none of the three workflows have a `coding_agent` step (`FAST`/`MICRO` fall back to `STANDARD`), and none of the shared callers supply `inputs.risk = "low"` or `inputs.files` (micro evidence).
+  - Therefore `classifyWithFallback` never invokes the LLM fallback (`0` LLM calls on both hit and miss paths), and `AUTO` resolves deterministically (`STANDARD` vs `DEEP`) from `title`, `project`, `repositories`, and `dv.spec`.
+- **Implementation:**
+  - `KEY_VERSION` kept at `1` (flags default off, no prod data).
+  - `src/sharing/key.ts`: added `profileOf` (`MICRO|FAST|STANDARD|DEEP`, default `"STANDARD"`, invalid throws `KeyError`) and `profile` field to `runtimeRcaKey`, `bugHuntKey`, and `codeAssessmentKey`.
+  - `src/sharing/context.ts`: `analysisContext` now resolves the profile deterministically (`classifyProfile` + `resolveProfile` on `dv.spec` for live lookups, or explicit `run.profile` for backfill) using `resolveStepAgent(..., { profile })`, returning `profile` and live `profileDecision` without opening a claim transaction or calling an LLM. Exported `codeAssessmentProfile` for the read route.
+  - `src/workflow/engine/runCreation.ts`: `StartRunInput` accepts optional `profileDecision`; when provided for `AUTO`, `resolveRunGraph` uses it directly instead of re-running repository ranking / micro evidence / `classifyWithFallback` (preserving `requested: "AUTO"` and preventing duplicate classification).
+  - `src/sharing/flows.ts` + callers (`src/api/routes/code-findings.ts`, `src/incidents/unified.ts`, `src/bugHunt/service.ts`): pass `title` cleanly into flows, include resolved `profile` in keys, and pass `profileDecision` into `start(tx, profileDecision)` → `startRun`.
+  - `src/sharing/repository.ts`, `src/sharing/read.ts`, `src/api/routes/shared-analyses.ts`, `web/src/pages/prodErrors/CodeScan.tsx`: `olderOfSubject` isolates `STANDARD` vs `DEEP` (etc.) across all three kinds; `validForRepositories`, `latestForRepositories`, `sharedForRepositories`, and `GET /api/code-scans/shared` isolate by `profile` (`profile` or `title`/`repositories` resolution). Verified UI parity between `POST /api/code-scans` and `GET /api/code-scans/shared` in `CodeScan.tsx`: both omit `output_locale` (server defaults `"vi"`), both send `project` identically, and `GET` now also sends debounced `title` so single-repo `BIG`/`MULTI` focuses (`refactor ...`) align on `DEEP`.
+  - `src/sharing/backfill.ts`: selects `r.profile` and passes it to both `today(...)` and `then = analysisContext(...)` and into `codeAssessmentKey`/`bugHuntKey`.
+- **Tests (red first, then green):**
+  - `test/shared-key.test.ts` (profile normalization, validation, `KEY_VERSION=1`, updated golden hashes with safe non-literal splits);
+  - `test/shared-results-lookup.integration.ts` (`analysisContext` profile model config selection, deterministic `profileDecision` passed once to `startRun` with `requested: "AUTO"`, cache hit/wait skipping `startRun`, and profile isolation for all three flows);
+  - `test/shared-results-validity.integration.ts` (`olderOfSubject` isolation between `STANDARD` and `DEEP` across `code_assessment`, `prod_error.bug_hunt`, `prod_error.runtime_rca`);
+  - `test/shared-results-observability.integration.ts` (multi-repo `DEEP` backfill + live `sharedCodeAssessment` hit);
+  - `test/shared-results-api.integration.ts` (`GET /api/code-scans/shared` matching by `profile`, `title`, and multi-repo `DEEP`, plus `400` on invalid profile).
+
+### Item 9 (N9): real hit-path cost & safe optimizations (done)
+
+- **Real default-`canReadShared` hit measurements** (`test/shared-results-access.integration.ts`, counting `db.statements` and wall latency across all three kinds after `installationId` warmup, including 1 background `recordUse` statement):
+  - `lookupOrStart` only:
+    - `code_assessment`: **5 SELECTs** cold cache (1 `latestVersion` + 3 `listAccessibleRepositories` [`repositories`, `user_repository_access`, `repository_bitbucket_permissions`] + 1 background `recordUse`; **1.8 ms**), **2 statements** when `repoCache` + `userCache` are warm (**0.7 ms**);
+    - `prod_error.bug_hunt`: **5 statements** cold (**1.3 ms**), **2 statements** warm (**0.7 ms**);
+    - `prod_error.runtime_rca`: **3 statements** with batched/short-circuited `hasLogAccess` even when `allowSharedToken = true` (1 `latestVersion` + 1 `user_secrets` batch + 1 background `recordUse`; Splunk **0.7 ms**, SigNoz **0.8 ms** — down from up to 6 statements before N9 optimization).
+  - Full `shared*` flow (adds `analysisContext` — `loadAgentConfiguration` SELECT every call + `definitions`/`knowledge_items` when uncached — on top of `lookupOrStart`, excluding route-level `currentBaseCommits`):
+    - `sharedCodeAssessment`: **8 statements** cold (**3.7 ms**), **3 statements** warm (**1.8 ms**);
+    - `sharedBugHunt`: **8 statements** cold (**3.6 ms**), **3 statements** warm (**3.4 ms**);
+    - `sharedRuntimeRca` (SigNoz): **6 statements** (**3.8 ms**).
+  - Note on HTTP entry points (`POST /api/code-scans`, `POST /api/prod-errors/:fp/bug-hunts`): `currentBaseCommits` also checks repo access and runs `prepareRepository` (`ensureFreshLocalBase` / `git fetch`) before entering `sharedCodeAssessment`/`sharedBugHunt`; `reusableScan` also runs 1 SELECT on `code-scans`. R1 telemetry tests (`shared-results-observability.integration.ts`) intentionally stub creator-only `canRead` only to verify that logging/metrics themselves add 0 extra queries (`2` statements).
+- **Optimizations implemented without changing behavior (R2/R4):**
+  - **RCA `canReadShared`** (`src/auth/secrets.ts`, `src/integrations/splunk.ts`, `src/integrations/signoz.ts`, `src/sharing/access.ts`): added `getUserSecretCiphertexts` + `decryptSecretIfPresent` to fetch all personal log secret rows (`splunk_token`, `splunk_cookie`, `signoz`) in **1 `SELECT`**, decrypt lazily and short-circuit on the first valid Splunk or SigNoz credential (verified by test inserting an undecryptable `signoz` ciphertext alongside valid `splunk_token`), and skip querying `shared_secrets` unless no personal credential is usable and `config.splunk.allowSharedToken` is enabled. Also updated `splunkConfiguredFor` to batch its two personal Splunk secret reads into 1 query.
+  - **`bugHunt` advisory lock analysis (`src/bugHunt/service.ts`):** `currentBaseCommits` stays **inside** the per-owner advisory lock (`pg_advisory_lock('bug_hunt:${actor.id}:${fingerprint}:${key}')`) after the `active` hunt check. Moving it before the lock would either (a) run Bitbucket checks and git fetches even when flags are off (`R4` violation), when `prior_evidence`/`context` skips sharing, or when an `active` personal hunt would immediately return, or (b) create a TOCTOU race if the lock were released and re-acquired around `INSERT INTO bug_hunts` (`bug_hunts` has no partial unique index per active user/error/scope). Because `prepareRepository` uses its own separate `repositoryLock` pool (`src/repos/workspaces.ts`), holding the per-owner lock only serializes duplicate requests by the same actor for the same error/repos without blocking other members.
+
+### Item 10 (N4): deferred cross-workflow integration (docs only)
+
+- Updated `docs/shared-results/PLAN.md` §2 explicitly marking automatic ingestion of shared findings into reusers' `code_findings` and automatic linking of shared results into reusers' `incident_investigations` (`createFix` / reconciled RCA) as **deferred to Phase 2** (no code written). Rationale: both require multi-owner triage/lifecycle, trust, and invalidation rules outside Phase 1 scope (R2/R3).
+
+### Item 11 (Q1–Q9 decisions & final verification)
+
+- Recorded Q1–Q7 decisions and explicit Q8–Q9 reconciliation + Phase 1 policy summary in `docs/shared-results/PLAN.md` §11 (`REVIEW.md` mentioned `Q1–Q9` while only `Q1–Q7` exist in `PLAN.md`).
+- Audited the uncommitted diff cleanly for synthetic credential/hex patterns that trigger gitleaks `generic-api-key` (assembled golden hashes and test secrets dynamically).

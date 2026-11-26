@@ -82,15 +82,21 @@ export function signozEnabled() {
   return !!c && c.enabled && hasCredentials(c);
 }
 
-/** Whether `userId` has a usable SigNoz connection saved, read from storage without contacting SigNoz. */
-export async function signozConfiguredFor(userId: number) {
-  const raw = await getUserSecret(userId, KIND);
+export const SIGNOZ_SECRET_KIND = KIND;
+
+/** Whether a decrypted SigNoz JSON config is enabled and carries credentials. */
+export function isSignozConfigUsable(raw: string | null): boolean {
   try {
     const c = raw ? (JSON.parse(raw) as SignozConfig) : null;
     return !!c && c.enabled && hasCredentials(c);
   } catch {
     return false;
   }
+}
+
+/** Whether `userId` has a usable SigNoz connection saved, read from storage without contacting SigNoz. */
+export async function signozConfiguredFor(userId: number) {
+  return isSignozConfigUsable(await getUserSecret(userId, KIND));
 }
 
 export function signozStatus() {
