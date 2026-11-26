@@ -401,6 +401,36 @@ const revertTree = async (dir: string) => {
  * Regenerate the gomock files of the packages this merge touched (QC interfaces drift from prod, so a mock merged from a
  * prod-based branch can be stale). Returns the files that changed; a failed generator leaves the tree untouched.
  */
+/**
+ * Packages whose `go:generate mockgen` writes a mock the build reports as stale (`*mocks.MockX does not implement`),
+ * wherever that directive lives: the interface may have changed on the target, outside anything the branch touched.
+ */
+async function staleMockDirectives(dir: string, output: string) {
+  const types = new Set(
+    [...output.matchAll(/\*(?:"[^"]+"|\w+)\.(Mock\w+) does not implement/g)].map((m) => m[1]),
+  );
+  const dirs = new Set<string>();
+  for (const type of types) {
+    const files = await git(dir, "grep", "-l", "-E", `^type ${type} struct`, "--", "*.go").catch(
+      () => "",
+    );
+    for (const file of files.split("\n").filter(Boolean)) {
+      const name = file.split("/").at(-1)!.replaceAll(".", "\\.");
+      const lines = await git(
+        dir,
+        "grep",
+        "-l",
+        "-E",
+        `^//go:generate .*mockgen.*${name}`,
+        "--",
+        "*.go",
+      ).catch(() => "");
+      for (const d of lines.split("\n").filter(Boolean)) dirs.add(dirname(d));
+    }
+  }
+  return dirs;
+}
+
 async function regenerateMocks(
   ctx: ExecutionContext,
   runCommand: RunCommand,
@@ -408,13 +438,15 @@ async function regenerateMocks(
   repo: string,
   targetSha: string,
   timeoutMs: number,
+  output: string,
 ): Promise<string[]> {
-  const touched = new Set(
-    (await git(dir, "diff", "--name-only", `${targetSha}..HEAD`))
+  const touched = new Set([
+    ...(await git(dir, "diff", "--name-only", `${targetSha}..HEAD`))
       .split("\n")
       .filter((f) => f.endsWith(".go"))
       .map((f) => dirname(f)),
-  );
+    ...(await staleMockDirectives(dir, output)),
+  ]);
   const generating = (
     await git(dir, "grep", "-l", "-E", "^//go:generate .*mockgen", "--", "*.go").catch(() => "")
   )
@@ -544,15 +576,22 @@ async function testResolution(
     }
   };
 
-  let mocksTried = false;
   for (let round = 0; ; round++) {
     await ctx.log("system", `▶ ${repo}: build + test of the resolved merge`);
     const r = await execute(String(round));
     const verdict = await judge(r);
     if (verdict.ok) return { regenerated: [], preExisting: verdict.preExisting };
-    if (!mocksTried && !r.timedOut) {
-      mocksTried = true;
-      const regenerated = await regenerateMocks(ctx, runCommand, dir, repo, base.sha, timeoutMs);
+    // Every round: a revision can uncover stale mocks that an earlier failure hid.
+    if (!r.timedOut) {
+      const regenerated = await regenerateMocks(
+        ctx,
+        runCommand,
+        dir,
+        repo,
+        base.sha,
+        timeoutMs,
+        r.output,
+      );
       if (regenerated.length) {
         await ctx.log(
           "system",

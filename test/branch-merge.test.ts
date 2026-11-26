@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   mergeAndPush,
   setMergeModel,
@@ -23,6 +23,7 @@ const ENV = {
 const sh = (cwd: string, ...a: string[]) =>
   execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8", env: ENV }).trim();
 const commit = (cwd: string, file: string, content: string, msg: string) => {
+  mkdirSync(dirname(join(cwd, file)), { recursive: true });
   writeFileSync(join(cwd, file), content);
   sh(cwd, "add", file);
   sh(cwd, "commit", "-qm", msg);
@@ -359,6 +360,58 @@ test("stale mocks are regenerated and kept when that makes the tests pass", asyn
   assert.equal(sh(origin, "rev-list", "--parents", "-n1", "release/qc").split(" ").length, 3);
 });
 
+test("a stale mock uncovered by a revision is regenerated, even where the branch touched nothing", async () => {
+  const directive =
+    "package mocks\n\n//go:generate mockgen -source=../iface.go -destination=mock_iface.go -package=mocks\n";
+  const { origin, clone } = conflict([
+    ["mocks/gen.go", directive],
+    ["mocks/mock_iface.go", "package mocks\n\ntype MockUseCase struct{}\n"],
+  ]);
+  const prompts: string[] = [];
+  setMergeModel(async (_run, prompt) => {
+    prompts.push(prompt);
+    return prompts.length === 1
+      ? "<<<RESOLVED\npackage a\n\nfunc A() int { return BROKEN }\nRESOLVED>>>"
+      : "<<<RESOLVED\npackage a\n\nfunc A() int { return 2 + 3 }\nRESOLVED>>>";
+  });
+  const generated: string[] = [];
+  const r = await mergeAndPush(
+    context([]),
+    async (cmd, cwd) => {
+      if (cmd.startsWith("go generate")) {
+        generated.push(cmd);
+        writeFileSync(
+          join(cwd, "mocks", "mock_iface.go"),
+          "package mocks\n\ntype MockUseCase struct{}\n\nfunc (m *MockUseCase) CancelOrder() error { return nil }\n",
+        );
+        return { code: 0, output: "", timedOut: false };
+      }
+      if (readFileSync(join(cwd, "a.go"), "utf8").includes("BROKEN"))
+        return {
+          code: 1,
+          output: `# ${PKG}\na.go:3:22: undefined: BROKEN\nFAIL\t${PKG} [build failed]`,
+          timedOut: false,
+        };
+      return readFileSync(join(cwd, "mocks", "mock_iface.go"), "utf8").includes("CancelOrder")
+        ? { code: 0, output: "ok", timedOut: false }
+        : {
+            code: 1,
+            output: `# ${PKG} [${PKG}.test]\na_test.go:9:12: cannot use m (variable of type *mocks.MockUseCase) as UseCase value in argument to New: *mocks.MockUseCase does not implement UseCase (missing method CancelOrder)\nFAIL\t${PKG} [build failed]`,
+            timedOut: false,
+          };
+    },
+    { repo: "svc", branch: "feature", path: clone },
+    "release/qc",
+    lock,
+    { baseline: baselineOf([]) },
+  );
+  assert.equal(r.status, "merged");
+  assert.deepEqual(generated, ["go generate -run mockgen ./mocks"]);
+  assert.deepEqual(r.regenerated_mocks, ["mocks/mock_iface.go"]);
+  assert.match(show(origin, "release/qc", "mocks/mock_iface.go"), /CancelOrder/);
+  assert.match(show(origin, "release/qc", "a.go"), /return 2 \+ 3/);
+});
+
 test("regenerated mocks that do not fix the failure are discarded", async () => {
   const gen = "package a\n\n//go:generate mockgen -source=a.go -destination=a_mock.go -package=a\n";
   const { origin, clone } = conflict([["gen.go", gen]]);
@@ -385,8 +438,8 @@ test("regenerated mocks that do not fix the failure are discarded", async () => 
   );
   assert.deepEqual(
     mockPresent,
-    [false, true, false, false],
-    "tree restored after the regen attempt",
+    [false, true, false, true, false, true],
+    "tried again every round, and the tree restored after each attempt",
   );
   assert.equal(sh(origin, "rev-parse", "release/qc"), before);
   assert.equal(sh(clone, "worktree", "list").split("\n").length, 1);
