@@ -42,7 +42,8 @@ after(async () => {
 });
 beforeEach(() => {
   resetSharingHooks();
-  setSharingHooks({ observe: () => {} });
+  // These suites test lookup, validity and retry; access (step 5) is tested in shared-results-access.integration.ts.
+  setSharingHooks({ observe: () => {}, canRead: (row, actor) => row.created_by === actor.id });
   config.sharedResults.prodErrors = true;
   config.sharedResults.codeAssessment = true;
   config.sharedResults.runningTimeoutMinutes = 360;
@@ -203,7 +204,7 @@ test("a run that ends without publishing (canceled, crashed, failed) fails the c
   const first = await lookupOrStart(request(key));
   assert.equal(first.outcome, "miss");
   const id = first.analysis!.id;
-  const waiting = waitForAnalysis(id, { timeoutMs: 10_000, pollMs: 60_000 });
+  const waiting = waitForAnalysis(id, { id: alice }, { timeoutMs: 10_000, pollMs: 60_000 });
   await q(pool, "UPDATE workflow_runs SET status = 'CANCELED' WHERE id = $1", [
     first.outcome === "miss" ? first.runId : 0,
   ]);
@@ -212,7 +213,7 @@ test("a run that ends without publishing (canceled, crashed, failed) fails the c
   const w = await waiting;
   assert.equal(w.status, "failed");
   assert.ok(Date.now() - started < 5000, "woken by the notification, not by the 60 s poll");
-  assert.match(JSON.stringify(w.analysis.failure), /run canceled/);
+  assert.match(JSON.stringify(w.analysis!.failure), /run canceled/);
   const again = await lookupOrStart(request(key));
   assert.equal(again.outcome, "miss", "a failed claim does not block the key");
   assert.equal(again.analysis!.version, 2);
@@ -293,9 +294,13 @@ test("a waiter gives up at its timeout and gets the running analysis back", asyn
   const key = newKey();
   const first = await lookupOrStart(request(key));
   const t = Date.now();
-  const w = await waitForAnalysis(first.analysis!.id, { timeoutMs: 300, pollMs: 50 });
+  const w = await waitForAnalysis(
+    first.analysis!.id,
+    { id: alice },
+    { timeoutMs: 300, pollMs: 50 },
+  );
   assert.equal(w.status, "timeout");
-  assert.equal(w.analysis.status, "running");
+  assert.equal(w.analysis!.status, "running");
   assert.ok(Date.now() - t < 2000);
 });
 
@@ -320,14 +325,14 @@ test("two instances settling at once publish a row exactly once", async () => {
   for (const key of keys) assert.equal((await rowsOf(key))[0].status, "valid");
 });
 
-test("access hook: by default only the creator is served; another member runs unshared and never replaces the result", async () => {
+test("access hook: a member the hook refuses runs unshared and never replaces the result", async () => {
   const key = newKey();
   const first = await lookupOrStart(request(key, alice));
   await complete(first.outcome === "miss" ? first.runId : 0, { findings: [] });
   await settleSharedAnalyses();
   starts = 0;
   const forBob = await lookupOrStart(request(key, bob));
-  assert.equal(forBob.outcome, "bypass", "until step 5 decides access, nothing crosses members");
+  assert.equal(forBob.outcome, "bypass", "refused by the access hook");
   assert.equal(
     starts,
     0,
@@ -338,7 +343,7 @@ test("access hook: by default only the creator is served; another member runs un
   assert.equal(
     (await lookupOrStart(request(key, bob))).outcome,
     "hit",
-    "with step 5's hook, bob reuses it",
+    "allowed by the hook, bob reuses it",
   );
 });
 

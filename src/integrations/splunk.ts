@@ -3,7 +3,7 @@ import { retryAfterMs } from "./safeHttp.ts";
 import { config } from "../config.ts";
 import { pool, q, one, json } from "../db/pool.ts";
 import { currentUserId } from "../auth/execution.ts";
-import { getSharedSecret, putSharedSecret } from "../auth/secrets.ts";
+import { getSharedSecret, getUserSecret, putSharedSecret } from "../auth/secrets.ts";
 import { personalSettings as settings, PersonalSession, actorId } from "./personal.ts";
 import { redactPii } from "./redact.ts";
 import { cookiePairs } from "./curl.ts";
@@ -257,6 +257,13 @@ async function loadShared(force = false) {
 }
 
 const sharedUsable = () => config.splunk.allowSharedToken && !!shared?.valid;
+
+/** Whether `userId` has a Splunk login at all (a saved personal one, or the shared token members may use), read from storage without contacting Splunk. */
+export async function splunkConfiguredFor(userId: number) {
+  for (const kind of [SETTING_TOKEN, SETTING_COOKIE])
+    if (await getUserSecret(userId, kind)) return true;
+  return config.splunk.allowSharedToken && !!(await getSharedSecret(SHARED_TOKEN));
+}
 /** The credential a search of the current actor uses: personal first, then the shared token when permitted. */
 function activeLogin(): Login | null {
   if (login.current?.valid) return login.current;

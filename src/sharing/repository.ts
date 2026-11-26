@@ -210,6 +210,8 @@ export interface PublishFacts {
   costUsd: number | null;
   durationMs: number | null;
   observed: Record<string, unknown> | null;
+  /** The scrub policy version the result went through (scrub.ts), recorded in key_parts. */
+  scrubVersion: number;
 }
 
 /**
@@ -222,7 +224,8 @@ export async function publish(db: Db, id: number, result: unknown, facts: Publis
     db,
     `WITH upd AS (
        UPDATE shared_analyses SET status = 'valid', result = $2, finished_at = now(), valid_until = $3,
-              tokens_in = $4, tokens_out = $5, cost_usd = $6, duration_ms = $7, observed = $8
+              tokens_in = $4, tokens_out = $5, cost_usd = $6, duration_ms = $7, observed = $8,
+              key_parts = key_parts || jsonb_build_object('scrub_version', $9::int)
         WHERE id = $1 AND status = 'running' RETURNING kind, key, version),
      sup AS (
        UPDATE shared_analyses o SET status = 'superseded' FROM upd
@@ -237,6 +240,7 @@ export async function publish(db: Db, id: number, result: unknown, facts: Publis
       facts.costUsd,
       facts.durationMs,
       json(facts.observed),
+      facts.scrubVersion,
     ],
   );
   const ok = (rows[0]?.n ?? 0) > 0;

@@ -7,6 +7,7 @@ import { ignoreError } from "../ignoreError.ts";
 import type { SharedKey } from "./key.ts";
 import { sharingHooks, type SharedActor, type SharedOutcomeName } from "./hooks.ts";
 import { staleReason } from "./policy.ts";
+import { scrubText } from "./scrub.ts";
 import {
   attachRun,
   byId,
@@ -27,7 +28,8 @@ import {
  *  forced the same as a miss, but the caller asked for a re-run: a NEW VERSION of the key (the previous valid version is
  *         superseded only when this one is published, so readers keep a valid result meanwhile);
  *  bypass the existing result or running analysis is not for this caller (access), or a new start is not allowed yet (failed,
- *         in backoff or out of attempts): the caller runs its own analysis outside sharing, exactly as before.
+ *         in backoff or out of attempts): the caller runs its own analysis outside sharing, exactly as before. The row is
+ *         returned only when the caller may read it (otherwise null: not even who ran it crosses an access boundary).
  *
  * Single-flight is the database's: the partial unique index shared_analyses_one_running. Two claims of one key (two
  * requests, two instances, a force while another run is going) cannot both commit a running row: the second blocks on the
@@ -43,6 +45,10 @@ export type LookupResult =
   | { outcome: "wait"; analysis: SharedRow }
   | { outcome: "miss" | "forced"; analysis: SharedRow; runId: number }
   | { outcome: "bypass"; analysis: SharedRow | null };
+
+/** Free text a member typed (the assessment focus) is stored in key_parts: scrubbed like a result. */
+const scrubParts = (parts: Record<string, unknown>) =>
+  typeof parts.focus === "string" ? { ...parts, focus: scrubText(parts.focus) } : parts;
 
 export interface LookupRequest {
   key: SharedKey;
@@ -102,7 +108,7 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
       // supersede it for everyone who may read it. The caller runs unshared.
       if (!(await hooks.canRead(latest, r.actor))) {
         note("bypass", latest);
-        return { outcome: "bypass", analysis: latest };
+        return { outcome: "bypass", analysis: null };
       }
       if (!r.force) {
         use(latest, "hit");
@@ -113,7 +119,7 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
     if (latest?.status === "running") {
       if (!(await hooks.canRead(latest, r.actor))) {
         note("bypass", latest);
-        return { outcome: "bypass", analysis: latest };
+        return { outcome: "bypass", analysis: null };
       }
       use(latest, "wait");
       note("wait", latest, latest.source_run_id);
@@ -122,14 +128,17 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
     // A failed key is held back by its backoff and its attempt limit; a force re-run is the way past both.
     if (!r.force && !hooks.mayStart(latest, now)) {
       note("bypass", latest);
-      return { outcome: "bypass", analysis: latest };
+      return {
+        outcome: "bypass",
+        analysis: latest && (await hooks.canRead(latest, r.actor)) ? latest : null,
+      };
     }
     try {
       const claimed = await withTx(async (client, afterCommit) => {
         const row = await insertRunning(client, {
           kind,
           key,
-          keyParts: r.key.parts,
+          keyParts: scrubParts(r.key.parts),
           scopeRepos: [...new Set(r.scopeRepos ?? [])].sort(),
           errorKey: r.errorKey ?? null,
           createdBy: r.actor.id,
@@ -178,16 +187,37 @@ export async function markReplaced(row: SharedRow) {
 
 export type WaitResult =
   | { status: "valid" | "failed" | "stale" | "superseded"; analysis: SharedRow }
-  | { status: "timeout"; analysis: SharedRow };
+  | { status: "timeout"; analysis: SharedRow }
+  | { status: "denied"; analysis: null };
 
 /**
  * Wait until a running analysis is settled, or until `timeoutMs`. Woken by the `shared_analysis` notification that
  * settling sends; a poll is the backstop (a notification sent while the listener reconnects is lost).
+ * Access is checked again on the row returned: a waiter who cannot read it now (access lost meanwhile, or never had it)
+ * gets "denied" and no row.
  */
 export async function waitForAnalysis(
   id: number,
+  actor: SharedActor,
   opts: { timeoutMs?: number; pollMs?: number } = {},
 ): Promise<WaitResult> {
+  const r = await waitSettled(id, opts);
+  if (await sharingHooks().canRead(r.analysis, actor)) return r;
+  sharingHooks().observe({
+    kind: r.analysis.kind,
+    outcome: "denied",
+    analysisId: r.analysis.id,
+    version: r.analysis.version,
+    runId: null,
+    actorId: actor.id,
+  });
+  return { status: "denied", analysis: null };
+}
+
+async function waitSettled(
+  id: number,
+  opts: { timeoutMs?: number; pollMs?: number },
+): Promise<Exclude<WaitResult, { status: "denied" }>> {
   const timeoutMs = opts.timeoutMs ?? config.sharedResults.waitTimeoutMs;
   const pollMs = opts.pollMs ?? 2000;
   const deadline = Date.now() + timeoutMs;

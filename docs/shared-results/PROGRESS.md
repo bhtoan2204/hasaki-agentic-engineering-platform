@@ -5,7 +5,7 @@
 - [x] 2. Schema + dedup key
 - [x] 3. Lookup + single-flight
 - [x] 4. Invalidation + retry + force re-run + provenance
-- [ ] 5. Access + scrub
+- [x] 5. Access + scrub
 - [ ] 6. Metrics + tracing + feature flags + backfill
 - [ ] 7. UI / API
 
@@ -226,8 +226,8 @@ Done:
 
 ### Hooks (additions to the step 3 table)
 
-`servable` and `mayStart` are now implemented (policy.ts) and remain overridable. Still open for later: `canRead` and `scrub`
-(step 5), `observe` (step 6; it now also receives `forced` and `expired`).
+`servable` and `mayStart` are now implemented (policy.ts) and remain overridable. `canRead` and `scrub`: see step 5;
+`observe` (step 6; it now also receives `forced` and `expired`).
 
 ### Where the step touched step 3's behaviour
 
@@ -256,3 +256,121 @@ Done:
 - With a flag on, a bug hunt still resolves base commits (a fetch) while holding the per-owner advisory-lock connection
   (unchanged from step 3).
 - The route-level behaviour of `force` with a flag on was exercised through the flows (`lookupOrStart`), not through HTTP.
+
+## Step 5 (access, isolation, scrub)
+
+Done:
+
+- `src/sharing/access.ts`: `canReadShared(row, actor)`, the default `canRead` hook. It uses the platform's own access, with
+  no new permission system:
+  - the row's `key_parts.scope` must be this installation's id;
+  - **code assessment, bug hunt**: the actor reads **every** repository in `scope_repos` now (`listAccessibleRepositories`:
+    grants, shared level, Bitbucket/GitHub/GitLab verification). An empty or unknown repository list is denied;
+  - **runtime RCA** (plan Q3, the proposal): the actor can search logs themselves, either a personal Splunk login
+    (token or cookie), a usable personal SigNoz connection, or the shared Splunk token when `splunk.allowSharedToken` is
+    on. New helpers `splunkConfiguredFor` and `signozConfiguredFor` read storage only and never call Splunk or SigNoz;
+  - the creator gets no exception; any error denies (fail closed, logged with ids only).
+- `src/sharing/scrub.ts`: `scrubResult`, the default `scrub` hook, `SCRUB_VERSION = 1`. Policy, in order:
+  1. extra credential patterns;
+  2. `redactPii` (which includes `redactSecrets`);
+  3. a string that `looksSecret` still flags is replaced by `[redacted]`, as is any string under a field named like a
+     credential (password, secret, api_key, \*token, authorization, cookie, dsn, connection_string, ...).
+- Scrub runs **before the write**:
+  - `settle` scrubs, then publishes. A scrub that throws fails the row (`scrub failed`, counted) and stores nothing.
+  - `publish` records `key_parts.scrub_version`.
+  - The free-text `focus` is scrubbed before `insertRunning` stores `key_parts`; the key hash is computed beforehand and
+    is unchanged.
+- `lookupOrStart`: `bypass` returns the row only when the caller may read it (otherwise `analysis: null`), so no version,
+  key or runner name crosses an access boundary. This applies to every bypass, including a backoff.
+- `waitForAnalysis(id, actor, opts)` takes the actor and re-checks access on the row it returns. A waiter who cannot read
+  it, or who lost access while waiting, gets `{status: "denied", analysis: null}` and the observe event `denied`.
+
+### Data paths into and out of the shared store
+
+| Path                                     | Access                                                                                                         | Scrub                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| In: claim (`insertRunning`)              | The caller's own row. A valid or running row they cannot read gives `bypass`, never a new version              | `focus` scrubbed; other parts are hashes, commits, ids, config names       |
+| In: publish (`settle` → `publish`)       | Reconcile task; no actor                                                                                       | **The result is scrubbed before the UPDATE**; `observed` holds counts only |
+| In: fail / stale / expire / supersede    | Guarded by status; stale and supersede only within the same kind, key, scope and subject                       | Fixed reasons and repository names only                                    |
+| In: use row (`recordUse`)                | Recorded only after a hit, wait, miss or forced that passed the check                                          | Ids and numbers                                                            |
+| Out: hit                                 | `canRead` before returning                                                                                     | Stored scrubbed                                                            |
+| Out: wait (the running row, runner name) | `canRead` before attaching; denied → `bypass` with `null`                                                      | No result while running                                                    |
+| Out: `waitForAnalysis`                   | `canRead` again on the settled row                                                                             | Stored scrubbed                                                            |
+| Out: bypass                              | Row only if `canRead`; otherwise `null`                                                                        | No result in the view                                                      |
+| Out: force                               | Over a valid or running row the caller cannot read → `bypass`; the audit row only on `forced`                  | n/a                                                                        |
+| Out: `describeAnalysis`                  | Called by the routes only for hit, wait, miss or forced; `run_id` only for the creator; `result` only on a hit | Stored scrubbed                                                            |
+| Out: `observe` log line                  | Ids only (R1)                                                                                                  | n/a                                                                        |
+
+No other code reads `shared_analyses` (no list or read-by-id endpoint until step 7).
+
+### Isolation
+
+- **Between installations:** the scope is in the key, and `canRead` also requires `key_parts.scope` = this installation's id.
+  A row of another scope (a restored dump, a shared database by mistake) is served to no one, its creator included, and
+  cannot be forced over. Stale and supersede only touch the same key or the same scope (`olderOfSubject` filters on scope).
+- **Between projects of one installation:** by repository access. A member without every repository of the row gets
+  `bypass` with no row, and runs their own analysis outside sharing; they never replace the readable result.
+
+### Decision: access lost after a result was shared
+
+- Access is **evaluated on every read and never stored** on the row or cached across users. Losing a grant takes effect at
+  the next lookup or wait, bounded only by the platform's own caches: repository grants are invalidated on every committed
+  write, and the Bitbucket check keeps its last result until its TTL, as elsewhere.
+- The creator follows the same rule; a grant given back serves the result again.
+- The row is **kept, not deleted or re-scoped**: others who still have access keep using it.
+- What was already returned cannot be recalled; the use rows (who, when) remain for audit.
+- A waiter who loses access while waiting gets `denied` when the analysis settles.
+- A running analysis whose creator loses access is the run engine's business, as today (`enforceRunRepositoryAccess`).
+
+### Scrub patterns (proposal: to confirm)
+
+Plan 6.3 names the categories and "the patterns the platform already uses". `redactSecrets` and `redactPii` do not cover
+private keys, several API key formats or national ids, so these are added in `scrub.ts` only; `integrations/redact.ts` is
+unchanged, so other features are not affected:
+
+- PEM private key blocks;
+- AWS key ids (`AKIA`/`ASIA`);
+- GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`);
+- Slack tokens (`xox?-`);
+- `sk-…` / `sk-ant-…` / `sk-proj-…` API keys;
+- Google `AIza…` keys;
+- Stripe `sk_/rk_live|test_` keys;
+- a password-only URL (`redis://:pass@`);
+- CCCD/CMND or national/citizen id followed by 9–12 digits (only with that label in front, since a bare 9–12 digit number is
+  usually an order id).
+
+Kept on purpose: request and trace ids, IPs, commit SHAs, order ids, numbers.
+
+### Hooks (additions to the step 3 table)
+
+`canRead` → `canReadShared`; `scrub` → `scrubResult`. Still overridable. The step 3 and 4 suites now set a creator-only
+`canRead` explicitly, since they test lookup and validity, not access.
+
+### Where the step touched steps 3 and 4
+
+- The single-flight claim did not change.
+- `bypass` may carry `null` where it used to carry the unreadable row.
+- `waitForAnalysis` takes the actor, and has a new `denied` status.
+- The hit path now runs the access check before answering. Repository access comes from the platform's caches (repository
+  list and per-user grants). An RCA reads up to 3 credential rows. The use row and counter are still one background
+  statement.
+
+### Decisions to confirm
+
+1. **RCA rule (Q3)** as proposed: log access means a personal Splunk or SigNoz connection, or the shared token when members
+   may use it. The check looks only at whether a connection is stored; whether it is still valid is not checked (that would
+   need a network call).
+2. **Bug hunt follows the plan: repositories only.** If its report quotes log evidence (prior evidence from the workbench),
+   it may need the RCA rule too.
+3. **Admins have no bypass in lookup.** They get access like any member, which is the platform's rule for repositories. Plan
+   6.1's "support access (?scope=all), audited" fits the read endpoint of step 7; nothing in this step reads by id.
+4. **The scrub pattern list above.**
+
+### Not checked / remaining risks
+
+- Scrubbing is pattern-based: a secret with no recognisable shape and no credential-like field name (a random password in
+  prose) passes. `looksSecret` only catches assignments of 12 or more characters.
+- E-mails keep their domain and phone numbers keep their prefix and last 3 digits (the platform's existing masking).
+- Snapshots stored before step 5 (flags were off by default, so none are expected) have no `scrub_version` and are not
+  re-scrubbed; a re-scrub job is step 6 (backfill) if wanted.
+- Who may **force** is still "anyone who may read". No role restriction was added.

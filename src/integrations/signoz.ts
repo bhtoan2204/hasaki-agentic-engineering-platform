@@ -1,6 +1,7 @@
 import { config } from "../config.ts";
 import { currentUserId } from "../auth/execution.ts";
 import { one, pool } from "../db/pool.ts";
+import { getUserSecret } from "../auth/secrets.ts";
 import { PersonalSession, personalSettings } from "./personal.ts";
 import {
   BlockedDestinationError,
@@ -79,6 +80,17 @@ const hasCredentials = (c: SignozConfig | null | undefined) =>
 export function signozEnabled() {
   const c = session.current;
   return !!c && c.enabled && hasCredentials(c);
+}
+
+/** Whether `userId` has a usable SigNoz connection saved, read from storage without contacting SigNoz. */
+export async function signozConfiguredFor(userId: number) {
+  const raw = await getUserSecret(userId, KIND);
+  try {
+    const c = raw ? (JSON.parse(raw) as SignozConfig) : null;
+    return !!c && c.enabled && hasCredentials(c);
+  } catch {
+    return false;
+  }
 }
 
 export function signozStatus() {

@@ -4,10 +4,11 @@ import { attemptRows, summarize } from "../report/cost.ts";
 import type { SharedKind } from "./types.ts";
 import { sharingHooks } from "./hooks.ts";
 import { validUntil } from "./policy.ts";
+import { SCRUB_VERSION } from "./scrub.ts";
 import { expireDue, fail, publish, settleable, type PublishFacts } from "./repository.ts";
 
 /**
- * What a finished run leaves for others: the snapshot of the analysis (step 5 scrubs it through the hook). Null when
+ * What a finished run leaves for others: the snapshot of the analysis (scrubbed through the hook before it is stored). Null when
  * the run completed without the output the analysis is made of; the row is then failed, never published empty.
  */
 export async function snapshotOf(kind: SharedKind, runId: number): Promise<unknown | null> {
@@ -40,7 +41,7 @@ export async function factsOf(
   runId: number,
   errorKey: string | null,
   now = new Date(),
-): Promise<PublishFacts> {
+): Promise<Omit<PublishFacts, "scrubVersion">> {
   const total = summarize(await attemptRows([runId])).total;
   const run = await one<{ ms: number | null }>(
     pool,
@@ -115,13 +116,27 @@ export async function settleSharedAnalyses(limit = 50) {
           { counts: true, capMinutes: cap },
         );
       else {
-        ok = await publish(
-          pool,
-          id,
-          hooks.scrub(r.kind, snapshot),
-          await factsOf(r.kind, runId, r.error_key),
-        );
-        published = ok;
+        // Scrubbed before it is written; a scrub that throws publishes nothing.
+        let scrubbed: unknown;
+        try {
+          scrubbed = hooks.scrub(r.kind, snapshot);
+        } catch {
+          scrubbed = undefined;
+        }
+        if (scrubbed == null)
+          ok = await fail(
+            pool,
+            id,
+            { reason: "scrub failed", run_id: runId },
+            { counts: true, capMinutes: cap },
+          );
+        else {
+          ok = await publish(pool, id, scrubbed, {
+            ...(await factsOf(r.kind, runId, r.error_key)),
+            scrubVersion: SCRUB_VERSION,
+          });
+          published = ok;
+        }
       }
     } else if (r.run_status === "CANCELED")
       ok = await fail(

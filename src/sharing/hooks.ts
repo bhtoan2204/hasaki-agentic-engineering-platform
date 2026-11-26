@@ -1,9 +1,12 @@
 import { log } from "../logging.ts";
 import { canStart, isServable } from "./policy.ts";
+import { canReadShared } from "./access.ts";
+import { scrubResult } from "./scrub.ts";
 import type { SharedRow } from "./repository.ts";
 import type { SharedKind } from "./key.ts";
 
-export type SharedOutcomeName = "hit" | "wait" | "miss" | "forced" | "bypass" | "lost_race";
+export type SharedOutcomeName =
+  "hit" | "wait" | "miss" | "forced" | "bypass" | "lost_race" | "denied";
 export interface SharedActor {
   id: number;
   role?: string;
@@ -17,8 +20,7 @@ export interface SharedActor {
  *    now default to the rules of policy.ts;
  *  - step 5 (access, scrub): `canRead` (who may be served a row) and `scrub` (before a result is stored);
  *  - step 6 (metrics, tracing): `observe` (one call per lookup outcome and per settled row).
- * The defaults are the safe ones: a result is served only to the member who created it (no sharing across members
- * until step 5 decides access), nothing is scrubbed yet, and every valid row is servable.
+ * The defaults are the policies of access.ts (who may read, checked on every read) and scrub.ts (before a result is stored).
  */
 export interface SharingHooks {
   canRead(row: SharedRow, actor: SharedActor): boolean | Promise<boolean>;
@@ -36,10 +38,10 @@ export interface SharingHooks {
 }
 
 export const DEFAULT_HOOKS: SharingHooks = {
-  canRead: (row, actor) => row.created_by === actor.id,
+  canRead: (row, actor) => canReadShared(row, actor),
   servable: (row, now) => isServable(row, now),
   mayStart: (latest, now) => canStart(latest, now),
-  scrub: (_kind, result) => result,
+  scrub: (kind, result) => scrubResult(kind, result),
   // R1: only values already in scope; no query to enrich the line.
   observe: (e) =>
     log.info(

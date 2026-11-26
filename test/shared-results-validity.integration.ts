@@ -50,7 +50,8 @@ after(async () => {
 });
 beforeEach(() => {
   resetSharingHooks();
-  setSharingHooks({ observe: () => {} });
+  // These suites test lookup, validity and retry; access (step 5) is tested in shared-results-access.integration.ts.
+  setSharingHooks({ observe: () => {}, canRead: (row, actor) => row.created_by === actor.id });
   config.sharedResults.prodErrors = true;
   config.sharedResults.codeAssessment = true;
   config.sharedResults.maxAttempts = 3;
@@ -459,7 +460,7 @@ test("provenance: who and how at claim time; tokens, cost, duration and validity
   );
   await settleSharedAnalyses();
   const hit = await lookupOrStart(request(key, bob, {}));
-  assert.equal(hit.outcome, "bypass", "bob is not served until step 5 (default access)");
+  assert.equal(hit.outcome, "bypass", "bob is refused by the access hook");
   const own = await lookupOrStart(request(key, alice));
   assert.equal(own.outcome, "hit");
   const view = await describeAnalysis(own, { id: alice, username: "valid-alice" });
