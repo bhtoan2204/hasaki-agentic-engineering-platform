@@ -33,7 +33,10 @@ test("destinations: allowlisted QC hosts only; production, metadata, private add
       ],
     },
     () => {
-      assert.equal(qcDestination("https://oms.qc.example.dev/orders").hostname, "oms.qc.example.dev");
+      assert.equal(
+        qcDestination("https://oms.qc.example.dev/orders").hostname,
+        "oms.qc.example.dev",
+      );
       assert.equal(
         qcDestination("https://warranty.qc-v2.example.dev/x").hostname,
         "warranty.qc-v2.example.dev",

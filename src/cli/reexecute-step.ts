@@ -17,12 +17,15 @@ import { instanceHealth } from "../instances.ts";
 
 const args = process.argv.slice(2);
 const arg = (name: string) => args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
-const all = (name: string) => args.filter((a) => a.startsWith(`--${name}=`)).map((a) => a.slice(name.length + 3));
+const all = (name: string) =>
+  args.filter((a) => a.startsWith(`--${name}=`)).map((a) => a.slice(name.length + 3));
 
 const runId = Number(arg("run"));
 const step = arg("step");
 if (!Number.isInteger(runId) || runId <= 0 || !step) {
-  console.error('usage: npm run step:reexecute -- --run=<id> --step=<key> [--feedback="…"] [--once] [--skill=<key>]');
+  console.error(
+    'usage: npm run step:reexecute -- --run=<id> --step=<key> [--feedback="…"] [--once] [--skill=<key>]',
+  );
   process.exit(2);
 }
 
@@ -56,7 +59,10 @@ try {
     console.warn(
       `note: the owning installation ${before.worker_instance ?? "(none)"} is ${health.health}; the step starts when its server (\`npm start\`) is running.`,
     );
-  else console.log(`queued on ${before.worker_instance} (this machine: ${config.instanceId}); follow it in the UI: #/runs/${runId}/${step}`);
+  else
+    console.log(
+      `queued on ${before.worker_instance} (this machine: ${config.instanceId}); follow it in the UI: #/runs/${runId}/${step}`,
+    );
 } catch (e) {
   console.error(`re-execute failed: ${(e as Error).message}`);
   process.exitCode = 1;

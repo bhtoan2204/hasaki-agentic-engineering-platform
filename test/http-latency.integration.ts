@@ -90,14 +90,10 @@ test("HTTP failures log request and correlation IDs without the query string", a
   assert.equal(logged.mock.callCount(), 1);
   const line = String(logged.mock.calls[0].arguments[0]);
   const { event, method, path, status, request_id, correlation_id } = JSON.parse(line);
-  assert.deepEqual([event, method, path, status, request_id, correlation_id], [
-    "http.request_failed",
-    "GET",
-    "/api/auth/status",
-    503,
-    "request-123",
-    "correlation-456",
-  ]);
+  assert.deepEqual(
+    [event, method, path, status, request_id, correlation_id],
+    ["http.request_failed", "GET", "/api/auth/status", 503, "request-123", "correlation-456"],
+  );
   assert.ok(!line.includes("private-value"));
 });
 

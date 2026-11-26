@@ -93,10 +93,10 @@ The CLI refuses to run without the test-owned preload's database name, flag and 
 The committed JSON report compares baseline `68d360020081864e39c42055eee0df50086a3511` with candidate `4058f8cbb896ff2bc1ab0fc60bd92ba890568389`. It records fixture/harness/preload/lockfile hashes, both source trees and measured-module hashes, Node v22.23.2, PostgreSQL 18.6, OS/CPU information, raw samples and paired median/p95 distributions. Every pair has matching output hashes. The five measured production modules are byte-identical between subjects: this is an unchanged-code control, and timing variation demonstrates why no speedup is claimed.
 
 | Fixture | Knowledge items / context entries / idle claims | Baseline warm median / p95 (ms) | Candidate warm median / p95 (ms) | SQL calls, both subjects |
-| --- | --- | --- | --- | --- |
-| small | 10 / 8 / 2 | 4.026 / 4.413 | 3.966 / 4.969 | 4 |
-| medium | 100 / 80 / 8 | 14.854 / 17.052 | 16.178 / 19.547 | 16 |
-| large | 1000 / 800 / 32 | 63.412 / 70.081 | 61.036 / 67.525 | 64 |
+| ------- | ----------------------------------------------- | ------------------------------- | -------------------------------- | ------------------------ |
+| small   | 10 / 8 / 2                                      | 4.026 / 4.413                   | 3.966 / 4.969                    | 4                        |
+| medium  | 100 / 80 / 8                                    | 14.854 / 17.052                 | 16.178 / 19.547                  | 16                       |
+| large   | 1000 / 800 / 32                                 | 63.412 / 70.081                 | 61.036 / 67.525                  | 64                       |
 
 The measured idle claim path makes two SQL calls per claim in both revisions. This is concrete baseline evidence for investigating claim/handoff overhead, not justification to remove reconciliation without recovery tests. Each sample also calls `resolveContext` on a disposable run, claims that queued job, extends the lease with `heartbeat`, then expires it and runs `reapExpiredLeases`. Numeric phase timings cover knowledge planning, context rendering, serialization, token estimation, tool accounting, idle claiming, context retrieval and the active scheduler path. Query counts/failures and elapsed time contain no SQL, parameters or prompts. Query time includes pool acquisition. Context retrieval and lease recovery use transactions, so those client queries are in their phase timings and are not all present in `pool_query_calls`. Separate pool wait is unavailable. Token estimates refer to the serialized fixture payload, not actual provider usage. Provider latency, input/output/cache tokens and cost remain null. Repeated-read counts come from synthetic tool events through the existing metrics implementation. Cancellations and live providers remain outside this component baseline. The candidate revision is recorded only when `git status` is clean, aside from the harness snapshot directory, and every measured module on disk matches that commit. Uncommitted candidate behavior is refused instead of being labeled HEAD.
 
@@ -108,11 +108,11 @@ The review finding was reproduced: the earlier probe retrieved zero fixture know
 
 Fixture version 2 varies every relevant input dimension:
 
-| Size | Retrieved fixture knowledge | Accessible repositories | Persisted upstream outputs | Persisted answers |
-| --- | --- | --- | --- | --- |
-| small | 10 | 2 | 8 | 2 |
-| medium | 100 | 8 | 80 | 8 |
-| large | 1000 | 32 | 800 | 32 |
+| Size   | Retrieved fixture knowledge | Accessible repositories | Persisted upstream outputs | Persisted answers |
+| ------ | --------------------------- | ----------------------- | -------------------------- | ----------------- |
+| small  | 10                          | 2                       | 8                          | 2                 |
+| medium | 100                         | 8                       | 80                         | 8                 |
+| large  | 1000                        | 32                      | 800                        | 32                |
 
 Each measurement asserts these retrieved dimensions and hidden-item exclusion. A normalized content/upstream digest participates in baseline/candidate output equality, excluding random fixture identifiers. Setup and cleanup use the existing `q` write notifications for knowledge/repository cache invalidation. The test checks all three sizes and verifies disposable owner/run cleanup. Fixtures are removed after every sample. New owners deliberately exercise candidate retrieval for each sample; warm repetitions describe warmed process/database resources, not reuse of the same owner's cached context.
 
@@ -137,6 +137,7 @@ The heartbeat lease renewal previously issued two sequential queries per tick: o
 In `test/codex.test.ts`, the process termination check was corrected to inspect `/proc/${pid}/stat` state. When a detached child process is killed with `SIGKILL` in a Linux container where init does not immediately reap reparented children, the process enters state `Z` (Zombie/terminated). `kill(pid, 0)` in Linux continues to find zombie descriptors until reaped; checking the process state confirms the process has terminated.
 
 Verification on this increment:
+
 - `npm run typecheck` passes (tsc . & tsc web).
 - ESLint on modified files reports zero errors.
 - Targeted tests `test/scheduler-efficiency.test.ts` (3/3), `test/codex.test.ts` (24/24), `test/provider-handoff.test.ts` (16/16), and `test/workflow-reliability.test.ts` (9/9) pass.
@@ -153,22 +154,25 @@ Targeted verification command (144 tests) passes with 0 failures under restricte
 ## T4 concurrent subtask execution and heartbeat behavioral regression
 
 ### T4: Opt-in concurrent coding subtasks & deterministic integration
+
 - **Durable Admission in `beginAttempt` (`src/workflow/engine.ts`)**: The reader/writer gate over run worktrees now supports opt-in concurrent coding subtasks (`step.config.isolated_workspace`, `step.config.concurrent`, or `step.subtask_id`). When multiple concurrent subtasks are active, admission validates that:
   1. The concurrency limit (`max_concurrent_subtasks`, default 4) is not exceeded.
   2. Subtasks declare disjoint file ownership (`owned_files`), target separate repositories, or configure isolated workspaces.
   3. No active attempt is a global writer (such as `git_pull_request`, non-isolated commands, or standard non-concurrent coding agents).
-  Standard non-concurrent steps continue to obey strict mutual exclusion.
+     Standard non-concurrent steps continue to obey strict mutual exclusion.
 - **Decomposition Materialization (`src/workflow/decomposition.ts`)**: `materializeSubtasks` and `validateExpansion` now accept `isolatedWorkspaces` opt-in, preserving parallel execution strategy for independent subtasks without injecting artificial serialization dependencies.
 - **Deterministic Integration Executor (`src/workflow/executors/builtin.ts`)**: `integrateSubtasks` handles `integrate_subtasks` / `subtask_integration` actions, verifying upstream subtask outputs, detecting overlapping file modifications, and returning clean diagnostics for conflict recovery.
 - **DAG UI Indicators (`web/src/graph.tsx`)**: Step nodes visually display badges for parallel subtasks and isolated worktrees.
 
 ### T2: Heartbeat combined lease renewal & STOPPING behavioral regression
+
 - `test/scheduler-efficiency.test.ts` includes full behavioral regression testing on live database records:
   1. Healthy active jobs extend `lease_expires_at` and return `true`.
   2. Active jobs with a `STOPPING` provider handoff refuse renewal and return `false` without modifying the lease expiration.
   3. Heartbeats without an attempt ID continue to evaluate correctly.
 
 ### Verification
+
 - `npm run typecheck` (`tsc -p . && tsc -p web`) passes with zero errors.
 - ESLint reports zero errors on touched files.
 - `web` production build (`npm run build`) completes successfully.

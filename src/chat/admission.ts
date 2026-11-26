@@ -96,10 +96,7 @@ export async function admitProvider(input: {
     const row = health.find((h) => h.provider === pinned);
     if (!isUsableAgent(row)) {
       const reason = healthSkipReason(row) ?? "not usable";
-      if (!input.fallbackEnabled)
-        throw new ChatTurnError(
-          failureFromHealth(pinned, reason),
-        );
+      if (!input.fallbackEnabled) throw new ChatTurnError(failureFromHealth(pinned, reason));
       skipped.push({ provider: pinned, reason });
       avoid.add(pinned);
     } else {
@@ -182,7 +179,11 @@ function failureFromHealth(provider: AgentProvider, reason: string): ChatFailure
 }
 
 /** Whether a post-start failure may try another eligible provider (never for permission denials). */
-export function mayFallback(failure: ChatFailure, strategy: ProviderStrategy, fallbackEnabled: boolean) {
+export function mayFallback(
+  failure: ChatFailure,
+  strategy: ProviderStrategy,
+  fallbackEnabled: boolean,
+) {
   if (failure.code === "PERMISSION_DENIED" || failure.code === "CANCELED") return false;
   if (strategy === "manual" && !fallbackEnabled) return false;
   return (

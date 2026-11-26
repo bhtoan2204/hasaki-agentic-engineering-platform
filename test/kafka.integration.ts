@@ -119,11 +119,23 @@ test("parseMessageEvents reads SSE frames and JSON arrays", () => {
 test("the client sends only GET, except the single allowlisted produce request", () => {
   const src = readFileSync(new URL("../src/integrations/kafka.ts", import.meta.url), "utf8");
   const writes = [...src.matchAll(/method:\s*["'](POST|PUT|PATCH|DELETE)/gi)];
-  assert.deepEqual(writes.map((w) => w[1].toUpperCase()), ["POST"], "no other write request exists");
+  assert.deepEqual(
+    writes.map((w) => w[1].toUpperCase()),
+    ["POST"],
+    "no other write request exists",
+  );
   assert.equal([...src.matchAll(/\bbody:/g)].length, 1);
   const publish = src.slice(src.indexOf("export async function publishMessage"));
-  assert.match(publish.slice(0, publish.indexOf("fetch(")), /await kafkaPublishTarget\(/, "allowlist checked before the request");
-  assert.match(publish, /\/topics\/\$\{enc\(target\.topic\)\}\/messages`/, "the produce endpoint only (no delete/offset/topic admin)");
+  assert.match(
+    publish.slice(0, publish.indexOf("fetch(")),
+    /await kafkaPublishTarget\(/,
+    "allowlist checked before the request",
+  );
+  assert.match(
+    publish,
+    /\/topics\/\$\{enc\(target\.topic\)\}\/messages`/,
+    "the produce endpoint only (no delete/offset/topic admin)",
+  );
 });
 
 test("session validated before saving; topics, groups and message search work; expiry detected", async () => {

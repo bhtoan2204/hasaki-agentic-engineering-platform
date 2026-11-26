@@ -25,10 +25,15 @@ for (const v of result.newViolations) console.error(`NEW ${v.rule}: ${v.detail}`
 if (result.newViolations.length) process.exit(1);
 
 if (write) {
-  writeFileSync(baselinePath, `${JSON.stringify({ violations: result.violations.map((v) => v.key) }, null, 2)}\n`);
+  writeFileSync(
+    baselinePath,
+    `${JSON.stringify({ violations: result.violations.map((v) => v.key) }, null, 2)}\n`,
+  );
   console.log(`baseline written with ${result.violations.length} entries`);
   process.exit(0);
 }
 if (result.staleBaseline.length) {
-  console.warn(`${result.staleBaseline.length} baseline entries no longer occur; run \`npm run arch:baseline\` to shrink it`);
+  console.warn(
+    `${result.staleBaseline.length} baseline entries no longer occur; run \`npm run arch:baseline\` to shrink it`,
+  );
 }

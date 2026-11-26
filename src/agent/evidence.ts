@@ -296,7 +296,10 @@ export function normalizeClaims(raw: unknown, notes: string[]): Claim[] {
     const prev = byText.get(key);
     // A contradicted citation (fabricated, another run's, wrong observation) is never merged away: it must stay
     // visible so the verdict can fail, even when a same-text claim cites a valid record.
-    if (prev && (c.verification_status === "contradicted" || prev.verification_status === "contradicted")) {
+    if (
+      prev &&
+      (c.verification_status === "contradicted" || prev.verification_status === "contradicted")
+    ) {
       (c.notes ??= []).push(`not merged with ${prev.id}: a contradicted citation stays separate`);
       out.push(c);
       return;
@@ -642,7 +645,9 @@ export function normalizeInvestigationOutput<R extends EvidenceRole>(
   output: Record<string, unknown>,
   upstream: Record<string, unknown> = {},
   unavailable: string[] = [],
-): NormalizedInvestigationOutput & { evidence_validation: EvidenceValidation } & RoleOutputFields[R] {
+): NormalizedInvestigationOutput & {
+  evidence_validation: EvidenceValidation;
+} & RoleOutputFields[R] {
   const notes: string[] = [];
   const claims = normalizeClaims(output.claims, notes);
   const missing = list(output.missing_evidence, 30);
@@ -762,7 +767,8 @@ export function approvedScopeFrom(stepKey: string, raw: unknown): ApprovedScope 
     changes,
     risk: RISKS.find((r) => r === record(proposal.fix_assessment).risk) ?? null,
     root_cause_status:
-      ROOT_CAUSE_STATUSES.find((st) => st === record(proposal.root_cause_assessment).status) ?? null,
+      ROOT_CAUSE_STATUSES.find((st) => st === record(proposal.root_cause_assessment).status) ??
+      null,
     gate: (proposal.evidence_gate as EvidenceGate | undefined) ?? null,
     assumptions: claims
       .filter((c) => c.classification === "ASSUMPTION" || c.classification === "HYPOTHESIS")
@@ -955,7 +961,10 @@ export function evidenceSummary(upstream: Record<string, { output: unknown; stat
         triggering_conditions: clip(r.triggering_conditions, 240),
         execution_path: list(r.execution_path, 12, 200),
         contributing_factors: list(r.contributing_factors, 8, 200),
-        reproduction: clip(typeof r.reproduction === "object" ? JSON.stringify(r.reproduction) : r.reproduction, 240),
+        reproduction: clip(
+          typeof r.reproduction === "object" ? JSON.stringify(r.reproduction) : r.reproduction,
+          240,
+        ),
         uncertainties: list(r.uncertainties, 8, 200),
         from: key,
       };

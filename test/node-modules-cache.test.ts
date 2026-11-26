@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nodeModulesReady, installNodeDependencies, recordDependencies } from "../src/git/provider.ts";
+import {
+  nodeModulesReady,
+  installNodeDependencies,
+  recordDependencies,
+} from "../src/git/provider.ts";
 import { TEST_COMMAND } from "../src/workflow/templates.ts";
 
 test("nodeModulesReady rejects package manager markers without a matching worker fingerprint", async () => {
@@ -68,11 +72,32 @@ test("workflow test commands preserve a current dependency fingerprint", async (
     await mkdir(join(dir, "bin"));
     await recordDependencies(dir);
     const version = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
-    await writeFile(join(dir, "bin", "npm"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf '%s\\n' "$*" >> "$CALLS"\n`, { mode: 0o755 });
-    execFileSync("bash", ["-c", TEST_COMMAND], { cwd: dir, stdio: "pipe", env: { ...process.env, PLATFORM_NODE_DEPENDENCIES: join(import.meta.dirname, "..", "src", "git", "nodeDependencies.ts"), PATH: `${join(dir, "bin")}:${process.env.PATH}`, CALLS: join(dir, "calls") } });
+    await writeFile(
+      join(dir, "bin", "npm"),
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf '%s\\n' "$*" >> "$CALLS"\n`,
+      { mode: 0o755 },
+    );
+    execFileSync("bash", ["-c", TEST_COMMAND], {
+      cwd: dir,
+      stdio: "pipe",
+      env: {
+        ...process.env,
+        PLATFORM_NODE_DEPENDENCIES: join(
+          import.meta.dirname,
+          "..",
+          "src",
+          "git",
+          "nodeDependencies.ts",
+        ),
+        PATH: `${join(dir, "bin")}:${process.env.PATH}`,
+        CALLS: join(dir, "calls"),
+      },
+    });
     assert.equal((await readFile(join(dir, "calls"), "utf8")).trim(), "test --if-present");
     assert.equal(await nodeModulesReady(dir), true);
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("dependency readiness invalidates when the lockfile changes", async () => {
@@ -84,7 +109,9 @@ test("dependency readiness invalidates when the lockfile changes", async () => {
     const first = await dependencyFingerprint(dir);
     await writeFile(join(dir, "package-lock.json"), "second");
     assert.notEqual(await dependencyFingerprint(dir), first);
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("a failed dependency install cannot leave a reusable worker record", async () => {
@@ -98,11 +125,17 @@ test("a failed dependency install cannot leave a reusable worker record", async 
     await mkdir(join(dir, "bin"));
     await recordDependencies(dir);
     await writeFile(join(dir, "package-lock.json"), "changed");
-    await writeFile(join(dir, "bin", "npm"), "#!/bin/sh\necho 'installation failed' >&2\nexit 1\n", { mode: 0o755 });
+    await writeFile(
+      join(dir, "bin", "npm"),
+      "#!/bin/sh\necho 'installation failed' >&2\nexit 1\n",
+      { mode: 0o755 },
+    );
     process.env.PATH = `${join(dir, "bin")}:${previousPath}`;
     await assert.rejects(installNodeDependencies(dir), /installation failed/);
     assert.equal(await nodeModulesReady(dir), false);
-    await assert.rejects(readFile(join(dir, "node_modules", ".platform-ready")), { code: "ENOENT" });
+    await assert.rejects(readFile(join(dir, "node_modules", ".platform-ready")), {
+      code: "ENOENT",
+    });
   } finally {
     process.env.PATH = previousPath;
     await rm(dir, { recursive: true, force: true });
@@ -123,7 +156,11 @@ test("dependency installation falls back when the inherited cache is not writabl
     const cache = join(dir, "unwritable-cache");
     await writeFile(cache, "protected cache path");
     const version = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
-    await writeFile(join(dir, "bin", "npm"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf '%s' "$npm_config_cache" > "$CACHE_USED"\n`, { mode: 0o755 });
+    await writeFile(
+      join(dir, "bin", "npm"),
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf '%s' "$npm_config_cache" > "$CACHE_USED"\n`,
+      { mode: 0o755 },
+    );
     process.env.PATH = `${join(dir, "bin")}:${previousPath}`;
     process.env.CACHE_USED = join(dir, "cache-used");
     assert.equal(await install(dir, cache), true);

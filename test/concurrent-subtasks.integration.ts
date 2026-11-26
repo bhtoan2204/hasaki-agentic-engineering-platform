@@ -124,8 +124,7 @@ test("integrateSubtasks integrates disjoint subtasks and detects file conflicts"
   assert.equal(conflictResult.kind, "failed");
   if (conflictResult.kind === "failed") {
     const det = conflictResult.details as
-      | { conflicts: Array<{ file: string; subtasks: string[] }> }
-      | undefined;
+      { conflicts: Array<{ file: string; subtasks: string[] }> } | undefined;
     assert.match(conflictResult.error, /merge conflict/);
     assert.deepEqual(det?.conflicts[0].file, "src/shared.ts");
     assert.deepEqual(det?.conflicts[0].subtasks, ["subtask-1", "subtask-2"]);
@@ -133,16 +132,32 @@ test("integrateSubtasks integrates disjoint subtasks and detects file conflicts"
 });
 
 test("beginAttempt admits concurrent independent subtasks and serializes conflicting steps", async () => {
-  const user = await createUser({ username: `user-${Date.now()}`, password: "password12345", role: "member" });
+  const user = await createUser({
+    username: `user-${Date.now()}`,
+    password: "password12345",
+    role: "member",
+  });
   const key = `conc-test-${Date.now()}`;
   const def = await definitions.create({
     key,
     spec: {
       name: key,
       steps: [
-        { key: "step-1", type: "coding_agent", config: { concurrent: true, scope: { owned_files: ["a.ts"] } } },
-        { key: "step-2", type: "coding_agent", config: { concurrent: true, scope: { owned_files: ["b.ts"] } } },
-        { key: "step-conflict", type: "coding_agent", config: { concurrent: true, scope: { owned_files: ["a.ts"] } } },
+        {
+          key: "step-1",
+          type: "coding_agent",
+          config: { concurrent: true, scope: { owned_files: ["a.ts"] } },
+        },
+        {
+          key: "step-2",
+          type: "coding_agent",
+          config: { concurrent: true, scope: { owned_files: ["b.ts"] } },
+        },
+        {
+          key: "step-conflict",
+          type: "coding_agent",
+          config: { concurrent: true, scope: { owned_files: ["a.ts"] } },
+        },
       ],
     },
   });
@@ -232,7 +247,11 @@ test("beginAttempt admits concurrent independent subtasks and serializes conflic
     [run.id, stepShared.id, config.instanceId],
   ))!;
   const begunShared = await beginAttempt(jobShared, "worker-shared");
-  assert.equal(begunShared, null, "A step without its own worktree is not admitted beside a writer");
+  assert.equal(
+    begunShared,
+    null,
+    "A step without its own worktree is not admitted beside a writer",
+  );
 
   // 4. isolated_workspace without a subtask id cannot name a distinct worktree.
   const stepUnnamed = (await one<{ id: number }>(
@@ -253,10 +272,18 @@ test("beginAttempt admits concurrent independent subtasks and serializes conflic
 
   // 5. Begin attempt for Step Conflict while Step 1 is RUNNING -> refused (file overlap on a.ts)
   const begunConflict = await beginAttempt(jobConflict, "worker-3");
-  assert.equal(begunConflict, null, "Step Conflict is refused and requeued due to overlapping owned files");
+  assert.equal(
+    begunConflict,
+    null,
+    "Step Conflict is refused and requeued due to overlapping owned files",
+  );
 
   // Verify jobConflict status was reset to queued
-  const requeued = await one<Pick<JobRow, "status" | "lease_owner">>(pool, "SELECT status, lease_owner FROM workflow_jobs WHERE id = $1", [jobConflict.id]);
+  const requeued = await one<Pick<JobRow, "status" | "lease_owner">>(
+    pool,
+    "SELECT status, lease_owner FROM workflow_jobs WHERE id = $1",
+    [jobConflict.id],
+  );
   assert.equal(requeued?.status, "queued");
   assert.equal(requeued?.lease_owner, null);
 

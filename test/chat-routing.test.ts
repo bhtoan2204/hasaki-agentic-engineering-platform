@@ -21,9 +21,7 @@ describe("chat intelligent routing", () => {
 
   it("production error questions prefer observability under AUTO", () => {
     const d = routeTurnIntelligent("AUTO", "Xem lỗi production NullPointer trên Signoz", []);
-    assert.ok(
-      d.route === "OBSERVABILITY_INVESTIGATION" || d.effective_mode === "INVESTIGATE",
-    );
+    assert.ok(d.route === "OBSERVABILITY_INVESTIGATION" || d.effective_mode === "INVESTIGATE");
   });
 
   it("implementation requests resolve to DELEGATE under AUTO", () => {

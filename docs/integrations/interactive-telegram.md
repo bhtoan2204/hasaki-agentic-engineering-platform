@@ -18,11 +18,11 @@ The bot uses the existing approval, rejection and question-answer services. It d
 
 Telegram is configured on the Integrations page only; no `TELEGRAM_*` environment variable is read (since 2026-11-22).
 
-| Setting | Where | Notes |
-|---|---|---|
-| Bot token | Integrations (encrypted shared secret) | Never logged or returned; the UI shows a masked suffix only. |
-| Shared chat | Integrations | Legacy shared chat (Production Error summaries). Not used for authorization. |
-| Receiver mode | Integrations (`off` default, `polling`) | Stored in `settings`; every instance follows it within about 30 seconds. |
+| Setting       | Where                                   | Notes                                                                        |
+| ------------- | --------------------------------------- | ---------------------------------------------------------------------------- |
+| Bot token     | Integrations (encrypted shared secret)  | Never logged or returned; the UI shows a masked suffix only.                 |
+| Shared chat   | Integrations                            | Legacy shared chat (Production Error summaries). Not used for authorization. |
+| Receiver mode | Integrations (`off` default, `polling`) | Stored in `settings`; every instance follows it within about 30 seconds.     |
 
 Webhook mode is not available from the UI: it needs a public HTTPS URL and a secret, which the platform no longer takes from the environment. The webhook transport code remains (tests drive it by setting the configuration directly).
 

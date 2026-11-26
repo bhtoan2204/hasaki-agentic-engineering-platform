@@ -129,7 +129,10 @@ before(async () => {
     execute: async () => ({ kind: "completed", output: { result: true } }),
   });
 });
-after(async () => { setHandoffReadinessForTests(undefined); await pool.end(); });
+after(async () => {
+  setHandoffReadinessForTests(undefined);
+  await pool.end();
+});
 
 test("identity survives process restarts, is unique per installation, refuses Git storage and invalid IDs", async () => {
   const a = mkdtempSync(join(process.env.TEST_ROOT!, "identity-"));

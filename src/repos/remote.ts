@@ -33,7 +33,13 @@ function gitlabRemote(value: string): CanonicalRemote | null {
     return null;
   const slug = parts.pop()!;
   const workspace = parts.join("/");
-  return { url: `https://${host}/${workspace}/${slug}.git`, workspace, slug, provider: "gitlab", host };
+  return {
+    url: `https://${host}/${workspace}/${slug}.git`,
+    workspace,
+    slug,
+    provider: "gitlab",
+    host,
+  };
 }
 
 export function repositoryRemote(value: unknown): CanonicalRemote {
@@ -97,10 +103,7 @@ export const legacyBitbucketHttpsUrl = (value: string) =>
 /** Normalize a detected origin (HTTPS or the legacy SSH forms) for comparison. Registration stays strict. */
 export function canonicalizeDetectedUrl(value: string): string | null {
   const ssh = gitlabSshToHttps(value.trim())
-    .replace(
-      /^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/,
-      "https://github.com/$1/$2.git",
-    )
+    .replace(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/, "https://github.com/$1/$2.git")
     .replace(/^git@bitbucket\.org:([^/]+)\/(.+?)(?:\.git)?$/, "https://bitbucket.org/$1/$2.git");
   const https = legacyBitbucketHttpsUrl(ssh);
   try {

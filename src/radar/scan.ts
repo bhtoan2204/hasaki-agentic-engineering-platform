@@ -106,8 +106,7 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
     db,
     "SELECT id, window_start, started_at, namespaces FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1",
   );
-  if (!latest)
-    return { series: [] as ErrorSeries[], latestScan: null, seriesCoverage: null };
+  if (!latest) return { series: [] as ErrorSeries[], latestScan: null, seriesCoverage: null };
   // How much of the newest scan the cap leaves out (counted, plus a bounded sample of the largest skipped).
   const totals = (await one<{ total: number; ignored: number; skipped: unknown }>(
     db,
@@ -458,7 +457,10 @@ export async function radarScan(
       // Quiet findings resolve on their own (a recurrence reopens them) — but only when this pass actually evaluated
       // their source on fresh data: a signature skipped by the cap, absent from the newest scan's namespaces, or a
       // failure group beyond the cap is "not looked at", not "quiet".
-      const evaluated = coverage.status === "stale" || coverage.status === "none" ? [] : series.map((x) => x.fingerprint);
+      const evaluated =
+        coverage.status === "stale" || coverage.status === "none"
+          ? []
+          : series.map((x) => x.fingerprint);
       const failuresComplete = !coverage.failure_groups_truncated;
       const quiet = await q<{ id: number }>(
         reads.db,
@@ -672,7 +674,12 @@ export async function radarTick() {
 
 /** Coverage of the newest finished radar pass: findings are only as complete as what that pass evaluated. */
 export async function latestCoverage() {
-  return one<{ id: number; finished_at: string; error: string | null; coverage: RadarCoverage | null }>(
+  return one<{
+    id: number;
+    finished_at: string;
+    error: string | null;
+    coverage: RadarCoverage | null;
+  }>(
     pool,
     "SELECT id, finished_at, error, coverage FROM radar_scans WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1",
   );

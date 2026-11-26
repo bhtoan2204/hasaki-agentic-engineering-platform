@@ -5,13 +5,7 @@ import type { Db } from "../db/pool.ts";
 import { background } from "./background.ts";
 import { budgetPreflight } from "./budgets.ts";
 import { getPath } from "./graph.ts";
-import {
-  lockRun,
-  setStepStatus,
-  setRunStatus,
-  ensureJob,
-  type AfterCommit,
-} from "./mutations.ts";
+import { lockRun, setStepStatus, setRunStatus, ensureJob, type AfterCommit } from "./mutations.ts";
 import { deriveRunStatus, DONE } from "./stateMachine.ts";
 import { evaluateGate, machineApproval } from "./autonomy.ts";
 import type { RunRow, StepRow } from "./types.ts";
@@ -122,10 +116,12 @@ export async function advance(c: Db, runId: number, afterCommit?: AfterCommit): 
   // Parallel child workflows: the run waits for them before it completes (workflow/delegation.ts joins it).
   if (
     next === "COMPLETED" &&
-    (await c.query(
-      "SELECT 1 FROM workflow_delegations WHERE parent_run_id=$1 AND mode='parallel' AND status IN ('queued','started','proposed') LIMIT 1",
-      [runId],
-    )).rowCount
+    (
+      await c.query(
+        "SELECT 1 FROM workflow_delegations WHERE parent_run_id=$1 AND mode='parallel' AND status IN ('queued','started','proposed') LIMIT 1",
+        [runId],
+      )
+    ).rowCount
   )
     next = "WAITING";
   await setRunStatus(c, run, next, afterCommit);

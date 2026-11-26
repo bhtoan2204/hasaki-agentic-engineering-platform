@@ -185,12 +185,16 @@ export async function recommendationDetail(id: number, owner: number) {
 
 export function findRecommendation(id: number) {
   return one<{ id: number; owner_id: number }>(
-    pool, "SELECT * FROM agent_recommendations WHERE id=$1", [id],
+    pool,
+    "SELECT * FROM agent_recommendations WHERE id=$1",
+    [id],
   );
 }
 
 export function listRecommendations(ownerId: number) {
   return q<{ id: number; owner_id: number }>(
-    pool, "SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50", [ownerId],
+    pool,
+    "SELECT * FROM agent_recommendations WHERE owner_id=$1 ORDER BY id DESC LIMIT 50",
+    [ownerId],
   );
 }

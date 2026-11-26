@@ -41,7 +41,10 @@ test("cited artifact ids are the ancestor logs an independent verifier may read"
     },
     implement: { output: { verification: { log_artifact_id: 851 } } },
   });
-  assert.deepEqual(ids.sort((a, b) => a - b), [851, 852]);
+  assert.deepEqual(
+    ids.sort((a, b) => a - b),
+    [851, 852],
+  );
   const short = evidenceExcerpt("hello", 20);
   assert.equal(short.truncated, false);
   assert.equal(short.text, "hello");
@@ -66,7 +69,12 @@ const emptyContext: ResolvedContext = {
 
 test("independent review is told to read platform artifacts instead of asking the developer", () => {
   const sys = buildSystemAppend(
-    { id: 95, definition_key: "feature", title: "t", allowed_repositories: [] as string[] } as RunRow,
+    {
+      id: 95,
+      definition_key: "feature",
+      title: "t",
+      allowed_repositories: [] as string[],
+    } as RunRow,
     {
       id: 1,
       run_id: 95,
@@ -120,22 +128,14 @@ test("context isolation: the verifier never sees the author's claims, only requi
 });
 
 test("independent review refuses a finished turn that never recorded a verdict", () => {
+  assert.match(independentSubmissionGap(undefined) ?? "", /without calling submit_result/);
   assert.match(
-    independentSubmissionGap(undefined) ?? "",
-    /without calling submit_result/,
-  );
-  assert.match(
-    independentSubmissionGap(undefined, { toolNames: ["call_mcp_tool"], note: "auto-denied" }) ?? "",
+    independentSubmissionGap(undefined, { toolNames: ["call_mcp_tool"], note: "auto-denied" }) ??
+      "",
     /not recorded/,
   );
-  assert.match(
-    independentSubmissionGap({ summary: "looks fine" }) ?? "",
-    /missing verdict/,
-  );
-  assert.equal(
-    independentSubmissionGap({ verdict: "FAIL", findings: [], summary: "no" }),
-    null,
-  );
+  assert.match(independentSubmissionGap({ summary: "looks fine" }) ?? "", /missing verdict/);
+  assert.equal(independentSubmissionGap({ verdict: "FAIL", findings: [], summary: "no" }), null);
   assert.equal(independentSubmissionGap({ approved: true, findings: [], summary: "ok" }), null);
 });
 
@@ -352,7 +352,8 @@ test("PR gate: every required verifier needs a valid PASS bound to the exact, cl
     verificationGate([pass({ svc: "a", api: "b" })], { svc: clean("a"), api: clean("b") }),
     [],
   );
-  const g = (v: Parameters<typeof verificationGate>[0], p: Record<string, PublishState>) => verificationGate(v, p).join(" | ");
+  const g = (v: Parameters<typeof verificationGate>[0], p: Record<string, PublishState>) =>
+    verificationGate(v, p).join(" | ");
   assert.match(
     g([pass({ svc: "a" })], { svc: clean("b") }),
     /svc: changed after independent verification "review" \(verified a, now b\)/,

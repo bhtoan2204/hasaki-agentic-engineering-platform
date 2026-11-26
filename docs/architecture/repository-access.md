@@ -6,16 +6,16 @@ backend only (`src/repos/access.ts`); the UI just reflects it.
 
 ## Gap analysis (before this change)
 
-| Gap | Where | Effect |
-| --- | --- | --- |
-| No per-user permission at all | `repositories.allowedFor(project)` | Any member could run agents on, read, rank and prepare every enabled repository. |
-| Fallback widened to every repository | `allowedFor` with an unmapped/empty project | A run without a mapped project could use the whole registry. |
-| Registry API was global | `GET /api/repositories`, `/workspace`, `/test-connection`, `/prepare`, `/refresh`, `/index-status`, `/rank` | Members listed, ranked and checked out repositories they had no business seeing. |
-| Shared credentials proved nothing | `resolveBitbucket()` fallback to the service account | A successful clone/push with the shared account looked like user authorization. |
-| Run scope frozen at creation | `run.allowed_repositories` | Revoking a person's access had no effect on existing runs, retries or resume. |
-| Repository knowledge was global | knowledge list/get/preview, agent context, learning | A `REPOSITORY`-scoped item, or a skill imported from a private repository, leaked to everyone and into any agent context. |
-| Historical diffs | `GET /api/runs/:id/changes` | Live source diffs stayed readable after access was revoked, also through the admin support view. |
-| Dependencies | repository metadata | A repository's `dependencies` disclosed names of repositories the viewer cannot access. |
+| Gap                                  | Where                                                                                                       | Effect                                                                                                                    |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| No per-user permission at all        | `repositories.allowedFor(project)`                                                                          | Any member could run agents on, read, rank and prepare every enabled repository.                                          |
+| Fallback widened to every repository | `allowedFor` with an unmapped/empty project                                                                 | A run without a mapped project could use the whole registry.                                                              |
+| Registry API was global              | `GET /api/repositories`, `/workspace`, `/test-connection`, `/prepare`, `/refresh`, `/index-status`, `/rank` | Members listed, ranked and checked out repositories they had no business seeing.                                          |
+| Shared credentials proved nothing    | `resolveBitbucket()` fallback to the service account                                                        | A successful clone/push with the shared account looked like user authorization.                                           |
+| Run scope frozen at creation         | `run.allowed_repositories`                                                                                  | Revoking a person's access had no effect on existing runs, retries or resume.                                             |
+| Repository knowledge was global      | knowledge list/get/preview, agent context, learning                                                         | A `REPOSITORY`-scoped item, or a skill imported from a private repository, leaked to everyone and into any agent context. |
+| Historical diffs                     | `GET /api/runs/:id/changes`                                                                                 | Live source diffs stayed readable after access was revoked, also through the admin support view.                          |
+| Dependencies                         | repository metadata                                                                                         | A repository's `dependencies` disclosed names of repositories the viewer cannot access.                                   |
 
 ## Model (migration 045)
 
@@ -61,11 +61,11 @@ access (`POST /api/repository-access/revalidate`); an admin re-checks a reposito
 
 Policy, `config.json` → `bitbucket.accessVerification`:
 
-| Value | Read | Write / PR |
-| --- | --- | --- |
-| `strict` (default) | verified by Bitbucket | verified by Bitbucket |
-| `personal` | verified by Bitbucket | allowed when Bitbucket does not report it, because pushes and PRs then run with that same personal token and Bitbucket enforces them |
-| `trusted` | not checked | not checked |
+| Value              | Read                  | Write / PR                                                                                                                           |
+| ------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `strict` (default) | verified by Bitbucket | verified by Bitbucket                                                                                                                |
+| `personal`         | verified by Bitbucket | allowed when Bitbucket does not report it, because pushes and PRs then run with that same personal token and Bitbucket enforces them |
+| `trusted`          | not checked           | not checked                                                                                                                          |
 
 `trusted` is the documented explicit trust policy for a team that works through the shared service account: the admin
 vouches that platform grants mirror Bitbucket. Effective access is then the platform grant ∩ repository policy.
@@ -73,21 +73,21 @@ Repositories without a Bitbucket remote (legacy local checkouts) are `not_applic
 
 ## Enforcement points
 
-| Entry point | Check |
-| --- | --- |
-| `GET /api/repositories` (My repositories), `GET /api/repositories/:name`, `/workspace`, `/test-connection`, `/prepare`, `/refresh` | `requireRepositoryAccess` read; inaccessible = 404 (same as unknown) |
-| `GET /api/repositories/index-status` | filtered to readable repositories (`?manage=1`: admin) |
-| `POST /api/repositories/rank` | `allowedRepositoriesForRun(caller)` |
-| Registry and access management (`?manage=1`, `POST /api/repositories/:name`, `/access`, `/shared`, `/revalidate`, `/delete`, `/reindex`, `validate-url`, `/api/repository-access*`) | admin; every change audited (`audit_log`, `repository.*`) |
-| Run creation and preview | `allowedRepositoriesForRun(owner, project)`; every requested name (body or `inputs.repositories`) must be in it, else 403 without listing others |
-| Repository selection (user, approval, agent output) | inside the persisted scope **and** still readable by the owner |
-| Step start (scheduler, covers retry, resume, re-execution) | `enforceRunRepositoryAccess`: revoked unselected repositories leave the scope; a revoked selected repository stops the step, not retried |
-| Every agent tool call (`validateToolBinding`) | `assertRunScopeReadable` on the attempt's scope |
-| Worktree preparation | `prepare_branch` automatically adds a needed repository to `selected_repositories` when it is already in the run's allowed scope and `requireRunRepositoryAccess(run, repo, "write")` succeeds. Selection is persisted and logged under the live attempt's lease and fencing token; no manual database update or developer question is needed. |
-| Push | `requireRunRepositoryAccess(run, repo, "write")` |
-| Pull request | `requireRunRepositoryAccess(run, repo, "pull_request")` |
-| `GET /api/runs/:id/changes` | per workspace: the **viewer's** read access; otherwise `restricted`, no code |
-| Knowledge list/get/preview, agent context, learning | `REPOSITORY`-scoped items and items imported from repository files follow repository read access |
+| Entry point                                                                                                                                                                         | Check                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/repositories` (My repositories), `GET /api/repositories/:name`, `/workspace`, `/test-connection`, `/prepare`, `/refresh`                                                  | `requireRepositoryAccess` read; inaccessible = 404 (same as unknown)                                                                                                                                                                                                                                                                           |
+| `GET /api/repositories/index-status`                                                                                                                                                | filtered to readable repositories (`?manage=1`: admin)                                                                                                                                                                                                                                                                                         |
+| `POST /api/repositories/rank`                                                                                                                                                       | `allowedRepositoriesForRun(caller)`                                                                                                                                                                                                                                                                                                            |
+| Registry and access management (`?manage=1`, `POST /api/repositories/:name`, `/access`, `/shared`, `/revalidate`, `/delete`, `/reindex`, `validate-url`, `/api/repository-access*`) | admin; every change audited (`audit_log`, `repository.*`)                                                                                                                                                                                                                                                                                      |
+| Run creation and preview                                                                                                                                                            | `allowedRepositoriesForRun(owner, project)`; every requested name (body or `inputs.repositories`) must be in it, else 403 without listing others                                                                                                                                                                                               |
+| Repository selection (user, approval, agent output)                                                                                                                                 | inside the persisted scope **and** still readable by the owner                                                                                                                                                                                                                                                                                 |
+| Step start (scheduler, covers retry, resume, re-execution)                                                                                                                          | `enforceRunRepositoryAccess`: revoked unselected repositories leave the scope; a revoked selected repository stops the step, not retried                                                                                                                                                                                                       |
+| Every agent tool call (`validateToolBinding`)                                                                                                                                       | `assertRunScopeReadable` on the attempt's scope                                                                                                                                                                                                                                                                                                |
+| Worktree preparation                                                                                                                                                                | `prepare_branch` automatically adds a needed repository to `selected_repositories` when it is already in the run's allowed scope and `requireRunRepositoryAccess(run, repo, "write")` succeeds. Selection is persisted and logged under the live attempt's lease and fencing token; no manual database update or developer question is needed. |
+| Push                                                                                                                                                                                | `requireRunRepositoryAccess(run, repo, "write")`                                                                                                                                                                                                                                                                                               |
+| Pull request                                                                                                                                                                        | `requireRunRepositoryAccess(run, repo, "pull_request")`                                                                                                                                                                                                                                                                                        |
+| `GET /api/runs/:id/changes`                                                                                                                                                         | per workspace: the **viewer's** read access; otherwise `restricted`, no code                                                                                                                                                                                                                                                                   |
+| Knowledge list/get/preview, agent context, learning                                                                                                                                 | `REPOSITORY`-scoped items and items imported from repository files follow repository read access                                                                                                                                                                                                                                               |
 
 Project mappings only narrow a user's set; they never add a repository. Without a mapped project a run gets the user's
 own accessible set, never the whole registry.

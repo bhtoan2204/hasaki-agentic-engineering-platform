@@ -14,16 +14,16 @@ pg_dump --format=custom --file=platform-before-083.dump "$DATABASE_URL"
 
 ## Removed database objects
 
-| Object | Kind | Notes |
-|---|---|---|
-| `tasks`, `events`, `questions`, `prs` | tables | Pre-workflow history. Rows are discarded; work items and pull requests backfilled from them by 002 stay. |
-| `events_task_code_fkey`, `questions_task_code_fkey`, `prs_task_code_fkey`, `work_items_legacy_task_code_fkey` | foreign keys | Dropped explicitly before the tables. |
-| `work_items.legacy_task_code` | column | |
-| `work_items.source = 'legacy'` | CHECK value | Existing rows become `manual`. |
-| `workflow_step_attempts.workspace`, `agent_sessions.ended_at`, `platform_instances.display_name`, `chat_conversations.budget`, `telegram_updates.received_at`, `outcome_observations.recorded_at`, `intake_items.priority` | columns | Never written or read. `intake_items_queue` is recreated without `priority`. |
-| `agent_sessions_attempt` | index | Prefix of `agent_sessions_provider`. |
-| `execution_decisions_autonomy_idx`, `execution_decisions_kind_idx`, `splunk_searches_user`, `chat_turns_owner_idx`, `evaluation_comparisons_owner`, `knowledge_items_scope` | indexes | No query filters or sorts on their leading columns. |
-| `evaluation_runs_cache`, `agent_recommendations_cache`, `agent_optimization_policies_cache` | triggers | `cache_invalidate` notifications no cache listens to. |
+| Object                                                                                                                                                                                                                     | Kind         | Notes                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------- |
+| `tasks`, `events`, `questions`, `prs`                                                                                                                                                                                      | tables       | Pre-workflow history. Rows are discarded; work items and pull requests backfilled from them by 002 stay. |
+| `events_task_code_fkey`, `questions_task_code_fkey`, `prs_task_code_fkey`, `work_items_legacy_task_code_fkey`                                                                                                              | foreign keys | Dropped explicitly before the tables.                                                                    |
+| `work_items.legacy_task_code`                                                                                                                                                                                              | column       |                                                                                                          |
+| `work_items.source = 'legacy'`                                                                                                                                                                                             | CHECK value  | Existing rows become `manual`.                                                                           |
+| `workflow_step_attempts.workspace`, `agent_sessions.ended_at`, `platform_instances.display_name`, `chat_conversations.budget`, `telegram_updates.received_at`, `outcome_observations.recorded_at`, `intake_items.priority` | columns      | Never written or read. `intake_items_queue` is recreated without `priority`.                             |
+| `agent_sessions_attempt`                                                                                                                                                                                                   | index        | Prefix of `agent_sessions_provider`.                                                                     |
+| `execution_decisions_autonomy_idx`, `execution_decisions_kind_idx`, `splunk_searches_user`, `chat_turns_owner_idx`, `evaluation_comparisons_owner`, `knowledge_items_scope`                                                | indexes      | No query filters or sorts on their leading columns.                                                      |
+| `evaluation_runs_cache`, `agent_recommendations_cache`, `agent_optimization_policies_cache`                                                                                                                                | triggers     | `cache_invalidate` notifications no cache listens to.                                                    |
 
 `inbox` and `settings` stay: the Hasaki Work poller, operator settings, integrations and Telegram still use them.
 

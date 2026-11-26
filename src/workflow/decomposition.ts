@@ -51,7 +51,11 @@ const clampLimits = (l: DecompositionLimits): DecompositionLimits => ({
 });
 
 /** Conservative defaults; decomposition itself is opt-in per step config. */
-export const DEFAULT_LIMITS: DecompositionLimits = { max_subtasks: 8, max_depth: 1, max_replans: 2 };
+export const DEFAULT_LIMITS: DecompositionLimits = {
+  max_subtasks: 8,
+  max_depth: 1,
+  max_replans: 2,
+};
 
 export interface TaskSignals {
   repositories: number;
@@ -121,7 +125,8 @@ export function validateExpansion(
   const allowed = new Set(ctx.allowedRepositories);
   for (const s of subtasks) {
     for (const r of s.target_repos)
-      if (!allowed.has(r)) errors.push(`subtask "${s.id}" targets repository "${r}" outside the allowed set`);
+      if (!allowed.has(r))
+        errors.push(`subtask "${s.id}" targets repository "${r}" outside the allowed set`);
     for (const d of s.depends_on) {
       if (d === s.id) errors.push(`subtask "${s.id}" depends on itself`);
       else if (!ids.has(d) && !ctx.existingKeys.includes(d))
@@ -131,7 +136,8 @@ export function validateExpansion(
   // Shared-file ownership: overlapping writers must not run in parallel — serialize them.
   for (let i = 0; i < subtasks.length; i++)
     for (let j = i + 1; j < subtasks.length; j++) {
-      const a = subtasks[i], b = subtasks[j];
+      const a = subtasks[i],
+        b = subtasks[j];
       const overlap = a.owned_files.some((f) => b.owned_files.includes(f));
       if (overlap && !reaches(subtasks, b.id, a.id) && !reaches(subtasks, a.id, b.id)) {
         b.depends_on.push(a.id);
@@ -143,8 +149,10 @@ export function validateExpansion(
   if (!ctx.isolatedWorkspaces) {
     for (let i = 0; i < subtasks.length; i++)
       for (let j = i + 1; j < subtasks.length; j++) {
-        const a = subtasks[i], b = subtasks[j];
-        if (!reaches(subtasks, b.id, a.id) && !reaches(subtasks, a.id, b.id)) b.depends_on.push(a.id);
+        const a = subtasks[i],
+          b = subtasks[j];
+        if (!reaches(subtasks, b.id, a.id) && !reaches(subtasks, a.id, b.id))
+          b.depends_on.push(a.id);
       }
     for (const st of subtasks) st.execution_strategy = "sequential";
   }
@@ -163,7 +171,11 @@ export function validateExpansion(
         ...live,
         ...subtasks.map((s) => ({
           key: stepKey(s.id),
-          depends_on: s.depends_on.length ? s.depends_on.map(toKey) : ctx.planStepKey ? [ctx.planStepKey] : [],
+          depends_on: s.depends_on.length
+            ? s.depends_on.map(toKey)
+            : ctx.planStepKey
+              ? [ctx.planStepKey]
+              : [],
         })),
       ]);
     } catch (e) {
@@ -191,7 +203,9 @@ export function planHash(plan: DecompositionPlan): string {
   const canon = [...plan.subtasks]
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((s) => ({ ...s, depends_on: [...s.depends_on].sort() }));
-  return createHash("sha256").update(JSON.stringify({ summary: plan.summary, canon })).digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify({ summary: plan.summary, canon }))
+    .digest("hex");
 }
 
 export const idempotencyKey = (runId: number, hash: string, kind: string) =>
@@ -220,11 +234,18 @@ export async function materializeSubtasks(
   const limits = clampLimits({ ...DEFAULT_LIMITS, ...opts.limits });
   const parsed = DecompositionPlan.safeParse(rawPlan);
   if (!parsed.success)
-    throw new EngineError("invalid decomposition plan: " + parsed.error.issues.map((i) => i.message).join("; "), 422);
+    throw new EngineError(
+      "invalid decomposition plan: " + parsed.error.issues.map((i) => i.message).join("; "),
+      422,
+    );
   const plan = parsed.data;
   await lockRun(c, runId);
   const key = idempotencyKey(runId, planHash(plan), kind);
-  const prior = await one<{ revision: number }>(c, "SELECT revision FROM workflow_graph_revisions WHERE idempotency_key = $1", [key]);
+  const prior = await one<{ revision: number }>(
+    c,
+    "SELECT revision FROM workflow_graph_revisions WHERE idempotency_key = $1",
+    [key],
+  );
   if (prior) return { created: [], revision: prior.revision, replayed: true };
 
   const steps = await stepsOf(c, runId);
@@ -232,7 +253,10 @@ export async function materializeSubtasks(
   if (!planStep) throw new EngineError(`plan step "${planStepKey}" not found`, 404);
   // The plan must have been approved by a human: the plan step has to be completed first.
   if (planStep.status !== "COMPLETED")
-    throw new EngineError(`plan step "${planStepKey}" is not approved/completed (status ${planStep.status})`, 409);
+    throw new EngineError(
+      `plan step "${planStepKey}" is not approved/completed (status ${planStep.status})`,
+      409,
+    );
   // Proof of human approval, bound to THIS plan: a completed, current-generation approval gate on the plan step whose
   // approval data names the sha256 of the exact plan (and kind) being materialized. The approver is read from the gate,
   // never from the caller, so a replan needs its own gate approving its own plan.
@@ -263,11 +287,18 @@ export async function materializeSubtasks(
       !["PENDING", "COMPLETED", "SKIPPED"].includes(s.status),
   );
   if (started.length)
-    throw new EngineError(`steps already active after the plan step: ${started.map((s) => s.key).join(", ")}`, 409);
+    throw new EngineError(
+      `steps already active after the plan step: ${started.map((s) => s.key).join(", ")}`,
+      409,
+    );
   const depth = planStep.subtask_id ? 2 : 1;
   if (depth > limits.max_depth)
     throw new EngineError(`expansion depth ${depth} exceeds limit ${limits.max_depth}`, 409);
-  const revs = await q<{ kind: string }>(c, "SELECT kind FROM workflow_graph_revisions WHERE run_id = $1", [runId]);
+  const revs = await q<{ kind: string }>(
+    c,
+    "SELECT kind FROM workflow_graph_revisions WHERE run_id = $1",
+    [runId],
+  );
   if (kind === "replan" && revs.filter((r) => r.kind === "replan").length >= limits.max_replans)
     throw new EngineError(`replan limit (${limits.max_replans}) reached`, 409);
   if (kind === "decomposition" && revs.some((r) => r.kind === "decomposition"))
@@ -289,25 +320,51 @@ export async function materializeSubtasks(
     c,
     `INSERT INTO workflow_graph_revisions (run_id, revision, kind, reason, actor, plan, idempotency_key)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [runId, revision, kind, opts.reason, `${opts.actor} (approved by ${gate.approval.by})`, json(plan), key],
+    [
+      runId,
+      revision,
+      kind,
+      opts.reason,
+      `${opts.actor} (approved by ${gate.approval.by})`,
+      json(plan),
+      key,
+    ],
   );
   const toKey = (d: string) => (subtasks.some((s) => s.id === d) ? stepKey(d) : d);
   const created: string[] = [];
   let position = Math.max(...steps.map((s) => s.position)) + 1;
   for (const s of subtasks) {
-    const deps = [...new Set([...(s.depends_on.length ? s.depends_on.map(toKey) : [planStepKey]), gate.key])];
+    const deps = [
+      ...new Set([...(s.depends_on.length ? s.depends_on.map(toKey) : [planStepKey]), gate.key]),
+    ];
     await q(
       c,
       `INSERT INTO workflow_steps (run_id, key, type, name, position, depends_on, config, requires_approval, max_attempts, retry_backoff_s, status, parent_step_key, subtask_id, graph_revision)
        VALUES ($1, $2, 'coding_agent', $3, $4, $5, $6, $10, 2, 5, 'PENDING', $7, $8, $9)`,
-      [runId, stepKey(s.id), s.title, position++, deps, json({
-        subtask: s,
-        isolated_workspace: opts.isolatedWorkspaces === true && s.execution_strategy === "parallel",
-        concurrent: s.execution_strategy === "parallel",
-        // isolated_workspace makes prepareWorkspace cut a branch and worktree for this subtask. The run worktree
-        // stays the integration target. Scope repositories are validated against the run's allowed set.
-        scope: { repositories: s.target_repos, permissions: s.permissions, owned_files: s.owned_files },
-      }), planStepKey, s.id, revision, s.risk === "high"],
+      [
+        runId,
+        stepKey(s.id),
+        s.title,
+        position++,
+        deps,
+        json({
+          subtask: s,
+          isolated_workspace:
+            opts.isolatedWorkspaces === true && s.execution_strategy === "parallel",
+          concurrent: s.execution_strategy === "parallel",
+          // isolated_workspace makes prepareWorkspace cut a branch and worktree for this subtask. The run worktree
+          // stays the integration target. Scope repositories are validated against the run's allowed set.
+          scope: {
+            repositories: s.target_repos,
+            permissions: s.permissions,
+            owned_files: s.owned_files,
+          },
+        }),
+        planStepKey,
+        s.id,
+        revision,
+        s.risk === "high",
+      ],
     );
     created.push(stepKey(s.id));
   }
@@ -358,6 +415,12 @@ export async function materializeSubtasks(
       ],
     );
   }
-  await runEvents.add(c, runId, "graph", `graph revision ${revision} (${kind}): +${created.length} subtasks — ${opts.reason}`, planStep.id);
+  await runEvents.add(
+    c,
+    runId,
+    "graph",
+    `graph revision ${revision} (${kind}): +${created.length} subtasks — ${opts.reason}`,
+    planStep.id,
+  );
   return { created, revision, replayed: false };
 }

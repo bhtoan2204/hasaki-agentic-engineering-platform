@@ -30,7 +30,13 @@ const cfg = (extra: Partial<VerifyConfig> = {}): VerifyConfig => ({
   allowTestWeakening: false,
   ...extra,
 });
-const verify = (path: string, output: string, code: number | null, c: VerifyConfig, files: string[] = ["app/x.go"]) =>
+const verify = (
+  path: string,
+  output: string,
+  code: number | null,
+  c: VerifyConfig,
+  files: string[] = ["app/x.go"],
+) =>
   verifyWorkspaces([{ repo: "app", path }], [path], c, 1, new AbortController().signal, {
     run: async () => ({ code, timedOut: false, output }),
     diffTests: async () => "",
@@ -79,7 +85,10 @@ test("NOT_APPLICABLE only comes from the workflow policy and only for covered, n
   const r = repo();
   try {
     const policy = { allowedPaths: ["docs/**", "*.md"], reason: "docs only" };
-    const ok = await verify(r.path, "", 0, cfg({ notApplicable: policy }), ["docs/a/b.md", "README.md"]);
+    const ok = await verify(r.path, "", 0, cfg({ notApplicable: policy }), [
+      "docs/a/b.md",
+      "README.md",
+    ]);
     assert.equal(ok.repos[0].outcome, "NOT_APPLICABLE");
     assert.equal(ok.passed, true);
     for (const files of [["src/a.ts"], ["docs/a.md", "src/a.ts"], ["docs/x.test.ts"]]) {
@@ -91,12 +100,22 @@ test("NOT_APPLICABLE only comes from the workflow policy and only for covered, n
     assert.equal(none.repos[0].outcome, "NOT_EXECUTED");
     assert.equal(notApplicableCovers(undefined, ["README.md"]), false);
     // Generated protobuf code, .proto schemas and swag docs need no policy: no test can exercise them alone.
-    const generated = ["proto/oms/oms.pb.go", "proto/oms/oms.proto", "docs/docs.go", "docs/swagger.json", "docs/swagger.yaml"];
+    const generated = [
+      "proto/oms/oms.pb.go",
+      "proto/oms/oms.proto",
+      "docs/docs.go",
+      "docs/swagger.json",
+      "docs/swagger.yaml",
+    ];
     const gen = await verify(r.path, "", 0, cfg(), generated);
     assert.equal(gen.repos[0].outcome, "NOT_APPLICABLE");
     assert.equal(gen.passed, true);
     const mixed = await verify(r.path, "", 0, cfg(), [...generated, "app/dto/mapper.go"]);
-    assert.equal(mixed.repos[0].outcome, "NOT_EXECUTED", "hand-written code still needs test evidence");
+    assert.equal(
+      mixed.repos[0].outcome,
+      "NOT_EXECUTED",
+      "hand-written code still needs test evidence",
+    );
   } finally {
     r.done();
   }
@@ -104,10 +123,17 @@ test("NOT_APPLICABLE only comes from the workflow policy and only for covered, n
 
 test("verifyConfig reads not_applicable from the definition only when complete", () => {
   assert.deepEqual(
-    verifyConfig({ verify: { not_applicable: { allowed_paths: ["docs/**"], reason: "docs" } } }, "x")?.notApplicable,
+    verifyConfig(
+      { verify: { not_applicable: { allowed_paths: ["docs/**"], reason: "docs" } } },
+      "x",
+    )?.notApplicable,
     { allowedPaths: ["docs/**"], reason: "docs" },
   );
-  assert.equal(verifyConfig({ verify: { not_applicable: { allowed_paths: ["docs/**"] } } }, "x")?.notApplicable, undefined);
+  assert.equal(
+    verifyConfig({ verify: { not_applicable: { allowed_paths: ["docs/**"] } } }, "x")
+      ?.notApplicable,
+    undefined,
+  );
 });
 
 test("the verification loop stops without a repair when nothing was executed", async () => {
@@ -136,7 +162,8 @@ test("testEvidence parses node:test, Go and markers", () => {
 });
 
 test("testEvidence reads go test -json events and ignores package-level events", () => {
-  const pass = '{"Time":"t","Action":"pass","Package":"p","Test":"TestA","Elapsed":0}\n{"Time":"t","Action":"pass","Package":"p","Elapsed":0.1}\n';
+  const pass =
+    '{"Time":"t","Action":"pass","Package":"p","Test":"TestA","Elapsed":0}\n{"Time":"t","Action":"pass","Package":"p","Elapsed":0.1}\n';
   assert.deepEqual(testEvidence(pass), { executed: 1, skipped: 0, marker: false });
   const none = '{"Time":"t","Action":"skip","Package":"p","Elapsed":0}\n';
   assert.equal(testEvidence(none).executed, null);
@@ -147,20 +174,38 @@ test("testEvidence reads go test -json events and ignores package-level events",
 test("a Node repository without any test runner is NOT_APPLICABLE only after its typecheck really ran", async () => {
   const r = repo();
   try {
-    const out = "== typecheck\n== eslint (changed files, new errors only)\nno platform test harness; the regression step runs npm test";
-    writeFileSync(join(r.path, "package.json"), JSON.stringify({ scripts: { build: "tsc && vite build", lint: "eslint src" } }));
+    const out =
+      "== typecheck\n== eslint (changed files, new errors only)\nno platform test harness; the regression step runs npm test";
+    writeFileSync(
+      join(r.path, "package.json"),
+      JSON.stringify({ scripts: { build: "tsc && vite build", lint: "eslint src" } }),
+    );
     execFileSync("git", ["-C", r.path, "add", "."]);
     const ok = await verify(r.path, out, 0, cfg(), ["src/a.tsx"]);
     assert.equal(ok.repos[0].outcome, "NOT_APPLICABLE");
     assert.equal(ok.passed, true);
-    const skipped = await verify(r.path, "== typecheck\ntsc not installed; typecheck skipped\nno platform test harness", 0, cfg(), ["src/a.tsx"]);
+    const skipped = await verify(
+      r.path,
+      "== typecheck\ntsc not installed; typecheck skipped\nno platform test harness",
+      0,
+      cfg(),
+      ["src/a.tsx"],
+    );
     assert.equal(skipped.repos[0].outcome, "NOT_EXECUTED", "no static check ran");
     writeFileSync(join(r.path, "src.test.ts"), "");
     execFileSync("git", ["-C", r.path, "add", "."]);
-    assert.equal((await verify(r.path, out, 0, cfg(), ["src/a.tsx"])).repos[0].outcome, "NOT_EXECUTED", "tests exist but none ran");
+    assert.equal(
+      (await verify(r.path, out, 0, cfg(), ["src/a.tsx"])).repos[0].outcome,
+      "NOT_EXECUTED",
+      "tests exist but none ran",
+    );
     writeFileSync(join(r.path, "package.json"), JSON.stringify({ scripts: { test: "vitest" } }));
     execFileSync("git", ["-C", r.path, "rm", "-q", "--cached", "src.test.ts"]);
-    assert.equal((await verify(r.path, out, 0, cfg(), ["src/a.tsx"])).repos[0].outcome, "NOT_EXECUTED", "a test script exists but did not run");
+    assert.equal(
+      (await verify(r.path, out, 0, cfg(), ["src/a.tsx"])).repos[0].outcome,
+      "NOT_EXECUTED",
+      "a test script exists but did not run",
+    );
   } finally {
     r.done();
   }

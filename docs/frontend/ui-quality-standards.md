@@ -13,7 +13,13 @@ Use the established sizes: XS 28px, SM 32px, MD 38px, LG 44px. These are the `--
 `Button` supports `primary`, `secondary`, `quiet`, `danger`, `size`, `icon`, `loading`, native `disabled`, and native button attributes. Loading replaces the icon and sets `aria-busy` without inserting a layout row. Existing `button`, `.btn`, `.ghost`, `.quiet`, `.sm`, `.xs`, `.lg` call sites remain compatible. Do not combine competing visual variants.
 
 ```tsx
-<Button variant="secondary" size="sm" icon={<RefreshCw size={14}/>} loading={refreshing} onClick={reload}>
+<Button
+  variant="secondary"
+  size="sm"
+  icon={<RefreshCw size={14} />}
+  loading={refreshing}
+  onClick={reload}
+>
   {t("an.refresh")}
 </Button>
 ```

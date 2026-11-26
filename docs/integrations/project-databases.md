@@ -3,23 +3,23 @@
 Agents can read a project's QC database (MySQL / MariaDB) during a run, with Claude, Codex, Cursor and Antigravity alike. The
 databases are tools of the platform's per-run tool bridge (MCP `call_tool`), next to Splunk, Kafka, Vault and Argo CD:
 
-| Tool | Does |
-| --- | --- |
-| `database.list` | Databases this run may query (key, project, database name, description, row limit) |
+| Tool              | Does                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| `database.list`   | Databases this run may query (key, project, database name, description, row limit)         |
 | `database.schema` | Tables (approximate rows, comments), or one table's columns and indexes; reads no row data |
-| `database.query` | One read-only statement: `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `WITH … SELECT` |
+| `database.query`  | One read-only statement: `SELECT`, `SHOW`, `DESCRIBE`, `EXPLAIN`, `WITH … SELECT`          |
 
 ## Setup (admin)
 
 Integrations → **Project QC databases** → Add database. One entry per database, for example:
 
-| Key | Project | Repositories | Note |
-| --- | --- | --- | --- |
-| `oms-qc` | `OMS` | | every run with an OMS repository |
-| `payment-qc` | `Payment` | | every run with a Payment repository |
-| `warranty-qc` | | `warranty-api, warranty-worker` | the warranty repositories are mapped to project OMS, so list them explicitly |
+| Key           | Project   | Repositories                    | Note                                                                         |
+| ------------- | --------- | ------------------------------- | ---------------------------------------------------------------------------- |
+| `oms-qc`      | `OMS`     |                                 | every run with an OMS repository                                             |
+| `payment-qc`  | `Payment` |                                 | every run with a Payment repository                                          |
+| `warranty-qc` |           | `warranty-api, warranty-worker` | the warranty repositories are mapped to project OMS, so list them explicitly |
 
-Use a MySQL account with **SELECT only**. *Test* shows the server version and warns when the account can write. The
+Use a MySQL account with **SELECT only**. _Test_ shows the server version and warns when the account can write. The
 password is stored encrypted (`shared_secrets`, `AUTH_SECRET`), is never returned by the API, and is kept when an
 update leaves the field empty. Changes are audited (`database.create` / `update` / `delete`).
 

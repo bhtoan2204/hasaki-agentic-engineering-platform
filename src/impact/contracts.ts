@@ -298,27 +298,103 @@ const IDENT = "[A-Za-z_$][\\w.$]{0,100}";
  * may exist that no literal join can find. Bounded patterns over bounded lines (no nested quantifiers).
  */
 const DYNAMIC: Array<{ kind: DynamicSite["kind"]; re: RegExp; reason: string }> = [
-  { kind: "kafka_topic", re: new RegExp(`\\.send\\(\\s*\\{\\s*topic\\s*:\\s*${IDENT}`), reason: "topic from a variable" },
-  { kind: "kafka_topic", re: new RegExp(`\\b(?:kafkaTemplate|producer|kafkaProducer)\\.send\\(\\s*${IDENT}\\s*,`, "i"), reason: "topic from a variable" },
-  { kind: "kafka_topic", re: new RegExp(`\\.produce\\(\\s*${IDENT}\\s*,`), reason: "topic from a variable" },
-  { kind: "kafka_topic", re: /\bTopic\s*:\s*[A-Za-z_][\w.]{0,100}\s*(?:,|\}|$)/, reason: "topic from a variable" },
-  { kind: "kafka_topic", re: /@KafkaListener\([^)]{0,200}topics\s*=\s*\{?\s*(?:"\$\{|[A-Za-z_])/, reason: "topic from a property placeholder or constant" },
-  { kind: "kafka_topic", re: new RegExp(`\\bsubscribe\\(\\s*\\{\\s*topics?\\s*:\\s*\\[?\\s*${IDENT}`), reason: "topic from a variable" },
-  { kind: "kafka_topic", re: new RegExp(`\\bsubscribe\\(\\s*\\[\\s*${IDENT}`), reason: "topic from a variable" },
-  { kind: "http_route", re: new RegExp(`\\b(?:axios|httpClient|got|ky|restTemplate|apiClient)\\s*\\.\\s*(?:get|post|put|patch|delete)(?:ForObject|ForEntity)?\\s*\\(\\s*${IDENT}\\s*[,)]`, "i"), reason: "URL from a variable" },
-  { kind: "http_route", re: new RegExp(`\\bfetch\\(\\s*${IDENT}\\s*[,)]`), reason: "URL from a variable" },
-  { kind: "http_route", re: /\bfetch\(\s*`\$\{[^}`]{1,100}\}`/, reason: "URL entirely from a template expression" },
-  { kind: "http_route", re: /http\.NewRequest(?:WithContext)?\([^,()]{1,100},\s*(?:"[A-Z]+"|http\.Method\w+|\w+)\s*,\s*[A-Za-z_][\w.]{0,100}\s*,/, reason: "URL from a variable" },
-  { kind: "http_route", re: /\bhttp\.NewRequest\(\s*(?:"[A-Z]+"|http\.Method\w+|\w+)\s*,\s*[A-Za-z_][\w.]{0,100}\s*,/, reason: "URL from a variable" },
-  { kind: "http_route", re: /\bhttp\.(?:Get|Post)\(\s*[A-Za-z_][\w.]{0,100}\s*[,)]/, reason: "URL from a variable" },
-  { kind: "http_route", re: /\b(?:HandleFunc|Handle)\(\s*[A-Za-z_][\w.]{0,100}\s*,/, reason: "route from a variable" },
-  { kind: "http_route", re: /@(?:Get|Post|Put|Patch|Delete|Request)Mapping\(\s*(?:value\s*=\s*|path\s*=\s*)?(?:"\$\{|[A-Z_][A-Z0-9_]{1,100}\b)/, reason: "route from a property placeholder or constant" },
-  { kind: "db_table", re: /\b(?:FROM|JOIN|INTO|UPDATE)\s*["'`]\s*\+/i, reason: "table name concatenated at runtime" },
-  { kind: "db_table", re: /\b(?:FROM|JOIN|INTO|UPDATE)\s+(?:\$\{|%[sv]\b|\{[A-Za-z_])/i, reason: "table name formatted at runtime" },
+  {
+    kind: "kafka_topic",
+    re: new RegExp(`\\.send\\(\\s*\\{\\s*topic\\s*:\\s*${IDENT}`),
+    reason: "topic from a variable",
+  },
+  {
+    kind: "kafka_topic",
+    re: new RegExp(`\\b(?:kafkaTemplate|producer|kafkaProducer)\\.send\\(\\s*${IDENT}\\s*,`, "i"),
+    reason: "topic from a variable",
+  },
+  {
+    kind: "kafka_topic",
+    re: new RegExp(`\\.produce\\(\\s*${IDENT}\\s*,`),
+    reason: "topic from a variable",
+  },
+  {
+    kind: "kafka_topic",
+    re: /\bTopic\s*:\s*[A-Za-z_][\w.]{0,100}\s*(?:,|\}|$)/,
+    reason: "topic from a variable",
+  },
+  {
+    kind: "kafka_topic",
+    re: /@KafkaListener\([^)]{0,200}topics\s*=\s*\{?\s*(?:"\$\{|[A-Za-z_])/,
+    reason: "topic from a property placeholder or constant",
+  },
+  {
+    kind: "kafka_topic",
+    re: new RegExp(`\\bsubscribe\\(\\s*\\{\\s*topics?\\s*:\\s*\\[?\\s*${IDENT}`),
+    reason: "topic from a variable",
+  },
+  {
+    kind: "kafka_topic",
+    re: new RegExp(`\\bsubscribe\\(\\s*\\[\\s*${IDENT}`),
+    reason: "topic from a variable",
+  },
+  {
+    kind: "http_route",
+    re: new RegExp(
+      `\\b(?:axios|httpClient|got|ky|restTemplate|apiClient)\\s*\\.\\s*(?:get|post|put|patch|delete)(?:ForObject|ForEntity)?\\s*\\(\\s*${IDENT}\\s*[,)]`,
+      "i",
+    ),
+    reason: "URL from a variable",
+  },
+  {
+    kind: "http_route",
+    re: new RegExp(`\\bfetch\\(\\s*${IDENT}\\s*[,)]`),
+    reason: "URL from a variable",
+  },
+  {
+    kind: "http_route",
+    re: /\bfetch\(\s*`\$\{[^}`]{1,100}\}`/,
+    reason: "URL entirely from a template expression",
+  },
+  {
+    kind: "http_route",
+    re: /http\.NewRequest(?:WithContext)?\([^,()]{1,100},\s*(?:"[A-Z]+"|http\.Method\w+|\w+)\s*,\s*[A-Za-z_][\w.]{0,100}\s*,/,
+    reason: "URL from a variable",
+  },
+  {
+    kind: "http_route",
+    re: /\bhttp\.NewRequest\(\s*(?:"[A-Z]+"|http\.Method\w+|\w+)\s*,\s*[A-Za-z_][\w.]{0,100}\s*,/,
+    reason: "URL from a variable",
+  },
+  {
+    kind: "http_route",
+    re: /\bhttp\.(?:Get|Post)\(\s*[A-Za-z_][\w.]{0,100}\s*[,)]/,
+    reason: "URL from a variable",
+  },
+  {
+    kind: "http_route",
+    re: /\b(?:HandleFunc|Handle)\(\s*[A-Za-z_][\w.]{0,100}\s*,/,
+    reason: "route from a variable",
+  },
+  {
+    kind: "http_route",
+    re: /@(?:Get|Post|Put|Patch|Delete|Request)Mapping\(\s*(?:value\s*=\s*|path\s*=\s*)?(?:"\$\{|[A-Z_][A-Z0-9_]{1,100}\b)/,
+    reason: "route from a property placeholder or constant",
+  },
+  {
+    kind: "db_table",
+    re: /\b(?:FROM|JOIN|INTO|UPDATE)\s*["'`]\s*\+/i,
+    reason: "table name concatenated at runtime",
+  },
+  {
+    kind: "db_table",
+    re: /\b(?:FROM|JOIN|INTO|UPDATE)\s+(?:\$\{|%[sv]\b|\{[A-Za-z_])/i,
+    reason: "table name formatted at runtime",
+  },
 ];
 
 /** Runtime-keyed contract sites on one line that produced no static/inferred contract of their kind. */
-export function dynamicSites(file: string, line: number, text: string, context: string[] = []): DynamicSite[] {
+export function dynamicSites(
+  file: string,
+  line: number,
+  text: string,
+  context: string[] = [],
+): DynamicSite[] {
   if (isTestPath(file) || text.length > MAX_LINE || !SUPPORTED_SOURCE.test(file)) return [];
   const found = extractLine(file, line, text, context);
   const out: DynamicSite[] = [];
@@ -361,8 +437,8 @@ export const GREP_PATTERN = [
   "CREATE +TABLE",
   '(FROM|JOIN|INTO|UPDATE|from|join|into|update) +["`]?[a-zA-Z_]',
   // Runtime-built table names (reported as dynamic sites, never contracts).
-  '(FROM|JOIN|INTO|UPDATE|from|join|into|update) *["\'`] *\\+',
-  '(FROM|JOIN|INTO|UPDATE|from|join|into|update) +(\\$\\{|%[sv]|\\{)',
+  "(FROM|JOIN|INTO|UPDATE|from|join|into|update) *[\"'`] *\\+",
+  "(FROM|JOIN|INTO|UPDATE|from|join|into|update) +(\\$\\{|%[sv]|\\{)",
 ].join("|");
 export const SOURCE_PATHSPECS = [
   "*.go",

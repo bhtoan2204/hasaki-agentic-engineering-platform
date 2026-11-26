@@ -745,7 +745,11 @@ export async function proposeSkillUpdates(parentId: number, db: Db = pool) {
   const skills: Array<{ key: string }> = p.impacts?.skills ?? [];
   const out: Array<{ key: string; proposal_id?: number; error?: string }> = [];
   const run = p.source_run_id
-    ? await one(db, "SELECT agent_provider, agent_configuration, profile FROM workflow_runs WHERE id = $1", [p.source_run_id])
+    ? await one(
+        db,
+        "SELECT agent_provider, agent_configuration, profile FROM workflow_runs WHERE id = $1",
+        [p.source_run_id],
+      )
     : null;
   const ownerId = p.owner_id == null ? null : Number(p.owner_id);
   for (const s of skills) {

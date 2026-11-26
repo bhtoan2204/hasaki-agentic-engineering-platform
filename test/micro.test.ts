@@ -210,7 +210,11 @@ test("micro-change template runs unit tests for ordinary Node repositories", () 
   const implementStep = steps.find((s) => s.key === "implement")!;
   assert.equal(implementStep.config.verify.command, FEATURE_MICRO_TARGETED_COMMAND);
   assert.ok(FEATURE_MICRO_TARGETED_COMMAND.includes("npm test --if-present"));
-  assert.ok(!FEATURE_MICRO_TARGETED_COMMAND.includes("no platform test harness; the regression step runs npm test"));
+  assert.ok(
+    !FEATURE_MICRO_TARGETED_COMMAND.includes(
+      "no platform test harness; the regression step runs npm test",
+    ),
+  );
 });
 
 test("MICRO declines Cursor and prevents execution without pre-execution tool interception", async () => {
@@ -219,24 +223,39 @@ test("MICRO declines Cursor and prevents execution without pre-execution tool in
 
   const cursorReqDecision = classifyProfile({ ...signals, provider: "cursor" }, "MICRO");
   assert.notEqual(cursorReqDecision.profile, "MICRO");
-  assert.ok(cursorReqDecision.reasons.some((r) => r.includes("Cursor cannot enforce pre-execution tool boundaries")));
+  assert.ok(
+    cursorReqDecision.reasons.some((r) =>
+      r.includes("Cursor cannot enforce pre-execution tool boundaries"),
+    ),
+  );
 
   assert.throws(
     () => validateAgentOptions({ execution_profile: "MICRO" }, "cursor"),
-    /Cursor cannot enforce pre-execution tool boundaries/
+    /Cursor cannot enforce pre-execution tool boundaries/,
   );
 
   const microSpec = validateSpec({
     name: "micro-test",
     steps: [
       { key: "analyze", type: "agent" },
-      { key: "implement", type: "coding_agent", depends_on: ["analyze"], config: { agent: { provider: "cursor" } } },
-      { key: "self_review", type: "agent", depends_on: ["implement"], config: { independent: false } },
+      {
+        key: "implement",
+        type: "coding_agent",
+        depends_on: ["analyze"],
+        config: { agent: { provider: "cursor" } },
+      },
+      {
+        key: "self_review",
+        type: "agent",
+        depends_on: ["implement"],
+        config: { independent: false },
+      },
     ],
   });
   assert.throws(
     () => applyProfile(microSpec, "MICRO"),
-    (err: unknown) => err instanceof ProfileNotApplicable && /MICRO cannot run on Cursor/.test(err.message)
+    (err: unknown) =>
+      err instanceof ProfileNotApplicable && /MICRO cannot run on Cursor/.test(err.message),
   );
 
   const escalation = await claudeExecutor.execute({
@@ -249,7 +268,9 @@ test("MICRO declines Cursor and prevents execution without pre-execution tool in
   assert.equal(escalation.kind, "profile_escalation");
   if (escalation.kind === "profile_escalation") {
     assert.equal(escalation.request.target, "STANDARD");
-    assert.ok(escalation.request.reason.includes("Cursor cannot enforce pre-execution tool boundaries"));
+    assert.ok(
+      escalation.request.reason.includes("Cursor cannot enforce pre-execution tool boundaries"),
+    );
   }
 });
 
@@ -266,9 +287,31 @@ test("MICRO verification reuses dependencies with a matching worker fingerprint"
     const { recordDependencies } = await import("../src/git/provider.ts");
     const version = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
     await recordDependencies(root);
-    await writeFile(join(root, "bin", "npm"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf "%s\\n" "$*" >> "$CALLS"\n`, { mode: 0o755 });
-    execFileSync("bash", ["-c", FEATURE_MICRO_TARGETED_COMMAND], { cwd: root,
-      env: { ...process.env, PLATFORM_NODE_DEPENDENCIES: join(import.meta.dirname, "..", "src", "git", "nodeDependencies.ts"), PLATFORM_SELF_TEST: "0", BASE_BRANCH: "main", PATH: `${join(root, "bin")}:${process.env.PATH}`, CALLS: join(root, "calls") }, stdio: "pipe" });
+    await writeFile(
+      join(root, "bin", "npm"),
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${version}'; exit 0; fi\nprintf "%s\\n" "$*" >> "$CALLS"\n`,
+      { mode: 0o755 },
+    );
+    execFileSync("bash", ["-c", FEATURE_MICRO_TARGETED_COMMAND], {
+      cwd: root,
+      env: {
+        ...process.env,
+        PLATFORM_NODE_DEPENDENCIES: join(
+          import.meta.dirname,
+          "..",
+          "src",
+          "git",
+          "nodeDependencies.ts",
+        ),
+        PLATFORM_SELF_TEST: "0",
+        BASE_BRANCH: "main",
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        CALLS: join(root, "calls"),
+      },
+      stdio: "pipe",
+    });
     assert.equal((await readFile(join(root, "calls"), "utf8")).trim(), "test --if-present");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

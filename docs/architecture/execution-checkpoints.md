@@ -2,11 +2,11 @@
 
 The workflow engine stores recovery milestones in `workflow_checkpoints`. Migration 065 adds a versioned envelope alongside the existing payload. Progress notes and provider submissions are historical observations. They cannot supply a successful executor result or authorize recovery.
 
-| Boundary | Durable records |
-| --- | --- |
-| Begin attempt | The attempt, pinned input, generation, lease token and immutable context snapshot commit before the executor starts. |
-| Executor return | A versioned checkpoint and the termination timestamp commit together under the run and job locks. The checkpoint records the result kind, remaining state transition, hashes of the pinned input and context, and references to artifacts and verification evidence. |
-| Human wait or provider handoff | The checkpoint commits with the wait state. Handoff confirmation retains the accepted workspace fingerprint for revalidation immediately before dispatch. |
+| Boundary                       | Durable records                                                                                                                                                                                                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Begin attempt                  | The attempt, pinned input, generation, lease token and immutable context snapshot commit before the executor starts.                                                                                                                                                 |
+| Executor return                | A versioned checkpoint and the termination timestamp commit together under the run and job locks. The checkpoint records the result kind, remaining state transition, hashes of the pinned input and context, and references to artifacts and verification evidence. |
+| Human wait or provider handoff | The checkpoint commits with the wait state. Handoff confirmation retains the accepted workspace fingerprint for revalidation immediately before dispatch.                                                                                                            |
 
 On lease expiry, the reaper can apply a valid, fully returned `condition` or `noop` result to the original attempt. It runs the normal state transition and does so inside the recovery transaction. External effects and interrupted provider calls retain the existing reconciliation question. After reconciliation, the attempt can reuse a compatible provider session. The provider-neutral path carries validated checkpoint and workspace evidence in the existing context pack. A missing or incompatible session starts with that evidence and the current workspace. Crash recovery, automatic retries and provider handoffs validate their workspace before dispatch. During a normal question wait, a compatible native session can continue from the live worktree after the developer answers. Verification still uses the current workspace.
 

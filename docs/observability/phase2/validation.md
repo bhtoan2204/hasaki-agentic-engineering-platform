@@ -2,15 +2,15 @@
 
 Validated on **2026-11-08**, continuing from latest main **`1b199e8`** fetched from the requested repository. The working tree was clean at the beginning of Phase 2. Phase 1 telemetry, historical migrations, the existing HTTP authentication model, and the old advanced Insights routes were retained.
 
-| Check | Result |
-| --- | --- |
-| `npm run typecheck` | Passed for backend, tests, smoke script and web |
-| `npm run build` | Passed, Vite production build |
-| Full `npm test`, final run | **409 passed, 0 failed, 0 skipped**, 288.19 seconds |
-| Focused analytics queries and HTTP/RBAC, after final query refinements | **14 passed, 0 failed** |
-| Analytics + existing production-error/locale checks | **31 passed, 0 failed** at that checkpoint |
-| Final Playwright browser smoke | All checks passed; no browser page errors |
-| `git diff --check` | Passed |
+| Check                                                                  | Result                                              |
+| ---------------------------------------------------------------------- | --------------------------------------------------- |
+| `npm run typecheck`                                                    | Passed for backend, tests, smoke script and web     |
+| `npm run build`                                                        | Passed, Vite production build                       |
+| Full `npm test`, final run                                             | **409 passed, 0 failed, 0 skipped**, 288.19 seconds |
+| Focused analytics queries and HTTP/RBAC, after final query refinements | **14 passed, 0 failed**                             |
+| Analytics + existing production-error/locale checks                    | **31 passed, 0 failed** at that checkpoint          |
+| Final Playwright browser smoke                                         | All checks passed; no browser page errors           |
+| `git diff --check`                                                     | Passed                                              |
 
 The full suite includes the existing migrations, provider fixtures, engine/scheduler recovery, authentication, caching, production-error scanner, evaluation, and verification tests. Focused analytics tests additionally cover the final scan-histogram and resume/retry refinements made during full-suite execution.
 

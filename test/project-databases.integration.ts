@@ -32,7 +32,10 @@ import type { RunRow, StepRow } from "../src/workflow/types.ts";
 
 let server: Server;
 let base = "";
-type Call = <T = unknown>(path: string, body?: unknown) => Promise<{ status: number; body: T; text: string }>;
+type Call = <T = unknown>(
+  path: string,
+  body?: unknown,
+) => Promise<{ status: number; body: T; text: string }>;
 type DatabaseView = Awaited<ReturnType<typeof publicDatabase>>;
 type TestResult = Awaited<ReturnType<typeof testDatabase>>;
 let admin: Call, A: Call, B: Call;
@@ -341,7 +344,10 @@ test("agent tools: the run scope decides which database can be listed, described
 test("status is the last real connection: tests and agent queries record it, members get no technical details", async () => {
   const status = async (key: string) =>
     (await one<
-      Pick<ProjectDatabase, "last_status" | "last_error_kind" | "last_error" | "last_used_at" | "last_version">
+      Pick<
+        ProjectDatabase,
+        "last_status" | "last_error_kind" | "last_error" | "last_used_at" | "last_version"
+      >
     >(
       pool,
       "SELECT last_status, last_error_kind, last_error, last_used_at, last_version FROM project_databases WHERE key = $1",
@@ -364,14 +370,20 @@ test("status is the last real connection: tests and agent queries record it, mem
       code: "ER_ACCESS_DENIED_ERROR",
     });
   });
-  assert.equal((await admin<TestResult>("/api/integrations/databases/oms-qc/test", {})).body.kind, "auth");
-  const member = (await A<DatabaseView[]>("/api/integrations/databases")).body.find((d) => d.key === "oms-qc")!;
+  assert.equal(
+    (await admin<TestResult>("/api/integrations/databases/oms-qc/test", {})).body.kind,
+    "auth",
+  );
+  const member = (await A<DatabaseView[]>("/api/integrations/databases")).body.find(
+    (d) => d.key === "oms-qc",
+  )!;
   assert.equal(member.last_status, "failed");
   assert.equal(member.last_error_kind, "auth");
   assert.equal(member.last_error, undefined, "raw errors stay with admins");
   assert.match(
-    (await admin<DatabaseView[]>("/api/integrations/databases")).body.find((d) => d.key === "oms-qc")!
-      .last_error!,
+    (await admin<DatabaseView[]>("/api/integrations/databases")).body.find(
+      (d) => d.key === "oms-qc",
+    )!.last_error!,
     /Access denied/,
   );
   // an SQL error proves the connection works
@@ -426,34 +438,58 @@ test("deleting a database removes its stored password", async () => {
 });
 
 test("database results preserve literals, mask credentials, propagate caps and warn on write privileges", async () => {
-  await saveDatabase({
-    key: "fake-results", project: "OMS", host: "unused.invalid", database_name: "orders",
-    username: "fixture", password: "fixture-only", max_rows: 5,
-  }, ids["db-admin"]);
+  await saveDatabase(
+    {
+      key: "fake-results",
+      project: "OMS",
+      host: "unused.invalid",
+      database_name: "orders",
+      username: "fixture",
+      password: "fixture-only",
+      max_rows: 5,
+    },
+    ids["db-admin"],
+  );
   const db = (await listDatabases()).find((d) => d.key === "fake-results")!;
   const statements: Array<{ sql: string; cap: number }> = [];
   let writable = false;
   setDatabaseDriver(async (_db, sql, cap) => {
     statements.push({ sql, cap });
-    if (sql === "SHOW GRANTS") return {
-      columns: ["grant"], rows: [{ grant: writable
-        ? "GRANT SELECT, UPDATE ON orders.* TO fixture"
-        : "GRANT SELECT ON orders.* TO fixture" }], truncated: false,
-    };
-    if (sql.startsWith("SELECT VERSION()")) return {
-      columns: ["version", "account"], rows: [{ version: "fixture", account: "fixture@local" }], truncated: false,
-    };
+    if (sql === "SHOW GRANTS")
+      return {
+        columns: ["grant"],
+        rows: [
+          {
+            grant: writable
+              ? "GRANT SELECT, UPDATE ON orders.* TO fixture"
+              : "GRANT SELECT ON orders.* TO fixture",
+          },
+        ],
+        truncated: false,
+      };
+    if (sql.startsWith("SELECT VERSION()"))
+      return {
+        columns: ["version", "account"],
+        rows: [{ version: "fixture", account: "fixture@local" }],
+        truncated: false,
+      };
     if (sql === "SELECT * FROM no_such_table")
       throw Object.assign(new Error("Table does not exist"), { code: "ER_NO_SUCH_TABLE" });
     return {
       columns: ["id", "code", "api_token"],
-      rows: [{ id: 7, code: "ORD7", api_token: "fixture-token" }], truncated: true,
+      rows: [{ id: 7, code: "ORD7", api_token: "fixture-token" }],
+      truncated: true,
     };
   });
   try {
-    const result = await runQuery(db, "SELECT id, code, api_token FROM orders WHERE code = 'ORD7';", 50);
+    const result = await runQuery(
+      db,
+      "SELECT id, code, api_token FROM orders WHERE code = 'ORD7';",
+      50,
+    );
     assert.deepEqual(statements[0], {
-      sql: "SELECT id, code, api_token FROM orders WHERE code = 'ORD7'", cap: 5,
+      sql: "SELECT id, code, api_token FROM orders WHERE code = 'ORD7'",
+      cap: 5,
     });
     assert.deepEqual(result.rows, [[7, "ORD7", "[masked]"]]);
     assert.equal(result.row_count, 1);

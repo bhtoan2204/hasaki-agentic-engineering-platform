@@ -242,7 +242,11 @@ test("the exact incumbent configuration is compared, not the best configuration 
     ...samples("codex", 60, 0.9),
   ];
   const d = route(s, { incumbent: { provider: "claude", model: null, effort: null } });
-  assert.equal(d.non_inferiority!.incumbent, "claude", "baseline = the configured incumbent (60% correct)");
+  assert.equal(
+    d.non_inferiority!.incumbent,
+    "claude",
+    "baseline = the configured incumbent (60% correct)",
+  );
   assert.equal(d.applied, true);
   assert.deepEqual(d.chosen, { provider: "claude", model: "claude-opus", reasoning_effort: null });
   assert.equal(d.non_inferiority!.superior, true);
@@ -252,7 +256,10 @@ test("the exact incumbent configuration is compared, not the best configuration 
   assert.match(same.reason, /already the best/);
   // Effort is part of the identity too.
   const effort = route(
-    [...samples("codex", 60, 0.95, { effort: "high" }), ...samples("codex", 60, 0.5, { effort: "low" })],
+    [
+      ...samples("codex", 60, 0.95, { effort: "high" }),
+      ...samples("codex", 60, 0.5, { effort: "low" }),
+    ],
     { incumbent: { provider: "codex", model: null, effort: "low" }, eligible: ["codex"] },
   );
   assert.deepEqual(effort.chosen, { provider: "codex", model: null, reasoning_effort: "high" });
@@ -263,7 +270,12 @@ test("execution success is a separate non-inferiority gate: correct-when-finishe
     ...samples("claude", 400, 0.9, { costUsd: 2 }),
     ...samples("codex", 400, 0.9, { costUsd: 0.5 }),
     // codex also crashed 120 times without producing anything to verify (correctness unknown, not counted as wrong).
-    ...samples("codex", 120, 0, { executed: false, verified: null, failure: "PROVIDER_ERROR", costUsd: 0.5 }),
+    ...samples("codex", 120, 0, {
+      executed: false,
+      verified: null,
+      failure: "PROVIDER_ERROR",
+      costUsd: 0.5,
+    }),
   ];
   const d = route(s, { preference: "cost_first" });
   assert.equal(d.applied, false);
@@ -274,14 +286,25 @@ test("execution success is a separate non-inferiority gate: correct-when-finishe
 test("independent review is a separate gate when both sides have enough reviews", () => {
   const s = [
     ...samples("claude", 400, 0.9, { costUsd: 2 }),
-    ...samples("codex", 400, 0.9, { costUsd: 0.5 }).map((x, i) => ({ ...x, reviewed: i % 2 === 0 })),
+    ...samples("codex", 400, 0.9, { costUsd: 0.5 }).map((x, i) => ({
+      ...x,
+      reviewed: i % 2 === 0,
+    })),
   ];
   const d = route(s, { preference: "cost_first" });
   assert.equal(d.applied, false);
   assert.equal(d.non_inferiority!.review_assessed, true);
   assert.match(d.reason, /independent review Δ/);
   // Too few reviews: not assessed (reported), and does not block on its own.
-  const few = s.map((x) => ({ ...x, reviewed: x.provider === "codex" && x.runId % 50 === 0 ? false : x.provider === "codex" ? null : x.reviewed }));
+  const few = s.map((x) => ({
+    ...x,
+    reviewed:
+      x.provider === "codex" && x.runId % 50 === 0
+        ? false
+        : x.provider === "codex"
+          ? null
+          : x.reviewed,
+  }));
   const e = route(few, { preference: "cost_first" });
   assert.equal(e.non_inferiority!.review_assessed, false);
   assert.equal(e.applied, true);
@@ -291,7 +314,10 @@ test("difference interval (Newcombe): contains the difference, narrows with n, m
   // Newcombe (1998) example: 56/70 vs 48/80 → difference 0.2, 95% CI [0.0524, 0.3339] (method 10).
   const i = differenceInterval(56, 70, 48, 80)!;
   assert.ok(Math.abs(i.diff - 0.2) < 1e-9);
-  assert.ok(Math.abs(i.low - 0.0524) < 0.001 && Math.abs(i.high - 0.3339) < 0.001, JSON.stringify(i));
+  assert.ok(
+    Math.abs(i.low - 0.0524) < 0.001 && Math.abs(i.high - 0.3339) < 0.001,
+    JSON.stringify(i),
+  );
   const small = differenceInterval(36, 40, 36, 40)!;
   const large = differenceInterval(360, 400, 360, 400)!;
   assert.ok(small.low < large.low && large.low < 0 && large.high > 0);

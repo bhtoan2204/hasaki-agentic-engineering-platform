@@ -18,7 +18,10 @@ function repo(t: { after: (fn: () => void) => void }, scripts: Record<string, st
   const bin = join(dir, ".bin");
   mkdirSync(bin);
   for (const name of ["node", "npm", "npx"]) {
-    const real = name === "node" ? `[ "$1" = "-e" ] && exec "${process.execPath}" "$@"\ncase "$1" in */nodeDependencies.ts) exit 0 ;; esac\n` : "";
+    const real =
+      name === "node"
+        ? `[ "$1" = "-e" ] && exec "${process.execPath}" "$@"\ncase "$1" in */nodeDependencies.ts) exit 0 ;; esac\n`
+        : "";
     writeFileSync(join(bin, name), `#!/bin/sh\n${real}echo "${name} $*" >> "${log}"\n`);
     chmodSync(join(bin, name), 0o755);
   }
@@ -52,7 +55,13 @@ function repo(t: { after: (fn: () => void) => void }, scripts: Record<string, st
       ...process.env,
       PATH: `${bin}:${process.env.PATH}`,
       BASE_BRANCH: "main",
-      PLATFORM_NODE_DEPENDENCIES: join(import.meta.dirname, "..", "src", "git", "nodeDependencies.ts"),
+      PLATFORM_NODE_DEPENDENCIES: join(
+        import.meta.dirname,
+        "..",
+        "src",
+        "git",
+        "nodeDependencies.ts",
+      ),
     };
     delete env.DATABASE_URL;
     delete env.TEST_DATABASE_ADMIN_URL;

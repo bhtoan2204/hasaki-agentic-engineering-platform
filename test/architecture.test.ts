@@ -15,7 +15,11 @@ import {
 } from "../src/architecture/check.ts";
 
 const graphOf = (src: Record<string, string>): Graph =>
-  buildGraph(Object.keys(src), (f) => src[f], () => true);
+  buildGraph(
+    Object.keys(src),
+    (f) => src[f],
+    () => true,
+  );
 
 test("parseImports finds static, re-export, type and dynamic relative imports and excludes unrelated packages", () => {
   const specs = parseImports(
@@ -58,7 +62,10 @@ test("importing a provider internal file from outside is flagged, its entry file
     "src/agent/codex/run.ts": 'import "./policy.ts";',
   });
   const v = findViolations(g);
-  assert.deepEqual(v.map((x) => x.key), ["no-provider-internals:src/agent/other.ts->src/agent/codex/policy.ts"]);
+  assert.deepEqual(
+    v.map((x) => x.key),
+    ["no-provider-internals:src/agent/other.ts->src/agent/codex/policy.ts"],
+  );
 });
 
 test("a provider directory cannot import another provider, even its entry file", () => {
@@ -100,10 +107,10 @@ test("API handlers use repositories while the stream and analytics retain direct
     "src/db/pool.ts": "",
     "src/workitems/repository.ts": "",
   });
-  assert.deepEqual(findViolations(graph).map((v) => v.key), [
-    "no-db-from-api:src/api/routes.ts->pg",
-    "no-db-from-api:src/api/routes.ts->src/db/pool.ts",
-  ]);
+  assert.deepEqual(
+    findViolations(graph).map((v) => v.key),
+    ["no-db-from-api:src/api/routes.ts->pg", "no-db-from-api:src/api/routes.ts->src/db/pool.ts"],
+  );
 });
 
 test("repositories can use infrastructure and shared types, while service and route imports are rejected", () => {
@@ -119,10 +126,13 @@ test("repositories can use infrastructure and shared types, while service and ro
     "src/api/routes.ts": "",
     "src/db/pool.ts": "",
   });
-  assert.deepEqual(findViolations(graph).map((v) => v.key), [
-    "repository-dependencies:src/workitems/repository.ts->src/api/routes.ts",
-    "repository-dependencies:src/workitems/repository.ts->src/workflow/engine.ts",
-  ]);
+  assert.deepEqual(
+    findViolations(graph).map((v) => v.key),
+    [
+      "repository-dependencies:src/workitems/repository.ts->src/api/routes.ts",
+      "repository-dependencies:src/workitems/repository.ts->src/workflow/engine.ts",
+    ],
+  );
 });
 
 test("baseline ratchet rejects new violations and tolerates a shrunken baselined cycle", () => {
@@ -134,12 +144,19 @@ test("baseline ratchet rejects new violations and tolerates a shrunken baselined
   assert.equal(compareToBaseline(violations, { violations: [] }).newViolations.length, 1);
   const bigger = { violations: ["no-circular:src/a.ts,src/b.ts,src/c.ts"] };
   assert.equal(compareToBaseline(violations, bigger).newViolations.length, 0);
-  assert.deepEqual(compareToBaseline(violations, bigger).stale, ["no-circular:src/a.ts,src/b.ts,src/c.ts"]);
+  assert.deepEqual(compareToBaseline(violations, bigger).stale, [
+    "no-circular:src/a.ts,src/b.ts,src/c.ts",
+  ]);
 });
 
 test("the checked-in source tree has no violation outside architecture/baseline.json", () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-  const baseline = JSON.parse(readFileSync(join(root, "architecture", "baseline.json"), "utf8")) as Baseline;
+  const baseline = JSON.parse(
+    readFileSync(join(root, "architecture", "baseline.json"), "utf8"),
+  ) as Baseline;
   const result = runCheck(root, baseline);
-  assert.deepEqual(result.newViolations.map((v) => v.detail), []);
+  assert.deepEqual(
+    result.newViolations.map((v) => v.detail),
+    [],
+  );
 });

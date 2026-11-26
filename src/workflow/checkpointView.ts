@@ -1,4 +1,8 @@
-import type { CheckpointArtifactInput, CheckpointAttemptInput, CheckpointRowInput } from "./types.ts";
+import type {
+  CheckpointArtifactInput,
+  CheckpointAttemptInput,
+  CheckpointRowInput,
+} from "./types.ts";
 
 export type { CheckpointRowInput } from "./types.ts";
 

@@ -6,31 +6,31 @@ Chat tương tác với bộ nhớ phiên bền vững, tool calling đọc-only
 
 ## Module tái sử dụng
 
-| Thành phần | Vai trò trong chat |
-|---|---|
-| `completeForRun` / `CompletionRunner` | Completion không tool của provider (không import internals provider) |
-| `loadAgentConfiguration` + `resolveStepAgent` | Model / effort / timeout theo Settings |
-| `listAccessibleRepositories` / `requireRepositoryAccess` | Phạm vi repo theo user hiện tại |
-| `searchSymbols` / `searchCodeExact` / `localScope` | Tìm và đọc source (provision=false) |
-| `knowledge` + `visibleKnowledge` + `scoreKnowledge` | Knowledge theo quyền repo |
-| `investigationSearch` / `searchLogs` | Splunk / SigNoz với credential của user |
-| `databasesForRun` / `runQuery` / `assertReadOnlySql` | DB read-only, audit, mask cột nhạy cảm |
-| `workItems.createManual` / `previewRun` / `startRun` | Uỷ thác → work item + run thật |
-| `routeWorkflow` | Gợi ý workflow (user vẫn chọn) |
+| Thành phần                                               | Vai trò trong chat                                                   |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| `completeForRun` / `CompletionRunner`                    | Completion không tool của provider (không import internals provider) |
+| `loadAgentConfiguration` + `resolveStepAgent`            | Model / effort / timeout theo Settings                               |
+| `listAccessibleRepositories` / `requireRepositoryAccess` | Phạm vi repo theo user hiện tại                                      |
+| `searchSymbols` / `searchCodeExact` / `localScope`       | Tìm và đọc source (provision=false)                                  |
+| `knowledge` + `visibleKnowledge` + `scoreKnowledge`      | Knowledge theo quyền repo                                            |
+| `investigationSearch` / `searchLogs`                     | Splunk / SigNoz với credential của user                              |
+| `databasesForRun` / `runQuery` / `assertReadOnlySql`     | DB read-only, audit, mask cột nhạy cảm                               |
+| `workItems.createManual` / `previewRun` / `startRun`     | Uỷ thác → work item + run thật                                       |
+| `routeWorkflow`                                          | Gợi ý workflow (user vẫn chọn)                                       |
 
 ## Module mới (`src/chat/`)
 
-| File | Trách nhiệm |
-|---|---|
-| `types.ts` | Mode, event kinds, rows |
-| `repository.ts` | SQL owner-scoped (arch: chỉ phụ thuộc pool/types) |
-| `policy.ts` | Allowlist tool theo mode, routing ASK direct/tools, system policy |
-| `tools.ts` | Binding chat (owner + conversation + turn + mode + repo hiện tại) |
-| `context.ts` | Mentions, compaction, build prompt theo thứ tự ưu tiên |
-| `runtime.ts` | Fast path / tool loop, cancel, budget, usage null≠0 |
-| `events.ts` | SSE `chat_events` riêng (không dùng fake run id) |
-| `delegation.ts` | Preview hash + execute có confirm |
-| `service.ts` | CRUD conversation, message, cancel/regenerate |
+| File            | Trách nhiệm                                                       |
+| --------------- | ----------------------------------------------------------------- |
+| `types.ts`      | Mode, event kinds, rows                                           |
+| `repository.ts` | SQL owner-scoped (arch: chỉ phụ thuộc pool/types)                 |
+| `policy.ts`     | Allowlist tool theo mode, routing ASK direct/tools, system policy |
+| `tools.ts`      | Binding chat (owner + conversation + turn + mode + repo hiện tại) |
+| `context.ts`    | Mentions, compaction, build prompt theo thứ tự ưu tiên            |
+| `runtime.ts`    | Fast path / tool loop, cancel, budget, usage null≠0               |
+| `events.ts`     | SSE `chat_events` riêng (không dùng fake run id)                  |
+| `delegation.ts` | Preview hash + execute có confirm                                 |
+| `service.ts`    | CRUD conversation, message, cancel/regenerate                     |
 
 ## Vòng đời một turn
 
@@ -47,13 +47,13 @@ Regenerate → supersede turn cũ + turn mới cùng user text
 
 ## Ma trận mode × capability
 
-| | ASK | INVESTIGATE | PLAN | DELEGATE |
-|---|---|---|---|---|
-| Fast path (không tool) | có (câu hỏi thường) | không | không | không |
-| Repo / knowledge / platform | có | có | có | có |
-| Splunk / SigNoz / DB read | không | có | không | không |
-| Sửa source / shell / push / DB write | **không bao giờ** | | | |
-| Start workflow | chỉ qua preview + confirm | | | |
+|                                      | ASK                       | INVESTIGATE | PLAN  | DELEGATE |
+| ------------------------------------ | ------------------------- | ----------- | ----- | -------- |
+| Fast path (không tool)               | có (câu hỏi thường)       | không       | không | không    |
+| Repo / knowledge / platform          | có                        | có          | có    | có       |
+| Splunk / SigNoz / DB read            | không                     | có          | không | không    |
+| Sửa source / shell / push / DB write | **không bao giờ**         |             |       |          |
+| Start workflow                       | chỉ qua preview + confirm |             |       |          |
 
 ## Bảo mật (tóm tắt)
 
@@ -67,18 +67,18 @@ Regenerate → supersede turn cũ + turn mới cùng user text
 
 ## API (POST cho mutation, theo convention nền tảng)
 
-| Method | Path | Ghi chú |
-|---|---|---|
-| GET/POST | `/api/chat/conversations` | list / create |
-| GET/POST | `/api/chat/conversations/:id` | get / patch |
-| POST | `/api/chat/conversations/:id/delete` | xoá |
-| POST | `/api/chat/conversations/:id/messages` | gửi (idempotent `client_message_id`) |
-| GET | `/api/chat/conversations/:id/stream` | SSE |
-| GET | `/api/chat/conversations/:id/events?after=` | poll fallback |
-| POST | `/api/chat/turns/:id/cancel` | dừng |
-| POST | `/api/chat/turns/:id/regenerate` | tạo lại |
-| POST | `/api/chat/conversations/:id/delegation/preview` | xem trước |
-| POST | `/api/chat/conversations/:id/delegation/execute` | `{ request, hash, confirmed: true }` |
+| Method   | Path                                             | Ghi chú                              |
+| -------- | ------------------------------------------------ | ------------------------------------ |
+| GET/POST | `/api/chat/conversations`                        | list / create                        |
+| GET/POST | `/api/chat/conversations/:id`                    | get / patch                          |
+| POST     | `/api/chat/conversations/:id/delete`             | xoá                                  |
+| POST     | `/api/chat/conversations/:id/messages`           | gửi (idempotent `client_message_id`) |
+| GET      | `/api/chat/conversations/:id/stream`             | SSE                                  |
+| GET      | `/api/chat/conversations/:id/events?after=`      | poll fallback                        |
+| POST     | `/api/chat/turns/:id/cancel`                     | dừng                                 |
+| POST     | `/api/chat/turns/:id/regenerate`                 | tạo lại                              |
+| POST     | `/api/chat/conversations/:id/delegation/preview` | xem trước                            |
+| POST     | `/api/chat/conversations/:id/delegation/execute` | `{ request, hash, confirmed: true }` |
 
 ## Dev local
 

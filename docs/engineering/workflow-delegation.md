@@ -8,9 +8,18 @@ its own execution, verification or deliverable. Doing the work inside the curren
 **Opt-in per step.** A step may delegate only when its config allows it:
 
 ```json
-{ "key": "plan", "type": "agent",
-  "config": { "child_workflows": { "workflows": ["bug-investigation"], "modes": ["propose", "blocking"],
-                                   "max_children": 3, "budget_usd": 5 } } }
+{
+  "key": "plan",
+  "type": "agent",
+  "config": {
+    "child_workflows": {
+      "workflows": ["bug-investigation"],
+      "modes": ["propose", "blocking"],
+      "max_children": 3,
+      "budget_usd": 5
+    }
+  }
+}
 ```
 
 **Declarative request.** The agent adds this to its `submit_result` output:
@@ -24,6 +33,7 @@ per request in `workflow_delegations` (migration 107), and starts the children o
 right after the commit).
 
 **Modes:**
+
 - `propose`: the child is created PENDING; a human starts it (existing start action).
 - `blocking`: the step waits (`WAITING_INPUT`, no question) and completes with
   `output.child_workflows.results`. A child that does not complete fails the step; re-execute or skip it as usual.
@@ -31,6 +41,7 @@ right after the commit).
 - `detached`: nobody waits; the link is kept.
 
 **Children are ordinary runs:**
+
 - same owner;
 - repositories within the parent's allowed set (never wider);
 - their own approval gates, independent review and run budget (`budget_usd`, set before they start);
@@ -39,20 +50,20 @@ right after the commit).
 
 ## Bounds and safety
 
-| Rule | Value |
-|---|---|
-| Who may delegate | Only steps with `child_workflows` config. Otherwise the request is ignored and logged. |
-| Allowed targets | Only the step's allowlist. |
-| Justification | `reason` is required (at least 20 characters). |
-| Depth | At most 2. |
-| Cycles | A workflow already in the delegation chain is refused. |
-| Children | At most 5 per step (`max_children`, default 3). |
-| Concurrency | At most 3 active children per delegation tree; the rest queue. |
-| Cost | Each child has a run budget (step `budget_usd`, else the platform run budget, else $5), enforced by the existing preflight and after-attempt gates. |
-| Duplicates | `UNIQUE(root_run_id, dedupe_key)`: workflow, normalized request and repositories. Re-executing a step or repeating a request reuses the same child. |
-| Read-only parent | May only **propose** a workflow that can change code. Self-development is only ever proposed. |
-| Crash safety | A child created before a crash is found again by `inputs.delegation.id`. Spawning is retried 3 times, then marked failed with the error. Resuming, joining and cascading are idempotent. |
-| Cancel | Canceling (or failing) a parent cancels its non-detached children. Detached children are never canceled. |
+| Rule             | Value                                                                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Who may delegate | Only steps with `child_workflows` config. Otherwise the request is ignored and logged.                                                                                                   |
+| Allowed targets  | Only the step's allowlist.                                                                                                                                                               |
+| Justification    | `reason` is required (at least 20 characters).                                                                                                                                           |
+| Depth            | At most 2.                                                                                                                                                                               |
+| Cycles           | A workflow already in the delegation chain is refused.                                                                                                                                   |
+| Children         | At most 5 per step (`max_children`, default 3).                                                                                                                                          |
+| Concurrency      | At most 3 active children per delegation tree; the rest queue.                                                                                                                           |
+| Cost             | Each child has a run budget (step `budget_usd`, else the platform run budget, else $5), enforced by the existing preflight and after-attempt gates.                                      |
+| Duplicates       | `UNIQUE(root_run_id, dedupe_key)`: workflow, normalized request and repositories. Re-executing a step or repeating a request reuses the same child.                                      |
+| Read-only parent | May only **propose** a workflow that can change code. Self-development is only ever proposed.                                                                                            |
+| Crash safety     | A child created before a crash is found again by `inputs.delegation.id`. Spawning is retried 3 times, then marked failed with the error. Resuming, joining and cascading are idempotent. |
+| Cancel           | Canceling (or failing) a parent cancels its non-detached children. Detached children are never canceled.                                                                                 |
 
 ## Visibility
 

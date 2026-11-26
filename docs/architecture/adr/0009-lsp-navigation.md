@@ -39,12 +39,12 @@ An additional, optional layer — the syntax index stays the discovery tool:
 Fixture: two Go functions named `Process` (packages `payment`, `refund`), `payment` imported as `pay`; query
 `pay.Process`.
 
-| | syntax (Tree-sitter extractor) | LSP (gopls) |
-|---|---|---|
-| definition | 2 candidates, 1 false positive | 1 result, correct |
-| references | 7 candidates, 4 false positives | 3 results, all correct |
-| latency | 24–29 ms to extract all files | 429–472 ms cold (start + first answer), ~1 ms warm |
-| memory | – | ~72 MB RSS (server tree) |
+|            | syntax (Tree-sitter extractor)  | LSP (gopls)                                        |
+| ---------- | ------------------------------- | -------------------------------------------------- |
+| definition | 2 candidates, 1 false positive  | 1 result, correct                                  |
+| references | 7 candidates, 4 false positives | 3 results, all correct                             |
+| latency    | 24–29 ms to extract all files   | 429–472 ms cold (start + first answer), ~1 ms warm |
+| memory     | –                               | ~72 MB RSS (server tree)                           |
 
 ## Limits
 

@@ -43,29 +43,29 @@ This budget applies to the retrieved context pack. Trusted runtime policy, workf
 
 Logical names use `platform.<suffix>`. MCP exposes the `platform` server with suffix tool names, e.g. `mcp__platform__search_code`. `call_tool` also accepts a logical `platform.*` name through the same dispatcher. There is one strict schema catalog shared by Claude's in-process MCP list and both CLI stdio bridges.
 
-| Logical tool | Existing service / source |
-| --- | --- |
-| `platform.search_code` | `searchSymbols`, exact source search, or `buildCodeContext`; no independent search system |
-| `platform.get_symbol` | `findDefinitions`; returns candidate definitions and source provenance |
-| `platform.find_dependencies` | `findDependencies`, max three hops; use the qualified name returned by `get_symbol` for precise navigation |
-| `platform.search_knowledge` | Applicable immutable step snapshot, reranked with `scoreKnowledge`, with live registry visibility checked |
-| `platform.get_business_rules` | Applicable business-rule subset with version/provenance |
-| `platform.search_task_memory` | Existing approved/verified task-memory model plus `memoryFreshness` revalidation |
-| `platform.get_work_item` | Current run's linked owned work item, selected requirement fields, no unrelated task access |
-| `platform.get_step_output` | Completed ancestor output pinned in this attempt's input; independent-review sanitization is preserved |
-| `platform.get_run_context` | Current pack, snapshot/hash references, capabilities and paginated context entries |
-| `platform.get_production_errors` | Existing production groups for the linked owned task or unlinked configured project; no live scan or remote write |
-| `platform.get_repository_metadata` | Authorized repository registry and original deterministic ranking |
-| `platform.request_clarification` | Existing workflow questions, atomically authorized, idempotent while questions are open; stop and await answers |
+| Logical tool                       | Existing service / source                                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `platform.search_code`             | `searchSymbols`, exact source search, or `buildCodeContext`; no independent search system                         |
+| `platform.get_symbol`              | `findDefinitions`; returns candidate definitions and source provenance                                            |
+| `platform.find_dependencies`       | `findDependencies`, max three hops; use the qualified name returned by `get_symbol` for precise navigation        |
+| `platform.search_knowledge`        | Applicable immutable step snapshot, reranked with `scoreKnowledge`, with live registry visibility checked         |
+| `platform.get_business_rules`      | Applicable business-rule subset with version/provenance                                                           |
+| `platform.search_task_memory`      | Existing approved/verified task-memory model plus `memoryFreshness` revalidation                                  |
+| `platform.get_work_item`           | Current run's linked owned work item, selected requirement fields, no unrelated task access                       |
+| `platform.get_step_output`         | Completed ancestor output pinned in this attempt's input; independent-review sanitization is preserved            |
+| `platform.get_run_context`         | Current pack, snapshot/hash references, capabilities and paginated context entries                                |
+| `platform.get_production_errors`   | Existing production groups for the linked owned task or unlinked configured project; no live scan or remote write |
+| `platform.get_repository_metadata` | Authorized repository registry and original deterministic ranking                                                 |
+| `platform.request_clarification`   | Existing workflow questions, atomically authorized, idempotent while questions are open; stop and await answers   |
 
 Example arguments:
 
 ```json
-{"query":"FulfillRefund","repositories":["payment-src"],"operation":"symbols","limit":8}
+{ "query": "FulfillRefund", "repositories": ["payment-src"], "operation": "symbols", "limit": 8 }
 ```
 
 ```json
-{"section":"requirements","offset":0,"limit":8}
+{ "section": "requirements", "offset": 0, "limit": 8 }
 ```
 
 Search defaults to the run's selected repositories, otherwise its authorized repositories (bounded to 30). Explicit repositories cannot expand that scope. Code tools report `supported: false` when code intelligence is disabled; unavailable indexes/sources retain existing bounded fallback behavior. This interface does not provision/clone repositories or enqueue indexing as a side effect of its new read operations. Existing discovery/indexing lifecycle behavior is retained elsewhere.

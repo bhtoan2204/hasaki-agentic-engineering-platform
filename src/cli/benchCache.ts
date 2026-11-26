@@ -3,13 +3,18 @@
  * Compares the previous FIFO eviction with the bounded LRU on a Zipf workload, then checks that high-cardinality
  * traffic keeps CacheAside / StaleWhileRevalidate bounded and heap stable, and measures singleflight sharing.
  */
-import { CacheAside, StaleWhileRevalidate, singleflight, singleflightInflight } from "../cache/index.ts";
+import {
+  CacheAside,
+  StaleWhileRevalidate,
+  singleflight,
+  singleflightInflight,
+} from "../cache/index.ts";
 
 const N_KEYS = 5000;
 const CAP = 500;
 const OPS = 200_000;
 let seed = 42;
-const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
 const cdf: number[] = [];
 let sum = 0;
 for (let i = 1; i <= N_KEYS; i++) cdf.push((sum += 1 / i));
@@ -64,7 +69,9 @@ for (let i = 0; i < 100_000; i++) {
 }
 const heap1 = (global.gc?.(), process.memoryUsage().heapUsed);
 console.log(`high cardinality (100k keys): max entries aside=${maxAside}/1000 swr=${maxSwr}/500`);
-console.log(`heap delta ${((heap1 - heap0) / 1e6).toFixed(1)} MB (run with --expose-gc for a stable figure)`);
+console.log(
+  `heap delta ${((heap1 - heap0) / 1e6).toFixed(1)} MB (run with --expose-gc for a stable figure)`,
+);
 
 let loads = 0;
 await Promise.all(
@@ -72,5 +79,7 @@ await Promise.all(
     singleflight("same", async () => (loads++, await new Promise((r) => setTimeout(r, 10)))),
   ),
 );
-console.log(`singleflight: 1000 concurrent identical calls → ${loads} load(s), pending left ${singleflightInflight()}`);
+console.log(
+  `singleflight: 1000 concurrent identical calls → ${loads} load(s), pending left ${singleflightInflight()}`,
+);
 if (maxAside > 1000 || maxSwr > 500 || loads !== 1 || singleflightInflight() !== 0) process.exit(1);

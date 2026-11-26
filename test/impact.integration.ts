@@ -312,7 +312,10 @@ test("oversized diffs and invalid branches are refused, not parsed", async () =>
 
 test("coverage is explicit: runtime-keyed counterparts, dynamic changed sites, config-only and complete analyses", async () => {
   // An earlier test registers a repository without a checkout: every analysis would (correctly) be stale.
-  const stale = await analyzeImpact(userId, { repository: "imp-oms", diff: diff("src/x.ts", [], ["const a = 1;"]) });
+  const stale = await analyzeImpact(userId, {
+    repository: "imp-oms",
+    diff: diff("src/x.ts", [], ["const a = 1;"]),
+  });
   assert.equal(stale.analysis.status, "stale");
   await q(pool, "DELETE FROM repositories WHERE name='imp-missing'");
   // The rename still finds its static consumers — and says another repository may consume it through a runtime key.
@@ -326,8 +329,13 @@ test("coverage is explicit: runtime-keyed counterparts, dynamic changed sites, c
   });
   assert.equal(rename.conclusion, "impact_found");
   assert.equal(rename.analysis.status, "partial");
-  assert.deepEqual(rename.analysis.blind_counterparts, [{ repo: "imp-dyn", kind: "kafka_topic", sites: 1 }]);
-  assert.ok(!rename.impacts.some((i) => i.repo === "imp-dyn"), "a runtime-keyed site is never claimed as a static link");
+  assert.deepEqual(rename.analysis.blind_counterparts, [
+    { repo: "imp-dyn", kind: "kafka_topic", sites: 1 },
+  ]);
+  assert.ok(
+    !rename.impacts.some((i) => i.repo === "imp-dyn"),
+    "a runtime-keyed site is never claimed as a static link",
+  );
 
   // A new producer whose topic is configuration: nothing can be joined → unknown, never "no impact".
   const dynamic = await analyzeImpact(userId, {
@@ -343,7 +351,11 @@ test("coverage is explicit: runtime-keyed counterparts, dynamic changed sites, c
   // Only configuration changed (where topics are often defined): nothing analysable.
   const config_ = await analyzeImpact(userId, {
     repository: "imp-oms",
-    diff: diff("config/application.yml", ["orders.topic: order.shipped"], ["orders.topic: order.dispatched"]),
+    diff: diff(
+      "config/application.yml",
+      ["orders.topic: order.shipped"],
+      ["orders.topic: order.dispatched"],
+    ),
   });
   assert.equal(config_.analysis.status, "unsupported");
   assert.equal(config_.conclusion, "unknown");

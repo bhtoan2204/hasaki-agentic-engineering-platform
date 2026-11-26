@@ -11,8 +11,13 @@ export default async function* githubAnnotations(source) {
     // A suite that fails only because a subtest failed adds nothing: the subtest has its own annotation.
     if (error?.failureType === "subtestsFailed") continue;
     const cause = error?.cause ?? error;
-    const message = String(cause?.message ?? cause ?? "failed").split("\n").slice(0, 12).join("\n");
-    const where = file ? `file=${prop(file.replace(`${process.cwd()}/`, ""))},line=${line ?? 1},` : "";
+    const message = String(cause?.message ?? cause ?? "failed")
+      .split("\n")
+      .slice(0, 12)
+      .join("\n");
+    const where = file
+      ? `file=${prop(file.replace(`${process.cwd()}/`, ""))},line=${line ?? 1},`
+      : "";
     yield `::error ${where}title=${prop(name).slice(0, 200)}::${data(message).slice(0, 2000)}\n`;
   }
 }

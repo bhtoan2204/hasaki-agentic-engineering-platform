@@ -18,9 +18,15 @@ describe("chat title helpers", () => {
   });
 
   it("sanitizeGeneratedTitle strips quotes, prefixes and trailing punctuation", () => {
-    assert.equal(sanitizeGeneratedTitle('"Payment timeout fix."', "fallback"), "Payment timeout fix");
+    assert.equal(
+      sanitizeGeneratedTitle('"Payment timeout fix."', "fallback"),
+      "Payment timeout fix",
+    );
     assert.equal(sanitizeGeneratedTitle("Title: OMS checkout bug", "fallback"), "OMS checkout bug");
-    assert.equal(sanitizeGeneratedTitle("Tiêu đề: Sửa lỗi thanh toán", "fallback"), "Sửa lỗi thanh toán");
+    assert.equal(
+      sanitizeGeneratedTitle("Tiêu đề: Sửa lỗi thanh toán", "fallback"),
+      "Sửa lỗi thanh toán",
+    );
   });
 
   it("sanitizeGeneratedTitle falls back when model returns empty", () => {

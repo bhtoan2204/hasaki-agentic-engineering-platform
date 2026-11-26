@@ -512,8 +512,12 @@ export function applyProfile(
         config: {
           ...s.config,
           ...(micro ? { delegation: { enabled: false } } : {}),
-          ...(micro && (s.config.verify as { command?: string; [k: string]: unknown } | undefined)?.command === FEATURE_TARGETED_COMMAND
-            ? { verify: { ...(s.config.verify as object), command: FEATURE_MICRO_TARGETED_COMMAND } }
+          ...(micro &&
+          (s.config.verify as { command?: string; [k: string]: unknown } | undefined)?.command ===
+            FEATURE_TARGETED_COMMAND
+            ? {
+                verify: { ...(s.config.verify as object), command: FEATURE_MICRO_TARGETED_COMMAND },
+              }
             : {}),
           instructions,
           merged_from: [...merged, ...(micro ? reviews : [])].map((m) => m.key),

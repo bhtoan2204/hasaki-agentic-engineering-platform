@@ -192,19 +192,49 @@ export async function runMetrics(runId: number) {
     Object.entries(perStep).sort(
       (a, b) => b[1].exec_ms + b[1].queue_ms - (a[1].exec_ms + a[1].queue_ms),
     )[0]?.[0] ?? null;
-  const initialProfile = run?.profile_decision?.initial_profile ?? run?.profile_decision?.signals?.initial_profile ?? run?.profile;
-  const adaptiveSamples: ProfileSample[] = attempts.filter(a => ["agent", "coding_agent"].includes(a.step_type)).map(a => {
-    const t = telemetry.find(t => Number(t.attempt_id) === Number(a.id));
-    const sessions = Object.keys(t?.provider_sessions ?? {});
-    return { fixture: String(runId), repetition: Number(a.number), base: "run-evidence", provider: a.agent_provider ?? "unknown", model: a.agent_model ?? "unknown", cache: "unknown", checks: [],
-      initialProfile: a.effective_agent?.execution_profile ?? initialProfile ?? "STANDARD", finalProfile: run?.profile ?? "STANDARD",
-      wallMs: Number(a.exec_ms), activeMs: t?.provider_execution_ms == null ? null : Number(t.provider_execution_ms), queueMs: a.queue_ms == null ? null : Number(a.queue_ms),
-      invocations: sessions.length || null, tokens: t?.input_tokens == null || t?.output_tokens == null ? null : Number(t.input_tokens) + Number(t.output_tokens),
-      contextTokens: a.metrics?.context_pack?.estimated_tokens ?? null, verificationMs: a.metrics?.verification?.duration_ms ?? null, correct: null, expectedProfile: null };
-  });
+  const initialProfile =
+    run?.profile_decision?.initial_profile ??
+    run?.profile_decision?.signals?.initial_profile ??
+    run?.profile;
+  const adaptiveSamples: ProfileSample[] = attempts
+    .filter((a) => ["agent", "coding_agent"].includes(a.step_type))
+    .map((a) => {
+      const t = telemetry.find((t) => Number(t.attempt_id) === Number(a.id));
+      const sessions = Object.keys(t?.provider_sessions ?? {});
+      return {
+        fixture: String(runId),
+        repetition: Number(a.number),
+        base: "run-evidence",
+        provider: a.agent_provider ?? "unknown",
+        model: a.agent_model ?? "unknown",
+        cache: "unknown",
+        checks: [],
+        initialProfile: a.effective_agent?.execution_profile ?? initialProfile ?? "STANDARD",
+        finalProfile: run?.profile ?? "STANDARD",
+        wallMs: Number(a.exec_ms),
+        activeMs: t?.provider_execution_ms == null ? null : Number(t.provider_execution_ms),
+        queueMs: a.queue_ms == null ? null : Number(a.queue_ms),
+        invocations: sessions.length || null,
+        tokens:
+          t?.input_tokens == null || t?.output_tokens == null
+            ? null
+            : Number(t.input_tokens) + Number(t.output_tokens),
+        contextTokens: a.metrics?.context_pack?.estimated_tokens ?? null,
+        verificationMs: a.metrics?.verification?.duration_ms ?? null,
+        correct: null,
+        expectedProfile: null,
+      };
+    });
   return {
-    adaptive: { initial_profile: initialProfile, final_profile: run?.profile, classification_invocation: run?.profile_decision?.signals?.classification_invocation ?? null,
-      segments: summarizeProfiles(adaptiveSamples), samples: adaptiveSamples, accuracy_note: "Accuracy requires independently adjudicated labels; escalation alone is not a classification error." },
+    adaptive: {
+      initial_profile: initialProfile,
+      final_profile: run?.profile,
+      classification_invocation: run?.profile_decision?.signals?.classification_invocation ?? null,
+      segments: summarizeProfiles(adaptiveSamples),
+      samples: adaptiveSamples,
+      accuracy_note:
+        "Accuracy requires independently adjudicated labels; escalation alone is not a classification error.",
+    },
     telemetry: { attempts: telemetry, ...telemetryGroups(telemetry) },
     run_id: runId,
     profile: run?.profile,
@@ -438,11 +468,20 @@ export async function harnessEvaluation(since: string, attemptOwn = "", own = ""
     repeated_failures: patterns,
     human_intervention: { ...human, rate_pct: pct(human?.with_human ?? 0, human?.runs ?? 0) },
     // Upper-bound denominator: every scanned file is analysed at most twice (base and head).
-    slop: { ...slop, cache_hit_rate_pct: pct(Number(slop?.cache_hits ?? 0), Number(slop?.files_scanned ?? 0) * 2) },
+    slop: {
+      ...slop,
+      cache_hit_rate_pct: pct(Number(slop?.cache_hits ?? 0), Number(slop?.files_scanned ?? 0) * 2),
+    },
     decisions: {
       ...((decisions ?? {}) as Record<string, number | null>),
-      replay_reuse_rate_pct: pct(Number(decisions?.replay_reused ?? 0), Number(decisions?.replay_dispatched ?? 0)),
-      resume_success_rate_pct: pct(Number(decisions?.resumed ?? 0), Number(decisions?.resume_attempts ?? 0)),
+      replay_reuse_rate_pct: pct(
+        Number(decisions?.replay_reused ?? 0),
+        Number(decisions?.replay_dispatched ?? 0),
+      ),
+      resume_success_rate_pct: pct(
+        Number(decisions?.resumed ?? 0),
+        Number(decisions?.resume_attempts ?? 0),
+      ),
     } as Record<string, number | null>,
   };
 }

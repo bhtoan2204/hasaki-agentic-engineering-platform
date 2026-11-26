@@ -6,10 +6,10 @@ the semantic layer; they are **not** a security sandbox. Verification commands (
 
 ## Modes (`config.isolation.mode`)
 
-| Mode | What runs | Unattended work |
-|---|---|---|
-| `off` (default, legacy) | agents run as the worker user, tool policy only; reported as *not isolated* everywhere | never: autonomy `AUTONOMOUS`/`AUTOPILOT` gates return `ISOLATION_NOT_ENFORCED`; automatic recovery never resumes an agent |
-| `enforce` | every agent step runs in the sandbox; a host or provider that cannot do it fails the step (`GUARANTEE_UNMET`), no fallback | allowed (still subject to the autonomy/recovery policies) |
+| Mode                    | What runs                                                                                                                  | Unattended work                                                                                                           |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `off` (default, legacy) | agents run as the worker user, tool policy only; reported as _not isolated_ everywhere                                     | never: autonomy `AUTONOMOUS`/`AUTOPILOT` gates return `ISOLATION_NOT_ENFORCED`; automatic recovery never resumes an agent |
+| `enforce`               | every agent step runs in the sandbox; a host or provider that cannot do it fails the step (`GUARANTEE_UNMET`), no fallback | allowed (still subject to the autonomy/recovery policies)                                                                 |
 
 ## Threat model
 
@@ -50,11 +50,11 @@ descendant.
 
 ## Providers
 
-| Provider | Enforced mode |
-|---|---|
-| Claude | supported: the SDK spawns the CLI through `spawnClaudeCodeProcess` into the sandbox; hooks and the platform MCP server keep running in the worker over stdio. Auth: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (subscription). API keys are never passed, so there is no fallback to API billing. |
-| Codex, Copilot, Antigravity | refused (`os_isolation` unmet) until their adapters spawn through the sandbox and their subscription login can be scoped without copying the host auth directory. Options: use Claude for the step, or run `off` on a trusted single-operator host (unattended work then stays disabled). |
-| Cursor | refused for coding in every mode: its watcher acts after a tool starts, it is not a pre-tool hook. |
+| Provider                    | Enforced mode                                                                                                                                                                                                                                                                                              |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude                      | supported: the SDK spawns the CLI through `spawnClaudeCodeProcess` into the sandbox; hooks and the platform MCP server keep running in the worker over stdio. Auth: `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (subscription). API keys are never passed, so there is no fallback to API billing. |
+| Codex, Copilot, Antigravity | refused (`os_isolation` unmet) until their adapters spawn through the sandbox and their subscription login can be scoped without copying the host auth directory. Options: use Claude for the step, or run `off` on a trusted single-operator host (unattended work then stays disabled).                  |
+| Cursor                      | refused for coding in every mode: its watcher acts after a tool starts, it is not a pre-tool hook.                                                                                                                                                                                                         |
 
 ## Setup (Linux, WSL2)
 

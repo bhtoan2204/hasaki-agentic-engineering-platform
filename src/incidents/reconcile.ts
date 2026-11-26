@@ -76,7 +76,12 @@ export interface Reconciliation {
   reasons: string[];
   causes: Cause[];
   conflicts: Array<{ cause: string; detail: string; refs: string[] }>;
-  verified_defects: Array<{ ref: string; location: CodeLocation | null; causality: string; statement: string }>;
+  verified_defects: Array<{
+    ref: string;
+    location: CodeLocation | null;
+    causality: string;
+    statement: string;
+  }>;
   runtime_findings: Array<{ ref: string; statement: string }>;
   missing_evidence: string[];
   next_actions: Array<{ kind: string; detail: string; cause?: string }>;
@@ -114,7 +119,10 @@ export function causalityLevel(i: EvidenceItem): Level {
           : i.causality === "NOT_SUPPORTED"
             ? "against"
             : "unknown";
-  else if (i.kind === "runtime_hypothesis" && ["causal_origin", "direct_trigger"].includes(i.hypothesis_kind ?? ""))
+  else if (
+    i.kind === "runtime_hypothesis" &&
+    ["causal_origin", "direct_trigger"].includes(i.hypothesis_kind ?? "")
+  )
     l =
       i.hypothesis_status === "DISPROVED"
         ? "against"
@@ -143,12 +151,16 @@ export const causeKey = (l: CodeLocation | null, statement: string) =>
 
 export function reconcile(items: EvidenceItem[], runs: SourceRun[]): Reconciliation {
   const usable = items.filter((i) => i.valid);
-  const excluded = items.filter((i) => !i.valid).map((i) => ({ ref: i.ref, reason: i.invalid_reason ?? "invalid" }));
+  const excluded = items
+    .filter((i) => !i.valid)
+    .map((i) => ({ ref: i.ref, reason: i.invalid_reason ?? "invalid" }));
   // ---- cluster causes: same code location, or (no location) the same statement
   const clusters: Array<{ loc: CodeLocation | null; items: EvidenceItem[] }> = [];
   for (const i of usable.filter((x) => x.kind !== "runtime_finding")) {
     const c = clusters.find((c) =>
-      i.location && c.loc ? sameLocation(i.location, c.loc) : !i.location && !c.loc && jaccard(i.statement, c.items[0].statement) >= 0.5,
+      i.location && c.loc
+        ? sameLocation(i.location, c.loc)
+        : !i.location && !c.loc && jaccard(i.statement, c.items[0].statement) >= 0.5,
     );
     if (c) {
       c.items.push(i);
@@ -172,14 +184,20 @@ export function reconcile(items: EvidenceItem[], runs: SourceRun[]): Reconciliat
           ? "REJECTED"
           : "UNVERIFIED";
     // A source that supports a cause and another (different run) that disproves it: a contradiction, not an average.
-    if (supporting.length && against.some((a) => !supporting.some((s) => s.i.run_id === a.i.run_id)))
+    if (
+      supporting.length &&
+      against.some((a) => !supporting.some((s) => s.i.run_id === a.i.run_id))
+    )
       conflicts.push({
         cause: key,
         detail: `supported by ${supporting.map((s) => s.i.ref).join(", ")} but not supported/disproved by ${against.map((a) => a.i.ref).join(", ")}`,
         refs: [...supporting, ...against].map((x) => x.i.ref),
       });
     const target =
-      c.items.find((i) => i.target?.finding_id && ["CONFIRMED", "SUSPECTED"].includes(i.bug_verification ?? ""))?.target ??
+      c.items.find(
+        (i) =>
+          i.target?.finding_id && ["CONFIRMED", "SUSPECTED"].includes(i.bug_verification ?? ""),
+      )?.target ??
       c.items.find((i) => i.source === "runtime" && i.target?.run_id && i.location)?.target ??
       null;
     causes.push({
@@ -189,7 +207,11 @@ export function reconcile(items: EvidenceItem[], runs: SourceRun[]): Reconciliat
       level: best === "against" ? "unknown" : best,
       // Only a code location backed by code evidence becomes a code fix: provider, configuration or valid business
       // rejections are not forced into a code task.
-      code_fixable: !!c.loc && defect !== "REJECTED" && !!target && (defect !== "UNVERIFIED" || best !== "unknown"),
+      code_fixable:
+        !!c.loc &&
+        defect !== "REJECTED" &&
+        !!target &&
+        (defect !== "UNVERIFIED" || best !== "unknown"),
       supporting: supporting.map((s) => s.i.ref),
       contradicting: against.map((a) => a.i.ref),
       defect,
@@ -213,13 +235,20 @@ export function reconcile(items: EvidenceItem[], runs: SourceRun[]): Reconciliat
     runs.filter((r) => r.kind !== "fix").length > 0 &&
     runs
       .filter((r) => r.kind !== "fix")
-      .every((r) => r.outcome === "BLOCKED" || ["FAILED", "CANCELED"].includes(r.run_status) || r.outcome === "failed");
+      .every(
+        (r) =>
+          r.outcome === "BLOCKED" ||
+          ["FAILED", "CANCELED"].includes(r.run_status) ||
+          r.outcome === "failed",
+      );
   if (conflicts.length) {
     status = "CONFLICTED";
     reasons.push(...conflicts.map((c) => c.detail));
   } else if (confirmed.length === 1 && !conflictKeys.has(confirmed[0].key)) {
     status = "CONFIRMED";
-    reasons.push(`root cause ${confirmed[0].key} confirmed by ${confirmed[0].supporting.join(", ")}`);
+    reasons.push(
+      `root cause ${confirmed[0].key} confirmed by ${confirmed[0].supporting.join(", ")}`,
+    );
   } else if (causes.some((c) => c.level === "probable")) {
     status = "PROBABLE";
     reasons.push("a supported hypothesis exists but its causality is not confirmed");
@@ -228,21 +257,39 @@ export function reconcile(items: EvidenceItem[], runs: SourceRun[]): Reconciliat
     reasons.push("every investigation was blocked or failed before producing evidence");
   } else {
     status = "UNKNOWN";
-    reasons.push(finished.length ? "no hypothesis is supported by valid evidence" : "no investigation has finished");
+    reasons.push(
+      finished.length
+        ? "no hypothesis is supported by valid evidence"
+        : "no investigation has finished",
+    );
   }
   // ---- verified defects (bug verification, reported with their own causality verdict)
   const verified_defects = usable
     .filter((i) => i.bug_verification === "CONFIRMED")
-    .map((i) => ({ ref: i.ref, location: i.location, causality: i.causality ?? "UNKNOWN", statement: i.statement.slice(0, 300) }));
+    .map((i) => ({
+      ref: i.ref,
+      location: i.location,
+      causality: i.causality ?? "UNKNOWN",
+      statement: i.statement.slice(0, 300),
+    }));
   const missing = [...new Set(runs.flatMap((r) => r.missing))].slice(0, 20);
   for (const d of verified_defects)
-    if (!["CONFIRMED", "PROBABLE"].includes(d.causality) && !causes.some((c) => c.level !== "unknown" && c.supporting.includes(d.ref)))
-      missing.push(`runtime evidence that defect ${d.location ? `${d.location.repository}:${d.location.file}` : d.ref} caused this incident`);
+    if (
+      !["CONFIRMED", "PROBABLE"].includes(d.causality) &&
+      !causes.some((c) => c.level !== "unknown" && c.supporting.includes(d.ref))
+    )
+      missing.push(
+        `runtime evidence that defect ${d.location ? `${d.location.repository}:${d.location.file}` : d.ref} caused this incident`,
+      );
   // ---- next actions (deterministic; never started automatically)
-  const has = (k: SourceRun["kind"]) => runs.some((r) => r.kind === k && !["FAILED", "CANCELED"].includes(r.run_status));
+  const has = (k: SourceRun["kind"]) =>
+    runs.some((r) => r.kind === k && !["FAILED", "CANCELED"].includes(r.run_status));
   const next: Reconciliation["next_actions"] = [];
   if (!has("runtime") && !has("bug_hunt"))
-    next.push({ kind: "start", detail: "Run a Runtime RCA (logs/traces) or a Bug Hunt (code) — or both" });
+    next.push({
+      kind: "start",
+      detail: "Run a Runtime RCA (logs/traces) or a Bug Hunt (code) — or both",
+    });
   else if (!has("runtime") && status !== "CONFIRMED")
     next.push({
       kind: "run_runtime",
@@ -257,19 +304,37 @@ export function reconcile(items: EvidenceItem[], runs: SourceRun[]): Reconciliat
         ? "Run a Bug Hunt to verify the code defect behind the supported hypothesis"
         : "Run a Bug Hunt to look for (or rule out) a code defect behind this incident",
     });
-  for (const c of conflicts) next.push({ kind: "resolve_conflict", detail: `Cross-check: ${c.detail}`, cause: c.cause });
+  for (const c of conflicts)
+    next.push({ kind: "resolve_conflict", detail: `Cross-check: ${c.detail}`, cause: c.cause });
   for (const i of usable.filter((x) => x.stale))
-    next.push({ kind: "refresh", detail: `Evidence ${i.ref} cites code that changed since it was collected: re-run that workflow on the current code to rely on it` });
-  const fixed = new Set(runs.filter((r) => r.kind === "fix").map((r) => r.cause_key).filter(Boolean));
-  for (const c of causes.filter((x) => x.code_fixable && !fixed.has(x.key) && (x.level !== "unknown" || x.defect === "CONFIRMED")))
-    next.push({ kind: "create_fix", detail: `Create a fix task for ${c.key}${c.level === "unknown" ? " (defect confirmed; incident causality not proven)" : ""}`, cause: c.key });
+    next.push({
+      kind: "refresh",
+      detail: `Evidence ${i.ref} cites code that changed since it was collected: re-run that workflow on the current code to rely on it`,
+    });
+  const fixed = new Set(
+    runs
+      .filter((r) => r.kind === "fix")
+      .map((r) => r.cause_key)
+      .filter(Boolean),
+  );
+  for (const c of causes.filter(
+    (x) =>
+      x.code_fixable && !fixed.has(x.key) && (x.level !== "unknown" || x.defect === "CONFIRMED"),
+  ))
+    next.push({
+      kind: "create_fix",
+      detail: `Create a fix task for ${c.key}${c.level === "unknown" ? " (defect confirmed; incident causality not proven)" : ""}`,
+      cause: c.key,
+    });
   return {
     status,
     reasons,
     causes: causes.sort((a, b) => RANK[b.level] - RANK[a.level]),
     conflicts,
     verified_defects,
-    runtime_findings: usable.filter((i) => i.kind === "runtime_finding").map((i) => ({ ref: i.ref, statement: i.statement.slice(0, 300) })),
+    runtime_findings: usable
+      .filter((i) => i.kind === "runtime_finding")
+      .map((i) => ({ ref: i.ref, statement: i.statement.slice(0, 300) })),
     missing_evidence: [...new Set(missing)],
     next_actions: next,
     impact: [...new Set(runs.flatMap((r) => r.impact ?? []))].slice(0, 10),
@@ -281,9 +346,20 @@ export function reconcile(items: EvidenceItem[], runs: SourceRun[]): Reconciliat
 export function inputsHash(items: EvidenceItem[], runs: SourceRun[]) {
   const shape = {
     items: items
-      .map((i) => [i.ref, i.commit ?? "", i.bug_verification ?? "", i.causality ?? "", i.hypothesis_status ?? "", i.run_outcome ?? "", i.valid, !!i.stale])
+      .map((i) => [
+        i.ref,
+        i.commit ?? "",
+        i.bug_verification ?? "",
+        i.causality ?? "",
+        i.hypothesis_status ?? "",
+        i.run_outcome ?? "",
+        i.valid,
+        !!i.stale,
+      ])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    runs: runs.map((r) => [r.run_id, r.kind, r.run_status, r.outcome ?? ""]).sort((a, b) => Number(a[0]) - Number(b[0])),
+    runs: runs
+      .map((r) => [r.run_id, r.kind, r.run_status, r.outcome ?? ""])
+      .sort((a, b) => Number(a[0]) - Number(b[0])),
   };
   return createHash("sha256").update(JSON.stringify(shape)).digest("hex");
 }

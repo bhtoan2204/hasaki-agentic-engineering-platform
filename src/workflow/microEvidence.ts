@@ -58,7 +58,12 @@ export async function collectMicroEvidence(
       .join(" ");
     // Check for candidate or unresolved calls inside the file, external callers to symbols,
     // external module imports, and unindexed or unsupported consumers across the repository:
-    const stems = files.map((f) => f.split("/").pop()!.replace(/\.[^/.]+$/, ""));
+    const stems = files.map((f) =>
+      f
+        .split("/")
+        .pop()!
+        .replace(/\.[^/.]+$/, ""),
+    );
     const noExts = files.map((f) => f.replace(/\.[^/.]+$/, ""));
     const moduleCandidates = [
       ...files,
@@ -95,7 +100,10 @@ export async function collectMicroEvidence(
     );
     let externalConsumers = false;
     for (const file of files) {
-      const stem = file.split("/").pop()!.replace(/\.[^/.]+$/, "");
+      const stem = file
+        .split("/")
+        .pop()!
+        .replace(/\.[^/.]+$/, "");
       try {
         const grep = await git(state.root, [
           "grep",
@@ -104,7 +112,10 @@ export async function collectMicroEvidence(
           "-E",
           `(from|require\\(|import\\s+)['"].*\\b${stem}\\b`,
         ]);
-        const matched = grep.split("\n").map((s) => s.trim()).filter(Boolean);
+        const matched = grep
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean);
         if (matched.some((m) => !files.includes(m))) {
           externalConsumers = true;
           break;
@@ -118,7 +129,7 @@ export async function collectMicroEvidence(
       revision: state.index.commit_sha,
       indexRevision: state.index.commit_sha,
       files,
-      hashes: Object.fromEntries(rows.map(row => [row.file_path, row.content_hash])),
+      hashes: Object.fromEntries(rows.map((row) => [row.file_path, row.content_hash])),
       scopeTerms,
       impactKnown: uncertain.length === 0 && incomplete.length === 0 && !externalConsumers,
       priorFailureRuns,
@@ -129,16 +140,32 @@ export async function collectMicroEvidence(
 }
 
 /** Before the first edit, bind the prepared checkout to the admission revision and canonical source hashes. */
-export async function validateMicroWorkspace(root: string, revision: unknown, hashes: unknown): Promise<boolean> {
-  if (typeof revision !== "string" || !hashes || typeof hashes !== "object" || Array.isArray(hashes)) return false;
+export async function validateMicroWorkspace(
+  root: string,
+  revision: unknown,
+  hashes: unknown,
+): Promise<boolean> {
+  if (
+    typeof revision !== "string" ||
+    !hashes ||
+    typeof hashes !== "object" ||
+    Array.isArray(hashes)
+  )
+    return false;
   const entries = Object.entries(hashes);
   if (!entries.length || entries.length > 3) return false;
   try {
-    if ((await git(root, ["rev-parse", "HEAD"])).trim() !== revision || (await git(root, ["status", "--porcelain", "--untracked-files=no"])).trim()) return false;
+    if (
+      (await git(root, ["rev-parse", "HEAD"])).trim() !== revision ||
+      (await git(root, ["status", "--porcelain", "--untracked-files=no"])).trim()
+    )
+      return false;
     for (const [file, expected] of entries) {
       const source = await readSource(root, file);
       if (source === null || hash(source) !== expected) return false;
     }
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }

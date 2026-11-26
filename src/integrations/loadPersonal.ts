@@ -13,7 +13,13 @@ export async function loadPersonalIntegrations(force = false) {
   if (!id || (!force && Date.now() - (loaded.get(id) ?? 0) < 15_000)) return;
   let p = pending.get(id);
   if (!p) {
-    p = Promise.all([loadArgoToken(), loadSplunkCookie(), loadKafkaCookie(), loadVaultToken(), loadSignoz()])
+    p = Promise.all([
+      loadArgoToken(),
+      loadSplunkCookie(),
+      loadKafkaCookie(),
+      loadVaultToken(),
+      loadSignoz(),
+    ])
       .then(() => {
         loaded.set(id, Date.now());
       })

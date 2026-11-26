@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, inputsHash, causalityLevel, type EvidenceItem, type SourceRun } from "../src/incidents/reconcile.ts";
+import {
+  reconcile,
+  inputsHash,
+  causalityLevel,
+  type EvidenceItem,
+  type SourceRun,
+} from "../src/incidents/reconcile.ts";
 
 const loc = (file = "svc/order.go", line = 40, fn: string | null = "CreateOrder") => ({
   repository: "orders",
@@ -30,7 +36,13 @@ const hyp = (o: Partial<EvidenceItem> = {}): EvidenceItem => ({
   run_id: 20,
   kind: "runtime_hypothesis",
   statement: "nil shipment dereference in CreateOrder after 204 from partner",
-  location: { repository: "orders", file: "svc/order.go", line_start: 44, line_end: 44, function: null },
+  location: {
+    repository: "orders",
+    file: "svc/order.go",
+    line_start: 44,
+    line_end: 44,
+    function: null,
+  },
   commit: null,
   hypothesis_status: "SUPPORTED",
   hypothesis_kind: "causal_origin",
@@ -40,8 +52,20 @@ const hyp = (o: Partial<EvidenceItem> = {}): EvidenceItem => ({
   valid: true,
   ...o,
 });
-const hunt: SourceRun = { run_id: 10, kind: "bug_hunt", run_status: "COMPLETED", outcome: "completed", missing: [] };
-const runtime: SourceRun = { run_id: 20, kind: "runtime", run_status: "COMPLETED", outcome: "CONFIRMED", missing: [] };
+const hunt: SourceRun = {
+  run_id: 10,
+  kind: "bug_hunt",
+  run_status: "COMPLETED",
+  outcome: "completed",
+  missing: [],
+};
+const runtime: SourceRun = {
+  run_id: 20,
+  kind: "runtime",
+  run_status: "COMPLETED",
+  outcome: "CONFIRMED",
+  missing: [],
+};
 
 test("a confirmed bug is not a confirmed root cause: UNKNOWN causality, listed as a verified defect", () => {
   const r = reconcile([finding()], [hunt]);
@@ -50,9 +74,14 @@ test("a confirmed bug is not a confirmed root cause: UNKNOWN causality, listed a
   assert.equal(r.causes[0].level, "unknown");
   assert.equal(r.causes[0].defect, "CONFIRMED");
   assert.ok(r.missing_evidence.some((m) => /caused this incident/.test(m)));
-  assert.ok(r.next_actions.some((a) => a.kind === "run_runtime"), "suggests (never starts) a runtime RCA");
+  assert.ok(
+    r.next_actions.some((a) => a.kind === "run_runtime"),
+    "suggests (never starts) a runtime RCA",
+  );
   // A verified defect may still be fixed, marked as such.
-  assert.ok(r.next_actions.some((a) => a.kind === "create_fix" && /causality not proven/.test(a.detail)));
+  assert.ok(
+    r.next_actions.some((a) => a.kind === "create_fix" && /causality not proven/.test(a.detail)),
+  );
 });
 
 test("same cause from both workflows is deduplicated, and agreement does not raise the level", () => {
@@ -94,12 +123,26 @@ test("two different causes each confirmed → CONFLICTED", () => {
 test("stale evidence cannot confirm; invalid evidence is excluded and reported", () => {
   assert.equal(causalityLevel(hyp({ stale: true })), "probable");
   const r = reconcile(
-    [hyp({ stale: true }), finding({ ref: "bug_hunt:9:finding:9", valid: false, invalid_reason: "repository not accessible to the workspace owner" })],
+    [
+      hyp({ stale: true }),
+      finding({
+        ref: "bug_hunt:9:finding:9",
+        valid: false,
+        invalid_reason: "repository not accessible to the workspace owner",
+      }),
+    ],
     [runtime],
   );
   assert.equal(r.status, "PROBABLE");
-  assert.deepEqual(r.excluded.map((x) => x.ref), ["bug_hunt:9:finding:9"]);
-  assert.equal(r.verified_defects.length, 0, "an excluded finding never counts as a verified defect");
+  assert.deepEqual(
+    r.excluded.map((x) => x.ref),
+    ["bug_hunt:9:finding:9"],
+  );
+  assert.equal(
+    r.verified_defects.length,
+    0,
+    "an excluded finding never counts as a verified defect",
+  );
 });
 
 test("provider/config cause without a code location is never a code fix", () => {
@@ -116,7 +159,16 @@ test("provider/config cause without a code location is never a code fix", () => 
 });
 
 test("all sources blocked or failed → BLOCKED; nothing finished → UNKNOWN", () => {
-  assert.equal(reconcile([], [{ ...runtime, outcome: "BLOCKED" }, { ...hunt, run_status: "FAILED", outcome: "failed" }]).status, "BLOCKED");
+  assert.equal(
+    reconcile(
+      [],
+      [
+        { ...runtime, outcome: "BLOCKED" },
+        { ...hunt, run_status: "FAILED", outcome: "failed" },
+      ],
+    ).status,
+    "BLOCKED",
+  );
   const r = reconcile([], [{ ...runtime, run_status: "RUNNING", outcome: null }]);
   assert.equal(r.status, "UNKNOWN");
   assert.match(r.reasons[0], /no investigation has finished/);
@@ -126,7 +178,11 @@ test("an existing fix run for a cause suppresses a second create_fix", () => {
   const items = [finding(), hyp()];
   const first = reconcile(items, [hunt, runtime]);
   const key = first.causes[0].key;
-  const r = reconcile(items, [hunt, runtime, { run_id: 30, kind: "fix", run_status: "RUNNING", outcome: null, missing: [], cause_key: key }]);
+  const r = reconcile(items, [
+    hunt,
+    runtime,
+    { run_id: 30, kind: "fix", run_status: "RUNNING", outcome: null, missing: [], cause_key: key },
+  ]);
   assert.ok(!r.next_actions.some((a) => a.kind === "create_fix" && a.cause === key));
 });
 

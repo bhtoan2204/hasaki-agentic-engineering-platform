@@ -20,7 +20,6 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
 
 const deny = (reason: string): Decision => ({ allow: false, reason });
 
-
 function secretDenial(text: string): string | null {
   for (const [re, why] of SECRET_PATTERNS) if (re.test(text)) return why;
   return null;
@@ -93,7 +92,12 @@ export function copilotHookDecision(
     // Ensure path doesn't escape into sensitive roots
     if (resolved.includes("/.git/"))
       return deny("modifying .git internal files directly is forbidden; use commit_changes");
-    return decide(lower === "edit_file" ? "Edit" : "Write", { file_path: resolved }, policy, sessionCwd);
+    return decide(
+      lower === "edit_file" ? "Edit" : "Write",
+      { file_path: resolved },
+      policy,
+      sessionCwd,
+    );
   }
 
   // 6. File reading (read_file, view_file)

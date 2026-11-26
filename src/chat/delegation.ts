@@ -351,7 +351,10 @@ export async function delegatedRuns(conversationId: number) {
       progress: {
         done: own.filter((s) => s.status === "COMPLETED" || s.status === "SKIPPED").length,
         total: own.length,
-        current: own.filter((s) => ["RUNNING", "READY", "WAITING_INPUT", "WAITING_APPROVAL"].includes(s.status))
+        current: own
+          .filter((s) =>
+            ["RUNNING", "READY", "WAITING_INPUT", "WAITING_APPROVAL"].includes(s.status),
+          )
           .map((s) => ({ key: s.key, name: s.name, status: s.status })),
         failed: own.filter((s) => s.status === "FAILED").map((s) => ({ key: s.key, name: s.name })),
       },
@@ -360,12 +363,17 @@ export async function delegatedRuns(conversationId: number) {
           ? {
               summary: String(report?.summary ?? evidence?.summary ?? "").slice(0, 2000) || null,
               status: (report?.status as string | undefined) ?? null,
-              markdown: report?.report_markdown ? String(report.report_markdown).slice(0, 20_000) : null,
+              markdown: report?.report_markdown
+                ? String(report.report_markdown).slice(0, 20_000)
+                : null,
               verification: (verification.status as string | undefined) ?? null,
               root_cause: rootCause.status
                 ? {
                     status: rootCause.status,
-                    explanation: String(rootCause.explanation ?? rootCause.summary ?? "").slice(0, 1000),
+                    explanation: String(rootCause.explanation ?? rootCause.summary ?? "").slice(
+                      0,
+                      1000,
+                    ),
                   }
                 : null,
             }

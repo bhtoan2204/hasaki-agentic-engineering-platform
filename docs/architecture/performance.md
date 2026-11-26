@@ -4,14 +4,14 @@
 
 Run #3 (`bug-investigation`, a one-field ZIP Code mapping fix) took **44.8 min** wall time, run #1 51.5 min.
 
-| Source | Measured |
-|---|---|
-| 4 separate Claude sessions (analyze → root_cause → fix_proposal → implement) | **91 turns, ≈$3.46, ~574 s Claude time** |
-| Duplicate exploration | 20 `Read`s of 12 files (4 files read by ≥2 steps), 30 `Grep`s |
-| Growing prompts | user prompt 2k → 9k → 15k → 23k chars across the steps |
-| Test step | 4 attempts × ~137 s, dominated by one integration test waiting ~130 s for an unreachable DB — re-paid on every run |
-| Human waits | plan approval 222 s, repository confirmation 23 s |
-| Discovery | always asked Claude to re-rank, even when the deterministic ranking was unambiguous |
+| Source                                                                       | Measured                                                                                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 4 separate Claude sessions (analyze → root_cause → fix_proposal → implement) | **91 turns, ≈$3.46, ~574 s Claude time**                                                                           |
+| Duplicate exploration                                                        | 20 `Read`s of 12 files (4 files read by ≥2 steps), 30 `Grep`s                                                      |
+| Growing prompts                                                              | user prompt 2k → 9k → 15k → 23k chars across the steps                                                             |
+| Test step                                                                    | 4 attempts × ~137 s, dominated by one integration test waiting ~130 s for an unreachable DB — re-paid on every run |
+| Human waits                                                                  | plan approval 222 s, repository confirmation 23 s                                                                  |
+| Discovery                                                                    | always asked Claude to re-rank, even when the deterministic ranking was unambiguous                                |
 
 Already available and reused: context budgets and knowledge disclosure, baseline comparison (in-memory cache only),
 per-attempt metrics, session resume after questions.
@@ -26,37 +26,37 @@ normalize…), bug terms, declared risk (`inputs.risk` / payload `risk`), multi-
 high-risk vocabulary (payment, refund, COD, settlement, invoice, migration, schema, transaction, outbox, auth, token,
 PII, encryption, … in English and Vietnamese).
 
-* MICRO only when: verified bounded single-repository leaf changes with confirmed low risk and no multi-repo or high-risk business terms.
-* FAST only when: one known repository **and** a narrow-change signal **and** a bug fix (or declared low risk) **and**
+- MICRO only when: verified bounded single-repository leaf changes with confirmed low risk and no multi-repo or high-risk business terms.
+- FAST only when: one known repository **and** a narrow-change signal **and** a bug fix (or declared low risk) **and**
   no high-risk term. A short description is never enough.
-* High-risk areas → STANDARD (never FAST automatically). Multi-repository, epics/refactors or declared high risk → DEEP.
-* Anything uncertain → STANDARD ("safe default"), recorded with the reasons.
-* Manual override (AUTO / MICRO / FAST / STANDARD / DEEP) always wins; forcing FAST on a risky task records a warning.
+- High-risk areas → STANDARD (never FAST automatically). Multi-repository, epics/refactors or declared high risk → DEEP.
+- Anything uncertain → STANDARD ("safe default"), recorded with the reasons.
+- Manual override (AUTO / MICRO / FAST / STANDARD / DEEP) always wins; forcing FAST on a risky task records a warning.
 
 `applyProfile` transforms the published spec into the run's graph (the definition is never mutated):
 
-* **MICRO**: single session for verified, bounded low-risk work. Analysis and planning are folded into the coding session; plan approval is removed; separate post-coding review is folded into self-review within the session; context tokens are clamped to at most 12,000, wall-clock timeout to at most 10 minutes (600 s), and idle timeout to at most 3 minutes. Targeted checks, regression tests, human diff approval and the PR gate remain. Scope growth checkpoints and escalates the run.
-* **FAST**: analysis `agent` steps before the first `coding_agent` are folded into it (instructions merged in order,
+- **MICRO**: single session for verified, bounded low-risk work. Analysis and planning are folded into the coding session; plan approval is removed; separate post-coding review is folded into self-review within the session; context tokens are clamped to at most 12,000, wall-clock timeout to at most 10 minutes (600 s), and idle timeout to at most 3 minutes. Targeted checks, regression tests, human diff approval and the PR gate remain. Scope growth checkpoints and escalates the run.
+- **FAST**: analysis `agent` steps before the first `coding_agent` are folded into it (instructions merged in order,
   `merged_from` recorded); plan approvals are removed; `agent` review steps after coding are removed; dependants are
   rewired; discovery becomes deterministic; repository confirmation auto-approves when unambiguous. Tests, the PR
   approval gate and the Task Result Report remain. If a remaining step branches on a removed step (`run_if`/condition),
   FAST is refused and the run falls back to STANDARD with the reason.
-* **DEEP**: full workflow, no auto-approvals, AI-assisted discovery.
-* **STANDARD**: the published workflow.
+- **DEEP**: full workflow, no auto-approvals, AI-assisted discovery.
+- **STANDARD**: the published workflow.
 
 The decision (`workflow_runs.profile`, `profile_decision`) and the graph changes (`graph.profile_changes`) are stored
 with the run; `POST /api/runs/preview` returns exactly what `startRun` would create.
 
 ### Less redundant work
 
-| Change | Where |
-|---|---|
-| Repositories confirmed in an earlier run of the same work item are reused (within the allowed set); discovery then skips ranking | `resolveRunGraph`, `repositoryDiscovery` |
-| Discovery calls Claude only when the deterministic ranking is ambiguous | `executors/builtin.ts` |
-| Code locations found upstream (current attempts' Read/Edit/Grep + `path:line` in outputs) are handed to the next agent; invalidated attempts are excluded | `collectFileRefs` in `context.ts`, prompt section, snapshot `prompt_plan.file_refs` |
-| Prompt asks for targeted reads (path/glob Grep, offset/limit Read, parallel reads, no re-reads) | `stepPrompt.ts` |
-| Task Result Report calls Claude only when a requirement can be judged from non-screenshot evidence | `report/executor.ts` (`config.reasoning: auto|always|never`) |
-| Go baseline results persisted per (repository, base commit SHA, package); tests known to fail on the same base SHA are skipped via `GO_TEST_SKIP` (`go test -skip`) and reported as pre-existing; a new base commit invalidates automatically | `test_baselines` (migration 009), `executors/baseline.ts`, template test command |
+| Change                                                                                                                                                                                                                                        | Where                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Repositories confirmed in an earlier run of the same work item are reused (within the allowed set); discovery then skips ranking                                                                                                              | `resolveRunGraph`, `repositoryDiscovery`                                            |
+| Discovery calls Claude only when the deterministic ranking is ambiguous                                                                                                                                                                       | `executors/builtin.ts`                                                              |
+| Code locations found upstream (current attempts' Read/Edit/Grep + `path:line` in outputs) are handed to the next agent; invalidated attempts are excluded                                                                                     | `collectFileRefs` in `context.ts`, prompt section, snapshot `prompt_plan.file_refs` |
+| Prompt asks for targeted reads (path/glob Grep, offset/limit Read, parallel reads, no re-reads)                                                                                                                                               | `stepPrompt.ts`                                                                     |
+| Task Result Report calls Claude only when a requirement can be judged from non-screenshot evidence                                                                                                                                            | `report/executor.ts` (`config.reasoning: auto                                       | always | never`) |
+| Go baseline results persisted per (repository, base commit SHA, package); tests known to fail on the same base SHA are skipped via `GO_TEST_SKIP` (`go test -skip`) and reported as pre-existing; a new base commit invalidates automatically | `test_baselines` (migration 009), `executors/baseline.ts`, template test command    |
 
 Cross-step Claude session reuse is not added: steps differ in permissions (read-only vs coding) and workspaces, so
 reusing a session across them would widen what an analysis turn could do. FAST gets the same effect safely by folding
@@ -77,22 +77,22 @@ repository, 3 normal feature, 4 multi-repository change.
 
 Profile resolution (deterministic run):
 
-| Scenario | AUTO → | Steps | AI steps | STANDARD steps / AI steps |
-|---|---|---|---|---|
-| 1. One-field mapping fix | FAST | 5 | 1 | 9 / 4 |
-| 2. Small bug, known repository | FAST | 5 | 1 | 9 / 4 |
-| 3. Normal feature | STANDARD | 9 | 4 | 9 / 4 |
-| 4. Multi-repository change | DEEP | 9 | 4 | 9 / 4 |
+| Scenario                       | AUTO →   | Steps | AI steps | STANDARD steps / AI steps |
+| ------------------------------ | -------- | ----- | -------- | ------------------------- |
+| 1. One-field mapping fix       | FAST     | 5     | 1        | 9 / 4                     |
+| 2. Small bug, known repository | FAST     | 5     | 1        | 9 / 4                     |
+| 3. Normal feature              | STANDARD | 9     | 4        | 9 / 4                     |
+| 4. Multi-repository change     | DEEP     | 9     | 4        | 9 / 4                     |
 
 Live measurements (real Claude, `npm run bench -- --live --scenarios=1,2`, one run per cell; every run created a
 worktree, committed a real fix, ran the tests (passed) and asked no question):
 
-| Scenario | Profile | Claude sessions | Turns | Tool calls | Output tokens | Wall | Claude time | ≈ Cost (SDK estimate) |
-|---|---|---|---|---|---|---|---|---|
-| 1. One-field mapping fix | FAST (AUTO) | 1 | 8 | 7 | 2,585 | 28 s | 27 s | $0.17 |
-| 1. One-field mapping fix | STANDARD | 4 | 30 | 26 | 9,354 | 98 s | 92 s | $0.65 |
-| 2. Small bug, known repo | FAST (AUTO) | 1 | 9 | 8 | 2,513 | 31 s | 29 s | $0.17 |
-| 2. Small bug, known repo | STANDARD | 4 | 22 | 18 | 9,046 | 95 s | 89 s | $0.62 |
+| Scenario                 | Profile     | Claude sessions | Turns | Tool calls | Output tokens | Wall | Claude time | ≈ Cost (SDK estimate) |
+| ------------------------ | ----------- | --------------- | ----- | ---------- | ------------- | ---- | ----------- | --------------------- |
+| 1. One-field mapping fix | FAST (AUTO) | 1               | 8     | 7          | 2,585         | 28 s | 27 s        | $0.17                 |
+| 1. One-field mapping fix | STANDARD    | 4               | 30    | 26         | 9,354         | 98 s | 92 s        | $0.65                 |
+| 2. Small bug, known repo | FAST (AUTO) | 1               | 9     | 8          | 2,513         | 31 s | 29 s        | $0.17                 |
+| 2. Small bug, known repo | STANDARD    | 4               | 22    | 18         | 9,046         | 95 s | 89 s        | $0.62                 |
 
 For these two small tasks FAST used 1 Claude session instead of 4, 59–73 % fewer turns, ~72 % fewer output tokens and
 was ~3× faster, with tests and the PR gate intact. Caveats: single runs (LLM variance), a tiny fixture repository
@@ -104,41 +104,41 @@ the run #3 audit), and the effect of the file-reference handoff on STANDARD runs
 
 ## Remaining bottlenecks
 
-* Human gates (plan approval, PR approval, report review) dominate wall time of real runs; FAST removes only the plan
+- Human gates (plan approval, PR approval, report review) dominate wall time of real runs; FAST removes only the plan
   approval.
-* STANDARD/DEEP still start one Claude session per AI step; context is handed over as summaries and file references,
+- STANDARD/DEEP still start one Claude session per AI step; context is handed over as summaries and file references,
   not as a shared session.
-* Integration tests that need unreachable infrastructure are still paid once per new base commit (then cached).
-* Claude cold start and prompt caching are outside the platform's control; cache-read tokens dominate token volume.
+- Integration tests that need unreachable infrastructure are still paid once per new base commit (then cached).
+- Claude cold start and prompt caching are outside the platform's control; cache-read tokens dominate token volume.
 
 ## Remote database latency (round trips)
 
 Measured from a developer machine to the shared RDS (ap-southeast-1): **`SELECT 1` p50 ≈ 100 ms** (max ≈ 220 ms),
 **new TLS connection ≈ 720 ms**; local PostgreSQL ≈ 0.24 ms. Query cost is negligible next to the network: what makes
-pages and buttons slow is the number of *sequential* statements per request.
+pages and buttons slow is the number of _sequential_ statements per request.
 
 Bench (`scratchpad` harness: real HTTP server on an isolated local database with 100 ms injected before every
 statement):
 
-| Request | Before | After |
-|---|---|---|
-| `GET /api/runs/:id` (run page) | 620 ms, 11 queries | 105–210 ms, 9 queries |
-| `GET /api/runs/:id/steps/:key` | 408 ms | 108 ms |
-| `GET /api/runs/:id/events` | 312 ms | 106 ms |
-| `GET /api/metrics/runs/:id` | 511 ms | 105 ms |
-| `GET /api/metrics/summary` | 424 ms | 210 ms |
-| `GET /api/knowledge`, `/api/questions` | 205 ms | 105 ms |
+| Request                                 | Before                  | After                   |
+| --------------------------------------- | ----------------------- | ----------------------- |
+| `GET /api/runs/:id` (run page)          | 620 ms, 11 queries      | 105–210 ms, 9 queries   |
+| `GET /api/runs/:id/steps/:key`          | 408 ms                  | 108 ms                  |
+| `GET /api/runs/:id/events`              | 312 ms                  | 106 ms                  |
+| `GET /api/metrics/runs/:id`             | 511 ms                  | 105 ms                  |
+| `GET /api/metrics/summary`              | 424 ms                  | 210 ms                  |
+| `GET /api/knowledge`, `/api/questions`  | 205 ms                  | 105 ms                  |
 | `POST …/approve` (one state transition) | 1 930 ms, 19 statements | 1 330 ms, 14 statements |
 
 Changes:
 
-| Change | Where | Saves |
-|---|---|---|
+| Change                                                                                                                                         | Where                                                       | Saves                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------- |
 | Session lookup cached ≤ 10 s (`SESSION_CACHE_MS`, 0 disables); dropped at once in this process on login, logout, password change, deactivation | `auth/sessionCache.ts`, `auth/sessions.ts`, `auth/users.ts` | 1 round trip on every request |
-| Run owner cached (a run's owner never changes once set) | `requireRun` in `authz/access.ts` | 1 on every run route |
-| Run detail, step detail, run metrics, metrics summary, `getRun`: independent reads issued together | `engine.ts`, `api/metrics.ts` | 1–4 per request |
-| Event rows written inside a transaction are buffered and inserted with one multi-row INSERT before COMMIT (triggers still fire per row) | `insertDeferred` in `db/pool.ts`, `runEvents.add` | (events − 1) per transaction |
-| Engine actions return the run read after COMMIT, in parallel, instead of two sequential reads inside the transaction | `txThenRun` in `engine.ts` | 1 per action, shorter lock |
+| Run owner cached (a run's owner never changes once set)                                                                                        | `requireRun` in `authz/access.ts`                           | 1 on every run route          |
+| Run detail, step detail, run metrics, metrics summary, `getRun`: independent reads issued together                                             | `engine.ts`, `api/metrics.ts`                               | 1–4 per request               |
+| Event rows written inside a transaction are buffered and inserted with one multi-row INSERT before COMMIT (triggers still fire per row)        | `insertDeferred` in `db/pool.ts`, `runEvents.add`           | (events − 1) per transaction  |
+| Engine actions return the run read after COMMIT, in parallel, instead of two sequential reads inside the transaction                           | `txThenRun` in `engine.ts`                                  | 1 per action, shorter lock    |
 
 Not changed: the statements of a state transition itself (lock, step/attempt updates, promotion, job, run status) stay
 sequential inside one transaction — correctness first.
@@ -149,56 +149,57 @@ Also check whether the VPN path adds latency (100 ms Vietnam → Singapore is hi
 
 ## Click feedback and duplicate submissions
 
-* `act()` (`web/src/ui.tsx`) disables the button that started the action and shows a spinner (`.is-busy`,
+- `act()` (`web/src/ui.tsx`) disables the button that started the action and shows a spinner (`.is-busy`,
   `aria-busy`) until the request settles; clicks on a busy button are ignored. This applies to every `act(…)` call site
   without per-button code.
-* `api()` sends an `Idempotency-Key` with every POST. Create-type routes (`IDEMPOTENT_ROUTES` in
+- `api()` sends an `Idempotency-Key` with every POST. Create-type routes (`IDEMPOTENT_ROUTES` in
   `http/idempotency.ts`: work items, start run, analyze, import, evidence, Hasaki pick, prod-error scan/investigate)
   store the first response per (user, key) in `http_idempotency` (migration 023):
-  * a repeat with the same key replays that response (`Idempotent-Replayed: true`);
-  * a repeat while the first request is still running gets 409;
-  * the same key with a different body gets 422;
-  * a 5xx releases the key so the action can be retried.
+  - a repeat with the same key replays that response (`Idempotent-Replayed: true`);
+  - a repeat while the first request is still running gets 409;
+  - the same key with a different body gets 422;
+  - a 5xx releases the key so the action can be retried.
 
   Rows are pruned after a day.
-* State transitions (approve, answer, re-execute, stop, cancel) are not keyed. The run row lock plus status checks
+
+- State transitions (approve, answer, re-execute, stop, cancel) are not keyed. The run row lock plus status checks
   already make a repeat a no-op that answers 409.
 
 ## In-process caches (`src/cache/index.ts`)
 
-| Strategy | Used for | Invalidation |
-|---|---|---|
+| Strategy                                                                    | Used for                                                                                                                                                         | Invalidation                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Cache-aside + per-key singleflight + generation check (no stale write-back) | `knowledge.candidates` per owner (every step attempt), repository registry (run start, discovery, PR, authz), published workflow definition versions (run start) | write in this process → cleared after COMMIT (`onCommittedWrite` in `db/pool.ts`, rollback clears nothing); write in another process → DB trigger `NOTIFY cache_invalidate` (migration 024) → listener; TTL 60 s / 5 min backstop |
-| Stale-while-revalidate | `/api/metrics/summary` | fresh 30 s, then stale ≤ 10 min while one background refresh runs |
-| Singleflight | identical concurrent GETs of one user (`http/app.ts`) | none (nothing stored) |
+| Stale-while-revalidate                                                      | `/api/metrics/summary`                                                                                                                                           | fresh 30 s, then stale ≤ 10 min while one background refresh runs                                                                                                                                                                 |
+| Singleflight                                                                | identical concurrent GETs of one user (`http/app.ts`)                                                                                                            | none (nothing stored)                                                                                                                                                                                                             |
 
 **Safety rules**
 
-* The listener is started by the server. While it is disconnected (VPN drop, restart), every cache is flushed and
+- The listener is started by the server. While it is disconnected (VPN drop, restart), every cache is flushed and
   **bypassed**: notifications sent meanwhile are lost, so nothing cached may be trusted. When it reconnects it flushes
   again before serving from cache. Processes without a listener (tests, CLI) rely on local invalidation only.
-* A transaction that wrote a cached table bypasses that cache for the rest of the transaction, so it sees its own
+- A transaction that wrote a cached table bypasses that cache for the rest of the transaction, so it sees its own
   writes.
-* Cached values are returned as structured clones.
-* The knowledge cache keeps, per item, the version in effect plus newer future-dated versions, and selects by
+- Cached values are returned as structured clones.
+- The knowledge cache keeps, per item, the version in effect plus newer future-dated versions, and selects by
   `effective_from` in memory. An instant earlier than the load falls back to the database query.
-* Writes to cached tables must go through `q()`/`one()`. A raw `client.query` write is still caught by the trigger
+- Writes to cached tables must go through `q()`/`one()`. A raw `client.query` write is still caught by the trigger
   (cross-process path), only later.
-* `CACHE=off` disables the cache-aside and SWR caches.
+- `CACHE=off` disables the cache-aside and SWR caches.
 
 **Measured** (100 ms injected per statement):
 
-| Request | No cache | Warm cache |
-|---|---|---|
-| start run | 1 727 ms (18 statements) | 1 320 ms (14) |
-| resolve context per step attempt | 508 ms | 408 ms |
-| metrics summary | 205 ms | 1 ms |
-| 3 tabs refetching one run | 24 statements | 8 statements |
+| Request                          | No cache                 | Warm cache    |
+| -------------------------------- | ------------------------ | ------------- |
+| start run                        | 1 727 ms (18 statements) | 1 320 ms (14) |
+| resolve context per step attempt | 508 ms                   | 408 ms        |
+| metrics summary                  | 205 ms                   | 1 ms          |
+| 3 tabs refetching one run        | 24 statements            | 8 statements  |
 
 **Not cached on purpose**
 
-* Run and step detail. They change on every step, and the page already costs a single round trip.
-* Write paths. Write-through makes writes no faster, and write-behind would lose durable engine state.
+- Run and step detail. They change on every step, and the page already costs a single round trip.
+- Write paths. Write-through makes writes no faster, and write-behind would lose durable engine state.
 
 ## Phase 4 (2026-11)
 

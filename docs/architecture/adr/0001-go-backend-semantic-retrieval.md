@@ -9,12 +9,12 @@ skills/docs, run (task) memory, engineering lessons and chat memory differ only 
 `metadata.memory.trust`. Retrieval is lexical (`scoreKnowledge`, `src/context/plan.ts:100`: token overlap plus a
 VI→EN synonym map) and runs in four places:
 
-| Consumer | Code | Corpus |
-|---|---|---|
-| Workflow context | `resolveContext` → `planKnowledge` (`src/workflow/context.ts:422`) | items that passed visibility + `resolveKnowledge` + memory/lesson filters |
-| Agent `search_knowledge` / `platform.*` tools | `src/agent/platformTools.ts:687`, `src/agent/contextTools.ts:266` | the step's snapshot |
-| Chat knowledge | `knowledgeForTurn` / `searchKnowledge` (`src/chat/knowledge.ts`) | `discoverable()` |
-| Chat memory | `recallMemories` (`src/chat/memory.ts:230`) | the user's `memory.chat.*` items |
+| Consumer                                      | Code                                                               | Corpus                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Workflow context                              | `resolveContext` → `planKnowledge` (`src/workflow/context.ts:422`) | items that passed visibility + `resolveKnowledge` + memory/lesson filters |
+| Agent `search_knowledge` / `platform.*` tools | `src/agent/platformTools.ts:687`, `src/agent/contextTools.ts:266`  | the step's snapshot                                                       |
+| Chat knowledge                                | `knowledgeForTurn` / `searchKnowledge` (`src/chat/knowledge.ts`)   | `discoverable()`                                                          |
+| Chat memory                                   | `recallMemories` (`src/chat/memory.ts:230`)                        | the user's `memory.chat.*` items                                          |
 
 Lexical matching misses paraphrases and cross-language matches (a Vietnamese request against an English skill).
 The operator runs a single PostgreSQL 17 instance that ships pgvector 0.8.2 (not yet enabled).
@@ -50,7 +50,7 @@ per struct. The only interface is `Embedder`, because it has two implementations
 - Migration 084: `CREATE EXTENSION vector` when `pg_available_extensions` has it (otherwise a NOTICE and semantic
   retrieval reports `unavailable`), and:
   - `retrieval.sources(source_id → knowledge_items ON DELETE CASCADE, model, source_version, content_hash, status,
-    chunks, error)` and `retrieval.chunks(source_id, model, chunk, dims, embedding real[])`
+chunks, error)` and `retrieval.chunks(source_id, model, chunk, dims, embedding real[])`
   - `retrieval.queue(source_id PK, reason, enqueued_at, attempts, next_attempt_at, claimed_until)`: deduplicated
     by primary key, so it is bounded by the number of knowledge items.
   - AFTER ROW triggers on `knowledge_items` (insert/update) and `knowledge_versions` (insert) that upsert into
@@ -65,6 +65,7 @@ per struct. The only interface is `Embedder`, because it has two implementations
 
 A view `retrieval.eligible_sources`, defined in the migration next to the knowledge schema, is the contract:
 current version of enabled, non-expired items, except
+
 - `task_memory` items whose trust is not `verified`/`approved` (unverified run conclusions, rejected memory);
 - `memory.chat.*` items are included (they are only recalled for their owner);
 - supporting files with no prose are included; binary/encrypted metadata never.

@@ -2,12 +2,12 @@
 
 Phase 2 extends the existing Insights page with four routes. Existing quality, tool, failure, registry, harness evaluation and evaluation comparison views remain available through **Quality, tools & evaluations**. The existing Production Errors and Evaluation pages remain in place.
 
-| Route | Purpose |
-| --- | --- |
-| `#/insights/health` (default) | Observed production errors, severity, recurring fingerprints, lifecycle coverage and owner-protected evidence |
-| `#/insights/usage` | Provider/model/user/workflow/repository/project usage, estimated reported cost, missing metrics and token inspection signals |
-| `#/insights/performance` | Completion versus verification, invocation latency, workflow latency, queue/human/tool clocks, failure distributions and tool errors |
-| `#/insights/workflows` | Workflow throughput, slow steps, retry/blocked/approval hotspots, context preparation and labeled repository-selection evidence |
+| Route                         | Purpose                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `#/insights/health` (default) | Observed production errors, severity, recurring fingerprints, lifecycle coverage and owner-protected evidence                        |
+| `#/insights/usage`            | Provider/model/user/workflow/repository/project usage, estimated reported cost, missing metrics and token inspection signals         |
+| `#/insights/performance`      | Completion versus verification, invocation latency, workflow latency, queue/human/tool clocks, failure distributions and tool errors |
+| `#/insights/workflows`        | Workflow throughput, slow steps, retry/blocked/approval hotspots, context preparation and labeled repository-selection evidence      |
 
 All four routes reuse Hasaki tokens, typography, cards, tabs, tables, skeletons, errors, authentication, support mode and the bilingual message dictionary. Applied filters are encoded in the route URL and survive tab changes and reloads. Tables scroll within cards on small screens. Charts use aggregate buckets, native tooltips and an accessible data-table disclosure; missing values are not drawn as zero.
 

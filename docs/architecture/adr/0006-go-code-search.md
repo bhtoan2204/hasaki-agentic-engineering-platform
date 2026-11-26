@@ -13,11 +13,11 @@ chat turn and repository ranking calls it (`searchSymbols`, `findDefinitions`, `
 Profiled on this platform's own `src/` (≈360 TypeScript files per repository, local PostgreSQL, before any change;
 `npm run bench:code-search`, `docs/architecture/code-search-engines.json`):
 
-| TypeScript engine, 5 repositories | p50 | SQL statements | git subprocesses |
-|---|---|---|---|
-| `searchSymbols` (4 queries) | 1.5 s | 80 | 190 |
-| `findDependencies` (depth 2) | 0.7 s | 41 | 96 |
-| `buildCodeContext` (3 queries) | 15 s | 814 | 2,047 |
+| TypeScript engine, 5 repositories | p50   | SQL statements | git subprocesses |
+| --------------------------------- | ----- | -------------- | ---------------- |
+| `searchSymbols` (4 queries)       | 1.5 s | 80             | 190              |
+| `findDependencies` (depth 2)      | 0.7 s | 41             | 96               |
+| `buildCodeContext` (3 queries)    | 15 s  | 814            | 2,047            |
 
 The causes, in order of cost:
 
@@ -35,11 +35,11 @@ The causes, in order of cost:
 
 ### Split: TypeScript keeps the trust boundary, Go does the work
 
-| Stays in TypeScript | Moves to `go/internal/codeintelligence/search.go` |
-|---|---|
-| `authorize(scope)`, repository registration, read permission, run ownership, worktree identity (`localScope`), all resolved **once per call** (`src/codeIntelligence/goSearch.ts`, ≤4 in parallel, scope order kept) | freshness: base commit and worktree generation per repository, memoized for the request, re-checked after the queries |
-| provisioning and the indexing queue (`enqueue` of what Go found unindexed) | snapshot resolution for every repository in one statement; symbol, import and relation lookups batched across snapshots (`LATERAL`, per-snapshot limits) |
-| ranking contract (`byRank`), prompts, context budget (`contextTokens`), agent context policy, workflow decisions | dependency traversal (bounded depth/edges, deterministic), exact search (streamed ripgrep, early stop), source reads (one `git cat-file --batch` per checkout), secret redaction, the context body |
+| Stays in TypeScript                                                                                                                                                                                                  | Moves to `go/internal/codeintelligence/search.go`                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authorize(scope)`, repository registration, read permission, run ownership, worktree identity (`localScope`), all resolved **once per call** (`src/codeIntelligence/goSearch.ts`, ≤4 in parallel, scope order kept) | freshness: base commit and worktree generation per repository, memoized for the request, re-checked after the queries                                                                              |
+| provisioning and the indexing queue (`enqueue` of what Go found unindexed)                                                                                                                                           | snapshot resolution for every repository in one statement; symbol, import and relation lookups batched across snapshots (`LATERAL`, per-snapshot limits)                                           |
+| ranking contract (`byRank`), prompts, context budget (`contextTokens`), agent context policy, workflow decisions                                                                                                     | dependency traversal (bounded depth/edges, deterministic), exact search (streamed ripgrep, early stop), source reads (one `git cat-file --batch` per checkout), secret redaction, the context body |
 
 Each public function keeps its signature and calls `goSearch(op, …)` first when the flag is `go`; `null` means "the
 TypeScript engine answers", so the original code is the fallback path, unchanged. `POST
@@ -70,10 +70,10 @@ and silently skipped refused repositories).
 ### Freshness: never stale evidence
 
 The semantics of `fresh()` are kept per repository: base identity `base:<commit>`, overlay identity
-`overlay:<instance>:<run>:<base>:<generation>`; indexed rows are used only when the snapshot for the *current*
+`overlay:<instance>:<run>:<base>:<generation>`; indexed rows are used only when the snapshot for the _current_
 identity exists, otherwise the query falls back to live evidence and the repository is enqueued. After the queries
 the identity is computed again; a repository whose identity changed during the call contributes no indexed rows
-(fallback, as in TypeScript). The difference is *when*: single operations check before/after as before; composite
+(fallback, as in TypeScript). The difference is _when_: single operations check before/after as before; composite
 operations (`context`, multi-level `dependencies`) check each repository once before its first query and once after
 the last query of the whole operation, and drop every row of a repository that changed in between. That is at least as
 strict (a change anywhere in the window invalidates all of that repository's evidence) at a fraction of the cost.
@@ -97,12 +97,12 @@ defaults were reviewed in the same change (memory-aware, fail closed; see ADR 00
 
 ### Fallback
 
-| Situation | Behaviour |
-|---|---|
-| flag `typescript`, no `RETRIEVAL_INTERNAL_TOKEN` | TypeScript engine |
-| platform-go unreachable, timeout, 5xx, 409 (other parser version), invalid response | TypeScript engine, counted in `goSearchStats.fallbacks` |
-| 400 (a scope or input TypeScript should never produce), 401/403 (refused credential, ADR 0007 §9) | error raised, no fallback |
-| unauthorized repository | refused by `authorize` before either engine |
+| Situation                                                                                         | Behaviour                                               |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| flag `typescript`, no `RETRIEVAL_INTERNAL_TOKEN`                                                  | TypeScript engine                                       |
+| platform-go unreachable, timeout, 5xx, 409 (other parser version), invalid response               | TypeScript engine, counted in `goSearchStats.fallbacks` |
+| 400 (a scope or input TypeScript should never produce), 401/403 (refused credential, ADR 0007 §9) | error raised, no fallback                               |
+| unauthorized repository                                                                           | refused by `authorize` before either engine             |
 
 The fallback re-runs the TypeScript engine with its own freshness checks, so it can be slow but never stale and
 never wider than the authorized scope.
@@ -118,19 +118,19 @@ Re-measured in the hardening review (5 and 30 repositories, 3 iterations) after 
 PostgreSQL proxy added ~1 ms per packet even without injected latency; the first version of this table (1,509 → 626 ms
 etc.) included that overhead. Exact search now also authorizes lazily (ADR 0007 §9).
 
-| p50, TypeScript → Go (Δ) | 5 repositories | 30 repositories |
-|---|---|---|
-| `searchSymbols` (4 queries) | 1,041 → 488 ms (−53%) | 6,338 → 2,077 ms (−67%) |
-| `findDependencies` (depth 2) | 488 → 141 (−71%) | 2,198 → 523 (−76%) |
-| `findReferences` | 385 → 111 (−71%) | 363 → 216 (−41%) |
-| `searchCodeExact` (limit 20) | 179 → 68 (−62%) | 178 → 61 (−66%) |
-| `buildCodeContext` (3 queries) | 10,072 → 2,219 (−78%) | 37,181 → 5,252 (−86%) |
+| p50, TypeScript → Go (Δ)       | 5 repositories        | 30 repositories         |
+| ------------------------------ | --------------------- | ----------------------- |
+| `searchSymbols` (4 queries)    | 1,041 → 488 ms (−53%) | 6,338 → 2,077 ms (−67%) |
+| `findDependencies` (depth 2)   | 488 → 141 (−71%)      | 2,198 → 523 (−76%)      |
+| `findReferences`               | 385 → 111 (−71%)      | 363 → 216 (−41%)        |
+| `searchCodeExact` (limit 20)   | 179 → 68 (−62%)       | 178 → 61 (−66%)         |
+| `buildCodeContext` (3 queries) | 10,072 → 2,219 (−78%) | 37,181 → 5,252 (−86%)   |
 
-| per call at 30 repositories, TypeScript → Go (first measurement) | SQL statements | git processes | CPU (Node + Go) |
-|---|---|---|---|
-| `searchSymbols` | 480 → 16 | 1,140 → 930 | 2,276 → 929 ms |
-| `findDependencies` | 213 → 6 | 488 → 180 | 929 → 229 ms |
-| `buildCodeContext` | 3,025 → 54 | 7,892 → 966 | 15,719 → 1,111 ms |
+| per call at 30 repositories, TypeScript → Go (first measurement) | SQL statements | git processes | CPU (Node + Go)   |
+| ---------------------------------------------------------------- | -------------- | ------------- | ----------------- |
+| `searchSymbols`                                                  | 480 → 16       | 1,140 → 930   | 2,276 → 929 ms    |
+| `findDependencies`                                               | 213 → 6        | 488 → 180     | 929 → 229 ms      |
+| `buildCodeContext`                                               | 3,025 → 54     | 7,892 → 966   | 15,719 → 1,111 ms |
 
 Cold calls follow the same pattern (within 10% of p50 on both engines; the index is warm, only per-request state is
 cold). The Node event loop p99 stays at 6–15 ms on both engines; platform-go peaked at 181 MB RSS.
@@ -138,13 +138,13 @@ cold). The Node event loop p99 stays at 6–15 ms on both engines; platform-go p
 With every PostgreSQL packet delayed 20 ms each way (`BENCH_DB_LATENCY_MS=20`, 1 and 5 repositories,
 `docs/architecture/code-search-engines-latency20.json`; results again identical):
 
-| p50, TypeScript → Go | 1 repository | 5 repositories |
-|---|---|---|
-| `searchSymbols` | 916 → 968 ms (**+6%**) | 5,146 → 1,250 (−76%) |
-| `findDependencies` | 801 → 464 (−42%) | 2,566 → 399 (−84%) |
-| `findReferences` | 412 → 265 (−36%) | 2,170 → 359 (−83%) |
-| `searchCodeExact` | 108 → 58 (−46%) | 212 → 78 (−63%) |
-| `buildCodeContext` | 10,895 → 4,235 (−61%) | 52,057 → 5,691 (−89%) |
+| p50, TypeScript → Go | 1 repository           | 5 repositories        |
+| -------------------- | ---------------------- | --------------------- |
+| `searchSymbols`      | 916 → 968 ms (**+6%**) | 5,146 → 1,250 (−76%)  |
+| `findDependencies`   | 801 → 464 (−42%)       | 2,566 → 399 (−84%)    |
+| `findReferences`     | 412 → 265 (−36%)       | 2,170 → 359 (−83%)    |
+| `searchCodeExact`    | 108 → 58 (−46%)        | 212 → 78 (−63%)       |
+| `buildCodeContext`   | 10,895 → 4,235 (−61%)  | 52,057 → 5,691 (−89%) |
 
 Where the ≥30% target is **not** met, and why:
 

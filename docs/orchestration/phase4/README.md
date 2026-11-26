@@ -8,9 +8,15 @@ Agent and coding-agent nodes can select Claude, Codex, Cursor, Antigravity or Co
 {
   "name": "Mixed provider implementation",
   "steps": [
-    { "key": "research", "type": "agent", "config": { "agent": { "provider": "claude", "model": null } } },
     {
-      "key": "implement", "type": "coding_agent", "depends_on": ["research"],
+      "key": "research",
+      "type": "agent",
+      "config": { "agent": { "provider": "claude", "model": null } }
+    },
+    {
+      "key": "implement",
+      "type": "coding_agent",
+      "depends_on": ["research"],
       "config": {
         "agent": {
           "provider": "codex",
@@ -25,7 +31,12 @@ Agent and coding-agent nodes can select Claude, Codex, Cursor, Antigravity or Co
         }
       }
     },
-    { "key": "verification", "type": "agent", "depends_on": ["implement"], "config": { "independent": true, "agent": { "provider": "cursor" } } }
+    {
+      "key": "verification",
+      "type": "agent",
+      "depends_on": ["implement"],
+      "config": { "independent": true, "agent": { "provider": "cursor" } }
+    }
   ]
 }
 ```

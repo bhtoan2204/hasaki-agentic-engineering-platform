@@ -3,6 +3,7 @@
 ## Requirements Document
 
 ### Summary
+
 - **Request:** Show the execution harness lifecycle, checkpoints, recovery and DAG replay decisions in the existing Run View, Step Inspector, Trace Explorer and Insights screens. Add metrics for reuse, savings and latency. Do not add a separate dashboard.
 - **Background:**
   - The unified lifecycle (`src/agent/harness`) writes a `harness_evidence` artifact on every attempt, with stage timings, guarantees, failure code, checkpoint source, tool calls and cost.
@@ -17,6 +18,7 @@
   - Insights aggregates the same data.
 
 ### Current State (verified)
+
 - **Run View** (`web/src/pages/RunView.tsx:125`):
   - Layout: ReactFlow DAG plus a right pane with three modes: overview, `StepInspector` (`:666`) or `TraceExplorer` (`:660`).
   - Node pills live in `web/src/graph.tsx:225-300`, built from `StepNodeData` (`:144-158`).
@@ -41,6 +43,7 @@
   - session resume `checkpointSource` (`src/agent/harness/stages/execute.ts:399-442`, persisted only in `harness_evidence`)
 
   They are spread across events, `pending_input`, checkpoint rows, `provider_handoffs` and `audit_log`.
+
 - **Trace** (`src/workflow/trace.ts`):
   - `assembleTrace` (`:266`) builds run → step → attempt → tool → handoff from `loadTraceInput` (`:389`).
   - `traceLog` (`:95-148`) writes `workflow_events` with `kind='trace'`, and supports `span_id` and `parent_span_id`, which are unused so far.
@@ -57,11 +60,13 @@
   - Replay integration: `test/replay.integration.ts`.
 
 ### User decisions (2026-11-18)
+
 1. **Persistence:** a new `execution_decisions` table, added by a migration, written wherever a decision is made.
 2. **Savings:** estimated from the source attempt's reported telemetry (tokens, cost, invocations) and labelled "estimated". When the source reported nothing, the value is unknown, not 0.
 3. **Preview:** keep the Re-execute dialog and add per-decision badges and estimates. While the dialog is open, colour the Run View DAG nodes by their planned decision.
 
 ### Functional Requirements
+
 - **FR-001 (mandatory) Decision log.**
   - Migration `067_execution_decisions.sql` creates `execution_decisions` with these columns:
     - `id`, `run_id`, `step_id`, `attempt_id` (nullable)
@@ -75,6 +80,7 @@
     - `details` jsonb, `created_at`
 
   Indexes: `(run_id, created_at)` and `(kind, created_at)`. There is a CHECK on `kind`, `action` and `outcome`, and retention follows the run (`ON DELETE CASCADE`).
+
 - **FR-002 (mandatory) Recording.** A small repository/service, `src/workflow/decisions.ts`, records rows. It is best-effort outside transactions and transactional where the caller already holds the run lock, matching how `runEvents` works. Rows are written at:
   - Replay at dispatch (`scheduler.ts:264-275`): REUSE applied, or REEXECUTE with the miss reason.
   - Re-execute or retry (`engine.ts:738-930`): the `planReplay` decisions stored as `planned` rows for each step (`kind=replay`).
@@ -122,10 +128,12 @@
   - checkpoint size (p50/p95/max).
 
   No new page or tab.
+
 - **FR-010 (mandatory) Progress vs checkpoint.** Every place that lists checkpoints (Step Inspector, the trace, the run timeline) labels `progress`, `submit_result`, `skill_read` and `profile_*` as notes, never as recoverable checkpoints.
 - **FR-011 (optional) Run timeline.** `RunTimeline` shows decision rows (applied only) inline with events.
 
 ### Non-Functional Requirements
+
 - **Performance:**
   - Decision writes are a single insert each, outside the claim critical path where possible.
   - Run detail adds at most one indexed query (decisions by run).
@@ -137,6 +145,7 @@
 - **Maintainability:** reuse `ui.tsx` primitives and existing CSS classes. Keep each new component under about 250 lines, and the decision vocabulary in one shared module mirrored by the web types.
 
 ### Technical Specifications
+
 - **Shared vocabulary:** `src/workflow/decisions.ts` exports `DecisionKind`, `DecisionAction` (= `ReplayAction` ∪ the recovery actions) and `recordDecision(db, row)`. The web types live in `web/src/api.ts` or a small `web/src/decisions.ts`.
 - **Compatibility evaluation:** factor the read-only parts of `validate` and `validateContinuation` (`src/workflow/checkpoints.ts:287-381`) into a pure `checkpointCompatibility(checkpoint, step, attempt)`. Never throw on read: map failures to a status.
 - **Trace:** extend `TraceInput` with `stages`, `checkpoints` and `decisions`, loaded in `loadTraceInput` with bounded queries limited to the run. `assembleTrace` stays pure.
@@ -153,12 +162,14 @@
   - i18n: vi and en.
 
 ### Constraints
+
 - Reuse existing screens and components; no new dashboard, route or page.
 - Behaviour of replay and recovery must not change; only recording is added. The replay and recovery integration suites must pass unchanged.
 - Work on the current branch. Follow repo conventions. Commits in English with no AI attribution and no `func:`/`task:` footer for this repo.
 - `web/dist` must be built before the smoke tests.
 
 ### Test Requirements
+
 - **Unit:**
   - `checkpointCompatibility` for every status;
   - `assembleTrace` with `stages`, `checkpoints` and `decisions`;
@@ -184,6 +195,7 @@
   5. All existing suites pass.
 
 ### Outstanding Issues
+
 1. **Decision history for old runs.** No backfill is planned; only new runs record decisions. The UI shows "no decision data" for older runs.
 2. **Checkpoint size of pause checkpoints.** Pause checkpoints have no workspace artifact. Their size is the envelope `octet_length`, which is the only available measure.
 3. **Recovery latency for manual recoveries** (a human answers a reconciliation question) measures time to the human decision, not system latency. Report it separately as "awaiting human" or exclude it from p95. Planned default: exclude rows whose `details.human = true`.
@@ -191,6 +203,7 @@
 ## Task Breakdown
 
 ### Dependency graph
+
 ```
 P1 migration + decisions.ts ──> P2 recording at decision points ──> P3 API (checkpoint view, decisions, preview estimates)
                                                                      ├─> P4 Step Inspector + Run View + preview overlay
@@ -200,6 +213,7 @@ P4, P5, P6 ──> P7 smoke/UI regression + docs
 ```
 
 ### Phases
+
 - **P1:** `migrations/067_execution_decisions.sql`, `src/workflow/decisions.ts` (vocabulary, `recordDecision`, savings estimator), and unit tests.
 - **P2:** record decisions in:
   - `scheduler.ts` (replay hit or miss, reconcile mismatch)
@@ -209,6 +223,7 @@ P4, P5, P6 ──> P7 smoke/UI regression + docs
   - harness stages: execute (resume), preflight and verify (restore), checkpoint (review reuse), verify (verification reuse)
 
   Integration tests go in `replay.integration.ts`, `workflow-reliability.integration.ts` and a step-agent resume test.
+
 - **P3:**
   - `checkpointCompatibility` (pure, in `checkpoints.ts`);
   - `runRepository.ts` (decisions plus the derived checkpoint view and `latest_recoverable`);
@@ -234,6 +249,7 @@ P4, P5, P6 ──> P7 smoke/UI regression + docs
   - update `docs/architecture/execution-lifecycle.md`, `execution-checkpoints.md` and `dag-replay.md` with the decision log and the UI.
 
 ### Execute handoff
+
 - **Decisions:**
   - table, not events;
   - savings estimated from the source attempt and labelled "estimated";

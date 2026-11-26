@@ -33,7 +33,7 @@ args)` and `platform.listTools()` and returns a JSON value.
   The answer is marked `untrusted: true` and is never verified evidence by itself.
 - **Evidence integrity.** A reference is a claim that a durable row exists, so it is emitted only for a successful
   nested call whose row was written (the broker tracks each recorder outcome as `persisted`, bounded by
-  `codeAct.persistTimeoutMs`, default 10 s, and never swallows a failure) *and* whose execution was finalized by this
+  `codeAct.persistTimeoutMs`, default 10 s, and never swallows a failure) _and_ whose execution was finalized by this
   surface. Otherwise the answer keeps the program's value but reports `evidence_status: "partial" | "none"`, the call
   as `recorded: false` without `ref`, and a `warnings` line — a degraded answer rather than a failed one, because the
   value itself is never evidence (it is `untrusted`) and Chat/workflow evidence is what the refs cite. A row that lands
@@ -58,12 +58,12 @@ args)` and `platform.listTools()` and returns a JSON value.
 
 ## Measurements (`npm run bench:codeact`, fixture of 400 spans / 600 events, no model calls)
 
-| | direct calls | CodeAct |
-|---|---|---|
-| tool calls | 2 | 2 |
-| model turns needed | 3 | 2 |
-| bytes returned to the model | 47,924 (workflow cap) / 12,000 (chat cap), raw 112,215 | 66 |
-| program wall time (OS sandbox, dev host) | – | p50 109 ms, max 192 ms |
+|                                          | direct calls                                           | CodeAct                |
+| ---------------------------------------- | ------------------------------------------------------ | ---------------------- |
+| tool calls                               | 2                                                      | 2                      |
+| model turns needed                       | 3                                                      | 2                      |
+| bytes returned to the model              | 47,924 (workflow cap) / 12,000 (chat cap), raw 112,215 | 66                     |
+| program wall time (OS sandbox, dev host) | –                                                      | p50 109 ms, max 192 ms |
 
 Bytes are measured; turns are structural for this plan. No provider token counts were measured (no paid model calls):
 token savings on real tasks remain to be shown with evaluation runs.
@@ -86,7 +86,7 @@ results are discarded and never recorded, and the result keeps the cancellation 
 distinct from `timeout` and `internal`). `ToolCallContext.signal` carries the nested call's signal into `callTool`,
 which never starts a handler after the abort and never reports a result that arrived after it.
 
-*Limitation:* no integration handler forwards `ctx.signal` to its HTTP client yet, so an in-flight Splunk/SigNoz/…
+_Limitation:_ no integration handler forwards `ctx.signal` to its HTTP client yet, so an in-flight Splunk/SigNoz/…
 request runs to completion (bounded by its own timeout) after a cancellation; its result is discarded. Handlers can
 adopt it individually.
 

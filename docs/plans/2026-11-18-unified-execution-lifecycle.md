@@ -3,6 +3,7 @@
 ## Requirements Document
 
 ### Summary
+
 - **Request:** Gather the agent execution harness, which is currently spread over many places, into one explicit lifecycle that does not depend on the provider. Every supported provider (claude, codex, cursor, copilot, antigravity) must run under equivalent platform guarantees. Decisions that code can make move out of prompts and into the harness.
 - **Background:** All the pieces already exist: execution contract, tool policy, scope guard, verification loop, budgets, context pack, provider adapters, checkpoints and implementation evidence. The problem is how they are arranged:
   - They are interleaved inside one function of about 1,900 lines, `agentExecutor.execute` (`src/agent/claude.ts:513-2432`).
@@ -25,6 +26,7 @@
   - New architecture fitness rules that lock the structure in place.
 
 ### Current State
+
 - **Stack:** TypeScript (Node, `tsx`), PostgreSQL, modular monolith. Tests use `node:test` (`npm test`; `npm run test:integration` needs PostgreSQL). The architecture ratchet runs as `npm run arch:check` (`src/architecture/check.ts`, `architecture/baseline.json`) and also runs inside `npm test` through `test/architecture.test.ts`.
 - **Call chain:**
   1. `scheduler.ts:153 processJob`
@@ -43,29 +45,28 @@
   9. `finishAttempt` → `applyResult` → `enforceBudget` (`engine.ts:2206`, `:1884`, `:2306`)
 - **Where each stage lives today:**
 
-  | Stage | Where it runs | Notes |
-  |---|---|---|
-  | Preflight | 7+ places across the scheduler, the engine claim, `claude.ts:521-754`, and every `*/run.ts` capability re-check | |
-  | Context | `workflow/context.ts` (`buildStepInput`, `resolveContext`), `context/pack.ts ensureContextPack` (reused when the hash matches), `resumableSession`, `captureContextContinuity` | |
-  | Policy | `toolPolicy.ts:997 decide()`, called through a separate adapter per provider: Claude hooks; codex/copilot/antigravity through the broker hook; cursor through `cli.json` plus a watcher that acts after the fact | `scopeGuard` runs after verification |
-  | Budget | `budgetPreflight` before the job is queued; `enforceBudget` after the attempt | Nothing runs during the attempt except Claude `maxTurns` and the MICRO tool-call limit of 20 |
-  | Checkpoint | Spread over the claim, the scheduler, `claude.ts` session resume and progress notes, and `checkpoints.ts` | |
-  | Verify | `verify.ts:1063 verificationLoop` with `EvidenceCache`, plus the independent-review branch (`independentReview.ts`) | |
-  | Repair | Four loops: in-session verify repair (`max_repairs` ≤ 5), independent-review `reexecute` (≤ 10), testFailure auto-fix (≤ 5), engine retry (`max_attempts` ≤ 10) | |
-  | Evidence | `implementationEvidence.ts`, the `execution_contract` artifact, `output.implementation_evidence/scope_check/tested_heads`, `workflow_checkpoints` rows, `recordMetrics` | |
+  | Stage      | Where it runs                                                                                                                                                                                                    | Notes                                                                                        |
+  | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+  | Preflight  | 7+ places across the scheduler, the engine claim, `claude.ts:521-754`, and every `*/run.ts` capability re-check                                                                                                  |                                                                                              |
+  | Context    | `workflow/context.ts` (`buildStepInput`, `resolveContext`), `context/pack.ts ensureContextPack` (reused when the hash matches), `resumableSession`, `captureContextContinuity`                                   |                                                                                              |
+  | Policy     | `toolPolicy.ts:997 decide()`, called through a separate adapter per provider: Claude hooks; codex/copilot/antigravity through the broker hook; cursor through `cli.json` plus a watcher that acts after the fact | `scopeGuard` runs after verification                                                         |
+  | Budget     | `budgetPreflight` before the job is queued; `enforceBudget` after the attempt                                                                                                                                    | Nothing runs during the attempt except Claude `maxTurns` and the MICRO tool-call limit of 20 |
+  | Checkpoint | Spread over the claim, the scheduler, `claude.ts` session resume and progress notes, and `checkpoints.ts`                                                                                                        |                                                                                              |
+  | Verify     | `verify.ts:1063 verificationLoop` with `EvidenceCache`, plus the independent-review branch (`independentReview.ts`)                                                                                              |                                                                                              |
+  | Repair     | Four loops: in-session verify repair (`max_repairs` ≤ 5), independent-review `reexecute` (≤ 10), testFailure auto-fix (≤ 5), engine retry (`max_attempts` ≤ 10)                                                  |                                                                                              |
+  | Evidence   | `implementationEvidence.ts`, the `execution_contract` artifact, `output.implementation_evidence/scope_check/tested_heads`, `workflow_checkpoints` rows, `recordMetrics`                                          |                                                                                              |
 
 - **Provider parity gaps** (verified):
 
-  | Guarantee | claude | codex | cursor | copilot | antigravity |
-  |---|---|---|---|---|---|
-  | Tool policy enforced before execution | yes | yes (detects a tool that bypassed the hook) | **no**: watcher only, the tool has already started | yes, no bypass detection | yes, no bypass detection |
-  | Default wall-clock timeout | **none** | yes | yes (45 min) | yes | yes |
-  | Idle / no-progress kill | none | none | none | none | none |
-  | Budget during the run | `maxTurns` | none | none | none | none |
-  | Structured failure classification | `normalizeProviderFailure` | own classifier, no rate_limit | **none** | own classifier | identical copy of copilot's |
-  | Incomplete-output detection | weak | yes | yes | **none** | **none** |
-  | Network restriction | none | sandbox | none | `--sandbox` (optional) | `--sandbox` (optional) |
-
+  | Guarantee                             | claude                     | codex                                       | cursor                                             | copilot                  | antigravity                 |
+  | ------------------------------------- | -------------------------- | ------------------------------------------- | -------------------------------------------------- | ------------------------ | --------------------------- |
+  | Tool policy enforced before execution | yes                        | yes (detects a tool that bypassed the hook) | **no**: watcher only, the tool has already started | yes, no bypass detection | yes, no bypass detection    |
+  | Default wall-clock timeout            | **none**                   | yes                                         | yes (45 min)                                       | yes                      | yes                         |
+  | Idle / no-progress kill               | none                       | none                                        | none                                               | none                     | none                        |
+  | Budget during the run                 | `maxTurns`                 | none                                        | none                                               | none                     | none                        |
+  | Structured failure classification     | `normalizeProviderFailure` | own classifier, no rate_limit               | **none**                                           | own classifier           | identical copy of copilot's |
+  | Incomplete-output detection           | weak                       | yes                                         | yes                                                | **none**                 | **none**                    |
+  | Network restriction                   | none                       | sandbox                                     | none                                               | `--sandbox` (optional)   | `--sandbox` (optional)      |
   - **Known bugs:**
     - A codex timeout is terminal, while copilot, antigravity and cursor timeouts are retried.
     - The `provider_error.code` map (`claude.ts:1716`) only knows codex's lowercase names.
@@ -74,17 +75,19 @@
     - The `submit_result` read-back SQL is repeated in four `run.ts` files.
     - `excludeFromGit` appears three times.
   - **Misplaced shared code:** the broker transport that every provider uses lives in `codex/broker.ts` and `codex/client.ts`. Other providers import it, which accounts for 8 of the 16 entries in `baseline.json`.
+
 - **Rules that live only in prompts:**
 
-  | Rule | Status |
-  |---|---|
-  | Do not edit CI or verify scripts (`verify.ts:1155`) | not enforced |
-  | Call `submit_result` once per turn | not enforced; a second call inserts another checkpoint |
-  | String `output_contract`s in `templates.ts` | enums and nested shapes are prose only |
-  | No local `git merge` | not enforced |
-  | push, read-only, MICRO, secrets, primary-checkout writes | already enforced in `toolPolicy.ts`; no change |
+  | Rule                                                     | Status                                                 |
+  | -------------------------------------------------------- | ------------------------------------------------------ |
+  | Do not edit CI or verify scripts (`verify.ts:1155`)      | not enforced                                           |
+  | Call `submit_result` once per turn                       | not enforced; a second call inserts another checkpoint |
+  | String `output_contract`s in `templates.ts`              | enums and nested shapes are prose only                 |
+  | No local `git merge`                                     | not enforced                                           |
+  | push, read-only, MICRO, secrets, primary-checkout writes | already enforced in `toolPolicy.ts`; no change         |
 
 ### User decisions (2026-11-18)
+
 1. **Structure:** ordered, typed stage functions in a new `src/agent/harness/` module, called by one `runLifecycle()`. No middleware or plugin framework. Extract with behavior preserved first, then apply the fixes.
 2. **Parity policy:** fail closed per mode.
    - Coding (write) steps refuse a provider that cannot meet write-mode guarantees.
@@ -101,6 +104,7 @@
    - deny local `git merge` and `git rebase` onto the parent branch.
 
 ### Functional Requirements
+
 - **FR-001 (mandatory) Single lifecycle entry.** `src/agent/harness/lifecycle.ts` exports `runLifecycle(ctx: ExecutionContext): Promise<ExecResult>`. It runs these stages in a fixed order:
   1. `preflight`
   2. `resolveContext`
@@ -113,6 +117,7 @@
   9. `finalize`
 
   `agent` and `coding_agent` register a harness executor that calls `runLifecycle`. `agentExecutor.execute` is removed. The Claude-SDK-specific turn code moves to the Claude provider adapter (FR-004).
+
 - **FR-002 (mandatory) Stage contract.**
   - Each stage is a plain async function `(state: LifecycleState) => Promise<StageOutcome>`. `StageOutcome` is either `continue` with an updated state, or `stop` with an `ExecResult` plus a `HarnessFailure`.
   - `LifecycleState` holds what is computed once and read later:
@@ -155,18 +160,18 @@
   - `ExecResult.failed.details.failure_code` carries the code. `classifyFailure` (`failures.ts`) uses the structured code first and falls back to the regex only for older results without a code.
 - **FR-007 (mandatory) Explicit handling for each failure mode:**
 
-  | Condition | Detection | Outcome |
-  |---|---|---|
-  | Timeout | wall-clock timer per turn and per attempt; default for every provider (Claude included) | `EXECUTION_TIMEOUT`; retryable once, then stop. Progress is checkpointed. |
-  | Cancellation | `ctx.signal` | kill the process tree or abort the SDK; `CANCELED`; never retried |
-  | Idle | no stream event and no hook call for `idle_timeout_ms` | `IDLE_TIMEOUT`, retryable |
-  | No progress | verify signature repeats (existing `verify.ts:1096`), or `ToolLoopDetector`, which is now recorded for **all** providers through the broker hook path | `NO_PROGRESS`, which needs a human |
-  | Budget exhausted | tool-call cap, or projected or live cost above the remaining budget | turn aborted, checkpoint saved, run **paused** with a `budget` event (matches the existing soft-pause behavior); `BUDGET_EXHAUSTED` or `TOOL_BUDGET_EXHAUSTED` |
-  | Provider failure | adapter classifier | the mapped code from FR-006 |
-  | Incomplete output | no terminal result event, or exit 0 without `submit_result`, for every provider including copilot, antigravity and Claude | `INCOMPLETE_OUTPUT`, retryable with session resume |
-  | Invalid output | `validateOutputContract` against the typed schema | `CONTRACT_INVALID`; the existing in-turn retry stays; final failure is non-retryable |
-  | Invalid evidence | implementation evidence missing or forged, tested-state fingerprint drift, `verifyEvidence` rejection | `INVALID_EVIDENCE`, non-retryable, needs a human |
-  | Unsafe side effect | a tool that bypassed the hook (`broker.hookCalls` / `allowedTools` for codex, copilot, antigravity; cursor watcher), a denied network or git operation attempted, a write outside the worktree | kill the turn; `UNSAFE_SIDE_EFFECT` or `POLICY_VIOLATION`; not retryable |
+  | Condition          | Detection                                                                                                                                                                                      | Outcome                                                                                                                                                        |
+  | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Timeout            | wall-clock timer per turn and per attempt; default for every provider (Claude included)                                                                                                        | `EXECUTION_TIMEOUT`; retryable once, then stop. Progress is checkpointed.                                                                                      |
+  | Cancellation       | `ctx.signal`                                                                                                                                                                                   | kill the process tree or abort the SDK; `CANCELED`; never retried                                                                                              |
+  | Idle               | no stream event and no hook call for `idle_timeout_ms`                                                                                                                                         | `IDLE_TIMEOUT`, retryable                                                                                                                                      |
+  | No progress        | verify signature repeats (existing `verify.ts:1096`), or `ToolLoopDetector`, which is now recorded for **all** providers through the broker hook path                                          | `NO_PROGRESS`, which needs a human                                                                                                                             |
+  | Budget exhausted   | tool-call cap, or projected or live cost above the remaining budget                                                                                                                            | turn aborted, checkpoint saved, run **paused** with a `budget` event (matches the existing soft-pause behavior); `BUDGET_EXHAUSTED` or `TOOL_BUDGET_EXHAUSTED` |
+  | Provider failure   | adapter classifier                                                                                                                                                                             | the mapped code from FR-006                                                                                                                                    |
+  | Incomplete output  | no terminal result event, or exit 0 without `submit_result`, for every provider including copilot, antigravity and Claude                                                                      | `INCOMPLETE_OUTPUT`, retryable with session resume                                                                                                             |
+  | Invalid output     | `validateOutputContract` against the typed schema                                                                                                                                              | `CONTRACT_INVALID`; the existing in-turn retry stays; final failure is non-retryable                                                                           |
+  | Invalid evidence   | implementation evidence missing or forged, tested-state fingerprint drift, `verifyEvidence` rejection                                                                                          | `INVALID_EVIDENCE`, non-retryable, needs a human                                                                                                               |
+  | Unsafe side effect | a tool that bypassed the hook (`broker.hookCalls` / `allowedTools` for codex, copilot, antigravity; cursor watcher), a denied network or git operation attempted, a write outside the worktree | kill the turn; `UNSAFE_SIDE_EFFECT` or `POLICY_VIOLATION`; not retryable                                                                                       |
 
 - **FR-008 (mandatory) Guarantee matrix and fail-closed preflight.**
   - `providerCapabilities.ts` gains a static `GUARANTEES[provider]` set:
@@ -185,11 +190,11 @@
   - `StepAgentConfig` gains `idle_timeout_ms` and `max_tool_calls`, next to the existing `timeout_ms` and `max_turns`.
   - Defaults are settled by the plan and live in `config.ts`:
 
-    | Setting | Default | MICRO cap |
-    |---|---|---|
-    | `timeout_ms` | 45 min (same as the current cursor default) | existing 10-min cap stays |
-    | `idle_timeout_ms` | 10 min | 3 min |
-    | `max_tool_calls` | 400 | existing 20 stays |
+    | Setting           | Default                                     | MICRO cap                 |
+    | ----------------- | ------------------------------------------- | ------------------------- |
+    | `timeout_ms`      | 45 min (same as the current cursor default) | existing 10-min cap stays |
+    | `idle_timeout_ms` | 10 min                                      | 3 min                     |
+    | `max_tool_calls`  | 400                                         | existing 20 stays         |
 
   - Tool calls are counted in one place, `decide()`. It is reached through the Claude hook and through the broker for every hook-based provider. Cursor's watcher counts too.
   - **Cost:**
@@ -202,6 +207,7 @@
     - every repo-relative file path named as a token in the step's fixed `verify.command`.
 
     The step config can opt out with `allow_ci_edits: true`, for steps that are meant to change CI.
+
   - **submit_result once per turn.**
     - `submitResult` refuses a second valid submission in the same turn ("already submitted").
     - Each verify-repair resume and each session-resume turn opens a new submission window, because repair rounds legitimately submit again (`verify.ts:1156`).
@@ -243,6 +249,7 @@
   - Add the new rules to `architecture-governance.md`.
 
 ### Non-Functional Requirements
+
 - **Behavior preservation:**
   - Phase 2 (extraction) must not change any observable output, artifact, event or state transition. The existing integration suites are the oracle.
   - Behavior changes arrive only in later phases and each one has its own test.
@@ -261,6 +268,7 @@
   - The new config fields are optional and have defaults.
 
 ### Technical Specifications
+
 - **Reuse, do not duplicate:**
   - `verify.ts verificationLoop` and `verifyEvidence.ts` remain the only verification engine.
   - `toolPolicy.ts decide()` remains the only policy decision point.
@@ -294,6 +302,7 @@
 - **Web UI:** if `providerCapabilities.ts` drives UI controls, the new `idle_timeout_ms` and `max_tool_calls` fields appear in step-agent settings (`web/src/StepAgentFields.tsx`). Only the minimal field addition.
 
 ### Constraints
+
 - Keep the modular monolith and the existing lock order (run → job → attempt → step). `stateMachine.ts` stays the only transition policy.
 - Do not move claim-transaction logic out of `engine.ts`.
 - Work on the current branch. No branch creation. Commits are in English and carry no func/task footer for this repo.
@@ -301,6 +310,7 @@
 - Live provider CLIs may not be available in CI. Provider behavior is tested with the existing fake-CLI and stream fixtures.
 
 ### Test Requirements
+
 - **Characterization, before Phase 2:**
   - Extend `test/harness.integration.ts` and `test/step-agent.integration.ts`.
   - Snapshot `ExecResult`, artifacts and events for each step type: coding, read-only, MICRO, independent review, investigation, resume, waiting_input, reexecute.
@@ -328,6 +338,7 @@
   5. `npm run typecheck`, `npm run lint`, `npm test`, `npm run test:integration` and `npm run arch:check` all pass.
 
 ### Outstanding Issues
+
 1. **Cursor hooks.** Does the installed cursor-agent CLI support `.cursor/hooks.json` (beforeShellExecution, beforeReadFile, and similar) well enough to route policy through the broker? Phase 5 must check the CLI version and its docs.
    - If yes: wire it the same way as copilot.
    - If no: cursor is refused for write steps. This is a user-visible behavior change and must go in the release notes.
@@ -338,6 +349,7 @@
 ## Task Breakdown
 
 ### Dependency graph
+
 ```
 P0 characterization ─┐
 P1 failure taxonomy ─┼─> P2 lifecycle extraction ─> P4 parity/fail-closed ─> P5 in-run controls
@@ -350,10 +362,12 @@ P7 evidence/finalize (needs P2, P4, P5) ─> P8 fitness rules + docs
 ### Phases
 
 **P0: Characterization tests**
+
 - Files: `test/harness.integration.ts`, `test/step-agent.integration.ts`, a new fake turn adapter fixture under `test/fixtures/`.
 - Freeze the current `ExecResult`, artifacts and events for each step type listed in Test Requirements.
 
 **P1: Failure taxonomy**
+
 - Files:
   - `src/agent/harness/failure.ts` (new)
   - `src/agent/telemetry.ts`
@@ -364,9 +378,11 @@ P7 evidence/finalize (needs P2, P4, P5) ─> P8 fitness rules + docs
 - Fixes the timeout parity bug.
 
 **P1b: Broker relocation**
+
 - Files: `src/agent/broker/{server,client}.ts` (moved), importers in all provider dirs, `architecture/baseline.json` (regenerated).
 
 **P2: Lifecycle extraction (behavior-preserving)**
+
 - Files:
   - `src/agent/harness/{lifecycle,turn}.ts`
   - `stages/*.ts`
@@ -377,11 +393,13 @@ P7 evidence/finalize (needs P2, P4, P5) ─> P8 fitness rules + docs
 - Remove the repeated validator calls in favor of `LifecycleState`. The P0 suite must pass unchanged.
 
 **P3: Shared CLI turn runner**
+
 - Files: `src/agent/harness/cliTurn.ts`, `codex|cursor|copilot|antigravity/run.ts`, and a single `excludeFromGit`.
 - Adds the idle watchdog and incomplete-output detection for copilot and antigravity.
 - Adds an incomplete-output check to the Claude adapter.
 
 **P4: Guarantee matrix and fail-closed preflight**
+
 - Files:
   - `providerCapabilities.ts` (`GUARANTEES`)
   - `stages/preflight.ts`
@@ -390,6 +408,7 @@ P7 evidence/finalize (needs P2, P4, P5) ─> P8 fitness rules + docs
   - `cursor/*` (hooks or refusal, per Outstanding Issue 1)
 
 **P5: In-run controls**
+
 - Files:
   - `stepAgent.ts` (`idle_timeout_ms`, `max_tool_calls`)
   - `config.ts` (defaults)
@@ -400,6 +419,7 @@ P7 evidence/finalize (needs P2, P4, P5) ─> P8 fitness rules + docs
   - `web/src/StepAgentFields.tsx` (two fields)
 
 **P6: Rules moved from prompts to code**
+
 - Files:
   - `toolPolicy.ts` (CI and verify file deny, git merge and rebase deny)
   - `platformTools.ts` (submit window)
@@ -408,10 +428,12 @@ P7 evidence/finalize (needs P2, P4, P5) ─> P8 fitness rules + docs
   - `stepPrompt.ts` (render the contract from the schema; trim enforced prose)
 
 **P7: Evidence and finalization**
+
 - Files: `stages/finalize.ts`, `src/agent/harness/evidence.ts`.
 - Write the `harness_evidence` artifact and the repairs ledger. `revalidateContract` runs once. `INVALID_EVIDENCE` is wired in.
 
 **P8: Fitness rules and docs**
+
 - Files:
   - `src/architecture/check.ts` (3 rules, claude in `PROVIDERS`)
   - `test/architecture.test.ts`
@@ -419,16 +441,17 @@ P7 evidence/finalize (needs P2, P4, P5) ─> P8 fitness rules + docs
   - `docs/architecture/{execution-lifecycle,architecture-governance,agent-architecture}.md`
 
 ### Execute handoff
+
 - **Decisions:** see "User decisions". Defaults settled by the plan:
 
-  | Setting | Value |
-  |---|---|
-  | `timeout_ms` | 45 min |
-  | `idle_timeout_ms` | 10 min (MICRO 3 min) |
-  | `max_tool_calls` | 400 (MICRO 20) |
-  | Budget exhausted mid-run | pause, not fail |
-  | `submit_result` | once per turn, a new window per repair or resume turn |
-  | `package.json` | not protected |
+  | Setting                  | Value                                                 |
+  | ------------------------ | ----------------------------------------------------- |
+  | `timeout_ms`             | 45 min                                                |
+  | `idle_timeout_ms`        | 10 min (MICRO 3 min)                                  |
+  | `max_tool_calls`         | 400 (MICRO 20)                                        |
+  | Budget exhausted mid-run | pause, not fail                                       |
+  | `submit_result`          | once per turn, a new window per repair or resume turn |
+  | `package.json`           | not protected                                         |
 
 - **Order:** P0 → P1/P1b → P2 → P3 → P4 → P5 → P6 → P7 → P8. Commit each phase separately, and make sure each commit passes `npm run typecheck && npm test && npm run arch:check`. Run `npm run test:integration` at the end of P2, P5 and P8.
 - **References:**

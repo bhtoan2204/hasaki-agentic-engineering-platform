@@ -37,7 +37,14 @@ export interface EvidenceScope {
 export type EvidenceDecision =
   | { kind: "hit"; key: string; record: EvidenceRecord }
   | { kind: "joined"; key: string; promise: Promise<RepoVerification | null> }
-  | { kind: "lead"; key: string; reason: string; parts: EvidenceParts; settle(r: RepoVerification | null): Promise<string | null>; fail(): void };
+  | {
+      kind: "lead";
+      key: string;
+      reason: string;
+      parts: EvidenceParts;
+      settle(r: RepoVerification | null): Promise<string | null>;
+      fail(): void;
+    };
 
 export interface EvidenceStats {
   hits: number;
@@ -52,14 +59,22 @@ export interface EvidenceStats {
 }
 
 export const emptyStats = (): EvidenceStats => ({
-  hits: 0, misses: 0, reused: 0, duplicates_avoided: 0, saved_ms: 0, invalidations: [], not_stored: [], store_errors: [],
+  hits: 0,
+  misses: 0,
+  reused: 0,
+  duplicates_avoided: 0,
+  saved_ms: 0,
+  invalidations: [],
+  not_stored: [],
+  store_errors: [],
 });
 
 export const canonicalJson = (v: unknown): string =>
   JSON.stringify(v, (_k, val) =>
     val && typeof val === "object" && !Array.isArray(val)
       ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : 1)))
-      : val);
+      : val,
+  );
 
 export const evidenceKey = (parts: EvidenceParts) =>
   createHash("sha256").update(canonicalJson(parts)).digest("hex");
@@ -67,7 +82,8 @@ export const evidenceKey = (parts: EvidenceParts) =>
 /** Why a stored result may not be served again; null = reusable. */
 export function notReusableReason(r: RepoVerification): string | null {
   if (r.status !== "passed" && r.status !== "accepted_preexisting") return `status ${r.status}`;
-  if (r.status === "accepted_preexisting" && r.needs_review) return "accepted_preexisting needs review";
+  if (r.status === "accepted_preexisting" && r.needs_review)
+    return "accepted_preexisting needs review";
   if (r.needs_review) return "needs review";
   if (r.exit_code !== 0) return "non-zero exit";
   if (r.timed_out) return "timed out";
@@ -79,23 +95,57 @@ export function notReusableReason(r: RepoVerification): string | null {
 
 /** First differing part between two key part sets (invalidation reason). */
 export function firstDifference(prev: EvidenceParts, next: EvidenceParts): string {
-  const order = ["head", "workspace_fingerprint", "base_tip", "contract_revision", "command", "selectors",
-    "policy", "baseline", "timeout", "env_fingerprint", "env_vars", "skip"];
+  const order = [
+    "head",
+    "workspace_fingerprint",
+    "base_tip",
+    "contract_revision",
+    "command",
+    "selectors",
+    "policy",
+    "baseline",
+    "timeout",
+    "env_fingerprint",
+    "env_vars",
+    "skip",
+  ];
   const names = [...order, ...Object.keys(next).filter((k) => !order.includes(k))];
   for (const n of names) if ((prev[n] ?? "") !== (next[n] ?? "")) return n;
   return "none_found";
 }
 
-const DEP_FILES = ["go.mod", "go.sum", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
-  "tsconfig.json", ".golangci.yml", "Makefile", ".nvmrc", ".node-version", ".tool-versions"];
+const DEP_FILES = [
+  "go.mod",
+  "go.sum",
+  "package.json",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "tsconfig.json",
+  ".golangci.yml",
+  "Makefile",
+  ".nvmrc",
+  ".node-version",
+  ".tool-versions",
+];
 
 /** Hash of dependency/test-config files (committed or not) plus toolchain versions. Throws when it cannot be established. */
 export async function envFingerprint(path: string): Promise<string> {
   const h = createHash("sha256");
   const present: string[] = [];
   for (const f of DEP_FILES) {
-    const ok = await exec("git", ["-C", path, "ls-files", "--error-unmatch", f]).then(() => true, () => false);
-    const exists = ok || (await import("node:fs/promises").then((fs) => fs.stat(`${path}/${f}`).then(() => true, () => false)));
+    const ok = await exec("git", ["-C", path, "ls-files", "--error-unmatch", f]).then(
+      () => true,
+      () => false,
+    );
+    const exists =
+      ok ||
+      (await import("node:fs/promises").then((fs) =>
+        fs.stat(`${path}/${f}`).then(
+          () => true,
+          () => false,
+        ),
+      ));
     if (exists) present.push(f);
   }
   if (present.length) {
@@ -103,13 +153,20 @@ export async function envFingerprint(path: string): Promise<string> {
     present.forEach((f, i) => h.update(`${f}\0${stdout.split("\n")[i]}\0`));
   }
   h.update(`node ${process.version}\0`);
-  const go = await exec("go", ["version"]).then((r) => r.stdout.trim(), () => "no-go");
+  const go = await exec("go", ["version"]).then(
+    (r) => r.stdout.trim(),
+    () => "no-go",
+  );
   h.update(go);
   return h.digest("hex");
 }
 
 /** Hash the effective child process configuration. Environment values never enter persisted evidence. */
-export async function commandEnvironmentFingerprint(path: string, extra: Record<string, string>, verification = true) {
+export async function commandEnvironmentFingerprint(
+  path: string,
+  extra: Record<string, string>,
+  verification = true,
+) {
   const plan = await commandProcessEnv(path, extra, verification);
   const env = { ...plan.env };
   delete env.NODE_TEST_CONTEXT;
@@ -118,11 +175,17 @@ export async function commandEnvironmentFingerprint(path: string, extra: Record<
 
 export async function baseTip(path: string, baseBranch: string | undefined): Promise<string> {
   if (!baseBranch) return "";
-  return exec("git", ["-C", path, "rev-parse", `origin/${baseBranch}`]).then((r) => r.stdout.trim(), () => "unknown");
+  return exec("git", ["-C", path, "rev-parse", `origin/${baseBranch}`]).then(
+    (r) => r.stdout.trim(),
+    () => "unknown",
+  );
 }
 
 // Shared by every loop in this process: concurrent steps of one run that verify an identical state run it once.
-const inflight = new Map<string, { promise: Promise<RepoVerification | null>; resolve(r: RepoVerification | null): void }>();
+const inflight = new Map<
+  string,
+  { promise: Promise<RepoVerification | null>; resolve(r: RepoVerification | null): void }
+>();
 
 /** Process-wide singleflight + persisted evidence. One instance per verification loop. */
 export class EvidenceCache {
@@ -135,7 +198,9 @@ export class EvidenceCache {
     this.scope = scope;
   }
 
-  get pending() { return this.inflight.size; }
+  get pending() {
+    return this.inflight.size;
+  }
 
   async begin(repo: string, parts: EvidenceParts): Promise<EvidenceDecision> {
     const key = evidenceKey({ ...parts, repo, run: String(this.scope.runId) });
@@ -152,16 +217,21 @@ export class EvidenceCache {
       if (rec && notReusableReason(rec.result)) rec = null;
       // The state may be taken by a concurrent leader while we awaited the store.
       const again = this.inflight.get(flight);
-      if (again) { this.stats.duplicates_avoided++; return { kind: "joined", key, promise: again.promise }; }
+      if (again) {
+        this.stats.duplicates_avoided++;
+        return { kind: "joined", key, promise: again.promise };
+      }
       if (rec) {
-        this.stats.hits++; this.stats.reused++;
+        this.stats.hits++;
+        this.stats.reused++;
         this.stats.saved_ms += rec.duration_ms;
         return { kind: "hit", key, record: rec };
       }
       const prev = await this.store.latest(this.scope, repo);
       if (prev) reason = firstDifference(prev.parts, { ...parts });
     } catch (e) {
-      reason = "store_error"; this.stats.store_errors?.push((e as Error).message.slice(0, 160));
+      reason = "store_error";
+      this.stats.store_errors?.push((e as Error).message.slice(0, 160));
     }
     this.stats.misses++;
     this.stats.invalidations.push(reason);
@@ -176,14 +246,26 @@ export class EvidenceCache {
       resolve(r);
     };
     return {
-      kind: "lead", key, reason, parts,
+      kind: "lead",
+      key,
+      reason,
+      parts,
       fail: () => finish(null),
       settle: async (r) => {
         let why: string | null = r ? notReusableReason(r) : "no result";
         if (r && !why) {
           try {
-            await this.store.save(this.scope, repo, { key, parts, result: r, attempt_id: this.scope.attemptId ?? null, duration_ms: r.duration_ms });
-          } catch (e) { why = "store_error"; this.stats.store_errors?.push((e as Error).message.slice(0, 160)); }
+            await this.store.save(this.scope, repo, {
+              key,
+              parts,
+              result: r,
+              attempt_id: this.scope.attemptId ?? null,
+              duration_ms: r.duration_ms,
+            });
+          } catch (e) {
+            why = "store_error";
+            this.stats.store_errors?.push((e as Error).message.slice(0, 160));
+          }
         }
         if (why) this.stats.not_stored.push(why);
         finish(r && !notReusableReason(r) ? r : null);
@@ -193,43 +275,93 @@ export class EvidenceCache {
   }
 }
 
-type EvidenceRow = { key: string; parts: EvidenceParts; result: RepoVerification; attempt_id?: number | null; duration_ms?: number };
+type EvidenceRow = {
+  key: string;
+  parts: EvidenceParts;
+  result: RepoVerification;
+  attempt_id?: number | null;
+  duration_ms?: number;
+};
 
 /** PostgreSQL-backed store (migration 059). Rows are scoped by run_id. */
 export function pgEvidenceStore(db: Db): EvidenceStore {
   const toRec = (r: EvidenceRow): EvidenceRecord => ({
-    key: r.key, parts: r.parts, result: r.result, attempt_id: r.attempt_id ?? null, duration_ms: r.duration_ms ?? 0,
+    key: r.key,
+    parts: r.parts,
+    result: r.result,
+    attempt_id: r.attempt_id ?? null,
+    duration_ms: r.duration_ms ?? 0,
   });
   return {
     // Any step of the run may reuse: the key already covers workspace, command, contract, policy and environment.
     async find(s, repo, key) {
-      const r = await one(db, "SELECT * FROM verification_evidence WHERE run_id=$1 AND repo=$2 AND key=$3 ORDER BY id DESC LIMIT 1", [s.runId, repo, key]);
+      const r = await one(
+        db,
+        "SELECT * FROM verification_evidence WHERE run_id=$1 AND repo=$2 AND key=$3 ORDER BY id DESC LIMIT 1",
+        [s.runId, repo, key],
+      );
       return r ? toRec(r) : null;
     },
     async latest(s, repo) {
-      const r = await one(db, "SELECT * FROM verification_evidence WHERE run_id=$1 AND step_key=$2 AND repo=$3 ORDER BY created_at DESC, id DESC LIMIT 1", [s.runId, s.stepKey, repo]);
+      const r = await one(
+        db,
+        "SELECT * FROM verification_evidence WHERE run_id=$1 AND step_key=$2 AND repo=$3 ORDER BY created_at DESC, id DESC LIMIT 1",
+        [s.runId, s.stepKey, repo],
+      );
       return r ? toRec(r) : null;
     },
     async save(s, repo, rec) {
-      await q(db, "INSERT INTO verification_evidence (run_id, step_key, attempt_id, repo, key, parts, status, result, duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        [s.runId, s.stepKey, s.attemptId ?? null, repo, rec.key, JSON.stringify(rec.parts), rec.result.status, JSON.stringify(rec.result), Math.round(rec.duration_ms)]);
+      await q(
+        db,
+        "INSERT INTO verification_evidence (run_id, step_key, attempt_id, repo, key, parts, status, result, duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+        [
+          s.runId,
+          s.stepKey,
+          s.attemptId ?? null,
+          repo,
+          rec.key,
+          JSON.stringify(rec.parts),
+          rec.result.status,
+          JSON.stringify(rec.result),
+          Math.round(rec.duration_ms),
+        ],
+      );
     },
   };
 }
 
 /** In-memory store (tests, benchmark). */
-export function memoryEvidenceStore(): EvidenceStore & { rows: Array<{ scope: EvidenceScope; repo: string; rec: EvidenceRecord }> } {
+export function memoryEvidenceStore(): EvidenceStore & {
+  rows: Array<{ scope: EvidenceScope; repo: string; rec: EvidenceRecord }>;
+} {
   const rows: Array<{ scope: EvidenceScope; repo: string; rec: EvidenceRecord }> = [];
   return {
     rows,
-    async find(s, repo, key) { return rows.findLast((r) => r.scope.runId === s.runId && r.repo === repo && r.rec.key === key)?.rec ?? null; },
-    async latest(s, repo) { return rows.findLast((r) => r.scope.runId === s.runId && r.scope.stepKey === s.stepKey && r.repo === repo)?.rec ?? null; },
-    async save(s, repo, rec) { rows.push({ scope: s, repo, rec: structuredClone(rec) }); },
+    async find(s, repo, key) {
+      return (
+        rows.findLast((r) => r.scope.runId === s.runId && r.repo === repo && r.rec.key === key)
+          ?.rec ?? null
+      );
+    },
+    async latest(s, repo) {
+      return (
+        rows.findLast(
+          (r) => r.scope.runId === s.runId && r.scope.stepKey === s.stepKey && r.repo === repo,
+        )?.rec ?? null
+      );
+    },
+    async save(s, repo, rec) {
+      rows.push({ scope: s, repo, rec: structuredClone(rec) });
+    },
   };
 }
 
 /** Drop evidence older than `days`; a purged entry only costs a rerun. Returns the number of rows removed. */
 export async function purgeVerificationEvidence(days: number, db: Db): Promise<number> {
-  const rows = await q(db, "DELETE FROM verification_evidence WHERE created_at < now() - make_interval(days => $1) RETURNING id", [days]);
+  const rows = await q(
+    db,
+    "DELETE FROM verification_evidence WHERE created_at < now() - make_interval(days => $1) RETURNING id",
+    [days],
+  );
   return rows.length;
 }

@@ -408,9 +408,15 @@ test("adversarial dynamic contracts: runtime-built keys are never contracts, but
     ["q.go", 'q := fmt.Sprintf("UPDATE %s SET status=$1", tbl)', "db_table"],
   ];
   for (const [file, line, kind] of DYNAMIC) {
-    const contracts = extractLine(file, 1, line).filter((c) => c.kind === kind && c.confidence === "static");
+    const contracts = extractLine(file, 1, line).filter(
+      (c) => c.kind === kind && c.confidence === "static",
+    );
     assert.deepEqual(contracts, [], `no static ${kind} from a runtime key: ${line}`);
-    assert.deepEqual(dynamicSites(file, 1, line).map((d) => d.kind), [kind], `reported: ${line}`);
+    assert.deepEqual(
+      dynamicSites(file, 1, line).map((d) => d.kind),
+      [kind],
+      `reported: ${line}`,
+    );
   }
   // Literal keys are contracts, not unresolved sites; unrelated look-alikes, tests and unsupported languages are neither.
   const CLEAN: Array<[string, string]> = [
@@ -425,7 +431,13 @@ test("adversarial dynamic contracts: runtime-built keys are never contracts, but
   for (const [file, line] of CLEAN) assert.deepEqual(dynamicSites(file, 1, line), [], line);
   // Bounded: adversarial repetition stays linear.
   const t = Date.now();
-  for (const unit of ["fetch(", "http.NewRequest(", "FROM \" + ", "Topic: ", "@KafkaListener(topics = "])
+  for (const unit of [
+    "fetch(",
+    "http.NewRequest(",
+    'FROM " + ',
+    "Topic: ",
+    "@KafkaListener(topics = ",
+  ])
     dynamicSites("a.go", 1, unit.repeat(Math.floor(4000 / unit.length)));
   assert.ok(Date.now() - t < 300, `dynamic-site scan took ${Date.now() - t} ms`);
 });

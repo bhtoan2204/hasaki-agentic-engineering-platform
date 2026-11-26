@@ -37,13 +37,13 @@ pre-authorized rules (DELETE never runs unconfirmed) and by host-bound auth prof
 
 ## Coverage and limits
 
-| Path | Protection |
-|---|---|
-| Chat mutating operations (Kafka, QC HTTP) | provenance decision above + allowlists + owner confirmation + idempotency |
-| CodeAct nested calls | read-only broker; no sink reachable |
-| Workflow agents (`call_tool`) | mutating integrations refused (no confirmed operation outside chat) — unchanged |
+| Path                                                       | Protection                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Chat mutating operations (Kafka, QC HTTP)                  | provenance decision above + allowlists + owner confirmation + idempotency                                                                                                                                                                                                |
+| CodeAct nested calls                                       | read-only broker; no sink reachable                                                                                                                                                                                                                                      |
+| Workflow agents (`call_tool`)                              | mutating integrations refused (no confirmed operation outside chat) — unchanged                                                                                                                                                                                          |
 | Native provider tools (shell, edit, web) in workflow steps | **not instrumented by provenance**: tool policy (`decide`), protected paths, ALWAYS_DENIED shell commands and, with `isolation.mode=enforce`, the OS sandbox and egress allowlist remain the boundary. A command copied from a log into Bash is not detected as tainted. |
-| Notifications (webhook, Telegram) | destinations come from configuration / the owner's binding only — not model-supplied |
+| Notifications (webhook, Telegram)                          | destinations come from configuration / the owner's binding only — not model-supplied                                                                                                                                                                                     |
 
 Matching is textual: a value transformed by the model (re-encoded, split, paraphrased) is `unknown`, which still
 blocks auto-execution of an unknown target but not of an unknown payload. This reduces, not eliminates, injection risk;

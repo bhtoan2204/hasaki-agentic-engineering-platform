@@ -111,7 +111,11 @@ test("attribution: a pre-fix LOAD failure (the test imports what only the fix ad
     `import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { normalizeV2 } from "../src/phone.js";\ntest("phone", () => { assert.equal(normalizeV2("+84900000000"), "0900000000"); });\n`,
   );
   git(dir, "commit", "-qam", "test imports the new symbol");
-  const proof = await beforeAfterProof({ repo: "r", path: dir, baseBranch: "main" }, "r::test/phone.test.js", shell);
+  const proof = await beforeAfterProof(
+    { repo: "r", path: dir, baseBranch: "main" },
+    "r::test/phone.test.js",
+    shell,
+  );
   assert.equal(proof.status, "invalid", "previously counted as 'fails before' → verified");
   assert.equal(proof.before, "not_executed");
   assert.match(proof.reason, /load, build or infrastructure failure is not a reproduction/);
@@ -124,13 +128,31 @@ test("attribution: a pre-fix failure that does not repeat (flaky) is not attribu
   const flaky = async (command: string, cwd: string) => {
     if (n++ !== 1) return shell(command, cwd);
     const file = /'([^']+\.test\.js)'$/.exec(command)![1];
-    return { code: 0, output: JSON.stringify({ type: "platform:test-summary", file, complete: true, passed: 1, failed: 0, skipped: 0 }) };
+    return {
+      code: 0,
+      output: JSON.stringify({
+        type: "platform:test-summary",
+        file,
+        complete: true,
+        passed: 1,
+        failed: 0,
+        skipped: 0,
+      }),
+    };
   };
-  const proof = await beforeAfterProof({ repo: "r", path: dir, baseBranch: "main" }, "r::test/phone.test.js", flaky);
+  const proof = await beforeAfterProof(
+    { repo: "r", path: dir, baseBranch: "main" },
+    "r::test/phone.test.js",
+    flaky,
+  );
   assert.equal(proof.status, "invalid");
   assert.deepEqual([proof.before, proof.before_repeat], ["failed", "passed"]);
   assert.match(proof.reason, /flaky failure is not attributable/);
-  const stable = await beforeAfterProof({ repo: "r", path: dir, baseBranch: "main" }, "r::test/phone.test.js", shell);
+  const stable = await beforeAfterProof(
+    { repo: "r", path: dir, baseBranch: "main" },
+    "r::test/phone.test.js",
+    shell,
+  );
   assert.equal(stable.status, "verified", stable.reason);
   assert.equal(stable.before_repeat, "failed");
 });
@@ -139,10 +161,22 @@ test("integrity: the proof is measured on the committed HEAD — an uncommitted 
   const dir = repo("export const normalize = (p) => p; // touched, not fixed\n", ASSERT);
   // The real fix exists only as an uncommitted edit in the run's worktree.
   writeFileSync(join(dir, "src/phone.js"), FIX);
-  const proof = await beforeAfterProof({ repo: "r", path: dir, baseBranch: "main" }, "r::test/phone.test.js", shell);
-  assert.equal(proof.status, "invalid", "previously the 'after' run used the dirty worktree and verified a commit without the fix");
+  const proof = await beforeAfterProof(
+    { repo: "r", path: dir, baseBranch: "main" },
+    "r::test/phone.test.js",
+    shell,
+  );
+  assert.equal(
+    proof.status,
+    "invalid",
+    "previously the 'after' run used the dirty worktree and verified a commit without the fix",
+  );
   assert.match(proof.reason, /does not pass with the fix on the committed source/);
-  assert.equal(git(dir, "status", "--porcelain"), "M src/phone.js", "the uncommitted edit is left as it was");
+  assert.equal(
+    git(dir, "status", "--porcelain"),
+    "M src/phone.js",
+    "the uncommitted edit is left as it was",
+  );
   assert.equal(git(dir, "worktree", "list").split("\n").length, 1, "temporary worktrees removed");
 });
 
@@ -152,14 +186,21 @@ test("validity: installed dependencies are available to both runs, and the run's
   git(dir, "add", ".gitignore");
   git(dir, "commit", "-qm", "ignore deps");
   mkdirSync(join(dir, "node_modules/phone-dep"), { recursive: true });
-  writeFileSync(join(dir, "node_modules/phone-dep/package.json"), JSON.stringify({ name: "phone-dep", type: "module", main: "index.js" }));
+  writeFileSync(
+    join(dir, "node_modules/phone-dep/package.json"),
+    JSON.stringify({ name: "phone-dep", type: "module", main: "index.js" }),
+  );
   writeFileSync(join(dir, "node_modules/phone-dep/index.js"), "export const PREFIX = '+84';\n");
   writeFileSync(
     join(dir, "test/phone.test.js"),
     `import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { PREFIX } from "phone-dep";\nimport { normalize } from "../src/phone.js";\ntest("phone", () => { assert.equal(normalize(PREFIX + "900000000"), "0900000000"); });\n`,
   );
   git(dir, "commit", "-qam", "test uses an installed dependency");
-  const proof = await beforeAfterProof({ repo: "r", path: dir, baseBranch: "main" }, "r::test/phone.test.js", shell);
+  const proof = await beforeAfterProof(
+    { repo: "r", path: dir, baseBranch: "main" },
+    "r::test/phone.test.js",
+    shell,
+  );
   assert.equal(proof.status, "verified", proof.reason);
   assert.ok(existsSync(join(dir, "node_modules/phone-dep/index.js")), "linked, never removed");
 });

@@ -211,7 +211,10 @@ async function applyAdaptiveRouting(
   const isolation = { enforce, runtimeAvailable: enforce ? await isolationEnforced() : false };
   for (const step of steps) {
     const { eligible, excluded } = eligibility({ stepType: step.type, complexity, isolation });
-    const current = resolveStepAgent({ agent_provider: defaultProvider ?? undefined, profile }, step);
+    const current = resolveStepAgent(
+      { agent_provider: defaultProvider ?? undefined, profile },
+      step,
+    );
     const fallback = current?.provider ?? "claude";
     const decision = decideRoute({
       samples,

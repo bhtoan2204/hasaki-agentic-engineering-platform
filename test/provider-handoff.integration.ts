@@ -234,14 +234,19 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   assert.ok(h.package.repository_state[0].diff_hash);
   const sealed = await readExecutionCheckpoint(pool, h.source_attempt_id);
   assert.ok(sealed?.workspace_artifact_id);
-  const milestone = await one(pool,
+  const milestone = await one(
+    pool,
     "SELECT execution FROM workflow_checkpoints WHERE attempt_id=$1 AND reason='provider_handoff'",
-    [h.source_attempt_id]);
+    [h.source_attempt_id],
+  );
   assert.equal(milestone.execution.version, 1);
   assert.equal(milestone.execution.workspace_fingerprint, h.workspace_fingerprint);
   assert.equal(milestone.execution.binding.generation, h.generation);
-  const archive = await one<{ content: string }>(pool, "SELECT content FROM workflow_artifacts WHERE id=$1",
-    [sealed.workspace_artifact_id]);
+  const archive = await one<{ content: string }>(
+    pool,
+    "SELECT content FROM workflow_artifacts WHERE id=$1",
+    [sealed.workspace_artifact_id],
+  );
   assert.ok(archive);
   assert.doesNotMatch(archive.content, /Claude partially implemented|pending.bin/);
   const backup = JSON.parse(decryptSecret(archive.content)).workspaces[0];
@@ -277,8 +282,10 @@ test("quota pauses durably with redacted provider-neutral package; Claude → Co
   assert.equal(duplicate.filter((x) => !x.duplicate).length, 1);
   execute = async (ctx) => {
     assert.equal(ctx.attempt.agent_provider, "codex");
-    assert.equal(ctx.input.pending.provider_handoff.package.execution_checkpoint.workspace_artifact_id,
-      sealed.workspace_artifact_id);
+    assert.equal(
+      ctx.input.pending.provider_handoff.package.execution_checkpoint.workspace_artifact_id,
+      sealed.workspace_artifact_id,
+    );
     assert.match(readFileSync(join(path, "task.txt"), "utf8"), /Claude partially/);
     assert.equal(await resumableSession(ctx, path, "codex"), null);
     const pack = await ensureContextPack(ctx, newMetrics(""), { ...policy, workspaces: [path] });

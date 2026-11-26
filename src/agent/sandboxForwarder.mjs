@@ -16,7 +16,8 @@ const server = net.createServer((client) => {
 });
 server.listen(Number(port), "127.0.0.1", () => {
   const child = spawn(command, args, { stdio: "inherit" });
-  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => child.kill(signal));
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"])
+    process.on(signal, () => child.kill(signal));
   child.on("error", (e) => {
     console.error(`sandbox: ${e.message}`);
     process.exit(127);

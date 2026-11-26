@@ -12,7 +12,9 @@ test("Codex coding sandbox authorizes exact prepared worktrees on fresh and resu
       workspaces: [workspace, workspace],
       resumeId,
     });
-    assert.ok(args.includes(`sandbox_workspace_write.writable_roots=[${JSON.stringify(workspace)}]`));
+    assert.ok(
+      args.includes(`sandbox_workspace_write.writable_roots=[${JSON.stringify(workspace)}]`),
+    );
     assert.ok(args.includes('sandbox_mode="workspace-write"'));
     assert.ok(args.includes('approval_policy="never"'));
     assert.ok(args.includes("sandbox_workspace_write.network_access=false"));

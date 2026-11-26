@@ -10,15 +10,15 @@ Result reuse is deliberately limited to opt-in `agent` steps with `config.replay
 
 The authorized read-only endpoint `GET /api/runs/:id/steps/:key/replay-preview` is displayed in the step re-execution dialog. Candidates are conditional until dispatch. The dialog can request `force: true` to execute the entire affected closure without result or verification reuse. An explicitly re-executed target is always forced. Budget, repository access, approval and publication gates still apply.
 
-| Decision | Execution |
-| --- | --- |
-| `REUSE` | Preserve an unaffected step, or publish a matching descendant result as a new fenced attempt. |
-| `RESUME` | Use the existing answer and provider-session continuation, with checkpoint validation. |
-| `RESTORE` | A validated workspace artifact is available for operator restoration and reconciliation. See [Durable execution checkpoints](execution-checkpoints.md). |
-| `VERIFY_ONLY` | A verification phase runs its configured tests when current evidence cannot be reused. It does not use an old coding or review verdict to bypass execution. |
-| `REEXECUTE` | Execute after fresh dependency resolution and any required gates. |
-| `FORCE_REEXECUTE` | Execute as requested even when a compatible prior result or test pass exists. |
-| `RECONCILE` | Resolve an interruption, workspace mismatch or provider handoff before replaying affected steps. |
+| Decision          | Execution                                                                                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REUSE`           | Preserve an unaffected step, or publish a matching descendant result as a new fenced attempt.                                                               |
+| `RESUME`          | Use the existing answer and provider-session continuation, with checkpoint validation.                                                                      |
+| `RESTORE`         | A validated workspace artifact is available for operator restoration and reconciliation. See [Durable execution checkpoints](execution-checkpoints.md).     |
+| `VERIFY_ONLY`     | A verification phase runs its configured tests when current evidence cannot be reused. It does not use an old coding or review verdict to bypass execution. |
+| `REEXECUTE`       | Execute after fresh dependency resolution and any required gates.                                                                                           |
+| `FORCE_REEXECUTE` | Execute as requested even when a compatible prior result or test pass exists.                                                                               |
+| `RECONCILE`       | Resolve an interruption, workspace mismatch or provider handoff before replaying affected steps.                                                            |
 
 Standalone verification recognizes platform test commands, simple Go, Node and npm test invocations, and workflow-defined commands explicitly marked with `reuse_test_evidence: true`. Reuse requires evidence that tests ran. Passing evidence binds the clean workspace, baseline, test configuration, process environment and policy. Failed, skipped, waived or uncertain results do not become reusable. Publication and agent verification look up fully bound test evidence. The commit alone is insufficient.
 
@@ -28,12 +28,12 @@ Agent verification evidence (`verification_evidence`, `src/agent/verifyEvidence.
 
 Run `node --import ./test/setup.ts test/replay.bench.ts`. The fixture uses local PostgreSQL and eight downstream analysis steps with a 20 ms scripted invocation and 500 synthetic tokens per call. It times seven replays of an unchanged control output following an initial run. These are fixture measurements, with no paid provider involved.
 
-| Measurement | Baseline `b2bad02` | Incremental replay |
-| --- | ---: | ---: |
-| Median replay time | 670 ms | 476 ms |
-| Agent invocations | 56 | 0 |
-| Synthetic token count | 28,000 | 0 |
-| Eligible downstream reuse | 0/56 | 56/56 |
+| Measurement               | Baseline `b2bad02` | Incremental replay |
+| ------------------------- | -----------------: | -----------------: |
+| Median replay time        |             670 ms |             476 ms |
+| Agent invocations         |                 56 |                  0 |
+| Synthetic token count     |             28,000 |                  0 |
+| Eligible downstream reuse |               0/56 |              56/56 |
 
 ## Decision log
 
@@ -50,6 +50,7 @@ Run `node --import ./test/setup.ts test/replay.bench.ts`. The fixture uses local
 Savings (avoided invocations, tokens, cost) are what the reused source attempt reported. They are labelled as estimates and stay unknown when the source reported nothing. Recording never changes the decision.
 
 Where the decisions appear:
+
 - **Run view:** each DAG node shows the latest applied decision of its current generation, and the overview has an "Execution reuse" card.
 - **Re-execute dialog:** groups the preview by action with estimates. While the dialog is open, it colours the DAG nodes by their planned decision.
 - **Trace Explorer:** decisions, harness stages and recoverable checkpoints are nodes. The `recovery_loop` and `checkpoint_incompatible` diagnosis rules use them.

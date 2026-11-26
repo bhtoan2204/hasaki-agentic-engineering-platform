@@ -38,7 +38,8 @@ export const PROVIDERS = ["codex", "cursor", "antigravity", "copilot"] as const;
 export const PROVIDER_ENTRY_FILES = ["run.ts", "capabilities.ts", "index.ts"];
 const CORE_PREFIXES = ["src/workflow/", "src/eval/"];
 
-const IMPORT_RE = /(?:^|[\s;}])(?:import|export)\s+(?:type\s+)?(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
+const IMPORT_RE =
+  /(?:^|[\s;}])(?:import|export)\s+(?:type\s+)?(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
 
 export function listSourceFiles(root: string, dir = "src"): string[] {
   const out: string[] = [];
@@ -59,8 +60,9 @@ function isPostgresDriver(spec: string) {
 }
 
 export function parseImports(source: string): string[] {
-  return Array.from(source.matchAll(IMPORT_RE), (m) => m[1] ?? m[2])
-    .filter((spec) => spec.startsWith(".") || isPostgresDriver(spec));
+  return Array.from(source.matchAll(IMPORT_RE), (m) => m[1] ?? m[2]).filter(
+    (spec) => spec.startsWith(".") || isPostgresDriver(spec),
+  );
 }
 
 /** Builds the source import graph, including the PostgreSQL driver as an external leaf. */
@@ -79,7 +81,9 @@ export function buildGraph(
         continue;
       }
       const target = join(dirname(file), spec).split(sep).join("/");
-      const hit = [target, `${target}.ts`, `${target}/index.ts`].find((c) => fileSet.has(c) && exists(c));
+      const hit = [target, `${target}.ts`, `${target}/index.ts`].find(
+        (c) => fileSet.has(c) && exists(c),
+      );
       if (hit && hit !== file) deps.add(hit);
     }
     graph.set(file, [...deps].sort());
@@ -136,7 +140,10 @@ const API_DB_BOUNDARIES = new Set([
 ]);
 
 // The agent lifecycle is reached only through the executor registry; it returns results and never drives the engine.
-const HARNESS_ENTRIES = new Set(["src/agent/harness/executor.ts", "src/agent/harness/lifecycle.ts"]);
+const HARNESS_ENTRIES = new Set([
+  "src/agent/harness/executor.ts",
+  "src/agent/harness/lifecycle.ts",
+]);
 const HARNESS_CALLERS = new Set(["src/workflow/executors/index.ts"]);
 const WORKFLOW_CORE = new Set([
   "src/workflow/engine.ts",
@@ -160,7 +167,8 @@ export function findViolations(graph: Graph): Violation[] {
   for (const [from, deps] of graph) {
     for (const to of deps) {
       if (
-        from.startsWith("src/api/") && !API_DB_BOUNDARIES.has(from) &&
+        from.startsWith("src/api/") &&
+        !API_DB_BOUNDARIES.has(from) &&
         (to.startsWith("src/db/") || isPostgresDriver(to))
       ) {
         out.push({
@@ -171,8 +179,10 @@ export function findViolations(graph: Graph): Violation[] {
       }
       if (
         isRepository(from) &&
-        to !== "src/db/pool.ts" && to !== "src/db.ts" &&
-        !isRepository(to) && !to.endsWith("/types.ts")
+        to !== "src/db/pool.ts" &&
+        to !== "src/db.ts" &&
+        !isRepository(to) &&
+        !to.endsWith("/types.ts")
       ) {
         out.push({
           rule: "repository-dependencies",
@@ -215,7 +225,11 @@ export function findViolations(graph: Graph): Violation[] {
           detail: `${from} imports workflow core ${to}; the harness returns a result and the engine applies it`,
         });
       }
-      if (toProvider && fromProvider !== toProvider && !PROVIDER_ENTRY_FILES.includes(to.split("/").pop()!)) {
+      if (
+        toProvider &&
+        fromProvider !== toProvider &&
+        !PROVIDER_ENTRY_FILES.includes(to.split("/").pop()!)
+      ) {
         out.push({
           rule: "no-provider-internals",
           key: `no-provider-internals:${from}->${to}`,
@@ -233,7 +247,10 @@ const CYCLE_PREFIX = "no-circular:";
  * A cycle is known when its files are all inside one baselined cycle, so removing a file from a baselined cycle never
  * reads as a new violation, while a cycle that pulls in a file outside the baseline does.
  */
-export function compareToBaseline(violations: Violation[], baseline: Baseline): { newViolations: Violation[]; stale: string[] } {
+export function compareToBaseline(
+  violations: Violation[],
+  baseline: Baseline,
+): { newViolations: Violation[]; stale: string[] } {
   const known = new Set(baseline.violations);
   const baselineCycles = baseline.violations
     .filter((k) => k.startsWith(CYCLE_PREFIX))
@@ -253,7 +270,11 @@ export function compareToBaseline(violations: Violation[], baseline: Baseline): 
 
 export function runCheck(root: string, baseline: Baseline): CheckResult {
   const files = listSourceFiles(root);
-  const graph = buildGraph(files, (f) => readFileSync(join(root, f), "utf8"), (f) => existsSync(resolve(root, f)));
+  const graph = buildGraph(
+    files,
+    (f) => readFileSync(join(root, f), "utf8"),
+    (f) => existsSync(resolve(root, f)),
+  );
   const violations = findViolations(graph);
   const { newViolations, stale } = compareToBaseline(violations, baseline);
   return {

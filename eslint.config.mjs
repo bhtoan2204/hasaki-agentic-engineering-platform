@@ -6,7 +6,17 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
   {
-    ignores: ["node_modules/**", "go/**/testdata/**", "dist/**", "web/dist/**", "build/**", "coverage/**", ".next/**", ".claude/**", ".req94-baseline/**"],
+    ignores: [
+      "node_modules/**",
+      "go/**/testdata/**",
+      "dist/**",
+      "web/dist/**",
+      "build/**",
+      "coverage/**",
+      ".next/**",
+      ".claude/**",
+      ".req94-baseline/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -78,11 +88,7 @@ export default tseslint.config(
   },
   {
     files: ["web/src/**/*.{ts,tsx}"],
-    ignores: [
-      "web/src/dialog/service.ts",
-      "web/src/dialog/types.ts",
-      "web/src/dialog/index.ts",
-    ],
+    ignores: ["web/src/dialog/service.ts", "web/src/dialog/types.ts", "web/src/dialog/index.ts"],
     rules: {
       "no-restricted-globals": [
         "error",

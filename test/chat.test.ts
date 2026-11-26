@@ -51,7 +51,9 @@ describe("chat tool request parsing", () => {
 
 describe("chat context", () => {
   it("parses mentions and caps at 10", () => {
-    const m = parseMentions("xem @repo:oms-api và @file:oms-api/src/a.ts rồi @task:REQ-1 @run:42 @knowledge:conventions/api");
+    const m = parseMentions(
+      "xem @repo:oms-api và @file:oms-api/src/a.ts rồi @task:REQ-1 @run:42 @knowledge:conventions/api",
+    );
     assert.equal(m.length, 5);
     assert.deepEqual(m[0], { kind: "repo", ref: "oms-api" });
   });
@@ -141,12 +143,29 @@ describe("chat context", () => {
 describe("chat usage accounting", () => {
   it("keeps unknown cost/tokens as null, never a fake zero", () => {
     const u = addUsage(
-      { completions: 0, tool_calls: 0, provider_ms: 0, input_tokens: 0, output_tokens: 0, cost_usd: 0 },
+      {
+        completions: 0,
+        tool_calls: 0,
+        provider_ms: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+      },
       { provider_execution_ms: 10, cost_usd: null, tokens: { input: 5, output: 3 } },
     );
     assert.equal(u.cost_usd, null);
     assert.equal(u.input_tokens, 5);
-    const merged = mergeUsage({ cost_usd: 0.1, input_tokens: 10, output_tokens: 2, completions: 1, tool_calls: 0, provider_ms: 5 }, u);
+    const merged = mergeUsage(
+      {
+        cost_usd: 0.1,
+        input_tokens: 10,
+        output_tokens: 2,
+        completions: 1,
+        tool_calls: 0,
+        provider_ms: 5,
+      },
+      u,
+    );
     assert.equal(merged.cost_usd, null);
   });
 });

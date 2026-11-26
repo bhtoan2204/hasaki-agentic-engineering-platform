@@ -1,10 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  isUsableAgent,
-  nextHealthyProvider,
-  type AgentHealth,
-} from "../src/agent/health.ts";
+import { isUsableAgent, nextHealthyProvider, type AgentHealth } from "../src/agent/health.ts";
 
 const row = (provider: AgentHealth["provider"], patch: Partial<AgentHealth> = {}): AgentHealth => ({
   provider,
@@ -30,11 +26,10 @@ test("the next healthy provider skips a disconnected or exhausted agent", () => 
 
 test("no healthy provider is left when every later agent is down", () => {
   assert.equal(
-    nextHealthyProvider(
-      ["claude", "codex"],
-      new Set(["claude"]),
-      [row("claude", { connected: false }), row("codex", { connected: false })],
-    ),
+    nextHealthyProvider(["claude", "codex"], new Set(["claude"]), [
+      row("claude", { connected: false }),
+      row("codex", { connected: false }),
+    ]),
     null,
   );
 });

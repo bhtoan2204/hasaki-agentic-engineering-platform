@@ -196,7 +196,14 @@ export interface PromptSections {
   /** Images attached to this request (sent to the provider as image blocks with the prompt). */
   images?: number;
   /** Documents of the recent messages: metadata, extraction warnings and a bounded excerpt of their text. */
-  documents?: Array<{ id: number; filename: string; media_type: string; bytes: number; warnings: string[]; excerpt: string }>;
+  documents?: Array<{
+    id: number;
+    filename: string;
+    media_type: string;
+    bytes: number;
+    warnings: string[];
+    excerpt: string;
+  }>;
   /** Owner-private chat memory relevant to this message (preferences, corrections, verified procedures). */
   memories?: Array<{ key: string; kind: string; text: string }>;
 }

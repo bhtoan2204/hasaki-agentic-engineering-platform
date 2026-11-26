@@ -40,7 +40,6 @@ The repository detail page exposes connection testing, clone/preparation, refres
 
 Separate directories provide application isolation, not OS security boundaries. Workers and agent CLIs running as one OS user can read that user's files. Use distinct OS accounts or isolated worker hosts for mutually untrusted members. Do not share dataDir or an instance ID across live installations.
 
-
 ## Compatibility retained during production cleanup
 
 A read-only inspection during cleanup found 26 registry rows with `repository_url IS NULL`. Legacy layout hints, local overrides, configured-source discovery, the explicit migration CLI, fixture paths and persisted worktree recovery therefore remain supported. Nothing in cleanup applies repository migrations or rewrites shared identity. See the [cleanup evidence and blockers](../validation/production-cleanup.md).

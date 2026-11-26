@@ -143,7 +143,9 @@ export function planInvestigation(
         `only the "${config.splunk.environment}" Splunk environment is configured; searches use it`,
       ),
     );
-  const { providers, missing } = qc ? { providers: [], missing: [] } : selectProviders(inputs.observability);
+  const { providers, missing } = qc
+    ? { providers: [], missing: [] }
+    : selectProviders(inputs.observability);
   if (missing.includes("signoz"))
     notes.push(
       say(
@@ -156,26 +158,34 @@ export function planInvestigation(
   const window = { earliest: parsed.time.earliest, latest: parsed.time.latest };
   const signoz_queries = providers.includes("signoz")
     ? [
-        { tool: "signoz_aggregate_logs", args: { ...window, severity: "ERROR", group_by: ["service.name"] } },
+        {
+          tool: "signoz_aggregate_logs",
+          args: { ...window, severity: "ERROR", group_by: ["service.name"] },
+        },
         ...ids.slice(0, 2).map((id) => ({
           tool: "signoz_search_logs",
-          args: { ...window, expression: `body CONTAINS '${id.replace(/['\\]/g, "")}'`, limit: 200 },
+          args: {
+            ...window,
+            expression: `body CONTAINS '${id.replace(/['\\]/g, "")}'`,
+            limit: 200,
+          },
         })),
       ]
     : [];
-  const initial_queries = (providers.includes("splunk") ? indexes.slice(0, 3) : []).flatMap((idx) =>
-    ids.length
-      ? ids.slice(0, 2).map((id) => ({
-          query: `index=${idx} "${id.replace(/"/g, "")}" | table _time index source sourcetype host kubernetes.container_name message _raw | sort 0 _time | head 500`,
-          earliest: parsed.time.earliest,
-          latest: parsed.time.latest,
-          splunk_url: buildSearchUrl(
-            `search index=${idx} "${id}"`,
-            parsed.time.earliest_ms,
-            parsed.time.latest_ms,
-          ),
-        }))
-      : [],
+  const initial_queries = (providers.includes("splunk") ? indexes.slice(0, 3) : []).flatMap(
+    (idx) =>
+      ids.length
+        ? ids.slice(0, 2).map((id) => ({
+            query: `index=${idx} "${id.replace(/"/g, "")}" | table _time index source sourcetype host kubernetes.container_name message _raw | sort 0 _time | head 500`,
+            earliest: parsed.time.earliest,
+            latest: parsed.time.latest,
+            splunk_url: buildSearchUrl(
+              `search index=${idx} "${id}"`,
+              parsed.time.earliest_ms,
+              parsed.time.latest_ms,
+            ),
+          }))
+        : [],
   );
   if (!ids.length)
     notes.push(
@@ -230,9 +240,9 @@ export async function investigationParse(ctx: ExecutionContext): Promise<ExecRes
 }
 
 const parsedOf = (ctx: ExecutionContext): (ParsedRequest & { indexes?: string[] }) | null =>
-  (Object.values(ctx.input.upstream).find(
+  Object.values(ctx.input.upstream).find(
     (u) => u.output?.anchors && u.output?.time?.earliest_ms !== undefined,
-  )?.output) ?? null;
+  )?.output ?? null;
 
 function labelsFrom(ctx: ExecutionContext): EventLabel[] {
   const labels: EventLabel[] = [];
@@ -257,7 +267,8 @@ async function roundLabels(ctx: ExecutionContext): Promise<EventLabel[]> {
   const byRef = new Map<string, EventLabel>();
   for (const r of rows)
     for (const e of r.events as EventLabel[])
-      if (e && typeof e === "object" && e.evidence_ref) byRef.set(e.evidence_ref, { ...e, labeled_by: r.key });
+      if (e && typeof e === "object" && e.evidence_ref)
+        byRef.set(e.evidence_ref, { ...e, labeled_by: r.key });
   for (const l of current) byRef.set(l.evidence_ref, l);
   return [...byRef.values()];
 }
@@ -367,11 +378,23 @@ export async function investigationReport(ctx: ExecutionContext): Promise<ExecRe
   const locale = outputLocale(ctx.run);
   const refine = String(ctx.step.config.refine_step ?? "refine_search");
   const refineStatus = (
-    await q<{ status: string }>(pool, "SELECT status FROM workflow_steps WHERE run_id = $1 AND key = $2", [ctx.run.id, refine])
+    await q<{ status: string }>(
+      pool,
+      "SELECT status FROM workflow_steps WHERE run_id = $1 AND key = $2",
+      [ctx.run.id, refine],
+    )
   )[0]?.status;
   // A refine step skipped by its run_if would be skipped again: no further round can search.
   const canRefine = !!refineStatus && refineStatus !== "SKIPPED";
-  const round = await investigationRound(ctx, parsed, timelineOut, rows, up("findings", "analyze_findings"), up("code", "analyze_code"), canRefine);
+  const round = await investigationRound(
+    ctx,
+    parsed,
+    timelineOut,
+    rows,
+    up("findings", "analyze_findings"),
+    up("code", "analyze_code"),
+    canRefine,
+  );
   const report = buildReport({
     round,
     locale,
@@ -395,7 +418,12 @@ export async function investigationReport(ctx: ExecutionContext): Promise<ExecRe
     report.markdown,
     { summary: report.summary, status: report.status },
   );
-  const output = { ...report, report_artifact_id: artifactId, report_markdown: report.markdown, round };
+  const output = {
+    ...report,
+    report_artifact_id: artifactId,
+    report_markdown: report.markdown,
+    round,
+  };
   if (round.stop_reason === null)
     return { kind: "reexecute", target: refine, feedback: roundFeedback(round), output };
   return { kind: "completed", output };
@@ -409,10 +437,16 @@ export async function investigationReport(ctx: ExecutionContext): Promise<ExecRe
 async function investigationRound(
   ctx: ExecutionContext,
   parsed: ParsedRequest,
-  timelineOut: { timeline?: TimelineEvent[]; uncorrelated?: TimelineEvent[]; missing?: Array<{ objective: string; needed: string }>; identifiers?: Record<string, string[]> },
+  timelineOut: {
+    timeline?: TimelineEvent[];
+    uncorrelated?: TimelineEvent[];
+    missing?: Array<{ objective: string; needed: string }>;
+    identifiers?: Record<string, string[]>;
+  },
   rows: Awaited<ReturnType<typeof runSearches>>,
   findings: unknown,
-  code: { code_locations?: Array<{ repo?: string }>; services?: Array<{ repo?: string }> } | undefined,
+  code:
+    { code_locations?: Array<{ repo?: string }>; services?: Array<{ repo?: string }> } | undefined,
   canRefine: boolean,
 ): Promise<RoundState> {
   const prior = await q<{ data: RoundState }>(
@@ -427,7 +461,9 @@ async function investigationRound(
   const knownRefs = new Set([...timeline, ...(timelineOut.uncorrelated ?? [])].flatMap(refsOf));
   const runtimeRefs = new Set(timeline.filter((t) => t.confidence !== "unknown").flatMap(refsOf));
   const repositories = new Set(
-    [...(code?.code_locations ?? []), ...(code?.services ?? [])].map((c) => String(c?.repo ?? "")).filter(Boolean),
+    [...(code?.code_locations ?? []), ...(code?.services ?? [])]
+      .map((c) => String(c?.repo ?? ""))
+      .filter(Boolean),
   );
   const coverage = searchCoverage(rows);
   const anchorMs = parsed.time.anchor ? Date.parse(parsed.time.anchor) : null;
@@ -438,7 +474,9 @@ async function investigationRound(
   const blocked = gaps.includes("no_answered_search") || (!coverage.length && !splunkConnected());
   const verdict = rootCauseOutcome({ hypotheses, impact, deployed, blocked });
   const missing = timelineOut.missing ?? [];
-  const done = new Set<string>(prior.flatMap((p) => (p.data.actions ?? []).map((a: NextAction) => a.fingerprint)));
+  const done = new Set<string>(
+    prior.flatMap((p) => (p.data.actions ?? []).map((a: NextAction) => a.fingerprint)),
+  );
   const actions = planNextActions({
     gaps,
     anchor: parsed.time.anchor,
@@ -449,8 +487,14 @@ async function investigationRound(
     deployed,
     done,
   });
-  const signature = progressSignature({ refs: [...runtimeRefs], hypotheses, missing: missing.map((m) => m.objective) });
-  const queriesUsed = rows.filter((r) => r.mode !== "manual" && ["done", "failed", "running"].includes(r.status)).length;
+  const signature = progressSignature({
+    refs: [...runtimeRefs],
+    hypotheses,
+    missing: missing.map((m) => m.objective),
+  });
+  const queriesUsed = rows.filter(
+    (r) => r.mode !== "manual" && ["done", "failed", "running"].includes(r.status),
+  ).length;
   const round = prior.length + 1;
   const rule = stopReason({
     enabled: config.investigation.maxRounds > 0,
@@ -470,7 +514,12 @@ async function investigationRound(
     max_rounds: config.investigation.maxRounds,
     step_id: ctx.step.id,
     generation: ctx.step.generation,
-    time: { earliest: parsed.time.earliest, latest: parsed.time.latest, timezone: parsed.time.timezone, anchor: parsed.time.anchor },
+    time: {
+      earliest: parsed.time.earliest,
+      latest: parsed.time.latest,
+      timezone: parsed.time.timezone,
+      anchor: parsed.time.anchor,
+    },
     services: parsed.services.map((x) => x.name),
     outcome: verdict.outcome,
     outcome_reasons: verdict.reasons,
@@ -501,7 +550,10 @@ async function investigationRound(
     kind: "investigation",
     action: stop === null ? "REPLAN" : "STOP",
     outcome: "applied",
-    reason: stop === null ? `round ${round}: ${actions.length} next action(s)` : `round ${round}: stopped (${stop})`,
+    reason:
+      stop === null
+        ? `round ${round}: ${actions.length} next action(s)`
+        : `round ${round}: stopped (${stop})`,
     details: {
       round,
       outcome: verdict.outcome,

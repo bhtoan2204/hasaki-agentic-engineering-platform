@@ -61,7 +61,10 @@ function repo() {
 
 test(
   "live Copilot: analyze → ask/resume → coding with commit → independent verification",
-  { skip: live ? false : "set COPILOT_LIVE=1 (uses the worker's Copilot quota)", timeout: 40 * 60_000 },
+  {
+    skip: live ? false : "set COPILOT_LIVE=1 (uses the worker's Copilot quota)",
+    timeout: 40 * 60_000,
+  },
   async () => {
     const cap = await copilotCapabilities(true);
     assert.equal(cap.ok, true, cap.error ?? "");
@@ -118,7 +121,6 @@ test(
     });
     await drain();
     const qs = await q<{ id: string }>(
-
       pool,
       "SELECT * FROM workflow_questions WHERE run_id = $1 AND status = 'open'",
       [run.id],
@@ -127,15 +129,12 @@ test(
     await answerQuestions({ [qs[0].id]: "refund" }, "smoke");
     await drain();
     const steps = await q<{
-        key: string;
-        status: string;
-        output?: { verdict?: unknown; verification?: { status?: unknown } };
-      }>(
-
-      pool,
-      "SELECT key, status, output FROM workflow_steps WHERE run_id = $1 ORDER BY id",
-      [run.id],
-    );
+      key: string;
+      status: string;
+      output?: { verdict?: unknown; verification?: { status?: unknown } };
+    }>(pool, "SELECT key, status, output FROM workflow_steps WHERE run_id = $1 ORDER BY id", [
+      run.id,
+    ]);
     console.log(
       JSON.stringify(
         steps.map((s) => ({
@@ -149,11 +148,10 @@ test(
       ),
     );
     const sessions = await q<{
-        provider: string;
-        session_id: string;
-        key: string;
-      }>(
-
+      provider: string;
+      session_id: string;
+      key: string;
+    }>(
       pool,
       "SELECT s.provider, s.session_id, st.key FROM agent_sessions s JOIN workflow_step_attempts a ON a.id = s.attempt_id JOIN workflow_steps st ON st.id = a.step_id WHERE a.run_id = $1 ORDER BY s.id",
       [run.id],
@@ -170,7 +168,6 @@ test(
       "independent verification used a fresh thread",
     );
     const denied = await one<{ n: number }>(
-
       pool,
       "SELECT count(*)::int AS n FROM workflow_events WHERE run_id = $1 AND kind = 'tool' AND content LIKE 'denied %'",
       [run.id],

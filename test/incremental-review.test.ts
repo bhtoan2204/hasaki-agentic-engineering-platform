@@ -10,7 +10,13 @@ import {
   repairDiff,
 } from "../src/agent/independentReview.ts";
 
-const finding = { severity: "high" as const, file: "a.ts", line: 3, explanation: "null deref", evidence: "x.y" };
+const finding = {
+  severity: "high" as const,
+  file: "a.ts",
+  line: 3,
+  explanation: "null deref",
+  evidence: "x.y",
+};
 const fail = (over: Record<string, unknown> = {}) => ({
   id: 7,
   output: {
@@ -26,15 +32,30 @@ const fail = (over: Record<string, unknown> = {}) => ({
 
 test("incrementalCheckpoint resumes from a FAIL on the same repositories and base", () => {
   const cp = incrementalCheckpoint(fail(), { svc: "bbb" }, { svc: "base1" });
-  assert.deepEqual(cp, { attemptId: 7, heads: { svc: "aaa" }, findings: [finding], summary: "one bug" });
+  assert.deepEqual(cp, {
+    attemptId: 7,
+    heads: { svc: "aaa" },
+    findings: [finding],
+    summary: "one bug",
+  });
 });
 
 test("incrementalCheckpoint falls back to a full review when the checkpoint does not apply", () => {
   assert.equal(incrementalCheckpoint(null, { svc: "b" }, { svc: "base1" }), null);
-  assert.equal(incrementalCheckpoint(fail({ verdict: "PASS" }), { svc: "b" }, { svc: "base1" }), null);
+  assert.equal(
+    incrementalCheckpoint(fail({ verdict: "PASS" }), { svc: "b" }, { svc: "base1" }),
+    null,
+  );
   assert.equal(incrementalCheckpoint(fail(), { svc: "b" }, { svc: "base2" }), null, "base moved");
-  assert.equal(incrementalCheckpoint(fail(), { svc: "b", other: "c" }, { svc: "base1", other: "x" }), null, "repo added");
-  assert.equal(incrementalCheckpoint(fail({ verified_base_tips: undefined }), { svc: "b" }, { svc: "base1" }), null);
+  assert.equal(
+    incrementalCheckpoint(fail(), { svc: "b", other: "c" }, { svc: "base1", other: "x" }),
+    null,
+    "repo added",
+  );
+  assert.equal(
+    incrementalCheckpoint(fail({ verified_base_tips: undefined }), { svc: "b" }, { svc: "base1" }),
+    null,
+  );
 });
 
 test("incrementalReviewBrief lists the previous findings", () => {
@@ -47,7 +68,9 @@ test("repairDiff shows only commits after the checkpoint and refuses rewritten h
   const dir = mkdtempSync(join(tmpdir(), "incr-review-"));
   try {
     const git = (...args: string[]) =>
-      execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" }).trim();
+      execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        encoding: "utf8",
+      }).trim();
     git("init", "-q");
     writeFileSync(join(dir, "a.ts"), "original\n");
     git("add", ".");

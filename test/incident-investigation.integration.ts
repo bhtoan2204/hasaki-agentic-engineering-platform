@@ -303,7 +303,12 @@ test("refund timeout: the workflow collects, correlates, diagnoses and verifies 
   assert.ok(
     r.missing_evidence.some((m: string) => /refund-worker traces: SigNoz unavailable/.test(m)),
   );
-  assert.deepEqual(r.confirmed_facts.map((c: { id: string }) => c.id).sort(), ["F1", "F2", "F3", "K1"]);
+  assert.deepEqual(r.confirmed_facts.map((c: { id: string }) => c.id).sort(), [
+    "F1",
+    "F2",
+    "F3",
+    "K1",
+  ]);
   assert.equal(r.root_cause.status, "CONFIRMED");
   assert.match(r.source_locations[0], /payments-svc:provider\/client\.go:\d+-\d+@[0-9a-f]{12}/);
   assert.deepEqual(

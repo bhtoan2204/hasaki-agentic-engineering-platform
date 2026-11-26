@@ -175,7 +175,14 @@ test("Actual analysis → discovery → ranking → shared executor → Codex pr
   assert.match(block(resumed.prompt), /return 2/);
   assert.doesNotMatch(block(resumed.prompt), /return 1/);
   assert.ok(await runOnce());
-  assert.equal((await getRun(run.id)).status, "COMPLETED", JSON.stringify({ steps: await q(pool, "SELECT key,status,error FROM workflow_steps WHERE run_id=$1", [run.id]), questions: await q(pool, "SELECT question FROM workflow_questions WHERE run_id=$1", [run.id]) }));
+  assert.equal(
+    (await getRun(run.id)).status,
+    "COMPLETED",
+    JSON.stringify({
+      steps: await q(pool, "SELECT key,status,error FROM workflow_steps WHERE run_id=$1", [run.id]),
+      questions: await q(pool, "SELECT question FROM workflow_questions WHERE run_id=$1", [run.id]),
+    }),
+  );
 });
 test("Disabling P1 keeps actual agent workflow functional and removes the code context block", async () => {
   config.codeIntelligence.enabled = false;
@@ -189,7 +196,14 @@ test("Disabling P1 keeps actual agent workflow functional and removes the code c
   assert.ok(await runOnce());
   await approvedCodingFixture(run.id, "implement");
   await drain();
-  assert.equal((await getRun(run.id)).status, "COMPLETED", JSON.stringify({ steps: await q(pool, "SELECT key,status,error FROM workflow_steps WHERE run_id=$1", [run.id]), questions: await q(pool, "SELECT question FROM workflow_questions WHERE run_id=$1", [run.id]) }));
+  assert.equal(
+    (await getRun(run.id)).status,
+    "COMPLETED",
+    JSON.stringify({
+      steps: await q(pool, "SELECT key,status,error FROM workflow_steps WHERE run_id=$1", [run.id]),
+      questions: await q(pool, "SELECT question FROM workflow_questions WHERE run_id=$1", [run.id]),
+    }),
+  );
   assert.equal(block(logs().at(-1).prompt), "");
   config.codeIntelligence.enabled = true;
 });

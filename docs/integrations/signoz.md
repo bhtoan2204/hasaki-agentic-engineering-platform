@@ -30,12 +30,12 @@ hosts in **Settings → Integration → Approved internal SigNoz hosts**. That s
 
 Only documented SigNoz API is used:
 
-| Purpose | Request |
-|---|---|
-| Key check | `GET /api/v1/service_accounts/me` (200 = valid, 401 = invalid) |
+| Purpose     | Request                                                                                                                                                                      |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Key check   | `GET /api/v1/service_accounts/me` (200 = valid, 401 = invalid)                                                                                                               |
 | Every query | `POST /api/v5/query_range`, header `SIGNOZ-API-KEY`, `start`/`end` in Unix ms, `requestType` `raw` / `scalar` / `time_series`, `compositeQuery.queries[]` of `builder_query` |
-| Services | `query_range` scalar `count()` over traces grouped by `service.name` (no dedicated endpoint is documented) |
-| One trace | `query_range` raw traces with `trace_id = '…'` (no trace-by-id endpoint is documented) |
+| Services    | `query_range` scalar `count()` over traces grouped by `service.name` (no dedicated endpoint is documented)                                                                   |
+| One trace   | `query_range` raw traces with `trace_id = '…'` (no trace-by-id endpoint is documented)                                                                                       |
 
 The v5 API is required. If `/api/v5/query_range` answers 404 or 405, the result is reported as `unsupported_api`.
 Older self-hosted versions without service accounts (before v0.114.0) fail the key check gracefully and go on to the
@@ -43,17 +43,17 @@ query probe.
 
 Errors are classified for the UI and for agents:
 
-| Kind | Meaning |
-|---|---|
-| `auth_failed` | 401 |
-| `forbidden` | 403 or `authz_forbidden` |
-| `unsupported_api` | 404 or 405 |
-| `invalid_query` | 400 or 422, with SigNoz's `error.message` |
-| `server_error` | 5xx after retries |
-| `connection_failed` | network or TLS error, timeout, refused redirect, oversized response |
-| `blocked_destination` | the SSRF policy refused the destination |
-| `not_configured` | no SigNoz configuration for this user |
-| `budget_exhausted` | the run or step query budget is used up |
+| Kind                  | Meaning                                                             |
+| --------------------- | ------------------------------------------------------------------- |
+| `auth_failed`         | 401                                                                 |
+| `forbidden`           | 403 or `authz_forbidden`                                            |
+| `unsupported_api`     | 404 or 405                                                          |
+| `invalid_query`       | 400 or 422, with SigNoz's `error.message`                           |
+| `server_error`        | 5xx after retries                                                   |
+| `connection_failed`   | network or TLS error, timeout, refused redirect, oversized response |
+| `blocked_destination` | the SSRF policy refused the destination                             |
+| `not_configured`      | no SigNoz configuration for this user                               |
+| `budget_exhausted`    | the run or step query budget is used up                             |
 
 An empty result is a success, and it says explicitly that the absence of data is not evidence of health.
 
@@ -73,14 +73,14 @@ These tools are read-only and available to every agent provider through the plat
 `call_tool`). They are hidden from `list_tools`, the step prompt's integration catalog and `call_tool` when the run owner
 has not configured SigNoz or has disabled it.
 
-| Tool | Use |
-|---|---|
-| `signoz_list_services` | services with span counts (learn service names) |
+| Tool                    | Use                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `signoz_list_services`  | services with span counts (learn service names)                                     |
 | `signoz_aggregate_logs` | count / count_distinct / avg / p95 grouped by fields; `time_series=true` for spikes |
-| `signoz_search_logs` | raw logs, stored as evidence events (`S<search>:<n>`) |
-| `signoz_search_traces` | spans (operation, errors, status code), stored as evidence events |
-| `signoz_get_trace` | every span of one trace, in time order |
-| `signoz_query_metrics` | one metric as time series, with min/max/avg/last per series |
+| `signoz_search_logs`    | raw logs, stored as evidence events (`S<search>:<n>`)                               |
+| `signoz_search_traces`  | spans (operation, errors, status code), stored as evidence events                   |
+| `signoz_get_trace`      | every span of one trace, in time order                                              |
+| `signoz_query_metrics`  | one metric as time series, with min/max/avg/last per series                         |
 
 - **Filters.** `service`, `environment`, `severity`, `operation`, `trace_id`, `span_id`, `has_error` and `status_code`
   are compiled into a quoted, escaped `filter.expression`.
@@ -93,16 +93,16 @@ has not configured SigNoz or has disabled it.
 
 ### Budgets (`config.json` → `signoz`)
 
-| Key | Default |
-|---|---|
-| `defaultMinutes` | 15 |
-| `maxMinutes` | 7 days |
-| `defaultLimit` | 100 |
-| `maxLimit` | 1000 |
-| `timeoutMs` | 15000 |
-| `maxRetries` | 2 |
-| `maxResponseBytes` | 2 MB |
-| `maxCallsPerStep` | 20 |
+| Key                | Default |
+| ------------------ | ------- |
+| `defaultMinutes`   | 15      |
+| `maxMinutes`       | 7 days  |
+| `defaultLimit`     | 100     |
+| `maxLimit`         | 1000    |
+| `timeoutMs`        | 15000   |
+| `maxRetries`       | 2       |
+| `maxResponseBytes` | 2 MB    |
+| `maxCallsPerStep`  | 20      |
 
 Every SigNoz call, aggregates included, is recorded as one search row. It counts against both the run budget
 (`splunk.queryBudget`, shared with Splunk and Argo CD searches) and the per-step cap.
@@ -111,12 +111,12 @@ Every SigNoz call, aggregates included, is recorded as one search row. It counts
 
 `production-incident-investigation` takes `inputs.observability`:
 
-| Value | Sources |
-|---|---|
+| Value            | Sources                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
 | `auto` (default) | every source the run owner has connected; Splunk when none is connected, since its manual mode still works |
-| `splunk` | Splunk only |
-| `signoz` | SigNoz only |
-| `both` | Splunk and SigNoz |
+| `splunk`         | Splunk only                                                                                                |
+| `signoz`         | SigNoz only                                                                                                |
+| `both`           | Splunk and SigNoz                                                                                          |
 
 QC investigations still use Argo CD.
 
@@ -124,6 +124,7 @@ QC investigations still use Argo CD.
 service, then logs by identifier. It adds a note when SigNoz was selected but is not connected.
 
 The investigation rules tell agents to:
+
 - aggregate first, then narrow;
 - use traces for latency and failed spans;
 - keep confirmed findings apart from hypotheses;

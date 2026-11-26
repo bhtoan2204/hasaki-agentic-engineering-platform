@@ -10,7 +10,6 @@ import { changedFiles } from "./scopeGuard.ts";
 import { workspaceBase } from "../git/provider.ts";
 import { goBaseline, knownBaseFailures } from "../workflow/executors/baseline.ts";
 
-
 /** Historical step evidence proves that step. Publication separately tests the integrated workspace. */
 export async function verifyPublication(
   ctx: ExecutionContext,
@@ -42,7 +41,9 @@ export async function verifyPublication(
       ),
     );
     const environment = (path: string, env: Record<string, string>) => ({
-      ...extraEnv, ...env, BASE_BRANCH: bases.get(path) ?? env.BASE_BRANCH ?? config.baseBranch,
+      ...extraEnv,
+      ...env,
+      BASE_BRANCH: bases.get(path) ?? env.BASE_BRANCH ?? config.baseBranch,
       RUN_ID: String(ctx.run.id),
     });
     const execute: VerifyDeps["run"] = (command, path, env, ...args) =>
@@ -140,7 +141,9 @@ export async function verifyPublication(
     const trees = workspaces.filter((w) => ctx.run.selected_repositories.includes(w.repo));
     if (
       !trees.length ||
-      Object.keys(step.output?.tested_heads ?? {}).some((repo) => !trees.some((w) => w.repo === repo))
+      Object.keys(step.output?.tested_heads ?? {}).some(
+        (repo) => !trees.some((w) => w.repo === repo),
+      )
     ) {
       problems.push(`${step.key}: missing integration workspace`);
       continue;
@@ -160,7 +163,8 @@ export async function verifyPublication(
         s.type === "command" &&
         s.status === "COMPLETED" &&
         s.output?.tested_heads &&
-        s.config.allow_failure !== true && isVerificationCommand(s.config),
+        s.config.allow_failure !== true &&
+        isVerificationCommand(s.config),
     )) {
       const trees = workspaces.filter(
         (w) => ctx.run.selected_repositories.includes(w.repo) && w.repo in step.output.tested_heads,
@@ -182,8 +186,13 @@ export async function verifyPublication(
         continue;
       }
       if (staticChecksPassed.size) cfg.staticChecksPassed = [...staticChecksPassed];
-      await verify(step.key, cfg, trees, step.config.env as Record<string, string> | undefined,
-        step.config.reuse_test_evidence !== false);
+      await verify(
+        step.key,
+        cfg,
+        trees,
+        step.config.env as Record<string, string> | undefined,
+        step.config.reuse_test_evidence !== false,
+      );
     }
 
   return { problems, tested };

@@ -70,7 +70,7 @@ default; CPU pressure gating is off by default), bounded by the admission timeou
 No adaptive scheduler, no host configuration changes.
 
 Pressure wait past the deadline (amended with [ADR 0006](0006-go-code-search.md)): the first implementation of
-`waitPressure()` gave up waiting and *admitted* the command when the deadline passed, contrary to the text above. It
+`waitPressure()` gave up waiting and _admitted_ the command when the deadline passed, contrary to the text above. It
 now returns an error and the slot is released: a host whose pressure never drops runs nothing new (fail closed,
 `TestPressureTimeoutRefusesTheCommand`).
 

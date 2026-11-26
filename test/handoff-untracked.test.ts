@@ -15,7 +15,10 @@ test("repair cache does not count toward the handoff untracked limit", () => {
 
 test("real untracked files still stop the next agent", () => {
   const names = Array.from({ length: 101 }, (_, i) => `pkg/f${i}.go`);
-  assert.throws(() => classifyHandoffUntracked("oms-api", names), /oms-api has 101 untracked files/);
+  assert.throws(
+    () => classifyHandoffUntracked("oms-api", names),
+    /oms-api has 101 untracked files/,
+  );
 });
 
 test("handoff block reasons stay readable", () => {

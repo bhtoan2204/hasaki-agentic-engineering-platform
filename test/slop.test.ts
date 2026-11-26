@@ -524,7 +524,11 @@ test("scan FAST auto: counts untracked files and lines at the micro limits", asy
           g("-C", worktree, "add", "new0.ts");
           assert.equal((await scanWorkspace(opts)).level, "micro", "staged lines count once");
           writeFileSync(join(worktree, "extra.ts"), "// no trailing newline");
-          assert.equal((await scanWorkspace(opts)).level, "standard", "staged and untracked lines add up");
+          assert.equal(
+            (await scanWorkspace(opts)).level,
+            "standard",
+            "staged and untracked lines add up",
+          );
         }
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -587,9 +591,10 @@ test("verify: enforcement blocks a worsened finding beyond the 200-finding repor
       slop: async () => ({ ...scan, mode: s.mode }),
     });
     assert.equal(round.passed, false);
-    assert.deepEqual(round.repos[0].slop?.blocking.map((f) => [f.status, f.severity, f.confidence]), [
-      ["worsened", "high", 0.6],
-    ]);
+    assert.deepEqual(
+      round.repos[0].slop?.blocking.map((f) => [f.status, f.severity, f.confidence]),
+      [["worsened", "high", 0.6]],
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

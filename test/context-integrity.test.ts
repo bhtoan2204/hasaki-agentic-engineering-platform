@@ -44,7 +44,11 @@ test("codeRetrievalKey v3 incorporates selected repos and index snapshot, ignori
     selected: ["repo-a"],
     indexSnapshot: "snap-123",
   });
-  assert.notEqual(key1, keyDifferentSelected, "different selected repos must produce different key");
+  assert.notEqual(
+    key1,
+    keyDifferentSelected,
+    "different selected repos must produce different key",
+  );
 });
 
 test("budgetContextPack preserves mandatory required entries and throws ContextBudgetError if budget is exceeded", () => {
@@ -103,19 +107,12 @@ test("budgetContextPack preserves mandatory required entries and throws ContextB
     preparation_ms: 0,
   };
 
-  const pack = budgetContextPack(
-    basePack,
-    [mandatoryEntry, optionalEntry],
-  );
+  const pack = budgetContextPack(basePack, [mandatoryEntry, optionalEntry]);
   assert.equal(pack.entries.length, 2);
   assert.ok(pack.entries.some((e) => e.id === "mandatory_execution_contract"));
 
   assert.throws(
-    () =>
-      budgetContextPack(
-        { ...basePack, budget_tokens: 10 },
-        [mandatoryEntry],
-      ),
+    () => budgetContextPack({ ...basePack, budget_tokens: 10 }, [mandatoryEntry]),
     (err: unknown) => err instanceof ContextBudgetError,
   );
 });
@@ -148,20 +145,55 @@ test("scoreKnowledge discounts agent skills not applicable to current step type"
   };
 
   const request = "Run test driven development and architecture audit";
-  const scoreMatching = scoreKnowledge(matchingSkill as unknown as KnowledgeLike, request, "coding_agent");
-  const scoreUnmatching = scoreKnowledge(unmatchingSkill as unknown as KnowledgeLike, request, "coding_agent");
+  const scoreMatching = scoreKnowledge(
+    matchingSkill as unknown as KnowledgeLike,
+    request,
+    "coding_agent",
+  );
+  const scoreUnmatching = scoreKnowledge(
+    unmatchingSkill as unknown as KnowledgeLike,
+    request,
+    "coding_agent",
+  );
 
-  assert.ok(scoreMatching.score > scoreUnmatching.score, "non-applicable step skill should be discounted");
+  assert.ok(
+    scoreMatching.score > scoreUnmatching.score,
+    "non-applicable step skill should be discounted",
+  );
 });
 
 test("retrieval state fails closed on partial observations and identifies scope and index changes", async () => {
   const { observeRetrievalState } = await import("../src/context/pack.ts");
-  const read = async (repo: string) => repo === "missing" ? null : { workspace: "primary", head: "sha1", fingerprint: "clean", snapshot: "144:generation" };
+  const read = async (repo: string) =>
+    repo === "missing"
+      ? null
+      : { workspace: "primary", head: "sha1", fingerprint: "clean", snapshot: "144:generation" };
   assert.equal(await observeRetrievalState(["repo-a", "missing"], read), null);
   assert.equal(await observeRetrievalState([], read), null);
-  assert.equal(await observeRetrievalState(["repo-a"], async () => { throw new Error("unreadable"); }), null);
+  assert.equal(
+    await observeRetrievalState(["repo-a"], async () => {
+      throw new Error("unreadable");
+    }),
+    null,
+  );
   const first = await observeRetrievalState(["repo-a"], read);
   assert.ok(first);
-  assert.notDeepEqual(await observeRetrievalState(["repo-a"], async () => ({ workspace: "worktree", head: "sha1", fingerprint: "clean", snapshot: "144:generation" })), first);
-  assert.notDeepEqual(await observeRetrievalState(["repo-a"], async () => ({ workspace: "primary", head: "sha1", fingerprint: "clean", snapshot: "145:new" })), first);
+  assert.notDeepEqual(
+    await observeRetrievalState(["repo-a"], async () => ({
+      workspace: "worktree",
+      head: "sha1",
+      fingerprint: "clean",
+      snapshot: "144:generation",
+    })),
+    first,
+  );
+  assert.notDeepEqual(
+    await observeRetrievalState(["repo-a"], async () => ({
+      workspace: "primary",
+      head: "sha1",
+      fingerprint: "clean",
+      snapshot: "145:new",
+    })),
+    first,
+  );
 });

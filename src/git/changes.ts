@@ -64,7 +64,9 @@ export async function runChanges(runId: number, viewerId?: number) {
     [runId],
   );
   const slopByRepo = new Map<string, unknown>(
-    ((verified?.last ?? []) as Array<{ repo: string; slop?: unknown }>).filter((x) => x?.slop).map((x) => [x.repo, x.slop]),
+    ((verified?.last ?? []) as Array<{ repo: string; slop?: unknown }>)
+      .filter((x) => x?.slop)
+      .map((x) => [x.repo, x.slop]),
   );
   const repos = [];
   const readable =

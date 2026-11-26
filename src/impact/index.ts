@@ -53,11 +53,11 @@ export interface Freshness {
 
 export async function freshnessOf(name: string): Promise<Freshness> {
   const path = await checkoutOf(name);
-  const state = await one<{ commit: string; extractor: string; dynamic_sites: Record<string, number> }>(
-    pool,
-    "SELECT commit, extractor, dynamic_sites FROM impact_index_state WHERE repo=$1",
-    [name],
-  );
+  const state = await one<{
+    commit: string;
+    extractor: string;
+    dynamic_sites: Record<string, number>;
+  }>(pool, "SELECT commit, extractor, dynamic_sites FROM impact_index_state WHERE repo=$1", [name]);
   if (!path)
     return {
       repo: name,
@@ -169,7 +169,15 @@ async function extract(name: string, opts: { force?: boolean }): Promise<IndexRe
       db,
       `INSERT INTO impact_index_state(repo,commit,extractor,contracts,files,duration_ms,dynamic_sites) VALUES($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT(repo) DO UPDATE SET commit=$2,extractor=$3,contracts=$4,files=$5,duration_ms=$6,dynamic_sites=$7,indexed_at=now()`,
-      [name, rev, EXTRACTOR_VERSION, contracts.length, files, Date.now() - t0, JSON.stringify(dynamic)],
+      [
+        name,
+        rev,
+        EXTRACTOR_VERSION,
+        contracts.length,
+        files,
+        Date.now() - t0,
+        JSON.stringify(dynamic),
+      ],
     );
     return true;
   });

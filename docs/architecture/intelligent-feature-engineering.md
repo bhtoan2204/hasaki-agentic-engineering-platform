@@ -10,20 +10,20 @@ Seeded on startup like the other templates. Workflow Studio and the work-item st
 
 The steps are a single chain. `feedback_step` is `implement`. Review uses the existing independent verifier and `max_repairs: 2`.
 
-| Step | Type | Depends on | Role |
-| --- | --- | --- | --- |
-| `understand` | agent | — | Objectives, acceptance criteria, constraints, assumptions, ambiguities, keywords, risks |
-| `discover` | integration `repository_discovery` | `understand` | Rank repositories the owner may already use. Reuses a selection from an earlier run of the same work item |
-| `confirm_repos` | human approval | `discover` | Developer confirms the repositories. Rejecting stops the run until they choose |
-| `architecture` | agent | `confirm_repos` | Modules, dependencies, symbols, applicable knowledge and approved experience, alternatives, risks |
-| `plan` | agent | `architecture` | Ordered subtasks for this run. A subtask is a plan item, not a child run |
-| `approve_plan` | human approval | `plan` | Approves the plan. Rejecting re-executes `plan` and keeps the comment |
-| `implement` | coding agent | `approve_plan` | Edits only inside `prepare_branch` worktrees. Two attempts |
-| `targeted_test` | command | `implement` | Typecheck, lint and tests for the touched modules. Requires a worktree |
-| `review` | agent | `targeted_test` | Independent review of the diff. At most two repairs back into `implement` |
-| `regression_test` | command | `review` | Broader `go test ./...` or `npm test`, bounded by `-short` and the step timeout |
-| `quality_gate` | human approval | `regression_test` | Blocks the pull request. Rejecting re-executes `implement` |
-| `pr` | git pull request | `quality_gate` | Push and create or update the pull request after a person approves |
+| Step              | Type                               | Depends on        | Role                                                                                                      |
+| ----------------- | ---------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `understand`      | agent                              | —                 | Objectives, acceptance criteria, constraints, assumptions, ambiguities, keywords, risks                   |
+| `discover`        | integration `repository_discovery` | `understand`      | Rank repositories the owner may already use. Reuses a selection from an earlier run of the same work item |
+| `confirm_repos`   | human approval                     | `discover`        | Developer confirms the repositories. Rejecting stops the run until they choose                            |
+| `architecture`    | agent                              | `confirm_repos`   | Modules, dependencies, symbols, applicable knowledge and approved experience, alternatives, risks         |
+| `plan`            | agent                              | `architecture`    | Ordered subtasks for this run. A subtask is a plan item, not a child run                                  |
+| `approve_plan`    | human approval                     | `plan`            | Approves the plan. Rejecting re-executes `plan` and keeps the comment                                     |
+| `implement`       | coding agent                       | `approve_plan`    | Edits only inside `prepare_branch` worktrees. Two attempts                                                |
+| `targeted_test`   | command                            | `implement`       | Typecheck, lint and tests for the touched modules. Requires a worktree                                    |
+| `review`          | agent                              | `targeted_test`   | Independent review of the diff. At most two repairs back into `implement`                                 |
+| `regression_test` | command                            | `review`          | Broader `go test ./...` or `npm test`, bounded by `-short` and the step timeout                           |
+| `quality_gate`    | human approval                     | `regression_test` | Blocks the pull request. Rejecting re-executes `implement`                                                |
+| `pr`              | git pull request                   | `quality_gate`    | Push and create or update the pull request after a person approves                                        |
 
 The engine appends its usual task-result report when the work item asks for one. That report is not a second workflow.
 

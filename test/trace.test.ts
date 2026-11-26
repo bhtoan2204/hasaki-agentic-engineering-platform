@@ -281,7 +281,14 @@ describe("redaction and best-effort", () => {
     assert.equal(entry.level, "ERROR");
     assert.equal(entry.event, "workflow.trace_write_failed");
     assert.deepEqual(
-      [entry.run_id, entry.step_id, entry.attempt_id, entry.span_id, entry.parent_span_id, entry.trace_event],
+      [
+        entry.run_id,
+        entry.step_id,
+        entry.attempt_id,
+        entry.span_id,
+        entry.parent_span_id,
+        entry.trace_event,
+      ],
       [1, 2, 3, "span", "parent", "x"],
     );
     assert.equal(entry.error, "db down password=***");

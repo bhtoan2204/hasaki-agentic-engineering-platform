@@ -102,6 +102,9 @@ describe("subscribeDialog", () => {
     void dialog.confirm({ title: "X" });
     resolveDialog(true);
     unsub();
-    assert.deepEqual(seen.filter((x, i) => i === 0 || x !== seen[i - 1]), [null, "confirm", null]);
+    assert.deepEqual(
+      seen.filter((x, i) => i === 0 || x !== seen[i - 1]),
+      [null, "confirm", null],
+    );
   });
 });

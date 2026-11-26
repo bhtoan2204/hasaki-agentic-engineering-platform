@@ -2,6 +2,7 @@
 
 > [!NOTE] Current Implementation vs Historical Baseline
 > Originally authored for Claude Code via the Agent SDK, the platform retains the foundational principle of **single agent + skills + tools** but generalizes step execution across **5 supported agent providers**:
+>
 > - **Anthropic Claude Code** (Agent SDK & CLI)
 > - **Cursor CLI** (`agent`)
 > - **OpenAI Codex CLI** (`codex`)
@@ -35,29 +36,29 @@ tools + platform tools + a discoverable integration registry), disclosed progres
 
 ## Audit (before this change) and what was added
 
-| Requirement | Before | Now |
-|---|---|---|
-| Durable engine, single executor | ✅ | unchanged |
+| Requirement                              | Before                                                                                                                                                            | Now                                                                                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Durable engine, single executor          | ✅                                                                                                                                                                | unchanged                                                                                                                                          |
 | Skill discovery / progressive disclosure | registry + `read_knowledge`, every applicable on-demand item listed; **Claude Code also auto-loaded `~/.claude` skills and plugins** (two mechanisms, duplicates) | relevance-ranked three-tier disclosure; `search_knowledge`; `settingSources: []` by default and `~/.claude/skills` imported once into the registry |
-| Dynamic tools | fixed platform tools only | `src/agent/toolRegistry.ts`: discovery → description → call |
-| Context management | each upstream output capped at 20k chars, no total budget | token budget with weighted fair share, deterministic structural summaries, `read_step_output(step, attempt?)`, `run.step_history` |
-| Subagents | `Task` always available, unrestricted | off by default; per-step `delegation.enabled`; `explorer` / `reviewer` read-only |
-| Snapshots | knowledge versions, upstream attempt ids | + `prompt_plan` (disclosure tier + score per item, upstream full/summary, budgets, setting sources, delegation) |
-| Observability | transcript events | `workflow_step_attempts.metrics`, `/api/metrics/*`, Insights page, run/step metrics in the UI |
+| Dynamic tools                            | fixed platform tools only                                                                                                                                         | `src/agent/toolRegistry.ts`: discovery → description → call                                                                                        |
+| Context management                       | each upstream output capped at 20k chars, no total budget                                                                                                         | token budget with weighted fair share, deterministic structural summaries, `read_step_output(step, attempt?)`, `run.step_history`                  |
+| Subagents                                | `Task` always available, unrestricted                                                                                                                             | off by default; per-step `delegation.enabled`; `explorer` / `reviewer` read-only                                                                   |
+| Snapshots                                | knowledge versions, upstream attempt ids                                                                                                                          | + `prompt_plan` (disclosure tier + score per item, upstream full/summary, budgets, setting sources, delegation)                                    |
+| Observability                            | transcript events                                                                                                                                                 | `workflow_step_attempts.metrics`, `/api/metrics/*`, Insights page, run/step metrics in the UI                                                      |
 
 ## Skills: one mechanism, three tiers
 
-* Source of truth: `knowledge_items` / `knowledge_versions` (versioned, scoped, audited). Imported from repositories
+- Source of truth: `knowledge_items` / `knowledge_versions` (versioned, scoped, audited). Imported from repositories
   (`CLAUDE.md`, `.claude/skills`, `.agents/skills`, cursor rules, wiki docs) and from `~/.claude/skills`
-  (`npm run knowledge:import`, or *⟳ Quét repository* in the UI). User-level skills identical to a repository copy widen
+  (`npm run knowledge:import`, or _⟳ Quét repository_ in the UI). User-level skills identical to a repository copy widen
   that item to ORGANIZATION scope; interactive/autonomous ones (`execute`, `pr`, `address`, `define`, ...) are imported
   **disabled**.
-* Claude Code does not load settings layers in agent steps (`config.agent.settingSources = []`), so no `Skill` tool, no
+- Claude Code does not load settings layers in agent steps (`config.agent.settingSources = []`), so no `Skill` tool, no
   user plugins, no user MCP servers inside unattended steps. Set it to `["user"]` to opt back in (then `Skill` returns).
-* `planKnowledge` (pure): mandatory items (assigned to the step, enforced policies) are always inline; other inline-type
+- `planKnowledge` (pure): mandatory items (assigned to the step, enforced policies) are always inline; other inline-type
   items (repository conventions) fill `inlineKnowledgeTokens` by relevance and overflow to the index; on-demand items
   are ranked, the top `knowledgeIndexSize` become index lines, the rest are search-only.
-* Relevance (`scoreKnowledge`) is deterministic word overlap with the request (work item + step instructions + upstream
+- Relevance (`scoreKnowledge`) is deterministic word overlap with the request (work item + step instructions + upstream
   keywords) over title/key, description and content, with small priors; the reason is recorded.
 
 ## Tools: discovery → description → call
@@ -91,40 +92,40 @@ the agent was shown and what it did.
 
 ## Configuration (`config.json` → `agent`)
 
-| Key | Default | |
-|---|---|---|
-| `settingSources` | `[]` | Claude Code settings layers for agent steps |
-| `inlineKnowledgeTokens` | 8000 | budget for inline knowledge |
-| `knowledgeIndexSize` | 12 | on-demand items listed in the prompt |
-| `upstreamTokens` | 12000 | budget for upstream outputs |
+| Key                     | Default |                                             |
+| ----------------------- | ------- | ------------------------------------------- |
+| `settingSources`        | `[]`    | Claude Code settings layers for agent steps |
+| `inlineKnowledgeTokens` | 8000    | budget for inline knowledge                 |
+| `knowledgeIndexSize`    | 12      | on-demand items listed in the prompt        |
+| `upstreamTokens`        | 12000   | budget for upstream outputs                 |
 
 ## Task Result Report (optional final step)
 
 Driven by Hasaki Work `task_ai.ai_suggest`. Code: `src/report/` (parser, evidence, build, executor, evidence store),
 `withReportStep` in `src/workflow/engine.ts`, UI `web/src/pages/Report.tsx`.
 
-* **When.** `startRun` parses the work item payload (`parseAiSuggest`). If `report` has at least one section with a
+- **When.** `startRun` parses the work item payload (`parseAiSuggest`). If `report` has at least one section with a
   non-blank item, a `task_result_report` step (type of the same name, migration 008) is appended to the run's **resolved
   graph** — never to the published definition — depending on every terminal step, so it runs after implementation,
   tests, review and PR. Idempotent: not added when the graph already has a report step (custom workflows may declare
   one explicitly; it then reads `ai_suggest` from the work item at run time). `task_readiness` is ignored; `reasoning`
   is context only. JSONB does not preserve object key order, so sections keep their names but not necessarily the
   original order.
-* **Evidence (deterministic).** `collectEvidence` builds a catalogue with stable ids from PostgreSQL: implementation
+- **Evidence (deterministic).** `collectEvidence` builds a catalogue with stable ids from PostgreSQL: implementation
   summaries, analysis and review outputs, command/test results (baseline-aware), logs, commits and changed files of the
   run's worktrees, PRs, human answers, evidence uploaded to the report step, and task attachments (flagged pre-fix).
-* **Reasoning (main Claude agent, no tools).** Proposes per requirement `VERIFIED | PARTIAL | MISSING`, cited evidence
+- **Reasoning (main Claude agent, no tools).** Proposes per requirement `VERIFIED | PARTIAL | MISSING`, cited evidence
   ids and an explanation, plus a summary — in Vietnamese when the suggestion is Vietnamese.
-* **Validation (rules cap the proposal).** Unknown/irrelevant ids are dropped; failed tests, stale uploads and pre-fix
+- **Validation (rules cap the proposal).** Unknown/irrelevant ids are dropped; failed tests, stale uploads and pre-fix
   attachments never verify; a screenshot-only requirement is VERIFIED only by an image the user attached to that
   requirement, PARTIAL if an unattached image is cited, otherwise MISSING; an outcome requirement backed only by code
   stays PARTIAL; without the reasoner nothing is auto-verified except human evidence.
-* **Human review.** The draft (JSON + Markdown artifacts, also in the attempt output) waits in `WAITING_APPROVAL`
+- **Human review.** The draft (JSON + Markdown artifacts, also in the attempt output) waits in `WAITING_APPROVAL`
   without holding a worker. Users attach files/notes per requirement (`POST /api/runs/:id/steps/task_result_report/evidence`,
   stored as `evidence` artifacts on the step), regenerate (re-execute → new attempt, previous drafts kept), edit the
   Markdown and approve. Approval finalizes from the persisted draft of the current generation (no new LLM call) and
   records the approver and every unverified requirement as a limitation.
-* **Lifecycle.** The run is not COMPLETED until the report is approved. Re-executing any upstream step invalidates the
+- **Lifecycle.** The run is not COMPLETED until the report is approved. Re-executing any upstream step invalidates the
   report (generation bump) and the next draft uses the latest evidence. Crash/restart: leases are reaped and the step
   retried; drafts and uploads live in PostgreSQL. Nothing is posted to Hasaki Work, no task is closed, nothing merged.
 
@@ -180,7 +181,7 @@ outcome, repairs and human gates per run.
 - **Four repo statuses**: `passed` (clean), `accepted_preexisting` (only base-branch failures, **confirmed by a re-run
   with exactly those tests excluded**; anything else still failing → `failed`), `failed` (regressions, unclassified
   failures, timeouts, hard test weakening) and `error` (verification itself could not complete). Unknown/unparseable
-  failures and an unavailable baseline always count as failures. Pre-existing *build* errors cannot be isolated with
+  failures and an unavailable baseline always count as failures. Pre-existing _build_ errors cannot be isolated with
   `-skip`; they are accepted explicitly with `needs_review`.
 - **Integrity errors are explicit**: if the test diff cannot be inspected, the repo is `error` (never clean). The loop
   stops on `error` without spending repairs (the agent cannot fix infrastructure) and the step fails with a message
@@ -235,14 +236,14 @@ output contract) are affected — other downstream agents still read the author'
 
 `src/workflow/failures.ts`, applied in `engine.applyResult` to every failed attempt (stored as `error.failure`):
 
-| class | action |
-|---|---|
-| transient (network, 5xx, lease expiry) | retry with exponential backoff (base `retry_backoff_seconds`, cap 15 min), bounded by `max_attempts` |
-| rate_limit (429, overloaded) | retry with backoff, base ≥ 30 s, at least 3 attempts, then stop |
-| code (tests/build/verification) | the executor's decision (repair loops live in the executors) |
-| missing_requirements, workspace (git conflict, branch checked out elsewhere, dirty worktree) | pause: a question; "Dừng…/Stop" fails the step, any other answer runs it again |
-| auth (401/403, bad credentials) | stop at once |
-| no_progress (same failures twice) | stop |
+| class                                                                                        | action                                                                                               |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| transient (network, 5xx, lease expiry)                                                       | retry with exponential backoff (base `retry_backoff_seconds`, cap 15 min), bounded by `max_attempts` |
+| rate_limit (429, overloaded)                                                                 | retry with backoff, base ≥ 30 s, at least 3 attempts, then stop                                      |
+| code (tests/build/verification)                                                              | the executor's decision (repair loops live in the executors)                                         |
+| missing_requirements, workspace (git conflict, branch checked out elsewhere, dirty worktree) | pause: a question; "Dừng…/Stop" fails the step, any other answer runs it again                       |
+| auth (401/403, bad credentials)                                                              | stop at once                                                                                         |
+| no_progress (same failures twice)                                                            | stop                                                                                                 |
 
 Leases, fencing tokens, idempotent jobs and the step state machine are unchanged (new transition WAITING_INPUT → FAILED
 for "stop").
@@ -280,10 +281,10 @@ Measured over all recorded attempts: Grep 242 calls / 0.04 s avg / 0.2 min total
 Bash (builds/tests) 50.5 min. Retrieval is not a measurable bottleneck, so no symbol index or embeddings were added;
 the existing file-reference handoff between steps stays.
 
-
 ## Step-level orchestration, fallback and provider handoff
 
 While each run specifies a default `agent_provider` (`claude`, `cursor`, `codex`, `antigravity`, or `copilot`), steps can define their own agent configuration via `config.agent` (`src/agent/stepAgent.ts`):
+
 - **Provider & Model:** Select a specific provider, model, and reasoning effort per step, or supply a manual override at runtime (`agent_override`).
 - **Execution Profile:** Assign a step-level profile (`MICRO`, `FAST`, `STANDARD`, `DEEP`).
 - **Fallback Policy:** Configure `config.agent.fallback` (`mode: disabled | manual | automatic`, `providers: [...]`, `max_switches: 2`, `auto_health: true`).

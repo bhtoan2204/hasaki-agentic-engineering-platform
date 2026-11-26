@@ -268,7 +268,10 @@ test("escalation tool fences later writes and an interrupted provider retains th
 });
 
 test("incoming module import of constant export marks impact unknown", async () => {
-  writeFileSync(join(root, "src/consumer.ts"), 'import { label } from "./label";\nexport const x = label;\n');
+  writeFileSync(
+    join(root, "src/consumer.ts"),
+    'import { label } from "./label";\nexport const x = label;\n',
+  );
   git(root, "add", ".");
   git(root, "commit", "-qm", "add consumer");
   await indexRepository(repo);
@@ -282,7 +285,7 @@ test("incoming module import of constant export marks impact unknown", async () 
 });
 
 test("unindexed or broken file in repository marks impact unknown", async () => {
-  writeFileSync(join(root, "src/broken.ts"), 'export const broken = ;;\n');
+  writeFileSync(join(root, "src/broken.ts"), "export const broken = ;;\n");
   git(root, "add", ".");
   git(root, "commit", "-qm", "add broken file");
   await indexRepository(repo);

@@ -51,7 +51,11 @@ const textOnly: CompletionRunner = async () => ({ text: "ok", model: "stub", tok
 before(async () => {
   await shareAllRepositoriesForTests();
   const mk = async (tag: string) => {
-    const u = await createUser({ username: `agentic-${tag}-${Date.now()}`, password: "local-test-password", role: "member" });
+    const u = await createUser({
+      username: `agentic-${tag}-${Date.now()}`,
+      password: "local-test-password",
+      role: "member",
+    });
     return { id: u.id, username: u.username, role: u.role as Actor["role"], active: u.active };
   };
   owner = await mk("owner");
@@ -73,9 +77,17 @@ before(async () => {
     execFileSync("git", ["add", "."], { cwd: dir });
     return dir;
   });
-  setChatHealthProbe(async () => PROVIDERS.map((provider) => ({ provider, connected: true, quota: "unknown" as const })));
+  setChatHealthProbe(async () =>
+    PROVIDERS.map((provider) => ({ provider, connected: true, quota: "unknown" as const })),
+  );
   setChatTitleComplete(async () => "title");
-  setChatProviders({ claude, cursor: textOnly, codex: textOnly, antigravity: textOnly, copilot: textOnly });
+  setChatProviders({
+    claude,
+    cursor: textOnly,
+    codex: textOnly,
+    antigravity: textOnly,
+    copilot: textOnly,
+  });
 });
 after(async () => {
   setChatProviders(undefined);
@@ -91,78 +103,140 @@ test("uploads: type from the bytes, size bounds, base64 only, owner's conversati
   const ok = await uploadAttachment(owner.id, c.id, { data: PNG.toString("base64") });
   assert.equal(ok.media_type, "image/png");
   const gif = Buffer.from("R0lGODlhAQABAAAAACw=", "base64");
-  await assert.rejects(uploadAttachment(owner.id, c.id, { data: gif.toString("base64") }), /PNG, JPEG and WebP/);
+  await assert.rejects(
+    uploadAttachment(owner.id, c.id, { data: gif.toString("base64") }),
+    /PNG, JPEG and WebP/,
+  );
   // A PNG name or claim does not matter: the bytes decide (plain text is a text document, binary is refused).
-  const text = await uploadAttachment(owner.id, c.id, { data: Buffer.from("not an image").toString("base64"), filename: "x.png" });
+  const text = await uploadAttachment(owner.id, c.id, {
+    data: Buffer.from("not an image").toString("base64"),
+    filename: "x.png",
+  });
   assert.equal(text.kind, "document");
   assert.equal(text.media_type, "text/plain");
   await assert.rejects(
-    uploadAttachment(owner.id, c.id, { data: Buffer.from([0x4d, 0x5a, 0x90, 0, 3, 0]).toString("base64"), filename: "x.png" }),
+    uploadAttachment(owner.id, c.id, {
+      data: Buffer.from([0x4d, 0x5a, 0x90, 0, 3, 0]).toString("base64"),
+      filename: "x.png",
+    }),
     /PNG, JPEG and WebP/,
   );
   await assert.rejects(uploadAttachment(owner.id, c.id, { data: "%%%" }), /not base64/);
-  await assert.rejects(uploadAttachment(owner.id, c.id, { data: "A".repeat(14 * 1024 * 1024) }), /larger than/);
+  await assert.rejects(
+    uploadAttachment(owner.id, c.id, { data: "A".repeat(14 * 1024 * 1024) }),
+    /larger than/,
+  );
   // A valid PNG above the image limit (5 MB) is refused even though documents may be larger.
   const bigPng = Buffer.concat([PNG, Buffer.alloc(5 * 1024 * 1024)]);
-  await assert.rejects(uploadAttachment(owner.id, c.id, { data: bigPng.toString("base64") }), /image larger than 5 MB/);
-  await assert.rejects(uploadAttachment(other.id, c.id, { data: PNG.toString("base64") }), /not found/);
+  await assert.rejects(
+    uploadAttachment(owner.id, c.id, { data: bigPng.toString("base64") }),
+    /image larger than 5 MB/,
+  );
+  await assert.rejects(
+    uploadAttachment(other.id, c.id, { data: PNG.toString("base64") }),
+    /not found/,
+  );
   assert.ok(await readAttachment(owner.id, ok.id));
   assert.equal(await readAttachment(other.id, ok.id), undefined, "another user never reads it");
   // Another user's upload id cannot be attached to this conversation's message.
   const theirs = await chat.create(other, { mode: "ASK", provider: "claude" });
   const foreign = await uploadAttachment(other.id, theirs.id, { data: PNG.toString("base64") });
   await assert.rejects(
-    chat.postMessage(owner, c.id, { content: "look", attachments: [foreign.id], client_message_id: `agentic-f-${c.id}` }),
+    chat.postMessage(owner, c.id, {
+      content: "look",
+      attachments: [foreign.id],
+      client_message_id: `agentic-f-${c.id}`,
+    }),
     /not found or already used/,
   );
-  await assert.rejects(chat.postMessage(owner, c.id, { content: "  " }), /text or at least one image/);
+  await assert.rejects(
+    chat.postMessage(owner, c.id, { content: "  " }),
+    /text or at least one image/,
+  );
 });
 
 test("an image-only message reaches the vision provider and stays in the history; a manual text-only provider is refused", async () => {
   const c = await chat.create(owner, { mode: "ASK", provider: "claude" });
   const up = await uploadAttachment(owner.id, c.id, { data: PNG.toString("base64") });
-  const posted = await chat.postMessage(owner, c.id, { attachments: [up.id], client_message_id: `agentic-img-${c.id}` });
+  const posted = await chat.postMessage(owner, c.id, {
+    attachments: [up.id],
+    client_message_id: `agentic-img-${c.id}`,
+  });
   assert.equal(posted.message?.content, "");
   await settleBackground();
   assert.equal(seen.images, 1, "the image was sent as an image block");
   const detail = await chat.get(owner, c.id);
   const user = detail.messages.find((m) => m.role === "user")!;
-  assert.deepEqual(user.attachments.map((a) => a.id), [up.id]);
+  assert.deepEqual(
+    user.attachments.map((a) => a.id),
+    [up.id],
+  );
   assert.equal(detail.turns[0].status, "completed");
   // A follow-up without a new image still carries the screenshot (bounded window).
-  await chat.postMessage(owner, c.id, { content: "và lỗi này nghĩa là gì?", client_message_id: `agentic-img2-${c.id}` });
+  await chat.postMessage(owner, c.id, {
+    content: "và lỗi này nghĩa là gì?",
+    client_message_id: `agentic-img2-${c.id}`,
+  });
   await settleBackground();
   assert.equal(seen.images, 1);
 
-  const manual = await chat.create(owner, { mode: "ASK", provider: "codex", provider_strategy: "manual" });
+  const manual = await chat.create(owner, {
+    mode: "ASK",
+    provider: "codex",
+    provider_strategy: "manual",
+  });
   const img = await uploadAttachment(owner.id, manual.id, { data: PNG.toString("base64") });
-  await chat.postMessage(owner, manual.id, { content: "phân tích", attachments: [img.id], client_message_id: `agentic-cap-${manual.id}` });
+  await chat.postMessage(owner, manual.id, {
+    content: "phân tích",
+    attachments: [img.id],
+    client_message_id: `agentic-cap-${manual.id}`,
+  });
   await settleBackground();
-  const turn = (await chat.get(owner, manual.id)).turns[0] as { status: string; failure?: { code?: string } };
+  const turn = (await chat.get(owner, manual.id)).turns[0] as {
+    status: string;
+    failure?: { code?: string };
+  };
   assert.equal(turn.status, "failed");
   assert.equal(turn.failure?.code, "PROVIDER_CAPABILITY", "never a silently dropped image");
 });
 
 test("repository scope inferred from the request; native tool calls use the authorized chat tools and the remote checkout", async () => {
   const c = await chat.create(owner, { mode: "INVESTIGATE", provider: "claude" });
-  await chat.postMessage(owner, c.id, { content: "Techstack Payment gồm những gì?", client_message_id: `agentic-repo-${c.id}` });
+  await chat.postMessage(owner, c.id, {
+    content: "Techstack Payment gồm những gì?",
+    client_message_id: `agentic-repo-${c.id}`,
+  });
   await settleBackground();
   const events = await q<{ data: { repositories: Array<{ name: string }> } }>(
     pool,
     "SELECT data FROM chat_events WHERE conversation_id = $1 AND kind = 'repositories.resolved'",
     [c.id],
   );
-  assert.deepEqual(events[0].data.repositories.map((r) => r.name).sort(), ["payment-api", "payment-wiki"]);
+  assert.deepEqual(events[0].data.repositories.map((r) => r.name).sort(), [
+    "payment-api",
+    "payment-wiki",
+  ]);
   assert.match(seen.text, /Repository scope: payment-api, payment-wiki/);
   assert.equal(seen.native.length, 3, "the provider called the platform tools natively");
-  assert.match(seen.native[1], /go\.mod/, "manifests listed from the checkout prepared from the registered remote");
-  assert.match(seen.native[2], /denied/, "an unreadable repository is refused by the same authorization");
+  assert.match(
+    seen.native[1],
+    /go\.mod/,
+    "manifests listed from the checkout prepared from the registered remote",
+  );
+  assert.match(
+    seen.native[2],
+    /denied/,
+    "an unreadable repository is refused by the same authorization",
+  );
   const calls = await chatRepository.toolCallsOf(c.id);
-  assert.deepEqual(calls.map((r) => [r.tool, r.status]), [
-    ["repo.list", "ok"],
-    ["code.list_files", "ok"],
-    ["code.read_file", "denied"],
-  ]);
+  assert.deepEqual(
+    calls.map((r) => [r.tool, r.status]),
+    [
+      ["repo.list", "ok"],
+      ["code.list_files", "ok"],
+      ["code.read_file", "denied"],
+    ],
+  );
   const detail = await chat.get(owner, c.id);
   assert.equal(detail.turns[0].status, "completed");
   assert.match(detail.messages.at(-1)!.content, /Go/);

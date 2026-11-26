@@ -179,7 +179,9 @@ async function uncommittedHash(path: string, prefix: string) {
     .update("\0")
     .update(await git(path, ["diff", "--no-color", "--binary", "--no-renames", "HEAD"]))
     .update("\0index\0")
-    .update(await git(path, ["diff", "--cached", "--no-color", "--binary", "--no-renames", "HEAD"]));
+    .update(
+      await git(path, ["diff", "--cached", "--no-color", "--binary", "--no-renames", "HEAD"]),
+    );
   const untracked = z(await git(path, ["ls-files", "-z", "--others", "--exclude-standard"])).sort();
   const files: string[] = [];
   for (const file of untracked) {
@@ -190,9 +192,13 @@ async function uncommittedHash(path: string, prefix: string) {
   }
   if (files.length) {
     const output = await new Promise<string>((resolve, reject) => {
-      const child = execFile("git", ["-C", path, "hash-object", "--stdin-paths"], { maxBuffer: 64 << 20 },
-        (error, stdout) => error ? reject(error) : resolve(stdout));
-      child.stdin?.end(files.map(file => JSON.stringify(file)).join("\n") + "\n");
+      const child = execFile(
+        "git",
+        ["-C", path, "hash-object", "--stdin-paths"],
+        { maxBuffer: 64 << 20 },
+        (error, stdout) => (error ? reject(error) : resolve(stdout)),
+      );
+      child.stdin?.end(files.map((file) => JSON.stringify(file)).join("\n") + "\n");
     });
     const hashes = output.trim().split("\n");
     if (hashes.length !== files.length) throw new Error("Incomplete untracked file observation");
@@ -367,10 +373,17 @@ export function finalPublishProblems(input: {
   const { repo, verified: v, now: n } = input;
   const problems: string[] = [];
   if (input.ownershipLost) problems.push(`${repo}: this attempt no longer owns the step`);
-  if (!n) return [...problems, `${repo}: workspace state could not be read right before publishing`];
-  if (n.head !== v.head) problems.push(`${repo}: HEAD moved from ${v.head.slice(0, 12)} to ${n.head.slice(0, 12)} after verification`);
+  if (!n)
+    return [...problems, `${repo}: workspace state could not be read right before publishing`];
+  if (n.head !== v.head)
+    problems.push(
+      `${repo}: HEAD moved from ${v.head.slice(0, 12)} to ${n.head.slice(0, 12)} after verification`,
+    );
   if (n.branchTip !== v.branchTip)
-    problems.push(`${repo}: branch tip moved from ${v.branchTip.slice(0, 12)} to ${n.branchTip.slice(0, 12)} after verification`);
-  if (n.fingerprint !== v.fingerprint) problems.push(`${repo}: workspace content changed after verification (fingerprint mismatch)`);
+    problems.push(
+      `${repo}: branch tip moved from ${v.branchTip.slice(0, 12)} to ${n.branchTip.slice(0, 12)} after verification`,
+    );
+  if (n.fingerprint !== v.fingerprint)
+    problems.push(`${repo}: workspace content changed after verification (fingerprint mismatch)`);
   return problems;
 }

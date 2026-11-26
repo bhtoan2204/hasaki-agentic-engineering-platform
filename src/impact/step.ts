@@ -177,7 +177,13 @@ export async function impactAnalysisStep(ctx: ImpactContext): Promise<ExecResult
     );
     await ctx.log(
       "system",
-      `impact analysis: ${impacts.length} cross-repository dependency(ies), ${breaking.length} breaking change(s)${results.some((r) => r.empty_diff) ? ", empty diff in some repositories" : ""}${partial ? ` (INCOMPLETE — ${Object.entries(statuses).map(([k, v]) => `${k}: ${v}`).join(", ")}; no dependency found does not mean no impact)` : ""}`,
+      `impact analysis: ${impacts.length} cross-repository dependency(ies), ${breaking.length} breaking change(s)${results.some((r) => r.empty_diff) ? ", empty diff in some repositories" : ""}${
+        partial
+          ? ` (INCOMPLETE — ${Object.entries(statuses)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(", ")}; no dependency found does not mean no impact)`
+          : ""
+      }`,
       { impact: { impacts: impacts.length, breaking: breaking.length, partial, statuses } },
     );
     return {

@@ -45,7 +45,10 @@ test("legacy data is backfilled into work items / pull requests, then 083 drops 
   const { rows: gone } = await pool.query(
     "SELECT to_regclass(t)::text AS t FROM unnest(ARRAY['tasks', 'events', 'questions', 'prs']) AS t",
   );
-  assert.deepEqual(gone.map((r) => r.t), [null, null, null, null]);
+  assert.deepEqual(
+    gone.map((r) => r.t),
+    [null, null, null, null],
+  );
   await assert.rejects(
     pool.query(`INSERT INTO work_items (code, source, title) VALUES ('X-2', 'legacy', 't')`),
     /check constraint/,

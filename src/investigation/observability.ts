@@ -10,7 +10,9 @@ export type ObservabilityProvider = "splunk" | "signoz";
  */
 export function selectProviders(choice: unknown) {
   const connected = { splunk: splunkConnected(), signoz: signozEnabled() };
-  const value = String(choice ?? "auto").trim().toLowerCase();
+  const value = String(choice ?? "auto")
+    .trim()
+    .toLowerCase();
   const wanted: ObservabilityProvider[] =
     value === "splunk" || value === "signoz"
       ? [value]

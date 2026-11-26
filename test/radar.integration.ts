@@ -296,7 +296,8 @@ async function quietOmsFinding() {
   return Number(row!.id);
 }
 const statusOf = async (id: number) =>
-  (await one<{ status: string }>(pool, "SELECT status FROM radar_findings WHERE id=$1", [id]))!.status;
+  (await one<{ status: string }>(pool, "SELECT status FROM radar_findings WHERE id=$1", [id]))!
+    .status;
 
 test("series cap: skipped signatures are reported (partial coverage) and their quiet findings are NOT resolved", async () => {
   await seedScan(new Date(Date.now() + 300_000), [
@@ -312,7 +313,11 @@ test("series cap: skipped signatures are reported (partial coverage) and their q
     assert.equal(r.coverage.signatures_in_scan, 2);
     assert.equal(r.coverage.signatures_evaluated, 1);
     assert.equal(r.coverage.signatures_skipped, 1);
-    assert.deepEqual(r.coverage.skipped_sample.map((x) => x.fingerprint), [OMS], "the lower-volume signature was cut");
+    assert.deepEqual(
+      r.coverage.skipped_sample.map((x) => x.fingerprint),
+      [OMS],
+      "the lower-volume signature was cut",
+    );
     assert.equal(await statusOf(id), "open", "not evaluated ≠ quiet: the finding stays open");
     assert.ok(r.coverage.resolution_deferred >= 1);
     assert.ok(r.coverage.notes.some((n) => /1 of 2 signatures not evaluated/.test(n)));

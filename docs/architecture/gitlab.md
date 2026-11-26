@@ -6,13 +6,13 @@ workflow engine knows about GitLab: it calls `gitProviderFor(repository.provider
 
 ## Provider seam
 
-| Part | Where | What it does |
-| --- | --- | --- |
-| URL identity | `src/repos/remote.ts` | Accepts `https://<allowed host>/<group>[/<subgroup>...]/<project>[.git]` and canonicalises it to lower case with `.git`. |
-| Host adapter | `src/git/hosts.ts` | Git transport credentials (`oauth2` + token), extra Git options (internal CA), label and access policy per host. |
-| REST adapter | `src/gitlab.ts`, registered in `src/git/provider.ts` | Merge requests, diffs, discussions, comments, approvals and mergeability, merge, close, pipelines, jobs and job logs. |
-| Shared model | `src/git/model.ts` | Provider-neutral change request, pipeline and merge-readiness types, and the shared merge policy. |
-| Access check | `src/repos/access.ts` | Per-host verifier map; GitLab asks `GET /projects/:id` with the user's own token. |
+| Part         | Where                                                | What it does                                                                                                             |
+| ------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| URL identity | `src/repos/remote.ts`                                | Accepts `https://<allowed host>/<group>[/<subgroup>...]/<project>[.git]` and canonicalises it to lower case with `.git`. |
+| Host adapter | `src/git/hosts.ts`                                   | Git transport credentials (`oauth2` + token), extra Git options (internal CA), label and access policy per host.         |
+| REST adapter | `src/gitlab.ts`, registered in `src/git/provider.ts` | Merge requests, diffs, discussions, comments, approvals and mergeability, merge, close, pipelines, jobs and job logs.    |
+| Shared model | `src/git/model.ts`                                   | Provider-neutral change request, pipeline and merge-readiness types, and the shared merge policy.                        |
+| Access check | `src/repos/access.ts`                                | Per-host verifier map; GitLab asks `GET /projects/:id` with the user's own token.                                        |
 
 Adding another host needs one URL rule in `remote.ts`, one entry in `gitHosts`, one `GitProvider` adapter with
 `registerGitProvider(name, adapter)`, one verifier in `access.ts`, and one clause in the `repositories_remote_canonical`
@@ -64,10 +64,10 @@ encrypted like the other personal credentials). Saving checks the token first
 connectivity (DNS, TLS, timeout) and missing-scope failures separately. **Test connection** re-checks a saved token.
 The token is never returned to the browser.
 
-| Use | Token | Scopes | Role on the project |
-| --- | --- | --- | --- |
-| Full workflow (push, MR, comments, pipelines, merge) | Personal or project access token | `api` | Developer; Maintainer only where protected-branch rules require it for merge |
-| Read and push only (no MR API) | Personal or project access token | `read_api`, `read_repository`, `write_repository` | Developer |
+| Use                                                  | Token                            | Scopes                                            | Role on the project                                                          |
+| ---------------------------------------------------- | -------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Full workflow (push, MR, comments, pipelines, merge) | Personal or project access token | `api`                                             | Developer; Maintainer only where protected-branch rules require it for merge |
+| Read and push only (no MR API)                       | Personal or project access token | `read_api`, `read_repository`, `write_repository` | Developer                                                                    |
 
 A project access token works for one project only; use a personal access token when one member works on several
 projects. A token is not a platform grant: an administrator still grants each repository. The shared `GITLAB_TOKEN`
@@ -94,7 +94,7 @@ When both exist for the run owner, every fetch, clone and push for that reposito
 - the key and a `known_hosts` file holding only the pinned keys are written as 0600 files in the per-call temp
   directory and removed afterwards;
 - `GIT_SSH_COMMAND` is `ssh -F /dev/null -i <key> -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes
-  -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<pinned> -o GlobalKnownHostsFile=/dev/null`; an unknown or
+-o StrictHostKeyChecking=yes -o UserKnownHostsFile=<pinned> -o GlobalKnownHostsFile=/dev/null`; an unknown or
   changed host key fails with "SSH host key verification failed", it is never accepted;
 - only `protocol.ssh` is allowed on that call, and the canonical HTTPS URL is rewritten to SSH with a command-line
   `url.<ssh>.insteadOf=<https>`, so `remote.origin.url` and Git config keep the HTTPS identity and never hold a key.

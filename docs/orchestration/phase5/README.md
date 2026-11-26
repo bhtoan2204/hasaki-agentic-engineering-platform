@@ -29,16 +29,16 @@ Use `config.agent.fallback` on an agent/coding-agent step (`config.fallback` is 
 
 The Phase 1 normalized taxonomy and structured provider codes determine eligibility. Provider diagnostics are distinguished from integration failures: a Bitbucket 401 is not evidence that the AI provider requires authentication.
 
-| Category | Behavior |
-|---|---|
-| RATE_LIMIT | Existing bounded backoff first (at least three attempts); exhausted retries produce a reviewable handoff. |
-| QUOTA_EXHAUSTED | Pause immediately; no pointless same-provider quota retry. |
-| PROVIDER_UNAVAILABLE | Existing retry budget first, then pause. |
-| AUTHENTICATION | Pause for manual recovery; never try unrelated credentials automatically. |
-| CONTEXT_LIMIT | Manual recovery/context review. |
-| EXECUTION_TIMEOUT | Existing retry budget first, then manual recovery. A timeout is never evidence of quota exhaustion. |
-| UNKNOWN | Pause only with structured provider diagnostics or a reported failed provider session; never automatic failover. |
-| TOOL_FAILURE / AGENT_ERROR / code or verification failure | Existing execution/retry behavior. No automatic failover eligibility. |
+| Category                                                  | Behavior                                                                                                         |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| RATE_LIMIT                                                | Existing bounded backoff first (at least three attempts); exhausted retries produce a reviewable handoff.        |
+| QUOTA_EXHAUSTED                                           | Pause immediately; no pointless same-provider quota retry.                                                       |
+| PROVIDER_UNAVAILABLE                                      | Existing retry budget first, then pause.                                                                         |
+| AUTHENTICATION                                            | Pause for manual recovery; never try unrelated credentials automatically.                                        |
+| CONTEXT_LIMIT                                             | Manual recovery/context review.                                                                                  |
+| EXECUTION_TIMEOUT                                         | Existing retry budget first, then manual recovery. A timeout is never evidence of quota exhaustion.              |
+| UNKNOWN                                                   | Pause only with structured provider diagnostics or a reported failed provider session; never automatic failover. |
+| TOOL_FAILURE / AGENT_ERROR / code or verification failure | Existing execution/retry behavior. No automatic failover eligibility.                                            |
 
 Only RATE_LIMIT, QUOTA_EXHAUSTED and PROVIDER_UNAVAILABLE are eligible for automatic failover. Even then, readiness, current repository permissions, tool/delegation capability, existing approval grants, assigned worker, instance fencing, switch budget, workspace fingerprint and conflicting attempts are rechecked before any new job is queued.
 
@@ -117,7 +117,6 @@ TEST_DATABASE_ADMIN_URL=postgres://platform@127.0.0.1:55433/platform \
 `test/provider-handoff.test.ts` uses deterministic adapters and real durable jobs/transactions: Claude → Codex dirty-worktree continuation; running Codex → Cursor cancellation; retries/backoff; timeout ≠ quota; auth/unknown/context failures; restart recovery; duplicate resume and competing claims; stale completion; fingerprint reinspection; revoked repository access; unavailable/foreign workers; budget/coverage guards; existing approvals/questions; owner/admin RBAC and CSRF. The UI smoke uses fixture adapters through actual HTTP, authentication, workflow jobs and English/Vietnamese controls. No live paid provider calls are required.
 
 Apply migrations and upgrade assigned workers before enabling Phase 5 workflows. Historical attempts without termination proof remain readable but require conservative reconciliation before a handoff; historical provider/model attribution is unchanged. No production migration or deployment is performed by the validation commands above.
-
 
 ### Recorded validation (2026-11-08)
 

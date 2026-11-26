@@ -113,10 +113,14 @@ if (tsc.status !== 0) {
         target: "/compiler/node_modules/typescript",
       },
       // The scoped native compiler packages are optional; JS-only TypeScript installations omit this directory.
-      ...(existsSync(join(import.meta.dirname, "..", "..", "node_modules", "@typescript")) ? [{
-        source: join(import.meta.dirname, "..", "..", "node_modules", "@typescript"),
-        target: "/compiler/node_modules/@typescript",
-      }] : []),
+      ...(existsSync(join(import.meta.dirname, "..", "..", "node_modules", "@typescript"))
+        ? [
+            {
+              source: join(import.meta.dirname, "..", "..", "node_modules", "@typescript"),
+              target: "/compiler/node_modules/@typescript",
+            },
+          ]
+        : []),
     );
   }
   try {

@@ -43,7 +43,10 @@ test("a failed shared handoff scan logs once and rejects all callers", async (t)
     throw error;
   });
   const logged = t.mock.method(console, "error", () => {});
-  const results = await Promise.allSettled([reconcileAutomaticHandoff(), reconcileAutomaticHandoff()]);
+  const results = await Promise.allSettled([
+    reconcileAutomaticHandoff(),
+    reconcileAutomaticHandoff(),
+  ]);
   assert.deepEqual(results, [
     { status: "rejected", reason: error },
     { status: "rejected", reason: error },

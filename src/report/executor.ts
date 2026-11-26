@@ -191,7 +191,10 @@ export const taskResultReportExecutor: StepExecutor = {
     let proposal: Proposal | null = null;
     // Semantic synthesis is only needed when a requirement can be satisfied by non-screenshot evidence that exists;
     // screenshot-only requirements and "nothing to judge" cases are decided by the rules alone (no Claude call).
-    const mode = ctx.run.profile === "MICRO" && !ctx.step.config.reasoning_need ? "never" : String(ctx.step.config.reasoning ?? "auto");
+    const mode =
+      ctx.run.profile === "MICRO" && !ctx.step.config.reasoning_need
+        ? "never"
+        : String(ctx.step.config.reasoning ?? "auto");
     const judgeable = spec.sections
       .flatMap((s) => s.requirements)
       .some(

@@ -22,7 +22,9 @@ const ConfigurationObject = z
     adapter: z
       .enum(["baseline", "reference", "agent_fixture", "provider_fixture"])
       .default("baseline"),
-    provider: z.enum(["fixture", "claude", "codex", "cursor", "antigravity", "copilot"]).default("fixture"),
+    provider: z
+      .enum(["fixture", "claude", "codex", "cursor", "antigravity", "copilot"])
+      .default("fixture"),
     model: z.string().max(100).nullable().default(null),
     prompt_version: z.enum(["p2-task-v1", "p2-task-v2"]).default("p2-task-v1"),
     workflow_version: z.literal("p2-workflow-v1").default("p2-workflow-v1"),

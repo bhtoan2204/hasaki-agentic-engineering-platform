@@ -92,10 +92,7 @@ test("requests use the PRIVATE-TOKEN header, encode nested namespaces and refuse
 
 test("a host outside the allowed GitLab instances never receives the token", async () => {
   serve([]);
-  await assert.rejects(
-    glab("evil.example.com", TOKEN, "/user"),
-    /not an allowed instance/,
-  );
+  await assert.rejects(glab("evil.example.com", TOKEN, "/user"), /not an allowed instance/);
   assert.equal(calls.length, 0);
 });
 

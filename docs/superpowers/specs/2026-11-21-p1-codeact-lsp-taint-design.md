@@ -41,33 +41,37 @@ Anti-goals: any path where generated code or tool output gains a capability the 
 ## Approaches considered
 
 **A. CodeAct runtime**
-1. *Node `vm` / isolated context in the worker* — rejected: not a security boundary; shares the worker's memory,
+
+1. _Node `vm` / isolated context in the worker_ — rejected: not a security boundary; shares the worker's memory,
    credentials and DB pool.
-2. *Child Node process under the existing OS sandbox (`sandboxInvocation`), Node `--permission`, JSON-lines RPC to the
-   parent broker* — **chosen**: reuses the hardened bwrap profile (no network, masked secrets, rlimits, cgroup
+2. _Child Node process under the existing OS sandbox (`sandboxInvocation`), Node `--permission`, JSON-lines RPC to the
+   parent broker_ — **chosen**: reuses the hardened bwrap profile (no network, masked secrets, rlimits, cgroup
    memory/pids), the parent holds every credential and the registry; fail closed when the probe is unavailable.
-3. *Go-hosted interpreter (goja) in platform-go* — rejected: new runtime, the registry and authorization live in TS.
+3. _Go-hosted interpreter (goja) in platform-go_ — rejected: new runtime, the registry and authorization live in TS.
 
 **B. LSP transport**
-1. *Add `vscode-jsonrpc`/`typescript-language-server` dependencies* — not available locally and new dependency
+
+1. _Add `vscode-jsonrpc`/`typescript-language-server` dependencies_ — not available locally and new dependency
    installs were refused earlier; deferred.
-2. *Small Content-Length JSON-RPC client in TS (the MCP bridge already frames this way) driving gopls; TS/JS served by
-   a child process using the TypeScript LanguageService API behind the same LSP-shaped request contract* —
+2. _Small Content-Length JSON-RPC client in TS (the MCP bridge already frames this way) driving gopls; TS/JS served by
+   a child process using the TypeScript LanguageService API behind the same LSP-shaped request contract_ —
    **chosen**: no new dependency, no project plugins executed, both under `superviseSpawn`-style lifecycle.
-3. *Extend platform-go* — rejected: LSP sessions are per worktree and authorization lives in TS.
+3. _Extend platform-go_ — rejected: LSP sessions are per worktree and authorization lives in TS.
 
 **C. Taint**
-1. *String labels on every value through LLM text* — rejected: not enforceable through model reasoning.
-2. *Boundary provenance: at a mutating sink the platform classifies each sensitive argument by searching its own
+
+1. _String labels on every value through LLM text_ — rejected: not enforceable through model reasoning.
+2. _Boundary provenance: at a mutating sink the platform classifies each sensitive argument by searching its own
    trusted records (user messages of the conversation, configured allowlists) and untrusted records (tool results of
-   the conversation / CodeAct outputs); untrusted-only or unknown-origin values remove auto-execution and are audited*
+   the conversation / CodeAct outputs); untrusted-only or unknown-origin values remove auto-execution and are audited_
    — **chosen**: deterministic, uses existing journals, honest about its boundary.
 
 ## Design
 
 ### A. CodeAct
+
 - Config `codeAct: { enabled: false, timeoutMs, maxCodeBytes, maxOutputBytes, maxCalls, maxResultBytes,
-  maxConcurrency, callTimeoutMs, memoryMb }`. Tool unavailable (typed reason) unless enabled **and**
+maxConcurrency, callTimeoutMs, memoryMb }`. Tool unavailable (typed reason) unless enabled **and**
   `probeIsolation().available`.
 - Module `src/codeact/`: `runner.mjs` (sandbox side: reads `{code}` from stdin, exposes `platform.callTool`,
   `platform.listTools`, serializes calls as JSON lines on stdout, receives results on stdin, returns the program's
@@ -82,9 +86,10 @@ Anti-goals: any path where generated code or tool output gains a capability the 
   counts, error category) and `code_execution_calls` (execution id, seq, tool, read_only, status, duration, input/
   output sha256, redacted capped result, error category). Evidence refs `codeact:<exec>:<seq>`.
 - Result to the model: `{ok, value (≤ maxOutputBytes, else truncated with note), calls:[{seq,tool,status,ref}],
-  provenance:[refs], stats}`; the value is labelled `untrusted` — never verified evidence.
+provenance:[refs], stats}`; the value is labelled `untrusted` — never verified evidence.
 
 ### B. LSP
+
 - Config `lsp: { enabled: false, maxSessions, idleMs, requestTimeoutMs, maxResults, gopls?: path }`.
 - `src/codeIntelligence/lsp/`: `client.ts` (framing, request/cancel, crash detection), `sessions.ts` (pool keyed by
   language + realpath root + owner scope; idle eviction; restart on crash; bounded), `tsServer.mjs` (TypeScript
@@ -94,10 +99,11 @@ Anti-goals: any path where generated code or tool output gains a capability the 
   GOFLAGS=-mod=mod disabled, GOTOOLCHAIN=local, CGO_ENABLED=0); otherwise under process supervision with the same env
   and the typed status `unsandboxed` reported (disabled by default, operator opt-in).
 - Contract result: `{status: ok|unsupported|unavailable|timeout|not_found|stale|unauthorized|invalid,
-  locations:[{repository,path,line,character,end_line}], more?, provenance}`.
+locations:[{repository,path,line,character,end_line}], more?, provenance}`.
 - Surfaces: workflow context tool `navigate_code`; chat `code.navigate`. Unsupported → caller uses `search_code`.
 
 ### C. Taint
+
 - Sinks: registry tools with `readOnly:false` (today `kafka.publish`, `qc_http.request`); target fields declared per
   tool (`kafka: topic, cluster, key`; `qc: url, method, auth`), payload fields (`value`, `body`, `headers`).
 - `src/agent/taint.ts`: `classifyArguments({tool, args, trusted, untrusted})` → per field
@@ -112,4 +118,5 @@ Anti-goals: any path where generated code or tool output gains a capability the 
   OS sandbox — documented as the uninstrumented boundary.
 
 ## What is left to the builder
+
 Exact limits defaults, metric names, migration number, test fixture shapes.

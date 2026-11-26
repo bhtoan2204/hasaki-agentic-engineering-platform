@@ -64,11 +64,11 @@ Agents only **label** stored log events by reference (`S<search id>:<n>`). The d
 Credentials are never sent to a model, never returned to the browser and are stored with the existing encrypted
 secrets (`user_secrets` / `shared_secrets`).
 
-| Credential | Where | Notes |
-|---|---|---|
-| Personal Splunk Web session (cookie) | Integrations → Splunk | Existing mechanism (Google SAML, no token needed). Calls go through Splunk Web's `/<locale>/splunkd/__raw` proxy with the CSRF form key. |
-| Personal Splunk token | Integrations → Splunk → *personal token* | `Authorization: Bearer`. Sent to `splunk.managementUrl` when set (e.g. `https://splunk:8089`), else through the Splunk Web proxy. |
-| Shared service-account token | Integrations → Splunk → *shared* (admin only) | Members use it only when `splunk.allowSharedToken` is true. A personal credential always wins. Every search is still audited per user. |
+| Credential                           | Where                                         | Notes                                                                                                                                    |
+| ------------------------------------ | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Personal Splunk Web session (cookie) | Integrations → Splunk                         | Existing mechanism (Google SAML, no token needed). Calls go through Splunk Web's `/<locale>/splunkd/__raw` proxy with the CSRF form key. |
+| Personal Splunk token                | Integrations → Splunk → _personal token_      | `Authorization: Bearer`. Sent to `splunk.managementUrl` when set (e.g. `https://splunk:8089`), else through the Splunk Web proxy.        |
+| Shared service-account token         | Integrations → Splunk → _shared_ (admin only) | Members use it only when `splunk.allowSharedToken` is true. A personal credential always wins. Every search is still audited per user.   |
 
 **Test connection** (`POST /api/integrations/splunk/test`, tool `splunk_test_connection`) checks identity, warns when
 the account has write/admin capabilities (`delete_by_keyword`, `admin_all_objects`, …) and runs a 15-minute
@@ -138,13 +138,13 @@ the intended role.
 
 ## API
 
-| | |
-|---|---|
-| `POST /api/runs` `{ workflow: "production-incident-investigation", inputs: { request, environment?, indexes?, earliest?, latest? }, output_locale }` | start |
-| `GET /api/runs/:id/investigation` | searches (audit + sanitized events), parsed request, timeline, latency, report |
-| `POST /api/runs/:id/investigation/manual-results` `{ search_id, text }` | manual mode |
-| `POST /api/workflows/route` `{ text }` | intent routing suggestion (workflows declaring `triggers`) |
-| `POST /api/integrations/splunk/token` · `/test` · `/shared` · `/shared/clear` | credentials / test (shared = admin) |
+|                                                                                                                                                      |                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `POST /api/runs` `{ workflow: "production-incident-investigation", inputs: { request, environment?, indexes?, earliest?, latest? }, output_locale }` | start                                                                          |
+| `GET /api/runs/:id/investigation`                                                                                                                    | searches (audit + sanitized events), parsed request, timeline, latency, report |
+| `POST /api/runs/:id/investigation/manual-results` `{ search_id, text }`                                                                              | manual mode                                                                    |
+| `POST /api/workflows/route` `{ text }`                                                                                                               | intent routing suggestion (workflows declaring `triggers`)                     |
+| `POST /api/integrations/splunk/token` · `/test` · `/shared` · `/shared/clear`                                                                        | credentials / test (shared = admin)                                            |
 
 ## Tests and evaluation
 

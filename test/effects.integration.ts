@@ -101,13 +101,10 @@ test("a failed summary write logs the original cause once and stays queued for r
   const { level, event, error, run_id, effect_kind } = JSON.parse(
     String(logged.mock.calls[0].arguments[0]),
   );
-  assert.deepEqual([level, event, error, run_id, effect_kind], [
-    "ERROR",
-    "workflow.effect_failed",
-    "summary write failed",
-    run.id,
-    "summary",
-  ]);
+  assert.deepEqual(
+    [level, event, error, run_id, effect_kind],
+    ["ERROR", "workflow.effect_failed", "summary write failed", run.id, "summary"],
+  );
 
   write.mock.restore();
   assert.equal(await dispatchRunEffects(), 1);

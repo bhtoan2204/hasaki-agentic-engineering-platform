@@ -616,19 +616,23 @@ export async function refreshBitbucket(userId: number, repos: RepositoryRow[], f
       for (let i = 0; i < due.length; i += CHECK_CONCURRENCY)
         verdicts.push(
           ...(await Promise.all(
-            due.slice(i, i + CHECK_CONCURRENCY).map(async (r): Promise<[RepositoryRow, Verdict]> => {
-              let remote: CanonicalRemote;
-              try {
-                remote = repositoryRemote(r.repository_url!);
-              } catch {
-                // e.g. a GitLab host removed from config.gitlab.instances: unknown, never an error for the listing.
-                return [
-                  r,
-                  unknownVerdict("repository URL is not accepted by this instance's configuration"),
-                ];
-              }
-              return [r, await verifiers[remote.provider](secret, remote)];
-            }),
+            due
+              .slice(i, i + CHECK_CONCURRENCY)
+              .map(async (r): Promise<[RepositoryRow, Verdict]> => {
+                let remote: CanonicalRemote;
+                try {
+                  remote = repositoryRemote(r.repository_url!);
+                } catch {
+                  // e.g. a GitLab host removed from config.gitlab.instances: unknown, never an error for the listing.
+                  return [
+                    r,
+                    unknownVerdict(
+                      "repository URL is not accepted by this instance's configuration",
+                    ),
+                  ];
+                }
+                return [r, await verifiers[remote.provider](secret, remote)];
+              }),
           )),
         );
       for (const [r, v] of verdicts) {

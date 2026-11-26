@@ -80,7 +80,8 @@ const TIMEOUT =
 const REJECTION =
   /too many (?:refund|retry|request)|duplicate (?:request|transaction|refund|payment|order|submission)|already (?:processed|refunded|paid)|idempotency (?:key|violation|conflict)/i;
 /** Datastore / infrastructure errors are never provider business rejections. */
-const INFRA_ERROR = /unique constraint|duplicate key|sqlstate|violates|deadlock|\bpq:|ER_DUP_ENTRY|E11000/i;
+const INFRA_ERROR =
+  /unique constraint|duplicate key|sqlstate|violates|deadlock|\bpq:|ER_DUP_ENTRY|E11000/i;
 const SUCCESS = /\b(success|succeeded|completed|approved|code["']?\s*[:=]\s*["']?00)\b/i;
 /** Any negation / qualification makes a success claim unreliable: treat as no confirmation (stay UNKNOWN). */
 const NOT_SUCCESS =
@@ -95,7 +96,9 @@ const isRejection = (t: TimelineEvent) =>
 const isSuccess = (t: TimelineEvent) =>
   !isTimeout(t) &&
   !isRejection(t) &&
-  ["PARTNER_RESPONSE_RECEIVED", "PARTNER_CALLBACK_RECEIVED", "STATE_CHANGED"].includes(t.event_type) &&
+  ["PARTNER_RESPONSE_RECEIVED", "PARTNER_CALLBACK_RECEIVED", "STATE_CHANGED"].includes(
+    t.event_type,
+  ) &&
   SUCCESS.test(t.excerpt) &&
   !NOT_SUCCESS.test(t.excerpt);
 
@@ -119,7 +122,8 @@ function groupOperations(timeline: TimelineEvent[]) {
   for (const t of timeline) {
     d.find(`e:${t.evidence_ref}`);
     for (const f of OPERATION_SCOPE)
-      for (const v of t.ids[f] ?? []) if (v.length >= 6) d.union(`e:${t.evidence_ref}`, `${f}:${v.toLowerCase()}`);
+      for (const v of t.ids[f] ?? [])
+        if (v.length >= 6) d.union(`e:${t.evidence_ref}`, `${f}:${v.toLowerCase()}`);
   }
   const groups = new Map<string, TimelineEvent[]>();
   for (const t of timeline) {
@@ -139,7 +143,8 @@ function attemptKey(t: TimelineEvent): string {
 
 function analyzeOperation(events: TimelineEvent[], index: number): LogicalOperation {
   const byAttempt = new Map<string, TimelineEvent[]>();
-  for (const t of events) byAttempt.set(attemptKey(t), [...(byAttempt.get(attemptKey(t)) ?? []), t]);
+  for (const t of events)
+    byAttempt.set(attemptKey(t), [...(byAttempt.get(attemptKey(t)) ?? []), t]);
 
   const prov = new Map<string, IdentifierProvenance>();
   for (const t of events)
@@ -152,44 +157,61 @@ function analyzeOperation(events: TimelineEvent[], index: number): LogicalOperat
       }
   // Only identifiers seen in more than one attempt are what actually joined attempts.
   const joined_by = [...prov.values()].filter(
-    (p) => new Set(p.evidence_refs.map((r) => attemptKey(events.find((e) => e.evidence_ref === r)!))).size > 1 || byAttempt.size === 1,
+    (p) =>
+      new Set(p.evidence_refs.map((r) => attemptKey(events.find((e) => e.evidence_ref === r)!)))
+        .size > 1 || byAttempt.size === 1,
   );
 
   const ordered = [...byAttempt.entries()].sort(
-    (a, b) => Math.min(...a[1].map((e) => e.epoch_us ?? Infinity)) - Math.min(...b[1].map((e) => e.epoch_us ?? Infinity)),
+    (a, b) =>
+      Math.min(...a[1].map((e) => e.epoch_us ?? Infinity)) -
+      Math.min(...b[1].map((e) => e.epoch_us ?? Infinity)),
   );
   const hasAttributed = ordered.some(([k]) => k !== UNATTRIBUTED);
   const attempts: AttemptAnalysis[] = ordered
-    .filter(([k, evs]) => !(hasAttributed && k === UNATTRIBUTED && !evs.some((e) => isTimeout(e) || isRejection(e) || isSuccess(e))))
+    .filter(
+      ([k, evs]) =>
+        !(
+          hasAttributed &&
+          k === UNATTRIBUTED &&
+          !evs.some((e) => isTimeout(e) || isRejection(e) || isSuccess(e))
+        ),
+    )
     .map(([key, evs], i) => {
-    const timeout = evs.some(isTimeout);
-    const rejected = evs.some(isRejection);
-    const success = evs.some(isSuccess);
-    let outcome: Outcome;
-    let reason: string;
-    if (success) {
-      outcome = "success";
-      reason = "a success response/callback of this attempt is in the evidence";
-    } else if (rejected) {
-      outcome = "failed";
-      reason = "the provider explicitly rejected this attempt; this says nothing about any earlier attempt";
-    } else if (timeout) {
-      outcome = "UNKNOWN";
-      reason =
-        "client timeout/deadline: the provider may have processed it; no authoritative status, callback or reconciliation record in the evidence";
-    } else {
-      outcome = "UNKNOWN";
-      reason = "no response, callback or state change recorded for this attempt";
-    }
-    return {
-      attempt_key: key,
-      attributed: key !== UNATTRIBUTED,
-      role: i === 0 ? "initial" : evs.every((e) => e.delivery && e.delivery.n > 1) ? "redelivery" : "retry",
-      evidence_refs: evs.map((e) => e.evidence_ref),
-      outcome,
-      reason,
-    };
-  });
+      const timeout = evs.some(isTimeout);
+      const rejected = evs.some(isRejection);
+      const success = evs.some(isSuccess);
+      let outcome: Outcome;
+      let reason: string;
+      if (success) {
+        outcome = "success";
+        reason = "a success response/callback of this attempt is in the evidence";
+      } else if (rejected) {
+        outcome = "failed";
+        reason =
+          "the provider explicitly rejected this attempt; this says nothing about any earlier attempt";
+      } else if (timeout) {
+        outcome = "UNKNOWN";
+        reason =
+          "client timeout/deadline: the provider may have processed it; no authoritative status, callback or reconciliation record in the evidence";
+      } else {
+        outcome = "UNKNOWN";
+        reason = "no response, callback or state change recorded for this attempt";
+      }
+      return {
+        attempt_key: key,
+        attributed: key !== UNATTRIBUTED,
+        role:
+          i === 0
+            ? "initial"
+            : evs.every((e) => e.delivery && e.delivery.n > 1)
+              ? "redelivery"
+              : "retry",
+        evidence_refs: evs.map((e) => e.evidence_ref),
+        outcome,
+        reason,
+      };
+    });
 
   // The operation outcome: a confirmed success anywhere wins; otherwise any unresolved attempt keeps it UNKNOWN.
   const ok = attempts.some((a) => a.outcome === "success");
@@ -214,7 +236,13 @@ function analyzeOperation(events: TimelineEvent[], index: number): LogicalOperat
       "provider callback or settlement/reconciliation record for the logical operation",
       "our persisted transaction record and its state transitions for the logical operation",
     );
-  return { operation_id: `op-${index + 1}`, joined_by, attempts, outcome: operation, missing_evidence: missing };
+  return {
+    operation_id: `op-${index + 1}`,
+    joined_by,
+    attempts,
+    outcome: operation,
+    missing_evidence: missing,
+  };
 }
 
 export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
@@ -231,7 +259,8 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
   const missingAll: string[] = [];
 
   const sorted = [...timeline].sort((a, b) => (a.epoch_us ?? Infinity) - (b.epoch_us ?? Infinity));
-  const lastError = [...sorted].reverse().find((t) => t.event_type === "ERROR" || isRejection(t)) ?? null;
+  const lastError =
+    [...sorted].reverse().find((t) => t.event_type === "ERROR" || isRejection(t)) ?? null;
 
   for (const op of ops) {
     // Only attributed attempts can prove a retry; pooled unattributed events never do.
@@ -286,7 +315,9 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
     );
   }
   if (multi.length)
-    recs.push("Do not retry a non-idempotent financial operation blindly and do not mark it successful without authoritative evidence.");
+    recs.push(
+      "Do not retry a non-idempotent financial operation blindly and do not mark it successful without authoritative evidence.",
+    );
 
   const forbidden = [
     "the provider is the root cause only because it returned an error",
@@ -310,11 +341,21 @@ export function analyzeCausality(timeline: TimelineEvent[]): CausalAnalysis {
     recommendations: recs,
     forbidden_conclusions: forbidden,
     has_unknown_outcome: unknown,
-    missing_evidence: [...new Set([...missingAll, ...ops.flatMap((o) => o.missing_evidence), ...(root?.missing_evidence ?? [])])],
+    missing_evidence: [
+      ...new Set([
+        ...missingAll,
+        ...ops.flatMap((o) => o.missing_evidence),
+        ...(root?.missing_evidence ?? []),
+      ]),
+    ],
   };
 }
 
-function timelineHas(timeline: TimelineEvent[], a: AttemptAnalysis, pred: (t: TimelineEvent) => boolean) {
+function timelineHas(
+  timeline: TimelineEvent[],
+  a: AttemptAnalysis,
+  pred: (t: TimelineEvent) => boolean,
+) {
   const refs = new Set(a.evidence_refs);
   return timeline.some((t) => refs.has(t.evidence_ref) && pred(t));
 }

@@ -64,7 +64,12 @@ const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
 export function fingerprint(findings: RawFinding[]): Array<RawFinding & { fingerprint: string }> {
   const seen = new Map<string, number>();
   return findings.map((f) => {
-    const key = [f.rule, f.path, f.symbol, METRIC_RULES.has(f.rule) ? "" : normalize(f.snippet)].join("|");
+    const key = [
+      f.rule,
+      f.path,
+      f.symbol,
+      METRIC_RULES.has(f.rule) ? "" : normalize(f.snippet),
+    ].join("|");
     const ordinal = seen.get(key) ?? 0;
     seen.set(key, ordinal + 1);
     return { ...f, fingerprint: createHash("sha256").update(`${key}|${ordinal}`).digest("hex") };
@@ -89,7 +94,11 @@ export function compare(
           ? "worsened"
           : "existing";
     if (suppressions.has(f.fingerprint)) status = "suppressed";
-    return { ...f, status, ...(b && status === "worsened" && b.value !== undefined ? { base_value: b.value } : {}) };
+    return {
+      ...f,
+      status,
+      ...(b && status === "worsened" && b.value !== undefined ? { base_value: b.value } : {}),
+    };
   });
   for (const b of before.values())
     if (!now.has(b.fingerprint)) out.push({ ...b, status: "resolved" });
@@ -97,7 +106,13 @@ export function compare(
 }
 
 export function tally(findings: Finding[]) {
-  const counts: Record<FindingStatus, number> = { new: 0, worsened: 0, existing: 0, resolved: 0, suppressed: 0 };
+  const counts: Record<FindingStatus, number> = {
+    new: 0,
+    worsened: 0,
+    existing: 0,
+    resolved: 0,
+    suppressed: 0,
+  };
   const by_category: Record<string, number> = {};
   for (const f of findings) {
     counts[f.status]++;

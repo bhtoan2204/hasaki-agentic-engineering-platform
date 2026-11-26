@@ -31,7 +31,10 @@ export interface RoutingDecision {
 }
 
 /** Explicit non-AUTO modes map directly; AUTO is resolved from signals. */
-export function resolveEffectiveMode(requested: ChatMode, route: ChatRoute): Exclude<ChatMode, "AUTO"> {
+export function resolveEffectiveMode(
+  requested: ChatMode,
+  route: ChatRoute,
+): Exclude<ChatMode, "AUTO"> {
   if (requested !== "AUTO") return requested;
   switch (route) {
     case "OBSERVABILITY_INVESTIGATION":
@@ -134,13 +137,7 @@ export function routeChatIntent(input: {
     /(bao nhiêu|how many|which|những|các)\b/.test(text) &&
     /(provider|cổng|payment|thanh toán|service|integration|tích hợp)/i.test(text)
   ) {
-    return decide(
-      "ASK",
-      "REPOSITORY_QUERY",
-      "workspace inventory question",
-      "deterministic",
-      0.85,
-    );
+    return decide("ASK", "REPOSITORY_QUERY", "workspace inventory question", "deterministic", 0.85);
   }
 
   if (score(OPS, text, 4) >= 4)
@@ -152,7 +149,13 @@ export function routeChatIntent(input: {
       0.8,
     );
   if (s.delegate >= 3 && input.mode === "AUTO")
-    return decide("DELEGATE", "WORKFLOW_DELEGATION", "implementation request", "deterministic", 0.8);
+    return decide(
+      "DELEGATE",
+      "WORKFLOW_DELEGATION",
+      "implementation request",
+      "deterministic",
+      0.8,
+    );
   if (s.plan >= 3 && (input.mode === "AUTO" || input.mode === "ASK"))
     return decide(
       input.mode === "AUTO" ? "PLAN" : "ASK",
@@ -163,7 +166,9 @@ export function routeChatIntent(input: {
     );
   if (s.obs >= 4)
     return decide(
-      input.mode === "AUTO" ? "INVESTIGATE" : ((input.mode === "ASK" ? "ASK" : input.mode) as Exclude<ChatMode, "AUTO">),
+      input.mode === "AUTO"
+        ? "INVESTIGATE"
+        : ((input.mode === "ASK" ? "ASK" : input.mode) as Exclude<ChatMode, "AUTO">),
       input.mode === "ASK" ? "PLATFORM_QUERY" : "OBSERVABILITY_INVESTIGATION",
       "observability signals",
       "deterministic",
@@ -205,13 +210,25 @@ export function routeChatIntent(input: {
   if (input.mode === "ASK" || input.mode === "AUTO") {
     if (GENERIC_TECH.test(text) && s.repo === 0 && s.platform === 0)
       return decide("ASK", "DIRECT_ANSWER", "generic technical question", "deterministic", 0.9);
-    if (text.length < 180 && !/[`/\\]/.test(text) && s.repo === 0 && s.platform === 0 && s.obs === 0)
+    if (
+      text.length < 180 &&
+      !/[`/\\]/.test(text) &&
+      s.repo === 0 &&
+      s.platform === 0 &&
+      s.obs === 0
+    )
       return decide("ASK", "DIRECT_ANSWER", "short general question", "default", 0.65);
   }
 
   // Low confidence: prefer bounded tools over inventing workspace facts.
   if (input.mode === "AUTO")
-    return decide("ASK", "REPOSITORY_QUERY", "AUTO default: bounded workspace lookup", "default", 0.4);
+    return decide(
+      "ASK",
+      "REPOSITORY_QUERY",
+      "AUTO default: bounded workspace lookup",
+      "default",
+      0.4,
+    );
   return decide("ASK", "DIRECT_ANSWER", "ASK default: direct answer", "default", 0.5);
 }
 

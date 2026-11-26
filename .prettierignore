@@ -1,0 +1,11 @@
+# Vendored with recorded sha256 (skills/external/manifest.json): formatting would break the integrity check.
+skills/external/
+# Go sources and fixtures are formatted by gofmt; parity/golden fixtures are compared byte for byte.
+go/
+test/fixtures/
+# Generated measurements and reports.
+docs/validation/
+docs/benchmarks/
+docs/audits/
+docs/architecture/*.json
+.gitleaks-baseline.json

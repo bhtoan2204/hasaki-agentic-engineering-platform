@@ -27,7 +27,13 @@ const svc = {
   logins: 0,
   valid: new Set<string>(),
   orders: new Map<string, Record<string, unknown>>(),
-  requests: [] as Array<{ method: string; path: string; auth?: string; idem?: string; body?: Record<string, unknown> }>,
+  requests: [] as Array<{
+    method: string;
+    path: string;
+    auth?: string;
+    idem?: string;
+    body?: Record<string, unknown>;
+  }>,
 };
 const server = http.createServer((req, res) => {
   let raw = "";

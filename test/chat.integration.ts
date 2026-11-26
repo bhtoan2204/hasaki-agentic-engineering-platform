@@ -34,7 +34,10 @@ const healthy = async () =>
 async function waitForTurn(conversationId: number, ownerId: number, timeoutMs = 5000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const detail = await chat.get(actorOf({ id: ownerId, username: "x", role: "member", active: true }), conversationId);
+    const detail = await chat.get(
+      actorOf({ id: ownerId, username: "x", role: "member", active: true }),
+      conversationId,
+    );
     if (!detail.active_turn) return detail;
     await sleep(50);
   }
@@ -45,14 +48,17 @@ before(() => {
   setChatHealthProbe(healthy);
   const runner: CompletionRunner = async (prompt) => ({
     text: prompt.includes("chat-tool")
-      ? "```chat-tool\n{\"calls\":[{\"tool\":\"repo.list\",\"arguments\":{}}]}\n```"
+      ? '```chat-tool\n{"calls":[{"tool":"repo.list","arguments":{}}]}\n```'
       : `Trả lời kiểm thử: ${prompt.includes("Current user message") ? "ok" : "follow-up"}`,
     model: "test-model",
     tokens: { input: 11, output: 7 },
     cost_usd: 0.001,
   });
   const providers = Object.fromEntries(
-    (["claude", "cursor", "codex", "antigravity", "copilot"] as AgentProvider[]).map((p) => [p, runner]),
+    (["claude", "cursor", "codex", "antigravity", "copilot"] as AgentProvider[]).map((p) => [
+      p,
+      runner,
+    ]),
   ) as Record<AgentProvider, CompletionRunner>;
   setChatProviders(providers);
 });
@@ -196,7 +202,10 @@ test("chat: unknown usage stays unknown across turns", async () => {
     antigravity: unknown,
     copilot: unknown,
   });
-  const m = await chat.postMessage(a, c.id, { content: "cost?", client_message_id: "usage-unknown-1" });
+  const m = await chat.postMessage(a, c.id, {
+    content: "cost?",
+    client_message_id: "usage-unknown-1",
+  });
   await runTurn(m.turn.id);
   const detail = await waitForTurn(c.id, owner.id);
   assert.equal(detail.conversation.usage.cost_usd, null);
@@ -290,7 +299,10 @@ test("chat: manual unhealthy provider fails visibly without inference wait", asy
     ),
   );
   // No assistant hallucination for platform failures.
-  assert.equal(detail.messages.filter((x) => x.role === "assistant" && x.turn_id === m.turn.id).length, 0);
+  assert.equal(
+    detail.messages.filter((x) => x.role === "assistant" && x.turn_id === m.turn.id).length,
+    0,
+  );
   setChatHealthProbe(healthy);
 });
 

@@ -20,12 +20,12 @@ Migration `026_code_intelligence.sql` adds six relational tables: `snapshots`, `
 
 The runtime is `web-tree-sitter` 0.27.1 with pinned `tree-sitter-wasm` 2.0.4 grammar binaries. The package records upstream grammar revisions. [Tree-sitter's WASM binding](https://github.com/tree-sitter/tree-sitter/tree/master/lib/binding_web) and the [grammar distribution](https://github.com/Crysthamus/tree-sitter-wasm) describe the loader/runtime contract. Runtime initialization and grammar loading are lazy. Cache identity includes language, runtime/grammar/extractor version, SHA-256 content, SQL dialect, symbol cap, generated/dependency policy and exclusions. Bump `INDEX_VERSION` when changing extraction rules or pinned parser packages.
 
-| Language | Extracted syntax |
-| --- | --- |
-| Go | Package, imports, named functions, receiver-qualified methods, interface method declarations, structs, interfaces, aliases/types, call candidates |
+| Language         | Extracted syntax                                                                                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Go               | Package, imports, named functions, receiver-qualified methods, interface method declarations, structs, interfaces, aliases/types, call candidates                         |
 | TypeScript / TSX | Imports/reexports, exported declaration references, functions/arrow assignments, named classes/methods, interfaces, aliases, explicit implements clauses, call candidates |
-| Proto | Package, imports, nested messages/enums, services, RPCs, request/response candidates |
-| SQL | CREATE TABLE/VIEW/INDEX/FUNCTION, columns, object/foreign-key reference candidates |
+| Proto            | Package, imports, nested messages/enums, services, RPCs, request/response candidates                                                                                      |
+| SQL              | CREATE TABLE/VIEW/INDEX/FUNCTION, columns, object/foreign-key reference candidates                                                                                        |
 
 The SQL grammar is PostgreSQL-oriented. `sqlDialect` accepts `postgresql` or `generic` and identifies cache provenance; both intentionally use the same grammar. This is syntax recognition of the grammar's supported subset, not validation or dialect translation. MySQL DELIMITER, T-SQL GO and other unsupported fragments produce skipped error subtrees; valid surrounding statements can still index. Anonymous declarations and compiler-level type/value/overload resolution are outside this extractor.
 
@@ -72,16 +72,16 @@ The full regression run passed **344 tests**, including migration upgrade/idempo
 
 The final benchmark is recorded verbatim in `code-intelligence-benchmark.json` and can be reproduced with `TMPDIR=/var/tmp npm run bench:code-intelligence` in this environment. It indexes 400 generated source fixtures across Go, TypeScript, Proto and SQL (42,945 source bytes) on Node v22.23.2 and the existing local PostgreSQL test service.
 
-| Measurement | Result |
-| --- | ---: |
-| Initial index | 327.45 ms |
-| One-file incremental commit | 62.80 ms |
-| Unchanged files reused | 399 / 400 |
-| Snapshot-validated symbol lookup, 20 samples | p50 50.20 ms; p95 71.06 ms |
-| Existing metadata ranking | 0.40 ms |
-| Hybrid ranking | 52.94 ms |
-| PostgreSQL tables plus indexes, including two base manifests | 1,589,248 bytes |
-| Retrieved source context | 215 characters; approximately 54 tokens |
+| Measurement                                                  |                                  Result |
+| ------------------------------------------------------------ | --------------------------------------: |
+| Initial index                                                |                               327.45 ms |
+| One-file incremental commit                                  |                                62.80 ms |
+| Unchanged files reused                                       |                               399 / 400 |
+| Snapshot-validated symbol lookup, 20 samples                 |              p50 50.20 ms; p95 71.06 ms |
+| Existing metadata ranking                                    |                                 0.40 ms |
+| Hybrid ranking                                               |                                52.94 ms |
+| PostgreSQL tables plus indexes, including two base manifests |                         1,589,248 bytes |
+| Retrieved source context                                     | 215 characters; approximately 54 tokens |
 
 `EXPLAIN ANALYZE` used `ci_symbol_name` for the primitive exact-symbol lookup (0.035 ms execution). The combined symbol/path retrieval plan used snapshot file indexes plus a symbol sequential scan/hash join (2.701 ms execution on this fixture). The latter is recorded explicitly rather than implying every hybrid predicate uses the exact-name index. Larger production data may justify splitting exact and path query plans. End-to-end timings above include Git/authorization/freshness overhead; SQL execution time alone is not presented as API latency.
 

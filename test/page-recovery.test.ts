@@ -16,7 +16,10 @@ test("chunk load failures from every browser are recognised; ordinary errors are
   ])
     assert.equal(isChunkLoadError(new Error(message)), true, message);
   assert.equal(isChunkLoadError(Object.assign(new Error("x"), { name: "ChunkLoadError" })), true);
-  assert.equal(isChunkLoadError(new TypeError("Cannot read properties of undefined (reading 'map')")), false);
+  assert.equal(
+    isChunkLoadError(new TypeError("Cannot read properties of undefined (reading 'map')")),
+    false,
+  );
   assert.equal(isChunkLoadError("nope"), false);
 });
 

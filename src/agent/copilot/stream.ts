@@ -120,9 +120,7 @@ export class TextBatch {
 
 type RawRecord = Record<string, unknown>;
 
-function parseCopilotLine(
-  line: string,
-): { event: CopilotEvent } | { error: CopilotParseError } {
+function parseCopilotLine(line: string): { event: CopilotEvent } | { error: CopilotParseError } {
   let raw: unknown;
   try {
     raw = JSON.parse(line);
@@ -301,13 +299,11 @@ function parseLegacyEvent(rawObj: RawRecord): CopilotEvent {
 
   let tokens: CopilotTokens | undefined;
   const rawMetrics = rawObj.metrics as RawRecord | undefined;
-  const usage = (
-    payload.usage ??
+  const usage = (payload.usage ??
     rawObj.usage ??
     rawMetrics?.tokens ??
     rawObj.tokens ??
-    (rawObj.type === "tokens" || rawObj.input != null ? rawObj : null)
-  ) as RawRecord | undefined;
+    (rawObj.type === "tokens" || rawObj.input != null ? rawObj : null)) as RawRecord | undefined;
   if (usage && typeof usage === "object") {
     tokens = {
       input: num(usage.input_tokens ?? usage.input ?? usage.prompt_tokens),
@@ -359,21 +355,17 @@ function parseLegacyEvent(rawObj: RawRecord): CopilotEvent {
     cumulativeUsage: protocolEvent === "result",
     status: typeof payload.status === "string" ? payload.status : undefined,
     turns: num(payload.num_turns) ?? undefined,
-    tool: (
-      payloadToolInfo?.name ??
+    tool: (payloadToolInfo?.name ??
       payloadToolInfo?.tool_name ??
       rawToolCall?.name ??
       rawObj.tool ??
       rawObj.name ??
-      undefined
-    ) as string | undefined,
-    toolArgs: (
-      payloadToolInfo?.parameters ??
+      undefined) as string | undefined,
+    toolArgs: (payloadToolInfo?.parameters ??
       rawToolCall?.args ??
       rawObj.args ??
       rawObj.arguments ??
-      undefined
-    ) as Record<string, unknown> | undefined,
+      undefined) as Record<string, unknown> | undefined,
     toolResult: payload.tool_info ?? rawObj.result ?? rawObj.toolResult ?? undefined,
     error,
     raw: rawObj,

@@ -50,7 +50,9 @@ const RAW_GIT_CONFLICT = /is already checked out at|is already used by worktree/
 const errorText = (n: TraceNode) => {
   const e = n.attrs.error as { message?: unknown; error?: unknown } | string | null;
   if (e == null) return "";
-  return redactSecrets(typeof e === "string" ? e : String(e.message ?? e.error ?? JSON.stringify(e)));
+  return redactSecrets(
+    typeof e === "string" ? e : String(e.message ?? e.error ?? JSON.stringify(e)),
+  );
 };
 
 function flatten(n: TraceNode, out: TraceNode[] = []) {
@@ -75,7 +77,9 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
 
   for (const step of nodes.filter((n) => n.type === "step")) {
     const decisions = flatten(step).filter((n) => n.type === "decision");
-    const recoveries = decisions.filter((d) => d.attrs.kind === "recovery" && d.status === "applied");
+    const recoveries = decisions.filter(
+      (d) => d.attrs.kind === "recovery" && d.status === "applied",
+    );
     if (recoveries.length >= loopAttempts)
       findings.push({
         kind: "recovery_loop",
@@ -86,7 +90,9 @@ export function diagnoseTrace(root: TraceNode, opts: DiagnosisOptions = {}): Fin
         suggestion:
           "Check why the worker keeps losing the lease (crash, restart, slow heartbeat) before retrying again; each recovery repeats work.",
       });
-    const lastReconcile = decisions.filter((d) => d.attrs.kind === "reconcile" && d.status === "applied").at(-1);
+    const lastReconcile = decisions
+      .filter((d) => d.attrs.kind === "reconcile" && d.status === "applied")
+      .at(-1);
     if (lastReconcile && step.status === "WAITING_INPUT")
       findings.push({
         kind: "checkpoint_incompatible",

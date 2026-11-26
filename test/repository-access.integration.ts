@@ -53,7 +53,10 @@ type AccessMatrix = {
 };
 type AuditEntry = { action: string; actor: string; detail: { after?: string } };
 type RunChanges = { repos: Array<{ repo: string; restricted: boolean }> };
-type RunScopeRow = Pick<RunRow, "id" | "owner_id" | "allowed_repositories" | "selected_repositories" | "inputs">;
+type RunScopeRow = Pick<
+  RunRow,
+  "id" | "owner_id" | "allowed_repositories" | "selected_repositories" | "inputs"
+>;
 let admin: Call, A: Call, B: Call;
 let bitbucketCalls = 0;
 
@@ -81,7 +84,8 @@ async function login(username: string, password: string): Promise<Call> {
     return { status: res.status, body: await res.json().catch(() => ({})) };
   };
 }
-const names = (rows: Array<{ name?: string; repo?: string }>) => rows.map((r) => r.name ?? r.repo).sort();
+const names = (rows: Array<{ name?: string; repo?: string }>) =>
+  rows.map((r) => r.name ?? r.repo).sort();
 const register = (name: string, extra: Record<string, unknown> = {}) =>
   repositories.upsert(name, {
     repository_url: `https://bitbucket.org/hasaki/${name}.git`,
@@ -231,7 +235,10 @@ test("9. checkboxes and bulk: independent read/write/PR flags normalize to a lev
     [{ read: false, write: false, pull_request: false }, "none"],
   ];
   for (const [flags, level] of cases) {
-    const r = await admin<{ after: string }>("/api/repositories/repo-d/access", { user_id: ids["acl-b"], ...flags });
+    const r = await admin<{ after: string }>("/api/repositories/repo-d/access", {
+      user_id: ids["acl-b"],
+      ...flags,
+    });
     assert.equal(r.status, 200, JSON.stringify(flags));
     assert.equal(r.body.after, level, JSON.stringify(flags));
   }
@@ -406,7 +413,10 @@ test("2. ranking never returns a repository the caller cannot access", async () 
   });
   assert.equal(r.status, 200);
   assert.deepEqual(r.body.ranked.map((x) => x.repo).sort(), ["repo-a", "repo-c"]);
-  const unmapped = await A<{ ranked: RankedRepository[] }>("/api/repositories/rank", { text: "repo-b", project: "" });
+  const unmapped = await A<{ ranked: RankedRepository[] }>("/api/repositories/rank", {
+    text: "repo-b",
+    project: "",
+  });
   assert.ok(
     !unmapped.body.ranked.some((x) => x.repo === "repo-b"),
     "no project mapping never widens to every repository",
@@ -544,9 +554,11 @@ test("8/11. revocation reaches existing runs: scope narrows, the step stops, wri
     "a selected repository was revoked: the step must stop",
   );
   assert.deepEqual(
-    (await one<{ allowed_repositories: string[] }>(pool, "SELECT allowed_repositories FROM workflow_runs WHERE id = $1", [
-      run.id,
-    ]))!.allowed_repositories,
+    (await one<{ allowed_repositories: string[] }>(
+      pool,
+      "SELECT allowed_repositories FROM workflow_runs WHERE id = $1",
+      [run.id],
+    ))!.allowed_repositories,
     ["repo-a"],
     "the unselected revoked repository leaves the scope; the selected one stays recorded but blocked",
   );
@@ -628,20 +640,22 @@ test("8. a queued step of an existing run stops before executing once its select
   await retryStep(run.id, "look");
   assert.equal(await runOnce("acl-worker"), true);
   assert.equal(executed, 1);
-  assert.equal(
-    (await getRun(run.id)).steps.find((x) => x.key === "look")!.status,
-    "COMPLETED",
-  );
+  assert.equal((await getRun(run.id)).steps.find((x) => x.key === "look")!.status, "COMPLETED");
 });
 
 test("a run created before any grant picks the grant up when its step is retried (nothing selected yet)", async () => {
   // B has no access to repo-d; the run starts with an empty scope (the user story behind "no repositories are allowed")
-  const wi = (await B<WorkItemRow>("/api/work-items", { title: "before grant", project: "ACL" })).body;
+  const wi = (await B<WorkItemRow>("/api/work-items", { title: "before grant", project: "ACL" }))
+    .body;
   await admin("/api/repositories/repo-c/shared", { level: "none" });
   await admin("/api/repositories/repo-b/access", { user_id: ids["acl-b"], level: "none" });
   try {
     const run = (
-      await B<RunRow>("/api/runs", { workflow: "bug-investigation", work_item_id: wi.id, start: false })
+      await B<RunRow>("/api/runs", {
+        workflow: "bug-investigation",
+        work_item_id: wi.id,
+        start: false,
+      })
     ).body;
     assert.deepEqual(run.allowed_repositories, []);
     await admin("/api/repositories/repo-b/access", { user_id: ids["acl-b"], level: "write" });
@@ -653,9 +667,11 @@ test("a run created before any grant picks the grant up when its step is retried
     const scope = await enforceRunRepositoryAccess(row);
     assert.deepEqual(scope, { revoked: [], blocked: [], added: ["repo-b"], changed: true });
     assert.deepEqual(
-      (await one<{ allowed_repositories: string[] }>(pool, "SELECT allowed_repositories FROM workflow_runs WHERE id = $1", [
-        run.id,
-      ]))!.allowed_repositories,
+      (await one<{ allowed_repositories: string[] }>(
+        pool,
+        "SELECT allowed_repositories FROM workflow_runs WHERE id = $1",
+        [run.id],
+      ))!.allowed_repositories,
       ["repo-b"],
     );
     assert.ok(
@@ -687,15 +703,19 @@ test("5. code intelligence status is filtered by access", async () => {
   const saved = config.codeIntelligence.enabled;
   config.codeIntelligence.enabled = true;
   try {
-    const rows = (await A<{ repositories: Array<{ name: string }> }>("/api/repositories/index-status")).body.repositories
+    const rows = (
+      await A<{ repositories: Array<{ name: string }> }>("/api/repositories/index-status")
+    ).body.repositories
       .map((r) => r.name)
       .sort();
     assert.deepEqual(rows, ["repo-a", "repo-c"]);
     assert.equal((await A("/api/repositories/index-status?manage=1")).status, 403);
     assert.ok(
-      (await admin<{ repositories: Array<{ name: string }> }>("/api/repositories/index-status?manage=1")).body.repositories.some(
-        (r) => r.name === "repo-b",
-      ),
+      (
+        await admin<{ repositories: Array<{ name: string }> }>(
+          "/api/repositories/index-status?manage=1",
+        )
+      ).body.repositories.some((r) => r.name === "repo-b"),
     );
   } finally {
     config.codeIntelligence.enabled = saved;
@@ -744,21 +764,39 @@ test("11. repository knowledge (scoped or imported) is invisible without access 
 });
 
 test("knowledge delete: members cannot delete shared items; an assigned key needs force; admins can", async () => {
-  await knowledge.create({ key: "acl.del.shared", category: "business_rule", scope_type: "GLOBAL", title: "to delete", content: "x", created_by: "test" });
+  await knowledge.create({
+    key: "acl.del.shared",
+    category: "business_rule",
+    scope_type: "GLOBAL",
+    title: "to delete",
+    content: "x",
+    created_by: "test",
+  });
   assert.equal((await A("/api/knowledge/acl.del.shared/delete", { reason: "no" })).status, 403);
-  const wf = (await admin<Array<{ key: string; archived: boolean }>>("/api/workflows")).body.find((d) => !d.archived && d.key)!;
+  const wf = (await admin<Array<{ key: string; archived: boolean }>>("/api/workflows")).body.find(
+    (d) => !d.archived && d.key,
+  )!;
   const { pool: p } = await import("../src/db/pool.ts");
-  await p.query("UPDATE workflow_definitions SET draft_spec = jsonb_set(coalesce(draft_spec, '{}'::jsonb), '{knowledge}', '[\"acl.del.shared\"]') WHERE key = $1", [wf.key]);
+  await p.query(
+    "UPDATE workflow_definitions SET draft_spec = jsonb_set(coalesce(draft_spec, '{}'::jsonb), '{knowledge}', '[\"acl.del.shared\"]') WHERE key = $1",
+    [wf.key],
+  );
   try {
     const blocked = await admin("/api/knowledge/acl.del.shared/delete", { reason: "unused" });
     assert.equal(blocked.status, 409);
     assert.match(JSON.stringify(blocked.body), /still assigned/);
-    const ok = await admin<{ deleted: string[] }>("/api/knowledge/acl.del.shared/delete", { reason: "unused", force: true });
+    const ok = await admin<{ deleted: string[] }>("/api/knowledge/acl.del.shared/delete", {
+      reason: "unused",
+      force: true,
+    });
     assert.equal(ok.status, 200);
     assert.deepEqual(ok.body.deleted, ["acl.del.shared"]);
     assert.equal((await admin("/api/knowledge/acl.del.shared")).status, 404);
   } finally {
-    await p.query("UPDATE workflow_definitions SET draft_spec = draft_spec - 'knowledge' WHERE key = $1", [wf.key]);
+    await p.query(
+      "UPDATE workflow_definitions SET draft_spec = draft_spec - 'knowledge' WHERE key = $1",
+      [wf.key],
+    );
   }
 });
 
@@ -805,7 +843,11 @@ test("deleting a repository removes its grants and checks with it", async () => 
 
 test("the repository list answers from expired checks and refreshes them in the background", async () => {
   await A("/api/repositories");
-  await q(pool, "UPDATE repository_bitbucket_permissions SET expires_at = now() - interval '1 minute' WHERE user_id = $1", [ids["acl-a"]]);
+  await q(
+    pool,
+    "UPDATE repository_bitbucket_permissions SET expires_at = now() - interval '1 minute' WHERE user_id = $1",
+    [ids["acl-a"]],
+  );
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   const slowCalls: string[] = [];
@@ -820,12 +862,17 @@ test("the repository list answers from expired checks and refreshes them in the 
   try {
     const listed = await A<RepoView[]>("/api/repositories");
     assert.equal(listed.status, 200);
-    assert.ok(names(listed.body).includes("repo-a"), "the last known verdict answers while the host is slow");
+    assert.ok(
+      names(listed.body).includes("repo-a"),
+      "the last known verdict answers while the host is slow",
+    );
     for (let i = 0; i < 50 && !slowCalls.length; i++) await new Promise((r) => setTimeout(r, 20));
     assert.ok(slowCalls.length > 0, "expired checks are refreshed behind the response");
     // An entry point that starts work still waits for a fresh answer.
     let settled = false;
-    const blocking = resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a", { verify: true }).then(() => (settled = true));
+    const blocking = resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a", {
+      verify: true,
+    }).then(() => (settled = true));
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(settled, false);
     release();
@@ -845,15 +892,32 @@ test("the repository list answers from expired checks and refreshes them in the 
 test("a host outage does not erase a recent verdict; a real answer still replaces it", async () => {
   const repoA = (await repositories.get("repo-a"))!;
   await refreshBitbucket(ids["acl-a"], [repoA], true);
-  setBitbucketPermissionChecker(async () => ({ state: "unknown", can_read: null, can_write: null, reason: "Bitbucket unreachable" }));
+  setBitbucketPermissionChecker(async () => ({
+    state: "unknown",
+    can_read: null,
+    can_write: null,
+    reason: "Bitbucket unreachable",
+  }));
   try {
     await refreshBitbucket(ids["acl-a"], [repoA], true);
     const p = await resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a");
-    assert.equal(p!.bitbucket.state, "verified", "an unreachable host keeps the last definite answer");
+    assert.equal(
+      p!.bitbucket.state,
+      "verified",
+      "an unreachable host keeps the last definite answer",
+    );
     assert.ok(names((await A<RepoView[]>("/api/repositories")).body).includes("repo-a"));
-    setBitbucketPermissionChecker(async () => ({ state: "denied", can_read: false, can_write: false, reason: "test: revoked" }));
+    setBitbucketPermissionChecker(async () => ({
+      state: "denied",
+      can_read: false,
+      can_write: false,
+      reason: "test: revoked",
+    }));
     await refreshBitbucket(ids["acl-a"], [repoA], true);
-    assert.equal((await resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a"))!.bitbucket.state, "denied");
+    assert.equal(
+      (await resolveEffectiveRepositoryPermissions(ids["acl-a"], "repo-a"))!.bitbucket.state,
+      "denied",
+    );
   } finally {
     setBitbucketPermissionChecker(async (creds, _ws, slug) => {
       bitbucketCalls++;

@@ -95,13 +95,11 @@ const fake: GitProvider = {
     };
   },
   pullRequestDiscussions: async (ref) => ({
-    discussions: remotes
-      .get(ref.url)!
-      .notes.map((n) => ({
-        id: String(n.id),
-        resolved: n.resolved,
-        notes: [{ id: n.id, author: n.author, body: n.body, created_at: "t", system: false }],
-      })),
+    discussions: remotes.get(ref.url)!.notes.map((n) => ({
+      id: String(n.id),
+      resolved: n.resolved,
+      notes: [{ id: n.id, author: n.author, body: n.body, created_at: "t", system: false }],
+    })),
     truncated: false,
   }),
   jobLog: async () => ({ log: [...remotes.values()][0]?.log ?? "", truncated: false }),

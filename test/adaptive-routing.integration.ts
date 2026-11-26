@@ -39,10 +39,15 @@ before(async () => {
   registerExecutor("coding_agent", {
     async execute(ctx) {
       if (/fail/.test(ctx.run.title)) {
-        await ctx.recordMetrics({ verification: { outcome: "failed", status: "failed", passed: false } });
+        await ctx.recordMetrics({
+          verification: { outcome: "failed", status: "failed", passed: false },
+        });
         return { kind: "failed", error: "Mandatory verification failed", retryable: false };
       }
-      return { kind: "completed", output: { summary: "ok", verification: { outcome: "passed", passed: true } } };
+      return {
+        kind: "completed",
+        output: { summary: "ok", verification: { outcome: "passed", passed: true } },
+      };
     },
   });
   await definitions.create({
@@ -90,8 +95,14 @@ test("history keeps execution success, correctness and review apart; analysis co
   const a = (p: string) => analysis.filter((o) => o.provider === p);
   assert.equal(a("claude").length, 16);
   assert.equal(a("claude").filter((o) => o.executed).length, 8, "execution success is recorded");
-  assert.ok(analysis.every((o) => o.verified === null), "no deterministic correctness for analysis steps");
-  assert.ok(analysis.every((o) => o.reviewed === null), "a run-level review is not attributed to analysis steps");
+  assert.ok(
+    analysis.every((o) => o.verified === null),
+    "no deterministic correctness for analysis steps",
+  );
+  assert.ok(
+    analysis.every((o) => o.reviewed === null),
+    "a run-level review is not attributed to analysis steps",
+  );
   const coding = await loadOutcomes({ stepType: "coding_agent" });
   const c = (p: string) => coding.filter((o) => o.provider === p);
   assert.equal(c("claude").filter((o) => o.verified === true).length, 8);
@@ -115,9 +126,18 @@ test("without an opt-in preference nothing changes; with it the measured-better 
 
   await saveRoutingPreference(ownerId, { enabled: true, preference: "balanced", min_samples: 10 });
   // Analysis: codex "completed" more often, but completion is not verified correctness → default kept.
-  const analysis = await startRun({ definitionKey: "route-wf", title: "routed analysis", ownerId, start: false });
+  const analysis = await startRun({
+    definitionKey: "route-wf",
+    title: "routed analysis",
+    ownerId,
+    start: false,
+  });
   runs.push(Number(analysis.id));
-  const ad = (await stepConfig(Number(analysis.id))).routing_decision as { applied: boolean; confidence: string; reason: string };
+  const ad = (await stepConfig(Number(analysis.id))).routing_decision as {
+    applied: boolean;
+    confidence: string;
+    reason: string;
+  };
   assert.equal(ad.applied, false);
   assert.equal(ad.confidence, "insufficient");
   assert.match(ad.reason, /completion is not counted as correct/);

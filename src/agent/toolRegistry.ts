@@ -1642,7 +1642,11 @@ function registerGitHostingTools() {
     available: () => true,
     handler: async ({ repo, path, rev, limit }, ctx) => {
       const { fileHistory } = await import("../git/history.ts");
-      return { repo, path, ...(await fileHistory(await localRoot(repo, ctx), path, { rev, limit })) };
+      return {
+        repo,
+        path,
+        ...(await fileHistory(await localRoot(repo, ctx), path, { rev, limit })),
+      };
     },
   });
   registerIntegrationTool({

@@ -2,16 +2,16 @@
 
 Validated on **2026-11-08**, continuing from clean latest main **`061e964`** fetched from the requested repository.
 
-| Check | Result |
-| --- | --- |
-| `npm run typecheck` | Passed, backend, tests and web |
-| `npm run build` | Passed, production Vite build |
-| Final full `npm test` | **423 passed, 0 failed, 0 skipped**, 268.18 seconds |
-| Latest focused context/security integration tests | **13 passed, 0 failed** |
-| Code-intelligence workflow + context regression checks | **18 passed, 0 failed** |
-| Provider/knowledge compatibility checkpoint | **46 passed, 0 failed** |
-| Context + Codex/Cursor compatibility checkpoint | **44 passed, 0 failed** |
-| `git diff --check` | Passed |
+| Check                                                  | Result                                              |
+| ------------------------------------------------------ | --------------------------------------------------- |
+| `npm run typecheck`                                    | Passed, backend, tests and web                      |
+| `npm run build`                                        | Passed, production Vite build                       |
+| Final full `npm test`                                  | **423 passed, 0 failed, 0 skipped**, 268.18 seconds |
+| Latest focused context/security integration tests      | **13 passed, 0 failed**                             |
+| Code-intelligence workflow + context regression checks | **18 passed, 0 failed**                             |
+| Provider/knowledge compatibility checkpoint            | **46 passed, 0 failed**                             |
+| Context + Codex/Cursor compatibility checkpoint        | **44 passed, 0 failed**                             |
+| `git diff --check`                                     | Passed                                              |
 
 The latest focused run includes the authorization-before-singleflight regression added during full-suite execution, as well as the final work-item fallback/visibility behavior. The full suite includes existing provider fixtures, actual shared-executor-to-Codex process tests, resumed worktree refresh, migrations, engine/scheduler recovery, RBAC, caching, analytics, evaluation and verification.
 

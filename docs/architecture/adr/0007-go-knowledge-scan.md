@@ -20,14 +20,14 @@ with references and a script — two identical in every repository —, Cursor r
 documents; 1,668 documents at 30) plus a user skills directory, on the isolated local PostgreSQL. The pre-change code
 was measured from a worktree of the previous commit (`docs/architecture/knowledge-import-baseline.json`):
 
-| pre-change code, p50 (SQL statements) | 1 repository | 5 | 15 | 30 |
-|---|---|---|---|---|
-| cold import | 1.4 s (526) | 7.9 s (3,027) | 22.8 s (8,704) | 50.0 s (17,376) |
-| unchanged re-import | 0.60 s (195) | 2.9 s (1,103) | 9.1 s (3,194) | 19.0 s (6,339) |
-| 1% of documents modified | 0.59 s | 3.1 s | 9.3 s | 20.3 s |
-| 10% modified | 0.71 s | 4.7 s | 13.5 s | 26.8 s |
-| 100% modified | 1.9 s | 13.6 s | 42.7 s | 84.5 s |
-| scan alone (no database) | 4 ms | 13 ms | 40 ms | 72 ms |
+| pre-change code, p50 (SQL statements) | 1 repository | 5             | 15             | 30              |
+| ------------------------------------- | ------------ | ------------- | -------------- | --------------- |
+| cold import                           | 1.4 s (526)  | 7.9 s (3,027) | 22.8 s (8,704) | 50.0 s (17,376) |
+| unchanged re-import                   | 0.60 s (195) | 2.9 s (1,103) | 9.1 s (3,194)  | 19.0 s (6,339)  |
+| 1% of documents modified              | 0.59 s       | 3.1 s         | 9.3 s          | 20.3 s          |
+| 10% modified                          | 0.71 s       | 4.7 s         | 13.5 s         | 26.8 s          |
+| 100% modified                         | 1.9 s        | 13.6 s        | 42.7 s         | 84.5 s          |
+| scan alone (no database)              | 4 ms         | 13 ms         | 40 ms          | 72 ms           |
 
 **Where the time goes.** Not the filesystem: scanning 1,668 documents took 94 ms (0.5% of an unchanged import). Not
 CPU: Node spent 2.5 s of CPU in a 17 s unchanged import. The database: every candidate was compared through
@@ -66,7 +66,7 @@ whole import.
 ### 2. Discovery / assembly split
 
 `scanRepositories()` = **discovery** (an engine reads the files and builds every candidate) + **assembly**
-(`assembleCandidates`, TypeScript only). Discovery attaches to each candidate a *target* —
+(`assembleCandidates`, TypeScript only). Discovery attaches to each candidate a _target_ —
 `repository`, `repositories` (identical skill copies), `wiki_siblings`, `wiki_projects`, `user_skill` — and assembly
 resolves it against the registry: scope, applicability (`scopeForRepositories`, `scopeForProjects`,
 `scopeForUserSkill`) and the enable policy of unattended-unsafe user skills (`USER_SKILLS_DISABLED`). TypeScript also
@@ -75,18 +75,18 @@ engine can widen a scope from what a document says.
 
 ### 3. One set of scan rules for both engines (`SourceTree`, `go/internal/knowledge/tree.go`)
 
-| Rule | Before | Now |
-|---|---|---|
-| symlink to a file or directory outside the root | followed and imported | skipped, reported (`symlink outside the repository`) |
-| symlink inside the root | followed | followed |
-| race: a path component swapped for a symlink after the check | — | caught: the opened descriptor's real path (`/proc/self/fd`) must be inside the root; final component opened with `O_NOFOLLOW`, FIFOs with `O_NONBLOCK` |
-| file larger than 1 MiB | read whole, secret-scanned, truncated to 60,000 chars | skipped, reported (`larger than 1048576 bytes`) — never imported unscanned; read bounded before allocation |
-| per-repository entries > 20,000, total bytes > 512 MiB, scan > 120 s | unbounded | the scan stops there; the repository is reported **incomplete** and nothing of it is retired |
-| broken symlink, checkout gone mid-scan | import aborted | skipped / repository incomplete |
-| directory or file that cannot be read (EACCES, EIO, EMFILE…) | treated as absent: its items **retired** | reported `unreadable (CODE)`; the repository is incomplete; nothing of it retired (hardening review) |
-| absent (ENOENT, ENOTDIR, symlink loop) | absent | absent: a legitimate deletion, retired when the scan is complete |
-| wiki `docs/` test | on the absolute path: a checkout below any `…/docs/…` imported every Markdown file | on the path relative to the repository |
-| a cut inside a surrogate pair (60,000-char truncation, 300/600-char descriptions) | lone surrogate: PostgreSQL stored U+FFFD for text, JSONB metadata refused the insert | U+FFFD at the cut (`sliceUnits` / `jsstr.SliceUTF16`) |
+| Rule                                                                              | Before                                                                               | Now                                                                                                                                                    |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| symlink to a file or directory outside the root                                   | followed and imported                                                                | skipped, reported (`symlink outside the repository`)                                                                                                   |
+| symlink inside the root                                                           | followed                                                                             | followed                                                                                                                                               |
+| race: a path component swapped for a symlink after the check                      | —                                                                                    | caught: the opened descriptor's real path (`/proc/self/fd`) must be inside the root; final component opened with `O_NOFOLLOW`, FIFOs with `O_NONBLOCK` |
+| file larger than 1 MiB                                                            | read whole, secret-scanned, truncated to 60,000 chars                                | skipped, reported (`larger than 1048576 bytes`) — never imported unscanned; read bounded before allocation                                             |
+| per-repository entries > 20,000, total bytes > 512 MiB, scan > 120 s              | unbounded                                                                            | the scan stops there; the repository is reported **incomplete** and nothing of it is retired                                                           |
+| broken symlink, checkout gone mid-scan                                            | import aborted                                                                       | skipped / repository incomplete                                                                                                                        |
+| directory or file that cannot be read (EACCES, EIO, EMFILE…)                      | treated as absent: its items **retired**                                             | reported `unreadable (CODE)`; the repository is incomplete; nothing of it retired (hardening review)                                                   |
+| absent (ENOENT, ENOTDIR, symlink loop)                                            | absent                                                                               | absent: a legitimate deletion, retired when the scan is complete                                                                                       |
+| wiki `docs/` test                                                                 | on the absolute path: a checkout below any `…/docs/…` imported every Markdown file   | on the path relative to the repository                                                                                                                 |
+| a cut inside a surrogate pair (60,000-char truncation, 300/600-char descriptions) | lone surrogate: PostgreSQL stored U+FFFD for text, JSONB metadata refused the insert | U+FFFD at the cut (`sliceUnits` / `jsstr.SliceUTF16`)                                                                                                  |
 
 Secret detection, path exclusions, external manifest hash verification and blocked third-party skills are unchanged
 (the external manifest import stays TypeScript: a handful of platform-owned files). A user skills directory
@@ -142,7 +142,7 @@ downstream (no version, no embedding).
 produced **identical import reports** in every scenario and scale, locally and with latency; the parity suite
 additionally compares the registry rows and the embedding eligibility.
 
-*Re-measured in the hardening review* (5 and 30 repositories) after a defect in the benchmark harness was fixed: its
+_Re-measured in the hardening review_ (5 and 30 repositories) after a defect in the benchmark harness was fixed: its
 PostgreSQL proxy delayed every packet by a 0 ms timer (~1 ms each way) even without injected latency, which inflated
 every "local" figure in proportion to its statement count — the pre-change code most. The first local table of this
 ADR (19.0 s → 0.49 s unchanged at 30 repositories, etc.) overstated the gains; the 20 ms latency figures below were
@@ -150,14 +150,14 @@ not affected.
 
 **Publication path (TypeScript engine, before → after):**
 
-| p50 | 5 repositories | 30 repositories |
-|---|---|---|
-| unchanged re-import | 306 → 92 ms (−70%) | 1,740 → 232 ms (−87%) |
-| 1% modified | 269 → 119 ms (−56%) | 1,897 → 325 ms (−83%) |
-| 10% modified | 448 → 138 ms (−69%) | 2,520 → 519 ms (−79%) |
-| 100% modified | 1,233 → 456 ms (−63%) | 7,748 → 2,322 ms (−70%) |
-| cold import | 646 → 297 ms (−54%) | 3,717 → 1,515 ms (−59%) |
-| SQL statements, unchanged | 1,009 → 8 | 5,747 → 8 |
+| p50                       | 5 repositories        | 30 repositories         |
+| ------------------------- | --------------------- | ----------------------- |
+| unchanged re-import       | 306 → 92 ms (−70%)    | 1,740 → 232 ms (−87%)   |
+| 1% modified               | 269 → 119 ms (−56%)   | 1,897 → 325 ms (−83%)   |
+| 10% modified              | 448 → 138 ms (−69%)   | 2,520 → 519 ms (−79%)   |
+| 100% modified             | 1,233 → 456 ms (−63%) | 7,748 → 2,322 ms (−70%) |
+| cold import               | 646 → 297 ms (−54%)   | 3,717 → 1,515 ms (−59%) |
+| SQL statements, unchanged | 1,009 → 8             | 5,747 → 8               |
 
 With 20 ms of latency on every database packet (1 repository, `knowledge-import-baseline-latency20.json` vs
 `knowledge-import-engines-latency20.json`): unchanged 7.4 s → 0.26 s (−96%), 1% 7.6 s → 0.31 s (−96%), 10% 9.4 s →
@@ -171,15 +171,15 @@ version semantics.
 
 **Go scan vs. TypeScript scan (same publication path, re-measured):**
 
-| p50 | 5 repositories | 30 repositories |
-|---|---|---|
-| scan alone | 33 → 21 ms (−37%) | 128 → 82 ms (−36%) |
-| Node CPU of the scan | 40 → 17 ms | 169 → 37 ms |
-| unchanged import | 92 → 87 ms | 232 → 186 ms (−20%) |
-| 1% modified | 119 → 126 ms | 325 → 271 ms (−16%) |
-| event-loop p99, unchanged import | 28 → 16 ms | 60 → 26 ms |
-| Node CPU, unchanged import | 64 → 55 ms | 255 → 143 ms |
-| 10% / 100% modified, cold | within ±15% | within ±10% |
+| p50                              | 5 repositories    | 30 repositories     |
+| -------------------------------- | ----------------- | ------------------- |
+| scan alone                       | 33 → 21 ms (−37%) | 128 → 82 ms (−36%)  |
+| Node CPU of the scan             | 40 → 17 ms        | 169 → 37 ms         |
+| unchanged import                 | 92 → 87 ms        | 232 → 186 ms (−20%) |
+| 1% modified                      | 119 → 126 ms      | 325 → 271 ms (−16%) |
+| event-loop p99, unchanged import | 28 → 16 ms        | 60 → 26 ms          |
+| Node CPU, unchanged import       | 64 → 55 ms        | 255 → 143 ms        |
+| 10% / 100% modified, cold        | within ±15%       | within ±10%         |
 
 The scan got slower than before (30 repositories: 77 → 128 ms in TypeScript) because every file is now resolved,
 opened without following symlinks and re-checked through `/proc`: the price of the rules in §3, paid by both engines.

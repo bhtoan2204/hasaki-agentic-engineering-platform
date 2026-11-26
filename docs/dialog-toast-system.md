@@ -12,20 +12,20 @@ Báo cáo kỹ thuật (tiếng Việt) cho việc thay thế `alert` / `confirm
 
 ## 2. Kiểm kê call site (trước → sau)
 
-| Khu vực | Trước | Sau | Mục đích |
-| --- | --- | --- | --- |
-| Chat | `confirm` xoá hội thoại | `dialog.confirm` destructive | Xoá conversation |
-| StepInspector | `confirm` skip/stop | `dialog.confirm` warning/destructive | Bỏ qua / dừng bước |
-| Integrations | `confirm` xoá DB / GitLab instance | `dialog.confirm` destructive | Xoá credential/config |
-| RunView | `confirm` cancel/merge/close; `prompt` branch | `dialog.confirm` / `dialog.prompt` | Huỷ run, PR, sửa branch |
-| Repositories | `confirm` xoá repo | `dialog.confirm` destructive | Gỡ đăng ký repo |
-| RepositoryAccess | `confirm` bulk access | `dialog.confirm` | Cập nhật quyền hàng loạt |
-| Settings | `window.confirm` restore | `dialog.confirm` destructive | Khôi phục mặc định |
-| WorkflowEditor | `confirm` discard | `dialog.confirm` warning | Bỏ thay đổi chưa lưu |
-| Knowledge | `prompt` lý do + `confirm` force | `dialog.prompt` + `dialog.confirm` | Xoá knowledge |
-| Investigations | `window.confirm` fix | `dialog.confirm` warning | Mở phiên sửa |
-| KnowledgeProposals | `confirm` bulk/rollback | `dialog.confirm` | Duyệt / từ chối / rollback |
-| Questions | `confirm` reject | `dialog.confirm` destructive | Từ chối approval |
+| Khu vực            | Trước                                         | Sau                                  | Mục đích                   |
+| ------------------ | --------------------------------------------- | ------------------------------------ | -------------------------- |
+| Chat               | `confirm` xoá hội thoại                       | `dialog.confirm` destructive         | Xoá conversation           |
+| StepInspector      | `confirm` skip/stop                           | `dialog.confirm` warning/destructive | Bỏ qua / dừng bước         |
+| Integrations       | `confirm` xoá DB / GitLab instance            | `dialog.confirm` destructive         | Xoá credential/config      |
+| RunView            | `confirm` cancel/merge/close; `prompt` branch | `dialog.confirm` / `dialog.prompt`   | Huỷ run, PR, sửa branch    |
+| Repositories       | `confirm` xoá repo                            | `dialog.confirm` destructive         | Gỡ đăng ký repo            |
+| RepositoryAccess   | `confirm` bulk access                         | `dialog.confirm`                     | Cập nhật quyền hàng loạt   |
+| Settings           | `window.confirm` restore                      | `dialog.confirm` destructive         | Khôi phục mặc định         |
+| WorkflowEditor     | `confirm` discard                             | `dialog.confirm` warning             | Bỏ thay đổi chưa lưu       |
+| Knowledge          | `prompt` lý do + `confirm` force              | `dialog.prompt` + `dialog.confirm`   | Xoá knowledge              |
+| Investigations     | `window.confirm` fix                          | `dialog.confirm` warning             | Mở phiên sửa               |
+| KnowledgeProposals | `confirm` bulk/rollback                       | `dialog.confirm`                     | Duyệt / từ chối / rollback |
+| Questions          | `confirm` reject                              | `dialog.confirm` destructive         | Từ chối approval           |
 
 ### Ngoại lệ còn lại (không thay thế)
 

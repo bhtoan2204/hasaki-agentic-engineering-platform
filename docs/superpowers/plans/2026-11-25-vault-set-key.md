@@ -32,11 +32,13 @@
 ### Task 1: Config and QC/allowlist preflight
 
 **Files:**
+
 - Modify: `src/config.ts:398-399` (type) and `src/config.ts:798` (default)
 - Modify: `src/integrations/vault.ts`
 - Create: `test/vault-write.test.ts`
 
 **Interfaces:**
+
 - Produces: `config.vault.writeAllow: Array<{ path: string; keys: string[] }>`; `vaultWriteTarget(path: string, key: string): Promise<{ path: string; mount: string; rest: string }>` exported from `vault.ts` (throws `Error` with a human message on any refusal).
 
 - [ ] **Step 1: Write failing tests** in `test/vault-write.test.ts` (use `test/env.ts` import pattern of `test/chat-operations.test.ts`; set `config.vault` fields per test and restore after). Names and assertions:
@@ -45,7 +47,7 @@
   - `vault write target: path and key must match the allowlist` → path outside prefix rejects; `otel_endpoint` vs allowed `OTEL_ENDPOINT` rejects; a `*` suffix entry matches by prefix.
   - `vault write target: path escapes are refused` → `secret/payment/../prod/x` and paths containing `..` reject.
   - `vault write target: production-looking path is refused` → `secret/payment-prod/x` rejects even under `secret/payment*`.
-  All of these reject before any network call, so no fake server is needed.
+    All of these reject before any network call, so no fake server is needed.
 
 - [ ] **Step 2: Run** `node --disable-warning=ExperimentalWarning --import ./test/env.ts --test test/vault-write.test.ts` — expect FAIL (`vaultWriteTarget` not exported).
 
@@ -58,10 +60,12 @@
 ### Task 2: `setVaultKey` against KV v2
 
 **Files:**
+
 - Modify: `src/integrations/vault.ts` (extend private `call` opts: `method` also `"PATCH"`, optional `body`, set `Content-Type: application/merge-patch+json` when PATCH)
 - Modify: `test/vault.integration.ts` (extend the fake Vault: GET `/v1/<mount>/data/...` returning `metadata.version`, PATCH recording method, content-type and parsed body; a flag to simulate CAS mismatch with Vault's 400 `check-and-set parameter did not match`)
 
 **Interfaces:**
+
 - Consumes: `vaultWriteTarget` (Task 1), `requireToken()`, `describeValue`.
 - Produces: `setVaultKey(a: { path: string; key: string; value: string }): Promise<{ written: true; path: string; key: string; version: number; downstream_verified: false }>`.
 
@@ -82,12 +86,14 @@
 ### Task 3: Register the tool, policy line, docs
 
 **Files:**
+
 - Modify: `src/agent/toolRegistry.ts` (after `vault.keys`, ~line 870)
 - Modify: `src/chat/policy.ts:39`
 - Modify: `src/integrations/vault.ts` header comment, `docs/architecture/interactive-agent-chat-operations.md` (new "Vault set_key (QC)" section modeled on "Kafka publish (QC)")
 - Test: `test/vault-write.test.ts`
 
 **Interfaces:**
+
 - Consumes: `vaultWriteTarget`, `setVaultKey`, `describeValue`, `vaultAvailable`.
 - Produces: integration tool `vault.set_key`.
 

@@ -10,7 +10,10 @@ export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
 export type ProviderFlags = Partial<Record<AgentProvider, boolean>>;
 
 /** Missing flag means on, so an unset Settings page leaves every provider available. */
-export function providerEnabled(provider: AgentProvider, flags: ProviderFlags | undefined = config.agent.enabledProviders): boolean {
+export function providerEnabled(
+  provider: AgentProvider,
+  flags: ProviderFlags | undefined = config.agent.enabledProviders,
+): boolean {
   return flags?.[provider] !== false;
 }
 

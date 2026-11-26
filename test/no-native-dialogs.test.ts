@@ -17,8 +17,7 @@ const ALLOW = new Set([
   "web/src/dialog/index.ts",
 ]);
 
-const BANNED =
-  /(?<![.\w$])(?:window\.|globalThis\.)?(?:alert|confirm|prompt)\s*\(/g;
+const BANNED = /(?<![.\w$])(?:window\.|globalThis\.)?(?:alert|confirm|prompt)\s*\(/g;
 
 function walk(dir: string, out: string[] = []) {
   for (const name of readdirSync(dir)) {

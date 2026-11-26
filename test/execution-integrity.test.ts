@@ -8,10 +8,7 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { requiredTestTargets, verifyWorkspaces } from "../src/agent/verify.ts";
-import {
-  installNodeDependencies,
-  nodeModulesReady,
-} from "../src/git/nodeDependencies.ts";
+import { installNodeDependencies, nodeModulesReady } from "../src/git/nodeDependencies.ts";
 import { commandProcessEnv, setBwrapForTests } from "../src/platform/selfDevelopment.ts";
 import { config } from "../src/config.ts";
 import { implementationChanged } from "../src/agent/implementationEvidence.ts";
@@ -241,7 +238,12 @@ test("worker verification cannot write a protected path outside its worktree", a
       try {
         return mkdtempSync(join(base, "verification-protected-"));
       } catch (error) {
-        if (!["EROFS", "EACCES", "EPERM", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+        if (
+          !["EROFS", "EACCES", "EPERM", "ENOENT"].includes(
+            (error as NodeJS.ErrnoException).code ?? "",
+          )
+        )
+          throw error;
       }
     }
     throw new Error("no writable location outside /tmp for the protected-path fixture");

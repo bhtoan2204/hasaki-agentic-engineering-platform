@@ -41,17 +41,17 @@ to the full conversation. Telegram displays Markdown as plain text, replaces cod
 Replying to one of the bot's answers continues **that** conversation (and makes it the linked one). Turns started in the
 web chat of the linked conversation are mirrored to Telegram ("💻 From the web: …").
 
-| Command | Effect |
-|---|---|
-| `/help` | Usage and examples |
-| `/new [title]` | New conversation; Telegram now talks to it |
-| `/link <id>` | Attach Telegram to one of your web conversations (`#/chat/<id>`) |
-| `/status` | Account, linked conversation, running answer, autonomy, run counts, provider health |
-| `/tasks` | Your ten most recent work items |
-| `/runs [blocked\|active\|failed]` | Your runs with 👁 buttons to follow one live |
-| `/mode` | Show autonomy; `/mode manual\|semi\|auto` sets your own policy, `/mode pause\|resume`; `/mode chat <AUTO\|ASK\|INVESTIGATE\|PLAN\|DELEGATE>` sets the conversation mode |
-| `/stop` | Cancel the running answer. `/stop all`: emergency stop (pauses your autonomy policy and the runs it started) |
-| `/cancel` | Cancel a pending workflow ForceReply prompt (unchanged) |
+| Command                           | Effect                                                                                                                                                                  |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/help`                           | Usage and examples                                                                                                                                                      |
+| `/new [title]`                    | New conversation; Telegram now talks to it                                                                                                                              |
+| `/link <id>`                      | Attach Telegram to one of your web conversations (`#/chat/<id>`)                                                                                                        |
+| `/status`                         | Account, linked conversation, running answer, autonomy, run counts, provider health                                                                                     |
+| `/tasks`                          | Your ten most recent work items                                                                                                                                         |
+| `/runs [blocked\|active\|failed]` | Your runs with 👁 buttons to follow one live                                                                                                                             |
+| `/mode`                           | Show autonomy; `/mode manual\|semi\|auto` sets your own policy, `/mode pause\|resume`; `/mode chat <AUTO\|ASK\|INVESTIGATE\|PLAN\|DELEGATE>` sets the conversation mode |
+| `/stop`                           | Cancel the running answer. `/stop all`: emergency stop (pauses your autonomy policy and the runs it started)                                                            |
+| `/cancel`                         | Cancel a pending workflow ForceReply prompt (unchanged)                                                                                                                 |
 
 Following a run (👁) keeps one status message with the current step, blocker, PR links and a link to the run.
 Unfollow removes the button. Following again reuses the existing message.
@@ -92,17 +92,17 @@ repository and workflow policies can only narrow it. `paused` at any level is an
 serialised per owner; the concurrency limit counts PENDING/RUNNING/WAITING runs plus starts allowed in the last ten
 minutes whose run is not attached yet.
 
-| Field | Meaning |
-|---|---|
-| `mode` | `MANUAL` (always ask), `SEMI` (LOW-risk only), `AUTONOMOUS` (up to `max_risk`) |
-| `actions` | Subset of `runs.pause`, `runs.resume` (LOW), `runs.retry_step`, `runs.start`, `runs.cancel`, `work.delegate` (MEDIUM). Anything else is rejected as protected |
-| `workflows` | Workflow keys `runs.start`/`work.delegate` may start |
-| `max_risk` | `LOW` or `MEDIUM`; HIGH is never autonomous |
-| `max_concurrent_runs` | Your RUNNING/WAITING runs must be below it |
-| `max_cost_usd_per_day`, `max_tokens_per_day` | Your last 24 h of reported agent cost/tokens |
-| `run_budget_usd` | Budget set on runs it starts (enforced by the existing budget gates) |
-| `retry_budget` | Autonomous `retry_step` per run per 24 h |
-| `timeout_minutes` | Runs it started are paused after this (scheduler reconcile tick) |
+| Field                                        | Meaning                                                                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`                                       | `MANUAL` (always ask), `SEMI` (LOW-risk only), `AUTONOMOUS` (up to `max_risk`)                                                                                |
+| `actions`                                    | Subset of `runs.pause`, `runs.resume` (LOW), `runs.retry_step`, `runs.start`, `runs.cancel`, `work.delegate` (MEDIUM). Anything else is rejected as protected |
+| `workflows`                                  | Workflow keys `runs.start`/`work.delegate` may start                                                                                                          |
+| `max_risk`                                   | `LOW` or `MEDIUM`; HIGH is never autonomous                                                                                                                   |
+| `max_concurrent_runs`                        | Your RUNNING/WAITING runs must be below it                                                                                                                    |
+| `max_cost_usd_per_day`, `max_tokens_per_day` | Your last 24 h of reported agent cost/tokens                                                                                                                  |
+| `run_budget_usd`                             | Budget set on runs it starts (enforced by the existing budget gates)                                                                                          |
+| `retry_budget`                               | Autonomous `retry_step` per run per 24 h                                                                                                                      |
+| `timeout_minutes`                            | Runs it started are paused after this (scheduler reconcile tick)                                                                                              |
 
 Risk: the action's base risk is raised to HIGH by a protected workflow (`deploy`, `release`, `merge`, `migrat…`,
 `secret`, `credential`, `rotate`, production data), by the subject text (payments, refunds, inventory, security, order
@@ -135,9 +135,17 @@ POST /api/chat/autonomy/policies/:id/revoke
 Example: allow every user to opt into autonomous read-only investigations and pause/resume.
 
 ```json
-{ "scope_kind": "global", "mode": "AUTONOMOUS", "actions": ["runs.pause", "runs.resume", "work.delegate"],
-  "workflows": ["incident-investigation", "production-incident-investigation"], "max_risk": "MEDIUM",
-  "max_concurrent_runs": 2, "max_cost_usd_per_day": 10, "run_budget_usd": 3, "timeout_minutes": 60 }
+{
+  "scope_kind": "global",
+  "mode": "AUTONOMOUS",
+  "actions": ["runs.pause", "runs.resume", "work.delegate"],
+  "workflows": ["incident-investigation", "production-incident-investigation"],
+  "max_risk": "MEDIUM",
+  "max_concurrent_runs": 2,
+  "max_cost_usd_per_day": 10,
+  "run_budget_usd": 3,
+  "timeout_minutes": 60
+}
 ```
 
 A user then sends `/mode auto` (their owner policy starts with `runs.pause`/`runs.resume` only and one concurrent
@@ -148,14 +156,14 @@ run; widen it through the API).
 Approval and question notices link to the affected step. Run completion and failure notices are keyed to the status
 transition. The gateway also checks active and recently changed runs about every ten seconds:
 
-| Kind | Severity | When |
-|---|---|---|
-| failure | critical | A step failed while the run continues (retry/recovery) |
-| blocked | critical | Run paused (budget, timeout, emergency stop) or waiting without a question/approval |
-| recovered | important | A failed/retrying step runs or completes again |
-| pr | important | A pull request was created for the run |
-| autonomy | important | A workflow gate was decided by the workflow autonomy policy |
-| intake | critical/important | An intake item became eligible, or a high/critical one was deferred |
+| Kind      | Severity           | When                                                                                |
+| --------- | ------------------ | ----------------------------------------------------------------------------------- |
+| failure   | critical           | A step failed while the run continues (retry/recovery)                              |
+| blocked   | critical           | Run paused (budget, timeout, emergency stop) or waiting without a question/approval |
+| recovered | important          | A failed/retrying step runs or completes again                                      |
+| pr        | important          | A pull request was created for the run                                              |
+| autonomy  | important          | A workflow gate was decided by the workflow autonomy policy                         |
+| intake    | critical/important | An intake item became eligible, or a high/critical one was deferred                 |
 
 Subscriptions and severity levels filter updates before they enter the notification queue. Non-critical updates wait
 20 seconds so they can arrive in one digest. Updates for a single run include a link to that run. During quiet hours,

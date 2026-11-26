@@ -20,12 +20,12 @@ statements per job.
 
 ### Split: TypeScript keeps the job, Go does the work
 
-| Stays in TypeScript | Moves to `go/internal/codeintelligence` |
-|---|---|
-| queue claim, lease, heartbeat, retries, cancellation (`runIndexOnce`) | file discovery (`git ls-tree`), eligibility and limits |
+| Stays in TypeScript                                                                                                                               | Moves to `go/internal/codeintelligence`                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| queue claim, lease, heartbeat, retries, cancellation (`runIndexOnce`)                                                                             | file discovery (`git ls-tree`), eligibility and limits                                                             |
 | repository provisioning (fetch with credentials) and authorization (`localScope`: run ownership, allowed repositories, worktree common-dir check) | streaming blob reads (one `git cat-file --batch` per job), worktree overlay detection with the symlink-safe reader |
-| search, ranking, context building (`search.ts`) | parsing on a bounded worker pool, extraction cache lookups |
-| migrations (`code_intelligence` schema, unchanged) | batch persistence (`unnest` + `COPY`) and atomic, fenced publication |
+| search, ranking, context building (`search.ts`)                                                                                                   | parsing on a bounded worker pool, extraction cache lookups                                                         |
+| migrations (`code_intelligence` schema, unchanged)                                                                                                | batch persistence (`unnest` + `COPY`) and atomic, fenced publication                                               |
 
 `indexRepository` calls `POST /internal/v1/code-intelligence/index` (contract
 `go/contracts/code-intelligence-v1.schema.json`) when the flag is `go`. The flag decides per job which
@@ -73,15 +73,15 @@ Docker image builds with CGO on Debian bookworm and runs on `debian:bookworm-sli
 
 ## Results (docs/architecture/code-index-engines.json)
 
-| oms-api / oms-frontend / oms-background | TypeScript | Go |
-|---|---|---|
-| full index throughput | 263–585 files/s | 781–1,593 files/s (**2.7–3.0×**) |
-| 3 repositories concurrently | 4.5 s | 1.4 s (**3.3×**) |
-| CPU time, full index | 1.2–2.0 s | 0.8–1.35 s (**−28–35%**) |
-| peak RSS of the indexing process | 178–226 MB | 79–99 MB (**−48–57%**) |
-| database statements per job | 54–67 | 21 (**−61–69%**) |
-| Node event-loop delay p99 while indexing | 230–534 ms | 10 ms (the sampling resolution) |
-| symbols | identical | identical |
+| oms-api / oms-frontend / oms-background  | TypeScript      | Go                               |
+| ---------------------------------------- | --------------- | -------------------------------- |
+| full index throughput                    | 263–585 files/s | 781–1,593 files/s (**2.7–3.0×**) |
+| 3 repositories concurrently              | 4.5 s           | 1.4 s (**3.3×**)                 |
+| CPU time, full index                     | 1.2–2.0 s       | 0.8–1.35 s (**−28–35%**)         |
+| peak RSS of the indexing process         | 178–226 MB      | 79–99 MB (**−48–57%**)           |
+| database statements per job              | 54–67           | 21 (**−61–69%**)                 |
+| Node event-loop delay p99 while indexing | 230–534 ms      | 10 ms (the sampling resolution)  |
+| symbols                                  | identical       | identical                        |
 
 ## Rollback
 

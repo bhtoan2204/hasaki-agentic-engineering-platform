@@ -29,16 +29,16 @@ Codex coding is allowed because its sandbox writes only the agent directory and 
 
 ## Isolation invariants
 
-| Rule | Where it is enforced |
-| --- | --- |
-| Modifications happen in a worktree | `prepareBranch`, `execution_workspaces` |
-| The live checkout is not a worktree and is not fetched, reset, cleaned or checked out by the workflow | `prepareBranch`, `prepareRepository` |
-| Agents cannot edit or write secrets in the live tree | `protectedRoots` plus `decide` / `decideBash` |
-| The server is not restarted, deployed or merged | no such step exists; the pull request waits for a person |
-| Tests do not receive the application database or runtime secrets | `commandProcessEnv` |
-| Newly generated code is not loaded into this process | tests and agents are child processes in the worktree |
-| A different workflow cannot skip the guards | the guards key off the repository URL, not the template name |
-| A resumed step rechecks repository permission | existing `enforceRunRepositoryAccess` |
+| Rule                                                                                                  | Where it is enforced                                         |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Modifications happen in a worktree                                                                    | `prepareBranch`, `execution_workspaces`                      |
+| The live checkout is not a worktree and is not fetched, reset, cleaned or checked out by the workflow | `prepareBranch`, `prepareRepository`                         |
+| Agents cannot edit or write secrets in the live tree                                                  | `protectedRoots` plus `decide` / `decideBash`                |
+| The server is not restarted, deployed or merged                                                       | no such step exists; the pull request waits for a person     |
+| Tests do not receive the application database or runtime secrets                                      | `commandProcessEnv`                                          |
+| Newly generated code is not loaded into this process                                                  | tests and agents are child processes in the worktree         |
+| A different workflow cannot skip the guards                                                           | the guards key off the repository URL, not the template name |
+| A resumed step rechecks repository permission                                                         | existing `enforceRunRepositoryAccess`                        |
 
 ## Limitations
 

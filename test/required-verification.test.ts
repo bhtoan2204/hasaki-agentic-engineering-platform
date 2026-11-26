@@ -14,26 +14,69 @@ test("required verification rejects prose mentions, skipped tests and workspace 
     writeFileSync(join(path, "source.txt"), "original");
     writeFileSync(join(path, "go.mod"), "module app\n\ngo 1.20\n");
     git("add", ".");
-    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture");
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "commit",
+      "-qm",
+      "fixture",
+    );
     for (const scenario of [
       { output: "app/TestBusiness passed", passed: false },
-      { output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }) + "\n[output truncated]", passed: false },
-      { output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }), command: "node test.js", passed: false },
-      { output: JSON.stringify({ Action: "skip", Package: "app", Test: "TestBusiness" }), passed: false },
-      { output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }), passed: true },
-      { output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }), mutate: true, passed: false },
+      {
+        output:
+          JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }) +
+          "\n[output truncated]",
+        passed: false,
+      },
+      {
+        output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }),
+        command: "node test.js",
+        passed: false,
+      },
+      {
+        output: JSON.stringify({ Action: "skip", Package: "app", Test: "TestBusiness" }),
+        passed: false,
+      },
+      {
+        output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }),
+        passed: true,
+      },
+      {
+        output: JSON.stringify({ Action: "pass", Package: "app", Test: "TestBusiness" }),
+        mutate: true,
+        passed: false,
+      },
     ]) {
-      const result = await verifyWorkspaces([{ repo: "app", path }], [path], {
-        command: scenario.command ?? "go test -json ./...", requiredTests: ["app/TestBusiness"], maxRepairs: 0,
-        timeoutMs: 30000, baseline: null, allowTestWeakening: false,
-      }, 0, new AbortController().signal, {
-        run: async command => {
-          if (command !== (scenario.command ?? "go test -json ./...")) return { code: 0, timedOut: false, output: "" };
-          if (scenario.mutate) writeFileSync(join(path, "source.txt"), "changed during verification");
-          return { code: 0, timedOut: false, output: scenario.output };
-        }, diffTests: async () => "",
-      });
+      const result = await verifyWorkspaces(
+        [{ repo: "app", path }],
+        [path],
+        {
+          command: scenario.command ?? "go test -json ./...",
+          requiredTests: ["app/TestBusiness"],
+          maxRepairs: 0,
+          timeoutMs: 30000,
+          baseline: null,
+          allowTestWeakening: false,
+        },
+        0,
+        new AbortController().signal,
+        {
+          run: async (command) => {
+            if (command !== (scenario.command ?? "go test -json ./..."))
+              return { code: 0, timedOut: false, output: "" };
+            if (scenario.mutate)
+              writeFileSync(join(path, "source.txt"), "changed during verification");
+            return { code: 0, timedOut: false, output: scenario.output };
+          },
+          diffTests: async () => "",
+        },
+      );
       assert.equal(result.passed, scenario.passed, JSON.stringify(scenario));
     }
-  } finally { rmSync(path, { recursive: true, force: true }); }
+  } finally {
+    rmSync(path, { recursive: true, force: true });
+  }
 });

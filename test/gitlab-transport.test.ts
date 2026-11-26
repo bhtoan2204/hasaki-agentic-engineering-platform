@@ -38,7 +38,10 @@ afterEach(() => {
 });
 
 test("SSH URL and known_hosts are derived from the canonical identity and the pinned keys", () => {
-  assert.equal(sshUrlOf(remote, null), "ssh://git@gitlab.example.work/platform/backend/oms-api.git");
+  assert.equal(
+    sshUrlOf(remote, null),
+    "ssh://git@gitlab.example.work/platform/backend/oms-api.git",
+  );
   assert.equal(
     sshUrlOf(remote, 2222),
     "ssh://git@gitlab.example.work:2222/platform/backend/oms-api.git",

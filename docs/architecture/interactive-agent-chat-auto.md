@@ -8,12 +8,12 @@
 
 ## Chiến lược
 
-| Trục | Requested (conversation) | Effective (per turn) |
-|---|---|---|
-| Mode | AUTO / ASK / … | ASK / INVESTIGATE / PLAN / DELEGATE |
-| Provider | strategy `auto` \| `manual` + preferred | provider thật sau admission |
-| Model / effort | strategy + giá trị | validate theo provider đã chọn |
-| Fallback | `fallback_enabled` | AUTO mặc định bật; manual pin mặc định tắt |
+| Trục           | Requested (conversation)                | Effective (per turn)                       |
+| -------------- | --------------------------------------- | ------------------------------------------ |
+| Mode           | AUTO / ASK / …                          | ASK / INVESTIGATE / PLAN / DELEGATE        |
+| Provider       | strategy `auto` \| `manual` + preferred | provider thật sau admission                |
+| Model / effort | strategy + giá trị                      | validate theo provider đã chọn             |
+| Fallback       | `fallback_enabled`                      | AUTO mặc định bật; manual pin mặc định tắt |
 
 Tái sử dụng: `probeAgentHealth`, `nextHealthyProvider`, `isUsableAgent`, `completeForRun`, chat tool binding, SSE `chat_events`.
 

@@ -31,8 +31,16 @@ const plan = (...s: ReturnType<typeof sub>[]): DecompositionPlan => ({ summary: 
 const ctx = { existingKeys: ["plan"], allowedRepositories: ["repo-a"], limits: DEFAULT_LIMITS };
 
 test("small task is not decomposed; large one is", () => {
-  assert.equal(shouldDecompose({ repositories: 1, acceptance_criteria: 2, estimated_effort_hours: 1 }).decompose, false);
-  assert.equal(shouldDecompose({ repositories: 2, acceptance_criteria: 5, estimated_effort_hours: 2 }).decompose, true);
+  assert.equal(
+    shouldDecompose({ repositories: 1, acceptance_criteria: 2, estimated_effort_hours: 1 })
+      .decompose,
+    false,
+  );
+  assert.equal(
+    shouldDecompose({ repositories: 2, acceptance_criteria: 5, estimated_effort_hours: 2 })
+      .decompose,
+    true,
+  );
 });
 
 test("valid independent plan passes", () => {
@@ -45,11 +53,17 @@ test("rejects cycles, unknown deps, duplicates, foreign repos, over limit", () =
   assert.match(e(plan(sub("a", { depends_on: ["zzz"] }))), /unknown/);
   assert.match(e(plan(sub("a"), sub("a"))), /duplicate/);
   assert.match(e(plan(sub("a", { target_repos: ["other"] }))), /outside the allowed/);
-  assert.match(e(plan(sub("a"), sub("b")), { ...ctx, limits: { ...DEFAULT_LIMITS, max_subtasks: 1 } }), /limit/);
+  assert.match(
+    e(plan(sub("a"), sub("b")), { ...ctx, limits: { ...DEFAULT_LIMITS, max_subtasks: 1 } }),
+    /limit/,
+  );
 });
 
 test("overlapping file ownership is serialized", () => {
-  const r = validateExpansion(plan(sub("a", { owned_files: ["x.ts"] }), sub("b", { owned_files: ["x.ts"] })), ctx);
+  const r = validateExpansion(
+    plan(sub("a", { owned_files: ["x.ts"] }), sub("b", { owned_files: ["x.ts"] })),
+    ctx,
+  );
   assert.deepEqual(r.errors, []);
   assert.deepEqual(r.subtasks[1].depends_on, ["a"]);
   assert.equal(r.subtasks[1].execution_strategy, "sequential");
@@ -73,8 +87,11 @@ function fakeDb(steps: Row[]) {
       if (/FROM workflow_runs/.test(sql)) return { rows: [{ id: p[0] }] };
       if (/FROM workflow_steps WHERE run_id/.test(sql)) return { rows: steps };
       if (/SELECT revision FROM workflow_graph_revisions/.test(sql))
-        return { rows: revisions.filter((r) => r.key === p[0]).map((r) => ({ revision: r.revision })) };
-      if (/SELECT kind FROM workflow_graph_revisions/.test(sql)) return { rows: revisions.map((r) => ({ kind: r.kind })) };
+        return {
+          rows: revisions.filter((r) => r.key === p[0]).map((r) => ({ revision: r.revision })),
+        };
+      if (/SELECT kind FROM workflow_graph_revisions/.test(sql))
+        return { rows: revisions.map((r) => ({ kind: r.kind })) };
       if (/INSERT INTO workflow_graph_revisions/.test(sql)) {
         revisions.push({ revision: p[1], kind: p[2], actor: p[4], key: p[6] });
         return { rows: [] };
@@ -109,7 +126,14 @@ let gateId = 10;
 /** Plan step + one downstream step + a completed approval gate per approved plan (hash-bound, current generation). */
 const baseSteps = (...approved: { p: DecompositionPlan; kind?: string; by?: string }[]): Row[] => [
   { id: 1, key: "plan", position: 0, depends_on: [], status: "COMPLETED", subtask_id: null },
-  { id: 2, key: "integration", position: 1, depends_on: ["plan"], status: "PENDING", subtask_id: null },
+  {
+    id: 2,
+    key: "integration",
+    position: 1,
+    depends_on: ["plan"],
+    status: "PENDING",
+    subtask_id: null,
+  },
   ...approved.map((a) => ({
     id: gateId++,
     key: `approve-${gateId}`,
@@ -119,7 +143,12 @@ const baseSteps = (...approved: { p: DecompositionPlan; kind?: string; by?: stri
     status: "COMPLETED",
     generation: 1,
     subtask_id: null,
-    approval: { granted: true, by: a.by ?? "toan", generation: 1, data: { plan_hash: planHash(a.p), kind: a.kind ?? "decomposition" } },
+    approval: {
+      granted: true,
+      by: a.by ?? "toan",
+      generation: 1,
+      data: { plan_hash: planHash(a.p), kind: a.kind ?? "decomposition" },
+    },
   })),
 ];
 const opts = { actor: "u", reason: "r", allowedRepositories: ["repo-a"] };
@@ -247,7 +276,10 @@ test("replan needs its own gate approving its own plan; the first gate does not 
   const second = plan(sub("c"));
   const f = fakeDb(baseSteps({ p: first }));
   await materializeSubtasks(f.db, 1, "plan", first, opts);
-  await assert.rejects(materializeSubtasks(f.db, 1, "plan", second, { ...opts, kind: "replan" }), /approves this replan plan/);
+  await assert.rejects(
+    materializeSubtasks(f.db, 1, "plan", second, { ...opts, kind: "replan" }),
+    /approves this replan plan/,
+  );
   // a replan-kind gate that names the replan plan hash authorizes it
   const steps = baseSteps({ p: first }, { p: second, kind: "replan", by: "reviewer" });
   const g = fakeDb(steps);
@@ -260,7 +292,10 @@ test("a stale approval (generation mismatch) is not accepted", async () => {
   const p = plan(sub("a"));
   const steps = baseSteps({ p });
   steps[2].generation = 2;
-  await assert.rejects(materializeSubtasks(fakeDb(steps).db, 1, "plan", p, opts), /no completed human approval gate/);
+  await assert.rejects(
+    materializeSubtasks(fakeDb(steps).db, 1, "plan", p, opts),
+    /no completed human approval gate/,
+  );
 });
 
 test("approver is recorded from the gate, not the caller", async () => {
@@ -287,12 +322,19 @@ test("materialize refuses to rewire downstream steps that already started", asyn
 test("limits cannot be raised above the hard ceiling", async () => {
   const many = plan(...Array.from({ length: 21 }, (_, i) => sub(`s${i}`)));
   const f = fakeDb(baseSteps({ p: many }));
-  await assert.rejects(materializeSubtasks(f.db, 1, "plan", many, { ...opts, limits: { max_subtasks: 1000 } }), /limit is 20/);
+  await assert.rejects(
+    materializeSubtasks(f.db, 1, "plan", many, { ...opts, limits: { max_subtasks: 1000 } }),
+    /limit is 20/,
+  );
 });
 
 test("independent subtasks are serialized while the run has a single shared worktree", () => {
   const p = plan(sub("a"), sub("b"), sub("c", { depends_on: ["a"] }));
-  const r = validateExpansion(p, { existingKeys: [], allowedRepositories: ["repo-a"], limits: DEFAULT_LIMITS });
+  const r = validateExpansion(p, {
+    existingKeys: [],
+    allowedRepositories: ["repo-a"],
+    limits: DEFAULT_LIMITS,
+  });
   assert.deepEqual(r.errors, []);
   assert.ok(r.subtasks.every((s) => s.execution_strategy === "sequential"));
   const dep = (id: string) => r.subtasks.find((s) => s.id === id)!.depends_on;
@@ -302,7 +344,15 @@ test("independent subtasks are serialized while the run has a single shared work
 
 test("parallel execution is only kept when isolated workspaces are declared", () => {
   const p = plan(sub("a"), sub("b"));
-  const r = validateExpansion(p, { existingKeys: [], allowedRepositories: ["repo-a"], limits: DEFAULT_LIMITS, isolatedWorkspaces: true });
-  assert.deepEqual(r.subtasks.map((s) => s.depends_on), [[], []]);
+  const r = validateExpansion(p, {
+    existingKeys: [],
+    allowedRepositories: ["repo-a"],
+    limits: DEFAULT_LIMITS,
+    isolatedWorkspaces: true,
+  });
+  assert.deepEqual(
+    r.subtasks.map((s) => s.depends_on),
+    [[], []],
+  );
   assert.ok(r.subtasks.every((s) => s.execution_strategy === "parallel"));
 });

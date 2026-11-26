@@ -8,13 +8,13 @@ WebSocket is involved.
 
 ## Contract
 
-| Piece | Behaviour |
-| --- | --- |
-| `GET /api/stream[?run_id=][&after=<id>][&scope=all]` | Session-authenticated. Events are filtered to the viewer's runs (admins see other members' runs only with the audited `scope=all`; ownerless runs are visible to nobody). Every frame has `id: <workflow_events.id>`. |
-| Payload | `{id, run_id, step_id, attempt_id, kind}` only, never content. Views fetch what they show through REST. |
-| Replay | `Last-Event-ID` (browser reconnect) or `?after=` (reopened stream) replays the gap from `workflow_events` before live delivery resumes. Live events that arrive during the replay are queued and de-duplicated by id. |
-| `hello` | `{live, cursor, replayed?, reset?}`. `live: false` means the server's LISTEN connection is down: clients use the fallback until a new `hello` with `live: true` (sent after the server has replayed what LISTEN missed). `reset: true` means the gap was larger than 500 events: reload views instead. |
-| `GET /api/events?after=<id>[&run_id=]` | Polling fallback with the same filter: `{events, reset, cursor}`. |
+| Piece                                                | Behaviour                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/stream[?run_id=][&after=<id>][&scope=all]` | Session-authenticated. Events are filtered to the viewer's runs (admins see other members' runs only with the audited `scope=all`; ownerless runs are visible to nobody). Every frame has `id: <workflow_events.id>`.                                                                                  |
+| Payload                                              | `{id, run_id, step_id, attempt_id, kind}` only, never content. Views fetch what they show through REST.                                                                                                                                                                                                |
+| Replay                                               | `Last-Event-ID` (browser reconnect) or `?after=` (reopened stream) replays the gap from `workflow_events` before live delivery resumes. Live events that arrive during the replay are queued and de-duplicated by id.                                                                                  |
+| `hello`                                              | `{live, cursor, replayed?, reset?}`. `live: false` means the server's LISTEN connection is down: clients use the fallback until a new `hello` with `live: true` (sent after the server has replayed what LISTEN missed). `reset: true` means the gap was larger than 500 events: reload views instead. |
+| `GET /api/events?after=<id>[&run_id=]`               | Polling fallback with the same filter: `{events, reset, cursor}`.                                                                                                                                                                                                                                      |
 
 Client rules (`web/src/api.ts`):
 
@@ -28,13 +28,13 @@ Known limit: event ids are assigned just before COMMIT, so an event can in theor
 
 ## Polling that stays (on purpose)
 
-| Where | Interval | Why it is not an event |
-| --- | --- | --- |
-| Run page worker health (`/api/runs/:id/worker`) | 15 s, visible tab, unfinished runs only | Instance heartbeats are not workflow events. |
-| Overview 30-day metrics | 60 s, visible tab | Aggregates; a minute-old figure is fine. |
-| Production errors while a scan runs | 1.5 s, visible tab | Scan progress is in-memory server state. |
-| Hasaki Work login window | 1.5 s while the window is open | External browser state. |
-| Local clocks (`useNow`, queue banner, command log) | 1–5 s | Re-render only, no request. |
+| Where                                              | Interval                                | Why it is not an event                       |
+| -------------------------------------------------- | --------------------------------------- | -------------------------------------------- |
+| Run page worker health (`/api/runs/:id/worker`)    | 15 s, visible tab, unfinished runs only | Instance heartbeats are not workflow events. |
+| Overview 30-day metrics                            | 60 s, visible tab                       | Aggregates; a minute-old figure is fine.     |
+| Production errors while a scan runs                | 1.5 s, visible tab                      | Scan progress is in-memory server state.     |
+| Hasaki Work login window                           | 1.5 s while the window is open          | External browser state.                      |
+| Local clocks (`useNow`, queue banner, command log) | 1–5 s                                   | Re-render only, no request.                  |
 
 ## Measuring
 
