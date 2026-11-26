@@ -12,12 +12,8 @@ import { createHash } from "node:crypto";
 /** Bump when the shape of the parts changes: old keys then stop matching instead of silently colliding. */
 export const KEY_VERSION = 1;
 
-export const SHARED_KINDS = [
-  "prod_error.runtime_rca",
-  "prod_error.bug_hunt",
-  "code_assessment",
-] as const;
-export type SharedKind = (typeof SHARED_KINDS)[number];
+import { SHARED_KINDS, type SharedKind } from "./types.ts";
+export { SHARED_KINDS, type SharedKind };
 
 export interface SharedKey {
   kind: SharedKind;

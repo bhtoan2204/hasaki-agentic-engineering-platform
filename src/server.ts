@@ -29,6 +29,7 @@ import { seedTemplates } from "./workflow/definitions.ts";
 import { registerDefaultExecutors } from "./workflow/executors/index.ts";
 import { registerReconcileTask, startScheduler } from "./workflow/scheduler.ts";
 import { runMemoryAgingThrottled } from "./knowledge/aging.ts";
+import { settleSharedAnalyses } from "./sharing/settle.ts";
 import { dispatchIntake } from "./workitems/intake.ts";
 import { syncPullRequestLifecycles } from "./workflow/prLifecycle.ts";
 import { startCacheInvalidation, stopCacheInvalidation } from "./cache/index.ts";
@@ -110,6 +111,8 @@ log.info(`workflow platform on ${config.publicUrl} (instance ${config.instanceId
 // Policy-controlled intake rides the scheduler's reconcile tick: re-triage and start eligible items (no-op without a policy).
 registerReconcileTask("intake", () => dispatchIntake());
 registerReconcileTask("memory_aging", () => runMemoryAgingThrottled());
+// Shared results: publish or fail analyses whose run ended (no-op while both SHARED_RESULTS_* flags are off).
+registerReconcileTask("shared_results", () => settleSharedAnalyses());
 // PR delivery lifecycle (no-op while prLifecycle.mode is "off"): bounded polling with per-PR backoff.
 registerReconcileTask("pull_request_lifecycle", syncPullRequestLifecycles);
 // Chat autonomy: runs started by an autonomy policy that outlive its timeout are paused for the owner.

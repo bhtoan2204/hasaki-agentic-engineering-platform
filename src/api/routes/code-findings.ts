@@ -3,6 +3,8 @@ import { HttpError } from "../../http/error.ts";
 import { positiveId as num } from "../../http/params.ts";
 import { audit, requireRun, requireWorkItem } from "../../authz/access.ts";
 import { currentBaseCommits, reusableScan } from "../../workflow/codeScans.ts";
+import { sharedCodeAssessment, sharedView } from "../../sharing/flows.ts";
+import { config } from "../../config.ts";
 import {
   DISPLAY_STATUSES,
   findingDetail,
@@ -129,25 +131,46 @@ export const codeFindingsRoutes: Route[] = [
         throw new HttpError(400, "repositories: 1 to 30 repository names");
       const focus = typeof body.focus === "string" ? body.focus.trim().slice(0, 500) : "";
       const project = typeof body.project === "string" ? body.project.trim().slice(0, 120) : "";
+      // Base commits are resolved (and fetched) at most once per request, whoever asks first.
+      let commits: Promise<Record<string, string> | null> | null = null;
+      const commitsNow = (r: string[]) => (commits ??= currentBaseCommits(actor.id, r));
       if (body.force !== true) {
-        const reuse = await reusableScan(actor.id, repos, focus, (r) =>
-          currentBaseCommits(actor.id, r),
-        );
+        const reuse = await reusableScan(actor.id, repos, focus, commitsNow);
         if (reuse) return reuse;
       }
-      const run = await startRun({
-        definitionKey: "codebase-assessment",
-        repositories: repos,
-        inputs: {
-          repositories: repos,
-          ...(project ? { project } : {}),
-          ...(focus ? { focus } : {}),
-        },
-        title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
-        outputLocale: localeOf(body),
-        agentProvider: providerOf(body),
-        ownerId: actor.id,
-      });
+      const start = (tx?: Parameters<typeof startRun>[1]) =>
+        startRun(
+          {
+            definitionKey: "codebase-assessment",
+            repositories: repos,
+            inputs: {
+              repositories: repos,
+              ...(project ? { project } : {}),
+              ...(focus ? { focus } : {}),
+            },
+            title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
+            outputLocale: localeOf(body),
+            agentProvider: providerOf(body),
+            ownerId: actor.id,
+          },
+          tx,
+        );
+      // Shared results (flag SHARED_RESULTS_CODE_ASSESSMENT): another member's analysis of the same commits, or the one
+      // running now, instead of a second run. Off, or a key that cannot be built: exactly the path below, as before.
+      if (body.force !== true && config.sharedResults.codeAssessment) {
+        const shared = await sharedCodeAssessment({
+          actor,
+          focus,
+          provider: providerOf(body),
+          commits: await commitsNow(repos),
+          start: async (tx) => Number((await start(tx)).id),
+        });
+        if (shared && shared.outcome === "miss")
+          return { started: true, run_id: shared.runId, shared: sharedView(shared, actor) };
+        if (shared && shared.outcome !== "bypass")
+          return { reused: "shared", shared: sharedView(shared, actor) };
+      }
+      const run = await start();
       return { started: true, run_id: run.id };
     },
   ],

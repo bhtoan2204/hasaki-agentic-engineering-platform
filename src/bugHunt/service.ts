@@ -11,6 +11,8 @@ import { startRun, EngineError } from "../workflow/engine.ts";
 import { describeGroup, type GroupRow } from "../prodErrors/scan.ts";
 import { workItems } from "../workitems/service.ts";
 import { config } from "../config.ts";
+import { sharedBugHunt, sharedView } from "../sharing/flows.ts";
+import { currentBaseCommits } from "../workflow/codeScans.ts";
 import { ignoreError } from "../ignoreError.ts";
 
 export const BUG_HUNT_WORKFLOW = "production-bug-hunt";
@@ -47,11 +49,26 @@ const lockKey = (s: string) => createHash("sha256").update(s).digest().readBigIn
  * Start a hunt for an incident, as `actor`, over repositories the actor may read (startRun enforces it). Concurrent
  * requests for the same incident, repositories and user get the one active hunt (session advisory lock + check).
  */
-export async function startBugHunt(
+async function huntOrShared(
   fingerprint: string,
   actor: Actor,
-  body: { repositories?: unknown; provider?: unknown; context?: string; prior_evidence?: string[] },
-) {
+  body: {
+    repositories?: unknown;
+    provider?: unknown;
+    context?: string;
+    prior_evidence?: string[];
+    force?: unknown;
+  },
+  sharing: boolean,
+): Promise<
+  | { created: boolean; hunt_id: number; run_id: number; shared?: undefined }
+  | {
+      created: false;
+      hunt_id?: undefined;
+      run_id?: undefined;
+      shared: ReturnType<typeof sharedView>;
+    }
+> {
   if (!/^[0-9a-f]{20}$/.test(fingerprint)) throw new HttpError(400, "invalid fingerprint");
   const repos = Array.isArray(body.repositories) ? [...new Set(body.repositories.map(String))] : [];
   if (!repos.length) throw new HttpError(400, "select at least one repository");
@@ -77,21 +94,40 @@ export async function startBugHunt(
     );
     if (active)
       return { created: false, hunt_id: Number(active.id), run_id: Number(active.run_id) };
+    const start = (tx?: Parameters<typeof startRun>[1]) =>
+      startRun(
+        {
+          definitionKey: BUG_HUNT_WORKFLOW,
+          title: `[Bug Hunt] ${g.service}: ${g.signature}`.slice(0, 160),
+          // `context`: bounded, already-validated prior evidence of the same incident (unified workbench), as hints.
+          inputs: {
+            fingerprint,
+            request: describeGroup(g) + (body.context ?? ""),
+            ...(body.prior_evidence?.length ? { prior_evidence: body.prior_evidence } : {}),
+          },
+          repositories: repos,
+          agentProvider: body.provider ? String(body.provider) : undefined,
+          ownerId: actor.id,
+        },
+        tx,
+      );
     let run;
     try {
-      run = await startRun({
-        definitionKey: BUG_HUNT_WORKFLOW,
-        title: `[Bug Hunt] ${g.service}: ${g.signature}`.slice(0, 160),
-        // `context`: bounded, already-validated prior evidence of the same incident (unified workbench), as hints.
-        inputs: {
-          fingerprint,
-          request: describeGroup(g) + (body.context ?? ""),
-          ...(body.prior_evidence?.length ? { prior_evidence: body.prior_evidence } : {}),
-        },
-        repositories: repos,
-        agentProvider: body.provider ? String(body.provider) : undefined,
-        ownerId: actor.id,
-      });
+      // Shared results (flag SHARED_RESULTS_PROD_ERRORS): a hunt of the same incident at the same commits by another
+      // member, or the one running now. The commits are only resolved when the flag is on.
+      const shared =
+        sharing && config.sharedResults.prodErrors && body.force !== true
+          ? await sharedBugHunt({
+              actor,
+              fingerprint,
+              provider: body.provider ? String(body.provider) : undefined,
+              commits: await currentBaseCommits(actor.id, [...repos].sort()),
+              start: async (tx) => Number((await start(tx)).id),
+            })
+          : null;
+      if (shared && shared.outcome !== "miss" && shared.outcome !== "bypass")
+        return { created: false, shared: sharedView(shared, actor) };
+      run = shared?.outcome === "miss" ? { id: shared.runId } : await start();
     } catch (e) {
       if (e instanceof EngineError) throw new HttpError(e.status ?? 400, e.message);
       throw e;
@@ -110,6 +146,34 @@ export async function startBugHunt(
     await c.query("SELECT pg_advisory_unlock_all()").catch(ignoreError("bug_hunt.advisory_unlock"));
     c.release();
   }
+}
+
+/** Start a hunt as before (no shared results): benchmarks and internal callers. */
+export async function startBugHunt(
+  fingerprint: string,
+  actor: Actor,
+  body: { repositories?: unknown; provider?: unknown; context?: string; prior_evidence?: string[] },
+) {
+  return (await huntOrShared(fingerprint, actor, body, false)) as {
+    created: boolean;
+    hunt_id: number;
+    run_id: number;
+  };
+}
+
+/** Start a hunt, or get the shared one (flag SHARED_RESULTS_PROD_ERRORS; `force` skips the lookup). */
+export function startBugHuntShared(
+  fingerprint: string,
+  actor: Actor,
+  body: {
+    repositories?: unknown;
+    provider?: unknown;
+    context?: string;
+    prior_evidence?: string[];
+    force?: unknown;
+  },
+) {
+  return huntOrShared(fingerprint, actor, body, true);
 }
 
 interface HuntRow {

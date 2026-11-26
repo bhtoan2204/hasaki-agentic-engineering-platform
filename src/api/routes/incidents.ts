@@ -4,13 +4,13 @@ import {
   bugHuntSummaries,
   createFixTask,
   listBugHunts,
-  startBugHunt,
+  startBugHuntShared,
 } from "../../bugHunt/service.ts";
 import {
   getWorkbench,
   rcaVersion,
-  startRuntime,
-  startHunt,
+  startRuntimeShared,
+  startHuntShared,
   startBoth,
   createFix as createIncidentFix,
 } from "../../incidents/unified.ts";
@@ -28,7 +28,7 @@ export const incidentsRoutes: Route[] = [
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/bug-hunts$/,
-    (c) => startBugHunt(c.p[0], c.actor, c.body),
+    (c) => startBugHuntShared(c.p[0], c.actor, c.body),
   ],
   [
     "GET",
@@ -71,17 +71,17 @@ export const incidentsRoutes: Route[] = [
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/runtime$/,
-    (c) => startRuntime(c.p[0], c.actor, c.body),
+    (c) => startRuntimeShared(c.p[0], c.actor, c.body),
   ],
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/bug-hunt$/,
-    (c) => startHunt(c.p[0], c.actor, c.body),
+    (c) => startHuntShared(c.p[0], c.actor, c.body),
   ],
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/workbench\/both$/,
-    (c) => startBoth(c.p[0], c.actor, c.body),
+    (c) => startBoth(c.p[0], c.actor, c.body, true),
   ],
   [
     "POST",

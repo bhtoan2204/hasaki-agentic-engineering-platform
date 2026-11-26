@@ -13,7 +13,14 @@ import { HttpError } from "../http/error.ts";
 import { audit, type Actor } from "../authz/access.ts";
 import { startRun, EngineError } from "../workflow/engine.ts";
 import { describeGroup, type GroupRow } from "../prodErrors/scan.ts";
-import { startBugHunt, createFixTask, huntStatus, BUG_HUNT_WORKFLOW } from "../bugHunt/service.ts";
+import {
+  startBugHunt,
+  startBugHuntShared,
+  createFixTask,
+  huntStatus,
+  BUG_HUNT_WORKFLOW,
+} from "../bugHunt/service.ts";
+import { sharedRuntimeRca, sharedView } from "../sharing/flows.ts";
 import { startFixFromInvestigation } from "../investigation/service.ts";
 import { readableOf } from "../impact/analyze.ts";
 import { checkoutOf, baseCommit } from "../impact/index.ts";
@@ -702,10 +709,11 @@ function digest(wb: Awaited<ReturnType<typeof getWorkbench>>, source: "bug_hunt"
   };
 }
 
-export async function startRuntime(
+async function runtimeOrShared(
   fp: string,
   actor: Actor,
-  body: { force?: unknown; provider?: unknown } = {},
+  body: { force?: unknown; provider?: unknown },
+  sharing: boolean,
 ) {
   const g = await groupOf(fp);
   const c = await pool.connect();
@@ -732,20 +740,38 @@ export async function startRuntime(
       );
     const wb = await getWorkbench(fp, actor);
     const d = digest(wb, "bug_hunt");
+    const start = (tx?: Parameters<typeof startRun>[1]) =>
+      startRun(
+        {
+          definitionKey: RUNTIME_WORKFLOW,
+          title: `[Runtime RCA] ${g.service}: ${g.signature}`.slice(0, 160),
+          inputs: {
+            request: describeGroup(g) + d.text,
+            environment: "production",
+            fingerprint: fp,
+            prior_evidence: d.refs,
+          },
+          agentProvider: body.provider ? String(body.provider) : undefined,
+          ownerId: actor.id,
+        },
+        tx,
+      );
     let run;
     try {
-      run = await startRun({
-        definitionKey: RUNTIME_WORKFLOW,
-        title: `[Runtime RCA] ${g.service}: ${g.signature}`.slice(0, 160),
-        inputs: {
-          request: describeGroup(g) + d.text,
-          environment: "production",
-          fingerprint: fp,
-          prior_evidence: d.refs,
-        },
-        agentProvider: body.provider ? String(body.provider) : undefined,
-        ownerId: actor.id,
-      });
+      // Shared results (flag SHARED_RESULTS_PROD_ERRORS): an RCA another member ran, or is running, for this incident.
+      const shared =
+        sharing && body.force !== true
+          ? await sharedRuntimeRca({
+              actor,
+              fingerprint: fp,
+              contract: VERIFICATION_CONTRACT,
+              provider: body.provider ? String(body.provider) : undefined,
+              start: async (tx) => Number((await start(tx)).id),
+            })
+          : null;
+      if (shared && shared.outcome !== "miss" && shared.outcome !== "bypass")
+        return { created: false, shared: sharedView(shared, actor) };
+      run = shared?.outcome === "miss" ? { id: shared.runId } : await start();
     } catch (e) {
       if (e instanceof EngineError) throw new HttpError(e.status ?? 400, e.message);
       throw e;
@@ -764,10 +790,11 @@ export async function startRuntime(
   }
 }
 
-export async function startHunt(
+async function huntOrShared(
   fp: string,
   actor: Actor,
   body: { repositories?: unknown; provider?: unknown; force?: unknown },
+  sharing: boolean,
 ) {
   await groupOf(fp);
   const repos = Array.isArray(body.repositories)
@@ -788,28 +815,73 @@ export async function startHunt(
     );
   const wb = await getWorkbench(fp, actor);
   const d = digest(wb, "runtime");
-  const r = await startBugHunt(fp, actor, {
+  const input = {
     repositories: body.repositories,
     provider: body.provider,
     context: d.text,
     prior_evidence: d.refs,
-  });
-  const investigationId = await workspace(pool, fp, actor.id);
-  await link(pool, investigationId, r.run_id, "bug_hunt", "workbench");
+    force: body.force,
+  };
+  const r = sharing
+    ? await startBugHuntShared(fp, actor, input)
+    : await startBugHunt(fp, actor, input);
+  // A shared hunt another member ran is not this owner's run: there is nothing to link.
+  if (r.run_id != null) {
+    const investigationId = await workspace(pool, fp, actor.id);
+    await link(pool, investigationId, r.run_id, "bug_hunt", "workbench");
+  }
   return r;
 }
 
 /** Both workflows, only because the user asked for both (never automatic). */
-export async function startBoth(
+/** Start a runtime RCA as before (no shared results). */
+export async function startRuntime(
+  fp: string,
+  actor: Actor,
+  body: { force?: unknown; provider?: unknown } = {},
+) {
+  return (await runtimeOrShared(fp, actor, body, false)) as { created: boolean; run_id: number };
+}
+/** Start a runtime RCA, or get the shared one (flag SHARED_RESULTS_PROD_ERRORS). The API's entry point. */
+export function startRuntimeShared(
+  fp: string,
+  actor: Actor,
+  body: { force?: unknown; provider?: unknown } = {},
+) {
+  return runtimeOrShared(fp, actor, body, true);
+}
+/** Start a bug hunt from the workbench as before (no shared results). */
+export async function startHunt(
   fp: string,
   actor: Actor,
   body: { repositories?: unknown; provider?: unknown; force?: unknown },
 ) {
-  const runtime = await startRuntime(fp, actor, body).catch((e) => ({
+  return (await huntOrShared(fp, actor, body, false)) as {
+    created: boolean;
+    hunt_id: number;
+    run_id: number;
+  };
+}
+/** Start a bug hunt from the workbench, or get the shared one. The API's entry point. */
+export function startHuntShared(
+  fp: string,
+  actor: Actor,
+  body: { repositories?: unknown; provider?: unknown; force?: unknown },
+) {
+  return huntOrShared(fp, actor, body, true);
+}
+
+export async function startBoth(
+  fp: string,
+  actor: Actor,
+  body: { repositories?: unknown; provider?: unknown; force?: unknown },
+  sharing = false,
+) {
+  const runtime = await runtimeOrShared(fp, actor, body, sharing).catch((e) => ({
     error: (e as Error).message,
     status: (e as HttpError).status ?? 500,
   }));
-  const hunt = await startHunt(fp, actor, body).catch((e) => ({
+  const hunt = await huntOrShared(fp, actor, body, sharing).catch((e) => ({
     error: (e as Error).message,
     status: (e as HttpError).status ?? 500,
   }));

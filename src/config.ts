@@ -341,6 +341,10 @@ export interface Config {
     codeAssessment: boolean;
     /** How long a published result is served before it is stale (hours / days, per kind). */
     ttl: { runtimeRcaHours: number; bugHuntDays: number; codeAssessmentDays: number };
+    /** A running analysis older than this is failed (its key is free again), even if its run is still going. */
+    runningTimeoutMinutes: number;
+    /** How long waitForAnalysis waits for a running analysis before it returns "timeout". */
+    waitTimeoutMs: number;
   };
   /** LOCAL checkout overrides, never synchronized to PostgreSQL. */
   repositories: Record<string, string>;
@@ -897,6 +901,8 @@ const defaults: Config = {
     prodErrors: false,
     codeAssessment: false,
     ttl: { runtimeRcaHours: 24, bugHuntDays: 30, codeAssessmentDays: 30 },
+    runningTimeoutMinutes: 360,
+    waitTimeoutMs: 30_000,
   },
   codeIntelligence: {
     enabled: LIVE,
@@ -1350,6 +1356,18 @@ function load(): Config {
     shared.ttl.codeAssessmentDays,
     1,
     3650,
+  );
+  shared.runningTimeoutMinutes = integer(
+    "SHARED_RESULTS_RUNNING_TIMEOUT_MINUTES",
+    shared.runningTimeoutMinutes,
+    1,
+    7 * 24 * 60,
+  );
+  shared.waitTimeoutMs = integer(
+    "SHARED_RESULTS_WAIT_TIMEOUT_MS",
+    shared.waitTimeoutMs,
+    100,
+    600_000,
   );
   if (process.env.RADAR_INTERVAL_SECONDS)
     cfg.radar.intervalSeconds = Math.max(60, Number(process.env.RADAR_INTERVAL_SECONDS) || 300);
