@@ -545,8 +545,12 @@ commits for this series, so every item is in the working tree, uncommitted.
 - [x] 2. C2 definition resolved with the owner; personal definitions not shared
 - [x] 3. C3 serve the newest readable valid version while the latest is running or failed
 - [x] 4. C4 stale on publish; model in the RCA subject; commit_changed only for a descendant
-- [x] stop point after 4 reached: summary given, waiting for the user's answers (see "Open decisions after C1–C4")
-- [ ] 5. N6 scrub · 6. N8 RCA without log access · 7. N1, N3, N5, N7 · 8. N2 · 9. N9 · 10. N4 (docs only) · 11. Q1–Q9, tests
+- [x] stop point after 4 reached: summary given, answers recorded below
+- [x] 4b. Decision #2: model identity in the subject of `code_assessment` and `prod_error.bug_hunt` (not only RCA)
+- [x] 5. N6 scrub (object keys, non-string credential values, unanchored field names, span redaction, all-redacted rejection)
+- [x] 6. N8 RCA without log access (blocked from claiming and publishing; does not supersede log-backed RCAs)
+- [x] 7. N1, N3, N5, N7 (code assessment locale/project, backfill focus scrub & cursor reset, settle isolation & maintenance expiry)
+- [ ] 8. N2 · 9. N9 · 10. N4 (docs only) · 11. Q1–Q9, tests (stopping after 7 for review before 8)
 
 ### C1: a run started with prior evidence is not shared (done)
 
@@ -647,12 +651,54 @@ commits for this series, so every item is in the working tree, uncommitted.
   still stales an earlier one with `model_changed` at publish (the model is in the key but only the RCA subject includes it).
   Making it part of every kind's subject is the same one-line change in `olderOfSubject`.
 
-## Open decisions after C1–C4 (waiting for the user)
+## Decisions after C1–C4 (confirmed)
 
-1. **Commits:** you answered "no commit needed", so C1–C4 are in the working tree, uncommitted (one commit per item was
-   asked for; say if you want them split or committed, and the `func:` code if so).
-2. **Provider in the subject for assessments and bug hunts:** extend the RCA rule to them (see above)?
-3. **`#cfg` left out of the RCA subject:** keep, or include the whole model fingerprint?
-4. **C1:** members who ran both workflows never share that incident's results (safe side). Put the evidence refs into the key
-   instead later?
-5. Q3 (RCA read rule) and Q7 (who may force): still unanswered; see item 11 of the series.
+1. **Commits:** keep new review fixes uncommitted in the working tree (`e5d3f82` is the base on `main`).
+2. **Provider/model in subject:** extend the RCA rule (`split_part(key_parts->>'model', '#', 1)`) to `code_assessment` and `prod_error.bug_hunt` in `olderOfSubject`, so different providers/models do not mark each other stale.
+3. **`#cfg` in subject:** keep `#cfg` outside the subject, so a configuration change still marks older results of the same model stale (`model_changed`).
+4. **C1:** keep skipping sharing when prior evidence is present; putting evidence refs into the key is deferred to a later phase.
+5. **Q3 & Q7:** Q3 keeps the current rule (personal Splunk/SigNoz or enabled shared Splunk token); Q7 stays "anyone who can read may force re-run" (audited via `shared_analysis.force`).
+
+### Item 4 supplement: model identity in assessment and bug-hunt subjects (done)
+
+- `olderOfSubject` (`src/sharing/repository.ts`) now filters on `split_part(key_parts->>'model', '#', 1) = $7` for **all** kinds, not only `prod_error.runtime_rca`.
+- **Tests (red first, then green)** in `test/shared-results-validity.integration.ts`:
+  - added coverage for both `code_assessment` and `prod_error.bug_hunt`: another provider/model leaves the older result `valid`, while the same model under a changed `#cfg` marks it `stale` with `model_changed`;
+  - updated the two existing `code_assessment` validity tests (`two publications of one subject` and `rubric, definition and model changes`) whose fixtures previously used different models (`codex/gpt-5`, `claude-sonnet-5-5`) as the same subject; they now use a changed `#cfg` on the same model identity.
+  - Note: `test/shared-results-validity.integration.ts` passed 26/26.
+
+### Item 5 (N6): scrub gaps and over-redaction (done)
+
+- `SCRUB_VERSION = 2` (`src/sharing/scrub.ts`):
+  - **Object keys:** `scrubValue` now runs `scrubText(k)` on every object key while still checking the original field name against credential patterns.
+  - **Non-string credential values & unanchored field names:** `normalizeField` splits camelCase and separators (`-`, `.`, whitespace) so `x-api-key`, `AWS_SECRET_ACCESS_KEY`, `db_password`, `dbPassword`, `sentry_dsn`, etc. match segment-bounded `SECRET_FIELD` without catching LLM counters (`tokens`, `input_tokens`, `contextTokens`) or `error_key`/`author`. Secret field status propagates into arrays and nested objects, redacting non-empty/non-null primitive leaves (`{ token: 12345678 }`, `{ password: { value: "..." } }`).
+  - **Span redaction & all-redacted rejection:** extracted `redactSecretMatches` in `src/knowledge/importer.ts` (sharing `SECRET_RE`, `SECRET_ASSIGNMENT` and the existing exemptions with `looksSecret`) so `scrubText` redacts matched secret spans in place instead of replacing an entire report string with `[redacted]`. `isFullyRedacted` rejects snapshots whose content was completely reduced to redaction markers (in `scrubResult`, `settleSharedAnalyses` -> `"scrub failed"`, and `backfillSharedResults` -> `scrub_failed`), while keeping `{ findings: [] }` and partially redacted snapshots.
+- **Tests (red first, then green):**
+  - `test/shared-scrub.test.ts` (4 new unit tests: object keys, non-string/unanchored fields, span redaction preserving prose & config paths, `scrubResult` rejecting all-redacted);
+  - `test/shared-results-access.integration.ts` (integration test for span-redacted publish vs all-redacted rejection via both default `scrubResult` and a custom hook).
+  - Verified with `test/shared-scrub.test.ts`, `test/knowledge-import-secrets.test.ts`, `test/shared-results-access.integration.ts`, and `test/shared-results-observability.integration.ts`.
+
+### Item 6 (N8): block runtime RCA sharing without log access (done)
+
+- **Claim gate** (`src/sharing/service.ts`): before claiming a `prod_error.runtime_rca` key (whether no row exists, or the latest row is stale, expired, or failed), `lookupOrStart` verifies `hooks.canRead(proposedRow, actor)` and returns `{ outcome: "bypass", analysis: null }` (`reason: "access"`) when the actor lacks log access. Hits and waits on readable rows add zero extra checks.
+- **Publish gate** (`src/sharing/settle.ts`): before publishing a completed `prod_error.runtime_rca`, `settleSharedAnalyses` re-checks `hooks.canRead(row, { id: row.created_by })` so a starter who lost log access while the run was in flight fails with `"creator lacks access"` (`counts: false`, no backoff penalty for log-capable users) and never supersedes a prior valid RCA.
+- **Tests (red first, then green):**
+  - `test/shared-results-access.integration.ts`: a member without Splunk/SigNoz cannot claim v1 or claim/force over expired/failed RCAs; losing log access mid-flight prevents publish and keeps v1 valid (`2` new integration tests);
+  - `test/unified-incident.integration.ts`: `C1 RCA` updated to verify `startRuntimeShared` without log access bypasses (`reason=access`, 0 shared rows) and with a personal Splunk token claims (`miss`) as before.
+  - Verified `test/shared-results-access.integration.ts` (14/14) and `test/unified-incident.integration.ts` (12/12).
+
+### Item 7 (N1, N3, N5, N7): key parity, backfill correctness, and settle isolation (done)
+
+- **N1 (`outputLocale` and `project` in `code_assessment`):**
+  - `codeAssessmentKey` (`src/sharing/key.ts`) now includes normalized `project` (`normalizeProject`) and `locale` (resolved via `resolveOutputLocale` from `src/agent/language.ts`, defaulting to `"vi"` and rejecting unsupported locales with `KeyError`).
+  - Wired into live calls (`POST /api/code-scans` in `src/api/routes/code-findings.ts` → `sharedCodeAssessment` in `src/sharing/flows.ts`), backfill (`src/sharing/backfill.ts` reading `r.output_locale` and `COALESCE(w.project, r.inputs->>'project', '')`), subject invalidation (`olderOfSubject` in `src/sharing/repository.ts`, so different locales or projects do not stale each other), and the read API/UI (`GET /api/code-scans/shared`, `sharedForRepositories`, `latestForRepositories`, `validForRepositories`, `web/src/pages/prodErrors/CodeScan.tsx`).
+- **N3 (scrubbed `focus` in backfill):** extracted `scrubKeyParts` in `src/sharing/scrub.ts` and shared it between live `lookupOrStart` (`src/sharing/service.ts`) and `backfillSharedResults` (`src/sharing/backfill.ts`), so backfilled `key_parts.focus` is scrubbed identically to live claims and matches `sharedForRepositories` / `olderOfSubject`.
+- **N5 (backfill cursor reset on completion):** `backfillSharedResults` (`src/sharing/backfill.ts`) now deletes `BACKFILL_CURSOR` from `settings` once a full pass reaches the end (`report.done && apply`), and saves the cursor only when a pass stops mid-way (`maxBatches`). Re-running after new runs complete or after another flag is enabled scans the new runs without `--restart`.
+- **N7 (per-row settle isolation & guaranteed TTL expiry):** `settleSharedAnalyses` (`src/sharing/settle.ts`) isolates each row in `try/catch`, logs with in-scope IDs (`R1`), and best-effort marks an unsettled poison row `failed` (`reason: "settle error"`) so it never sticks in `running` or stalls later rows. `expireSharedAnalyses` guards `hooks.observe` per row, and `sharedResultsMaintenance` catches settle and expiry separately so TTL expiry still runs even if settling throws.
+- **Tests (red first, then green):**
+  - `test/shared-key.test.ts` (updated `code_assessment` golden key for `locale` and `project`; added normalization/validation assertions);
+  - `test/shared-results-lookup.integration.ts` (`sharedCodeAssessment` key separation by `outputLocale` and `project`);
+  - `test/shared-results-api.integration.ts` (`GET /api/code-scans/shared` isolation by `project` and `output_locale`);
+  - `test/shared-results-observability.integration.ts` (N1/N3/N5 backfill coverage);
+  - `test/shared-results-validity.integration.ts` (N1 subject separation; N7 poison row isolation + maintenance TTL expiry).
+- **Stopped after Item 7** as requested, awaiting confirmation before Item 8 (N2).

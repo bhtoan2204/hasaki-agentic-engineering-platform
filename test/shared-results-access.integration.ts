@@ -334,6 +334,76 @@ test("runtime RCA: served only to members who can search logs themselves (person
   assert.equal((await lookupOrStart(request(key, alice))).outcome, "bypass", "the creator too");
 });
 
+test("N8: a member without log access cannot claim or supersede a shared runtime RCA (new, expired, stale, failed, or forced)", async () => {
+  const key = rcaKey(errorKey());
+  // No row exists yet: bob without Splunk/SigNoz bypasses sharing instead of claiming v1.
+  starts = 0;
+  const fresh = await lookupOrStart(request(key, bob));
+  assert.deepEqual([fresh.outcome, fresh.analysis, starts], ["bypass", null, 0]);
+  assert.deepEqual(await rowsOf(key), []);
+
+  // Alice (with Splunk) publishes v1; then v1 expires. Bob still cannot claim v2 or force over it.
+  await putUserSecret(alice, "splunk_token", JSON.stringify({ token: "t", user: "alice" }));
+  try {
+    await publish(key, alice, { summary: "real log RCA" });
+    await q(
+      pool,
+      "UPDATE shared_analyses SET valid_until = now() - interval '1 minute' WHERE kind = $1 AND key = $2",
+      [key.kind, key.key],
+    );
+    const expiredBob = await lookupOrStart(request(key, bob));
+    const forcedBob = await lookupOrStart(request(key, bob, { force: true }));
+    assert.deepEqual([expiredBob.outcome, expiredBob.analysis], ["bypass", null]);
+    assert.deepEqual([forcedBob.outcome, forcedBob.analysis], ["bypass", null]);
+    assert.deepEqual(
+      (await rowsOf(key)).map((r) => [r.version, r.status]),
+      [[1, "valid"]],
+      "alice's row is not superseded or joined by a log-less run",
+    );
+
+    // Failed v1 past backoff: bob still cannot claim v2.
+    await q(
+      pool,
+      "UPDATE shared_analyses SET status = 'failed', next_retry_at = now() - interval '1 minute', result = NULL WHERE kind = $1 AND key = $2",
+      [key.kind, key.key],
+    );
+    const failedBob = await lookupOrStart(request(key, bob));
+    assert.deepEqual([failedBob.outcome, failedBob.analysis], ["bypass", null]);
+    assert.equal((await rowsOf(key)).length, 1);
+  } finally {
+    await deleteUserSecret(alice, "splunk_token");
+  }
+});
+
+test("N8: a runtime RCA whose starter lost log access before settle is not published and does not supersede a prior valid RCA", async () => {
+  const key = rcaKey(errorKey());
+  await putUserSecret(alice, "splunk_token", JSON.stringify({ token: "t1", user: "alice" }));
+  await putUserSecret(bob, "splunk_token", JSON.stringify({ token: "t2", user: "bob" }));
+  try {
+    await publish(key, alice, { summary: "alice log RCA" });
+    const forced = await lookupOrStart(request(key, bob, { force: true }));
+    assert.equal(forced.outcome, "forced");
+    await deleteUserSecret(bob, "splunk_token");
+    await complete(runIdOf(forced), { summary: "bob no-logs RCA" });
+    await settleSharedAnalyses();
+    const rows = await rowsOf(key);
+    assert.deepEqual(
+      rows.map((r) => [r.version, r.status]),
+      [
+        [1, "valid"],
+        [2, "failed"],
+      ],
+      "v1 stays valid and is never superseded; v2 is refused at settle",
+    );
+    const hit = await lookupOrStart(request(key, alice));
+    assert.equal(hit.outcome, "hit");
+    assert.equal(hit.analysis!.version, 1);
+  } finally {
+    await deleteUserSecret(alice, "splunk_token").catch(() => {});
+    await deleteUserSecret(bob, "splunk_token").catch(() => {});
+  }
+});
+
 // ---- scrub before storing
 test("scrub happens before the write: the stored row holds no secret or customer data, and records the scrub version", async () => {
   const name = await repo([alice]);
@@ -403,6 +473,56 @@ test("a scrub that fails publishes nothing: the row fails instead", async () => 
   );
   assert.deepEqual(
     [row!.status, row!.result, row!.failure.reason],
+    ["failed", null, "scrub failed"],
+  );
+});
+
+test("N6: a report with a secret assignment keeps its prose (span redaction); an all-redacted result fails publish", async () => {
+  const name = await repo([alice]);
+  const k1 = assessKey([name]);
+  const r1 = await lookupOrStart(request(k1, alice));
+  const dbSecret = ["superSecret", "Value1234"].join("");
+  await complete(runIdOf(r1), {
+    report_markdown: `## Summary\nFound issue in config.\n\`db_secret_key = ${dbSecret}\`\nEnd.`,
+  });
+  await settleSharedAnalyses();
+  const published = await one<{ status: string; result: { report_markdown: string } | null }>(
+    pool,
+    "SELECT status, result FROM shared_analyses WHERE id = $1",
+    [r1.analysis!.id],
+  );
+  assert.equal(published!.status, "valid");
+  assert.match(published!.result!.report_markdown, /^## Summary\nFound issue in config\./);
+  assert.ok(!published!.result!.report_markdown.includes(dbSecret));
+
+  const k2 = assessKey([name], { focus: "all-redacted-default" });
+  const r2 = await lookupOrStart(request(k2, alice));
+  await complete(runIdOf(r2), {
+    report: "-----BEGIN PRIVATE KEY-----\nMIIEowIBAAKCAQEA7\n-----END PRIVATE KEY-----",
+  });
+  await settleSharedAnalyses();
+  const rejectedDefault = await one<{ status: string; result: unknown; failure: { reason: string } }>(
+    pool,
+    "SELECT status, result, failure FROM shared_analyses WHERE id = $1",
+    [r2.analysis!.id],
+  );
+  assert.deepEqual(
+    [rejectedDefault!.status, rejectedDefault!.result, rejectedDefault!.failure.reason],
+    ["failed", null, "scrub failed"],
+  );
+
+  const k3 = assessKey([name], { focus: "all-redacted-hook" });
+  setSharingHooks({ scrub: () => ({ report: "[redacted]" }) });
+  const r3 = await lookupOrStart(request(k3, alice));
+  await complete(runIdOf(r3), { report: "anything" });
+  await settleSharedAnalyses();
+  const rejectedHook = await one<{ status: string; result: unknown; failure: { reason: string } }>(
+    pool,
+    "SELECT status, result, failure FROM shared_analyses WHERE id = $1",
+    [r3.analysis!.id],
+  );
+  assert.deepEqual(
+    [rejectedHook!.status, rejectedHook!.result, rejectedHook!.failure.reason],
     ["failed", null, "scrub failed"],
   );
 });

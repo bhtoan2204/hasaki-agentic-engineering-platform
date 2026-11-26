@@ -9,13 +9,18 @@ import { startRun } from "../src/workflow/engine.ts";
 import { settleBackground } from "../src/workflow/background.ts";
 import { runtimeMetricsSnapshot } from "../src/runtimeMetrics.ts";
 import {
+  bugHuntKey,
   codeAssessmentKey,
   rubricHash,
   runtimeRcaKey,
   type SharedKey,
 } from "../src/sharing/key.ts";
 import { lookupOrStart, type LookupRequest } from "../src/sharing/service.ts";
-import { expireSharedAnalyses, settleSharedAnalyses } from "../src/sharing/settle.ts";
+import {
+  expireSharedAnalyses,
+  settleSharedAnalyses,
+  sharedResultsMaintenance,
+} from "../src/sharing/settle.ts";
 import { resetSharingHooks, setSharingHooks } from "../src/sharing/hooks.ts";
 import { describeAnalysis } from "../src/sharing/view.ts";
 import { byId } from "../src/sharing/repository.ts";
@@ -227,8 +232,8 @@ test("C4: commit_changed only when the new commit is a descendant of the old one
 
 test("C4: two publications of one subject never stale each other: only the older publication goes stale, whichever order they settle in", async () => {
   const name = repo();
-  const m1 = assessKey(name, { model: "claude/claude-opus-5-5#cfg:test" });
-  const m2 = assessKey(name, { model: "codex/gpt-5#cfg:test" });
+  const m1 = assessKey(name, { model: "claude/claude-opus-5-5#cfg:aaaa" });
+  const m2 = assessKey(name, { model: "claude/claude-opus-5-5#cfg:bbbb" });
   const [r1, r2] = [await lookupOrStart(request(m1)), await lookupOrStart(request(m2))];
   await complete(runIdOf(r1));
   await complete(runIdOf(r2));
@@ -261,11 +266,76 @@ test("C4: the RCA subject includes the model, so another provider does not stale
   assert.deepEqual([row.status, row.stale_reason], ["stale", "model_changed"]);
 });
 
+test("C4 (decision #2): code assessment and bug hunt subjects also include the model identity (different providers stay valid; changed #cfg stales)", async () => {
+  const name = repo();
+  const assessCodex = assessKey(name, { model: "codex/gpt-5#cfg:aaaa" });
+  await publish(assessCodex);
+  await publish(assessKey(name, { model: "claude/claude-opus-5-5#cfg:bbbb" }));
+  await settleBackground();
+  assert.equal((await rowsOf(assessCodex))[0].status, "valid", "assessment: another provider stays valid");
+  await publish(assessKey(name, { model: "codex/gpt-5#cfg:cccc" }));
+  await settleBackground();
+  const [assessRow] = await rowsOf(assessCodex);
+  assert.deepEqual([assessRow.status, assessRow.stale_reason], ["stale", "model_changed"]);
+
+  const fp = errorKeyFor();
+  const huntRepo = repo();
+  const huntKey = (model: string) =>
+    bugHuntKey({
+      scope: SCOPE,
+      errorKey: fp,
+      repos: [{ repo: huntRepo, commit: A }],
+      workflow: { key: "production-bug-hunt", version: 1 },
+      rubricHash: rubricHash({ instructions: "hunt" }),
+      model,
+    });
+  const huntCodex = huntKey("codex/gpt-5#cfg:aaaa");
+  const huntReq = (key: SharedKey) =>
+    request(key, alice, {
+      errorKey: fp,
+      start: async (tx) => {
+        const runId = Number(
+          (
+            await startRun(
+              {
+                definitionKey: "shared-validity-fixture",
+                ownerId: alice,
+                start: false,
+                title: `validity ${key.key.slice(0, 8)}`,
+              },
+              tx,
+            )
+          ).id,
+        );
+        await tx.client.query(
+          "INSERT INTO bug_hunts (fingerprint, run_id, requested_by, repositories, scope_key, report) VALUES ($1, $2, $3, $4, $5, $6)",
+          [fp, runId, alice, [huntRepo], huntRepo, JSON.stringify({ confirmed: [] })],
+        );
+        return runId;
+      },
+    });
+  await settleBackground();
+  const h1 = await lookupOrStart(huntReq(huntCodex));
+  await complete(runIdOf(h1));
+  await settleSharedAnalyses();
+  const h2 = await lookupOrStart(huntReq(huntKey("claude/claude-opus-5-5#cfg:bbbb")));
+  await complete(runIdOf(h2));
+  await settleSharedAnalyses();
+  await settleBackground();
+  assert.equal((await rowsOf(huntCodex))[0].status, "valid", "bug hunt: another provider stays valid");
+  const h3 = await lookupOrStart(huntReq(huntKey("codex/gpt-5#cfg:cccc")));
+  await complete(runIdOf(h3));
+  await settleSharedAnalyses();
+  await settleBackground();
+  const [huntRow] = await rowsOf(huntCodex);
+  assert.deepEqual([huntRow.status, huntRow.stale_reason], ["stale", "model_changed"]);
+});
+
 test("rubric, definition and model changes make the old result stale (when the new one is published) with the matching reason", async () => {
   for (const [change, reason] of [
     [{ rubric: "assess more carefully" }, "rubric_changed"],
     [{ version: 2 }, "definition_changed"],
-    [{ model: "claude/claude-sonnet-5-5#cfg:test" }, "model_changed"],
+    [{ model: "claude/claude-opus-5-5#cfg:v2" }, "model_changed"],
   ] as const) {
     const name = repo();
     const old = assessKey(name);
@@ -908,4 +978,105 @@ test("a stale result's answer carries the reason and is not served", async () =>
     `commit_changed:${name}`,
     "the answer says why it is stale",
   );
+});
+
+test("N1: different outputLocale or project are separate subjects and do not stale each other", async () => {
+  const name = repo();
+  const viOms = codeAssessmentKey({
+    scope: SCOPE,
+    repos: [{ repo: name, commit: A }],
+    focus: "",
+    project: "OMS",
+    outputLocale: "vi",
+    workflow: { key: "codebase-assessment", version: 1 },
+    rubricHash: rubricHash({ instructions: "assess" }),
+    model: "claude/claude-opus-5-5#cfg:test",
+  });
+  await publish(viOms);
+  await publish(
+    codeAssessmentKey({
+      scope: SCOPE,
+      repos: [{ repo: name, commit: B }],
+      focus: "",
+      project: "OMS",
+      outputLocale: "en",
+      workflow: { key: "codebase-assessment", version: 1 },
+      rubricHash: rubricHash({ instructions: "assess" }),
+      model: "claude/claude-opus-5-5#cfg:test",
+    }),
+  );
+  await publish(
+    codeAssessmentKey({
+      scope: SCOPE,
+      repos: [{ repo: name, commit: B }],
+      focus: "",
+      project: "Payment",
+      outputLocale: "vi",
+      workflow: { key: "codebase-assessment", version: 1 },
+      rubricHash: rubricHash({ instructions: "assess" }),
+      model: "claude/claude-opus-5-5#cfg:test",
+    }),
+  );
+  await settleBackground();
+  assert.equal((await rowsOf(viOms))[0].status, "valid");
+});
+
+test("N7: a row that throws during settle does not block later rows, and TTL expiry still runs in maintenance", async () => {
+  // Drain any prior running rows from earlier tests first.
+  await settleSharedAnalyses();
+  const kPoison = assessKey(repo());
+  const kGood = assessKey(repo());
+  const kExpired = assessKey(repo());
+  await publish(kExpired);
+  await q(
+    pool,
+    "UPDATE shared_analyses SET valid_until = now() - interval '1 minute' WHERE kind = $1 AND key = $2",
+    [kExpired.kind, kExpired.key],
+  );
+
+  const poison = await lookupOrStart(request(kPoison));
+  const good = await lookupOrStart(request(kGood));
+  await complete(runIdOf(poison), { findings: [{ title: "poison" }] });
+  await complete(runIdOf(good), { findings: [{ title: "good" }] });
+
+  // Inject a PostgreSQL jsonb rejection (\u0000) when scrubbing ONLY the poison row, simulating a row-level publish failure.
+  setSharingHooks({
+    scrub: (_kind, res) => {
+      const s = JSON.stringify(res);
+      if (s.includes("poison")) return { bad: "\u0000" };
+      return res;
+    },
+  });
+
+  await sharedResultsMaintenance();
+  await settleBackground();
+
+  const [poisonRow] = await rowsOf(kPoison);
+  const [goodRow] = await rowsOf(kGood);
+  const [expiredRow] = await rowsOf(kExpired);
+  assert.equal(poisonRow.status, "failed", "poison row is failed instead of blocking future ticks");
+  assert.equal(goodRow.status, "valid", "later rows still settle despite the earlier row failing");
+  assert.deepEqual(
+    [expiredRow.status, expiredRow.stale_reason],
+    ["stale", "ttl"],
+    "TTL expiry still runs even when settling hit an error",
+  );
+
+  // Even if the settle pass itself throws before iterating rows (e.g. invalid timeout config), expiry still runs.
+  const kExpired2 = assessKey(repo());
+  await publish(kExpired2);
+  await q(
+    pool,
+    "UPDATE shared_analyses SET valid_until = now() - interval '1 minute' WHERE kind = $1 AND key = $2",
+    [kExpired2.kind, kExpired2.key],
+  );
+  const origTimeout = config.sharedResults.runningTimeoutMinutes;
+  config.sharedResults.runningTimeoutMinutes = Number.NaN;
+  try {
+    await sharedResultsMaintenance();
+  } finally {
+    config.sharedResults.runningTimeoutMinutes = origTimeout;
+  }
+  const [expiredRow2] = await rowsOf(kExpired2);
+  assert.deepEqual([expiredRow2.status, expiredRow2.stale_reason], ["stale", "ttl"]);
 });

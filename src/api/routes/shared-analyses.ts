@@ -2,7 +2,7 @@ import { HttpError } from "../../http/error.ts";
 import { positiveId as num } from "../../http/params.ts";
 import { readSharedAnalysis, sharedForError, sharedForRepositories } from "../../sharing/read.ts";
 import type { Route } from "./types.ts";
-import { support } from "./shared.ts";
+import { localeOf, support } from "./shared.ts";
 
 /** Shared results (docs/shared-results/PLAN.md, step 7): read-only; starting and force re-runs use the existing routes. */
 export const sharedAnalysesRoutes: Route[] = [
@@ -26,7 +26,13 @@ export const sharedAnalysesRoutes: Route[] = [
         .filter(Boolean);
       if (repos.length > 30) throw new HttpError(400, "repositories: at most 30");
       const focus = (c.url.searchParams.get("focus") ?? "").slice(0, 500);
-      return { shared: await sharedForRepositories(repos, focus, c.actor) };
+      const project = (c.url.searchParams.get("project") ?? "").slice(0, 120);
+      const outputLocale = localeOf({
+        output_locale: c.url.searchParams.get("output_locale") ?? undefined,
+      });
+      return {
+        shared: await sharedForRepositories(repos, focus, c.actor, { project, outputLocale }),
+      };
     },
   ],
 ];

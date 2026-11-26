@@ -131,6 +131,8 @@ export const codeFindingsRoutes: Route[] = [
         throw new HttpError(400, "repositories: 1 to 30 repository names");
       const focus = typeof body.focus === "string" ? body.focus.trim().slice(0, 500) : "";
       const project = typeof body.project === "string" ? body.project.trim().slice(0, 120) : "";
+      const outputLocale = localeOf(body);
+      const agentProvider = providerOf(body);
       // Base commits are resolved (and fetched) at most once per request, whoever asks first.
       let commits: Promise<Record<string, string> | null> | null = null;
       const commitsNow = (r: string[]) => (commits ??= currentBaseCommits(actor.id, r));
@@ -149,8 +151,8 @@ export const codeFindingsRoutes: Route[] = [
               ...(focus ? { focus } : {}),
             },
             title: typeof body.title === "string" ? body.title.slice(0, 200) : undefined,
-            outputLocale: localeOf(body),
-            agentProvider: providerOf(body),
+            outputLocale,
+            agentProvider,
             ownerId: actor.id,
           },
           tx,
@@ -161,7 +163,9 @@ export const codeFindingsRoutes: Route[] = [
         const shared = await sharedCodeAssessment({
           actor,
           focus,
-          provider: providerOf(body),
+          project,
+          outputLocale,
+          provider: agentProvider,
           commits: await commitsNow(repos),
           force: body.force === true,
           start: async (tx) => Number((await start(tx)).id),

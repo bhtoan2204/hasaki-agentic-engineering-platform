@@ -196,7 +196,11 @@ export function CodeScan() {
   }, [focus]);
   const shared = useApi<{ shared: SharedView | null }>(
     targets.length
-      ? `/api/code-scans/shared?${new URLSearchParams({ repositories: targets.join(","), focus: sharedFocus })}`
+      ? `/api/code-scans/shared?${new URLSearchParams({
+          repositories: targets.join(","),
+          focus: sharedFocus,
+          ...(project ? { project } : {}),
+        })}`
       : null,
   );
   const sharedView = shared.data?.shared ?? null;

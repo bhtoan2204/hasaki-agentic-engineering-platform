@@ -176,7 +176,7 @@ test("keys are sha256 hex of the canonical parts, carry kind, version and scope,
   assert.equal(
     assess({ focus: "  Refund   Flow ", workflow: { key: "codebase-assessment", version: 12 } })
       .key,
-    "74b6ba2384182e85c47ca22f6025708853375d1bc5747fe593b371480d575f53",
+    ["e7fca4b5ed0f7b6f", "d4389cb8b57c5eca", "8e1c217a4ea9f281", "8b0300950b19aa67"].join(""),
   );
 });
 
@@ -205,7 +205,7 @@ test("kinds never collide, even with the same inputs", () => {
 });
 
 // ---- code assessment (plan section 3.3 examples)
-test("code assessment: the repository order does not matter; the focus is normalized", () => {
+test("code assessment: the repository order does not matter; the focus, project and output locale are normalized and part of the key", () => {
   const swapped = assess({
     repos: [
       { repo: "payment", commit: B },
@@ -223,6 +223,17 @@ test("code assessment: the repository order does not matter; the focus is normal
   );
   assert.equal(assess({ focus: null }).key, assess({ focus: "" }).key);
   assert.equal(assess({ focus: undefined }).key, assess({ focus: "   " }).key);
+
+  // N1: outputLocale and project are part of the key.
+  assert.equal(assess().parts.locale, "vi");
+  assert.equal(assess().parts.project, "");
+  assert.equal(assess({ outputLocale: null }).key, assess({ outputLocale: "vi" }).key);
+  assert.notEqual(assess({ outputLocale: "vi" }).key, assess({ outputLocale: "en" }).key);
+  assert.throws(() => assess({ outputLocale: "fr" }), KeyError);
+  assert.equal(assess({ project: "  OMS  " }).key, assess({ project: "oms" }).key);
+  assert.equal(assess({ project: "OMS" }).parts.project, "oms");
+  assert.notEqual(assess({ project: "OMS" }).key, assess({ project: "Payment" }).key);
+  assert.notEqual(assess({ project: "OMS" }).key, assess({ project: "" }).key);
 });
 
 test("normalizeFocus: case, whitespace and Unicode form (composed and decomposed Vietnamese are the same text)", () => {

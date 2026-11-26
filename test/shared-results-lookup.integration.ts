@@ -478,3 +478,55 @@ test("C2: a member with a personal copy of the workflow resolves it, and is neve
     assert.ok(shared && shared.outcome === "miss", `${key}: another member is shared as before`);
   }
 });
+
+test("N1: sharedCodeAssessment separates keys by outputLocale and project", async () => {
+  const commits = { [`n1-repo-${++seq}`]: "a".repeat(40) };
+  const start = async (tx: Parameters<LookupRequest["start"]>[0]) =>
+    Number(
+      (
+        await startRun(
+          { definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n1" },
+          tx,
+        )
+      ).id,
+    );
+  const viOms = await sharedCodeAssessment({
+    actor: { id: alice },
+    focus: "",
+    project: "OMS",
+    outputLocale: "vi",
+    commits,
+    start,
+  });
+  const enOms = await sharedCodeAssessment({
+    actor: { id: alice },
+    focus: "",
+    project: "OMS",
+    outputLocale: "en",
+    commits,
+    start,
+  });
+  const viPayment = await sharedCodeAssessment({
+    actor: { id: alice },
+    focus: "",
+    project: "Payment",
+    outputLocale: "vi",
+    commits,
+    start,
+  });
+  const viOmsCase = await sharedCodeAssessment({
+    actor: { id: alice },
+    focus: "",
+    project: "  oms  ",
+    outputLocale: "vi",
+    commits,
+    start,
+  });
+  assert.equal(viOms!.outcome, "miss");
+  assert.equal(enOms!.outcome, "miss");
+  assert.equal(viPayment!.outcome, "miss");
+  assert.equal(viOmsCase!.outcome, "wait", "normalized project matches the running vi/OMS claim");
+  assert.notEqual(viOms!.analysis!.key, enOms!.analysis!.key);
+  assert.notEqual(viOms!.analysis!.key, viPayment!.analysis!.key);
+  assert.equal(viOmsCase!.analysis!.id, viOms!.analysis!.id);
+});

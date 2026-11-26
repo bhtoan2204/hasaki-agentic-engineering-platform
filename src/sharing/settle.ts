@@ -1,10 +1,11 @@
 import { config } from "../config.ts";
 import { one, pool } from "../db/pool.ts";
+import { log } from "../logging.ts";
 import { attemptRows, summarize } from "../report/cost.ts";
 import type { SharedKind } from "./types.ts";
 import { sharingHooks } from "./hooks.ts";
 import { validUntil } from "./policy.ts";
-import { SCRUB_VERSION } from "./scrub.ts";
+import { isFullyRedacted, SCRUB_VERSION } from "./scrub.ts";
 import { markReplaced } from "./stale.ts";
 import { byId, expireDue, fail, publish, settleable, type PublishFacts } from "./repository.ts";
 import { background } from "../workflow/background.ts";
@@ -119,49 +120,91 @@ export async function settleSharedAnalyses(limit = 50) {
       why = reason;
       return fail(pool, id, { reason, run_id: runId, ...extra }, { counts, capMinutes: cap });
     };
-    let ok: boolean;
-    if (runId == null || r.run_status == null) ok = await failWith("run missing", true);
-    else if (r.run_status === "COMPLETED") {
-      const snapshot = await snapshotOf(r.kind, runId);
-      if (snapshot == null) ok = await failWith("completed without a result", true);
-      else {
-        // Scrubbed before it is written; a scrub that throws publishes nothing.
-        let scrubbed: unknown;
-        try {
-          scrubbed = hooks.scrub(r.kind, snapshot);
-        } catch {
-          scrubbed = undefined;
+    let settledRow = false;
+    try {
+      let ok: boolean;
+      if (runId == null || r.run_status == null) ok = await failWith("run missing", true);
+      else if (r.run_status === "COMPLETED") {
+        const row = r.kind === "prod_error.runtime_rca" ? await byId(pool, id) : null;
+        if (
+          r.kind === "prod_error.runtime_rca" &&
+          (!row || row.created_by == null || !(await hooks.canRead(row, { id: row.created_by })))
+        ) {
+          ok = await failWith("creator lacks access", false);
+        } else {
+          const snapshot = await snapshotOf(r.kind, runId);
+          if (snapshot == null) ok = await failWith("completed without a result", true);
+          else {
+            // Scrubbed before it is written; a scrub that throws or redacts the whole result publishes nothing.
+            let scrubbed: unknown;
+            try {
+              scrubbed = hooks.scrub(r.kind, snapshot);
+            } catch {
+              scrubbed = undefined;
+            }
+            if (scrubbed == null || isFullyRedacted(scrubbed))
+              ok = await failWith("scrub failed", true);
+            else
+              ok = await publish(pool, id, scrubbed, {
+                ...(await factsOf(r.kind, runId, r.error_key)),
+                scrubVersion: SCRUB_VERSION,
+              });
+          }
         }
-        if (scrubbed == null) ok = await failWith("scrub failed", true);
-        else
-          ok = await publish(pool, id, scrubbed, {
-            ...(await factsOf(r.kind, runId, r.error_key)),
-            scrubVersion: SCRUB_VERSION,
+      } else if (r.run_status === "CANCELED") ok = await failWith("run canceled", false);
+      else if (r.run_status === "FAILED") ok = await failWith("run failed", true);
+      else ok = await failWith("timeout", true, { run_status: r.run_status });
+      if (ok) {
+        settledRow = true;
+        settled++;
+        hooks.observe({
+          kind: r.kind,
+          outcome: why ? "failed" : "published",
+          analysisId: id,
+          version: Number(r.version),
+          runId,
+          actorId: null,
+          key: r.key,
+          scope: r.scope,
+          ...(why ? { reason: why } : {}),
+        });
+        // Older results of this subject that this one replaces become stale now, not when the run was claimed. In the
+        // background: it may ask git, and settling must not wait for it.
+        if (!why)
+          background("shared stale", async () => {
+            const row = await byId(pool, id);
+            if (row) await markReplaced(row).catch(ignoreError("shared.stale"));
           });
       }
-    } else if (r.run_status === "CANCELED") ok = await failWith("run canceled", false);
-    else if (r.run_status === "FAILED") ok = await failWith("run failed", true);
-    else ok = await failWith("timeout", true, { run_status: r.run_status });
-    if (ok) {
-      settled++;
-      hooks.observe({
-        kind: r.kind,
-        outcome: why ? "failed" : "published",
-        analysisId: id,
-        version: Number(r.version),
-        runId,
-        actorId: null,
-        key: r.key,
-        scope: r.scope,
-        ...(why ? { reason: why } : {}),
-      });
-      // Older results of this subject that this one replaces become stale now, not when the run was claimed. In the
-      // background: it may ask git, and settling must not wait for it.
-      if (!why)
-        background("shared stale", async () => {
-          const row = await byId(pool, id);
-          if (row) await markReplaced(row).catch(ignoreError("shared.stale"));
-        });
+    } catch (e) {
+      log.warn(`shared result settle failed: analysis=${id} run=${runId ?? "-"}`, e);
+      if (!settledRow) {
+        try {
+          if (
+            await fail(
+              pool,
+              id,
+              { reason: "settle error", run_id: runId },
+              { counts: true, capMinutes: cap },
+            )
+          ) {
+            settled++;
+            hooks.observe({
+              kind: r.kind,
+              outcome: "failed",
+              analysisId: id,
+              version: Number(r.version),
+              runId,
+              actorId: null,
+              key: r.key,
+              scope: r.scope,
+              reason: "settle error",
+            });
+          }
+        } catch (fe) {
+          log.warn(`shared result settle fallback failed: analysis=${id}`, fe);
+        }
+      }
     }
   }
   return settled;
@@ -173,23 +216,36 @@ export async function expireSharedAnalyses(limit = 200) {
   if (!kinds.length) return 0;
   const hooks = sharingHooks();
   const rows = await expireDue(pool, limit, kinds);
-  for (const r of rows)
-    hooks.observe({
-      kind: r.kind,
-      outcome: "expired",
-      analysisId: Number(r.id),
-      version: Number(r.version),
-      runId: null,
-      actorId: null,
-      key: r.key,
-      scope: r.scope,
-      reason: "ttl",
-    });
+  for (const r of rows) {
+    try {
+      hooks.observe({
+        kind: r.kind,
+        outcome: "expired",
+        analysisId: Number(r.id),
+        version: Number(r.version),
+        runId: null,
+        actorId: null,
+        key: r.key,
+        scope: r.scope,
+        reason: "ttl",
+      });
+    } catch (e) {
+      log.warn(`shared result expire observe failed: analysis=${r.id}`, e);
+    }
+  }
   return rows.length;
 }
 
-/** The reconcile task: settle, then expire. */
+/** The reconcile task: settle, then expire (expiry always runs even if settling throws). */
 export async function sharedResultsMaintenance() {
-  await settleSharedAnalyses();
-  await expireSharedAnalyses();
+  try {
+    await settleSharedAnalyses();
+  } catch (e) {
+    log.warn("shared results settle pass failed", e);
+  }
+  try {
+    await expireSharedAnalyses();
+  } catch (e) {
+    log.warn("shared results expiry pass failed", e);
+  }
 }

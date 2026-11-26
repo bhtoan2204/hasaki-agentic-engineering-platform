@@ -24,6 +24,8 @@ import { resetSharingHooks, setSharingHooks } from "../src/sharing/hooks.ts";
 import { installationId } from "../src/sharing/scope.ts";
 import { sharedBugHunt, sharedCodeAssessment, sharedRuntimeRca } from "../src/sharing/flows.ts";
 import { BACKFILL_CURSOR, backfillSharedResults } from "../src/sharing/backfill.ts";
+import { sharedForRepositories } from "../src/sharing/read.ts";
+import { SCRUB_VERSION } from "../src/sharing/scrub.ts";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -315,12 +317,24 @@ async function repoFor(user: number) {
 /** A completed codebase-assessment run as the platform records it: frozen configuration, commits, the assess output. */
 async function assessmentRun(
   repo: string,
-  o: { commit?: string; finishedDaysAgo?: number; output?: unknown } = {},
+  o: {
+    commit?: string;
+    finishedDaysAgo?: number;
+    output?: unknown;
+    focus?: string;
+    project?: string;
+    outputLocale?: "vi" | "en";
+  } = {},
 ) {
   const run = await startRun({
     definitionKey: "codebase-assessment",
     repositories: [repo],
-    inputs: { repositories: [repo] },
+    inputs: {
+      repositories: [repo],
+      ...(o.project ? { project: o.project } : {}),
+      ...(o.focus ? { focus: o.focus } : {}),
+    },
+    ...(o.outputLocale ? { outputLocale: o.outputLocale } : {}),
     ownerId: alice,
     start: false,
     title: "assessment",
@@ -415,7 +429,7 @@ test("backfill: only runs whose key is provably today's; dry-run writes nothing;
   for (const r of rows) {
     assert.deepEqual(
       [r.status, r.version, Number(r.created_by), r.key_parts.scrub_version],
-      ["valid", 1, alice, 1],
+      ["valid", 1, alice, SCRUB_VERSION],
     );
     assert.ok(!JSON.stringify(r.result).includes("nguyen.van.a@"), "scrubbed before the write");
   }
@@ -442,4 +456,97 @@ test("backfill: only runs whose key is provably today's; dry-run writes nothing;
   assert.equal(hit?.outcome, "hit");
   assert.equal(Number(hit!.analysis!.source_run_id), newest);
   assert.equal(starts, 0);
+});
+
+test("N1, N3, N5: backfill uses outputLocale/project, scrubs focus, and clears the cursor on completion so newer runs are picked up", async () => {
+  await q(pool, "DELETE FROM settings WHERE key = $1", [BACKFILL_CURSOR]);
+  const r = await repoFor(alice);
+  const runEn = await assessmentRun(r, {
+    project: "OMS",
+    outputLocale: "en",
+    focus: "Refund flow, ask nguyen.van.a@gmail.com",
+  });
+  const first = await backfillSharedResults({ apply: true, batchSize: 1 });
+  assert.equal(first.done, true);
+  assert.equal(
+    await one(pool, "SELECT 1 FROM settings WHERE key = $1", [BACKFILL_CURSOR]),
+    undefined,
+    "N5: cursor is cleared when a pass finishes",
+  );
+  const backfilled = await one<{
+    key_parts: { focus?: string; project?: string; locale?: string };
+  }>(
+    pool,
+    "SELECT key_parts FROM shared_analyses WHERE source_run_id = $1 AND trigger = 'backfill'",
+    [runEn],
+  );
+  assert.ok(backfilled, "the new run was backfilled");
+  assert.equal(backfilled!.key_parts.locale, "en");
+  assert.equal(backfilled!.key_parts.project, "oms");
+  assert.equal(
+    backfilled!.key_parts.focus,
+    "refund flow, ask n***@gmail.com",
+    "N3: focus is scrubbed before storing key_parts",
+  );
+  assert.ok(
+    !JSON.stringify(backfilled!.key_parts).includes("nguyen.van.a@"),
+    "N3: raw email is never stored in key_parts",
+  );
+
+  // N1 + N3: live lookup and read API match the backfilled row by scrubbed focus, project and locale.
+  let starts = 0;
+  const hit = await sharedCodeAssessment({
+    actor: { id: alice },
+    focus: "  Refund  Flow, ask nguyen.van.a@gmail.com ",
+    project: "oms",
+    outputLocale: "en",
+    commits: { [r]: A },
+    start: async () => (starts++, 0),
+  });
+  assert.equal(hit?.outcome, "hit");
+  assert.equal(Number(hit!.analysis!.source_run_id), runEn);
+  assert.equal(starts, 0);
+  const missLocale = await sharedCodeAssessment({
+    actor: { id: alice },
+    focus: "Refund flow, ask nguyen.van.a@gmail.com",
+    project: "oms",
+    outputLocale: "vi",
+    commits: { [r]: A },
+    start: async () => {
+      starts++;
+      return Number(
+        (
+          await startRun({
+            definitionKey: "shared-obs-fixture",
+            ownerId: alice,
+            start: false,
+            title: "n1-miss",
+          })
+        ).id,
+      );
+    },
+  });
+  assert.equal(missLocale?.outcome, "miss");
+  assert.equal(starts, 1);
+
+  const view = await sharedForRepositories(
+    [r],
+    "refund flow, ask nguyen.van.a@gmail.com",
+    { id: alice },
+    { project: "OMS", outputLocale: "en" },
+  );
+  assert.ok(view, "read API matches the backfilled scrubbed focus, project and locale");
+
+  // N5: a newer run created after a completed pass is picked up on the next run without --restart.
+  const later = await assessmentRun(await repoFor(alice), { project: "Payment", outputLocale: "vi" });
+  const next = await backfillSharedResults({ apply: true });
+  assert.equal(next.done, true);
+  assert.equal(next.inserted, 1, "N5: picked up the newer run without restart");
+  assert.ok(
+    await one(
+      pool,
+      "SELECT 1 FROM shared_analyses WHERE source_run_id = $1 AND trigger = 'backfill'",
+      [later],
+    ),
+  );
 });

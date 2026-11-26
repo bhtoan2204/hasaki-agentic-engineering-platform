@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveOutputLocale } from "../agent/language.ts";
 
 /**
  * Dedup keys of shared results (docs/shared-results/PLAN.md, section 3). Pure: no I/O, no clock, no model.
@@ -133,6 +134,25 @@ export function normalizeFocus(focus: string | null | undefined) {
     .toLowerCase();
 }
 
+/** The project name of a code assessment: NFC, trimmed, whitespace collapsed, lower-case. Empty = no project. */
+export function normalizeProject(project: string | null | undefined) {
+  const p = String(project ?? "")
+    .normalize("NFC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (p.length > 200) throw new KeyError("project is too long");
+  return p;
+}
+
+function localeOf(locale: string | null | undefined) {
+  try {
+    return resolveOutputLocale(locale);
+  } catch (e) {
+    throw new KeyError((e as Error).message);
+  }
+}
+
 export interface RubricInput {
   /** The step's instruction text of the workflow version (the prompt this analysis is held to). */
   instructions: string;
@@ -221,6 +241,8 @@ export interface CodeAssessmentKeyInput {
   scope: string;
   repos: RepoAtCommit[];
   focus?: string | null;
+  project?: string | null;
+  outputLocale?: string | null;
   workflow: WorkflowRef;
   rubricHash: string;
   model: string;
@@ -230,6 +252,8 @@ export function codeAssessmentKey(i: CodeAssessmentKeyInput): SharedKey {
     scope: scopeOf(i.scope),
     repos: reposOf(i.repos),
     focus: normalizeFocus(i.focus),
+    project: normalizeProject(i.project),
+    locale: localeOf(i.outputLocale),
     workflow: workflowOf(i.workflow),
     rubric: hashOf("rubric hash", i.rubricHash),
     model: required("model", i.model, 200),

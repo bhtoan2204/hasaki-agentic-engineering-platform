@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { pool, one, q } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { createUser, type PublicUser } from "../src/auth/users.ts";
+import { deleteUserSecret, putUserSecret } from "../src/auth/secrets.ts";
 import { getRun, cancelRun, reexecuteStep, startRun } from "../src/workflow/engine.ts";
 import { runOnce } from "../src/workflow/scheduler.ts";
 import {
@@ -655,35 +656,51 @@ test("C1 hunt: a hunt started with prior evidence neither reads nor publishes a 
   });
 });
 
-test("C1 RCA: a runtime RCA started with the hunt's evidence neither reads nor publishes a shared result; without evidence it does", async () => {
+test("C1 RCA: a runtime RCA started with the hunt's evidence neither reads nor publishes a shared result; without evidence it does (when log access is present)", async () => {
   const withEvidenceFp = caseFingerprint("transaction-consistency");
   await withSharing(async (events) => {
-    // Control: no evidence of the other workflow, so the RCA is shared (looked up and claimed).
-    const plain = await startRuntimeShared(caseFingerprint("correct-code-suspected"), owner, {});
-    assert.ok("run_id" in plain && plain.run_id, "runs as before");
+    // N8: without Splunk/SigNoz, the owner bypasses sharing and never claims a shared RCA.
+    const noLogs = await startRuntimeShared(caseFingerprint("correct-code-suspected"), owner, {});
+    assert.ok("run_id" in noLogs && noLogs.run_id, "runs unshared as before");
     assert.ok(
-      events.some((e) => e.outcome === "miss"),
-      "control: an evidence-free RCA is shared",
+      events.some((e) => e.outcome === "bypass" && e.reason === "access"),
+      "N8: owner without log access is bypassed",
     );
-    await cancelRun((plain as { run_id: number }).run_id);
+    assert.deepEqual(await sharedRowsOf(caseFingerprint("correct-code-suspected")), []);
+    await cancelRun((noLogs as { run_id: number }).run_id);
 
-    // The owner's own hunt of this incident gives the workbench evidence for the RCA's prompt.
-    const h = await startHunt(withEvidenceFp, owner, { repositories: [repo], provider: "codex" });
-    assert.equal(await drive(h.run_id), "COMPLETED");
-    const evidence = (await getWorkbench(withEvidenceFp, owner)).evidence.filter(
-      (e) => e.source === "bug_hunt" && e.valid && !e.stale,
-    );
+    // Control: with log access and no evidence of the other workflow, the RCA is shared (looked up and claimed).
     events.length = 0;
-    const r = await startRuntimeShared(withEvidenceFp, owner, {});
-    assert.ok("run_id" in r && r.run_id, "runs as before");
-    const used =
-      ((await getRun((r as { run_id: number }).run_id)).inputs.prior_evidence as string[]) ?? [];
-    if (sandbox)
-      assert.ok(used.length > 0 && evidence.length > 0, "the run did carry the hunt's evidence");
-    if (used.length) {
-      assert.deepEqual(events, [], "so: no lookup, no claim, nothing published");
-      assert.deepEqual(await sharedRowsOf(withEvidenceFp), []);
-    } else assert.ok(events.length > 0, "no evidence reached the prompt: it is shared as usual");
-    await cancelRun((r as { run_id: number }).run_id);
+    await putUserSecret(owner.id, "splunk_token", JSON.stringify({ token: "t", user: owner.username }));
+    try {
+      const plain = await startRuntimeShared(caseFingerprint("correct-code-suspected"), owner, {});
+      assert.ok("run_id" in plain && plain.run_id, "runs as before");
+      assert.ok(
+        events.some((e) => e.outcome === "miss"),
+        "control: an evidence-free RCA with log access is shared",
+      );
+      await cancelRun((plain as { run_id: number }).run_id);
+
+      // The owner's own hunt of this incident gives the workbench evidence for the RCA's prompt.
+      const h = await startHunt(withEvidenceFp, owner, { repositories: [repo], provider: "codex" });
+      assert.equal(await drive(h.run_id), "COMPLETED");
+      const evidence = (await getWorkbench(withEvidenceFp, owner)).evidence.filter(
+        (e) => e.source === "bug_hunt" && e.valid && !e.stale,
+      );
+      events.length = 0;
+      const r = await startRuntimeShared(withEvidenceFp, owner, {});
+      assert.ok("run_id" in r && r.run_id, "runs as before");
+      const used =
+        ((await getRun((r as { run_id: number }).run_id)).inputs.prior_evidence as string[]) ?? [];
+      if (sandbox)
+        assert.ok(used.length > 0 && evidence.length > 0, "the run did carry the hunt's evidence");
+      if (used.length) {
+        assert.deepEqual(events, [], "so: no lookup, no claim, nothing published");
+        assert.deepEqual(await sharedRowsOf(withEvidenceFp), []);
+      } else assert.ok(events.length > 0, "no evidence reached the prompt: it is shared as usual");
+      await cancelRun((r as { run_id: number }).run_id);
+    } finally {
+      await deleteUserSecret(owner.id, "splunk_token").catch(() => {});
+    }
   });
 });

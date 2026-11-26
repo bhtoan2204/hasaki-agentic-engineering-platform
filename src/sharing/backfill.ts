@@ -1,11 +1,12 @@
 import { one, pool, q } from "../db/pool.ts";
+import { outputLocale } from "../agent/language.ts";
 import { parseAgentConfiguration, refreshEnvironmentDefaults } from "../agent/configuration.ts";
 import { analysisContext, type AnalysisContext } from "./context.ts";
 import { bugHuntKey, codeAssessmentKey, KeyError, type SharedKey } from "./key.ts";
 import { validUntil } from "./policy.ts";
 import { insertBackfilled, keyExists } from "./repository.ts";
 import { installationId } from "./scope.ts";
-import { SCRUB_VERSION, scrubResult } from "./scrub.ts";
+import { isFullyRedacted, SCRUB_VERSION, scrubKeyParts, scrubResult } from "./scrub.ts";
 import { factsOf, snapshotOf, enabledKinds } from "./settle.ts";
 import type { SharedKind } from "./types.ts";
 
@@ -57,6 +58,8 @@ interface Candidate {
   inputs: Record<string, unknown>;
   selected_repositories: string[];
   source_revisions: Record<string, { commit?: string }> | null;
+  output_locale: string | null;
+  project: string;
   started_at: Date | null;
   finished_at: Date | null;
   hunt_fingerprint: string | null;
@@ -108,10 +111,12 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
       pool,
       `SELECT r.id, r.definition_key, v.version AS definition_version, d.owner_id IS NULL AS shared_definition,
               r.agent_provider, r.agent_configuration, r.owner_id, r.inputs, r.selected_repositories, r.source_revisions,
+              r.output_locale, COALESCE(w.project, r.inputs->>'project', '') AS project,
               r.started_at, r.finished_at, h.fingerprint AS hunt_fingerprint
          FROM workflow_runs r
          JOIN workflow_definition_versions v ON v.id = r.definition_version_id
          JOIN workflow_definitions d ON d.id = v.definition_id
+         LEFT JOIN work_items w ON w.id = r.work_item_id
          LEFT JOIN bug_hunts h ON h.run_id = r.id
         WHERE r.status = 'COMPLETED' AND r.definition_key = ANY($1::text[]) AND ($2::bigint IS NULL OR r.id < $2)
         ORDER BY r.id DESC LIMIT $3`,
@@ -132,6 +137,10 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
       }
     }
     cursor = Number(runs[runs.length - 1].id);
+    if (runs.length < batchSize) {
+      report.done = true;
+      break;
+    }
     if (apply)
       await q(
         pool,
@@ -139,11 +148,9 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
          ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
         [BACKFILL_CURSOR, String(cursor)],
       );
-    if (runs.length < batchSize) {
-      report.done = true;
-      break;
-    }
   }
+  // Clear the cursor once a full pass reaches the end so subsequent runs pick up newly completed runs and newly enabled flags.
+  if (apply && report.done) await q(pool, "DELETE FROM settings WHERE key = $1", [BACKFILL_CURSOR]);
   report.cursor = cursor;
   return report;
 
@@ -185,6 +192,8 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
               scope,
               repos: commits,
               focus: typeof run.inputs?.focus === "string" ? run.inputs.focus : "",
+              project: run.project,
+              outputLocale: outputLocale({ output_locale: run.output_locale }),
               ...now,
             })
           : bugHuntKey({
@@ -200,13 +209,20 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
     if (seen.has(key.key) || (await keyExists(pool, kind, key.key))) skip("exists");
     const snapshot = await snapshotOf(kind, Number(run.id));
     if (snapshot == null) skip("no_result");
+    let result: unknown;
+    try {
+      result = scrubResult(kind, snapshot);
+    } catch {
+      return skip("scrub_failed");
+    }
+    if (result == null || isFullyRedacted(result)) skip("scrub_failed");
     seen.add(key.key);
     if (!apply) return true;
     const facts = await factsOf(kind, Number(run.id), null);
     const id = await insertBackfilled(pool, {
       kind,
       key: key.key,
-      keyParts: { ...key.parts, scrub_version: SCRUB_VERSION },
+      keyParts: { ...scrubKeyParts(key.parts), scrub_version: SCRUB_VERSION },
       scopeRepos: repos,
       errorKey: kind === "code_assessment" ? null : run.hunt_fingerprint,
       createdBy: run.owner_id!,
@@ -217,7 +233,7 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
         rubricHash: now.rubricHash,
       },
       runId: Number(run.id),
-      result: scrubResult(kind, snapshot),
+      result,
       startedAt: new Date(run.started_at!),
       finishedAt: new Date(run.finished_at!),
       validUntil: until,

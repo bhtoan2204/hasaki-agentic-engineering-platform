@@ -96,11 +96,17 @@ async function repo(readers: string[]) {
   for (const u of readers) await setRepositoryAccess(row, ids[u], "read", ids["api-admin"]);
   return name;
 }
-const assessKey = (name: string, focus = ""): SharedKey =>
+const assessKey = (
+  name: string,
+  focus = "",
+  o: { project?: string; outputLocale?: string } = {},
+): SharedKey =>
   codeAssessmentKey({
     scope,
     repos: [{ repo: name, commit: "a".repeat(40) }],
     focus,
+    project: o.project,
+    outputLocale: o.outputLocale,
     workflow: { key: "codebase-assessment", version: 1 },
     rubricHash: rubricHash({ instructions: "assess" }),
     model: "claude/claude-opus-5-5#cfg:test",
@@ -317,4 +323,29 @@ test("C3: the same for a production error's RCA", async () => {
   assert.equal(r.body.runtime_rca.analysis_id, id);
   assert.equal(r.body.runtime_rca.status, "valid");
   assert.deepEqual(r.body.runtime_rca.newer_version, { version: 2, status: "running" });
+});
+
+test("N1: GET /api/code-scans/shared isolates assessments by project and output_locale", async () => {
+  const name = await repo(["api-alice", "api-bob"]);
+  const enOmsId = await publish(
+    assessKey(name, "", { project: "OMS", outputLocale: "en" }),
+    "api-alice",
+  );
+  assert.deepEqual(
+    (await bob(`/api/code-scans/shared?repositories=${name}`)).body,
+    { shared: null },
+    "default vi without project does not match en/OMS",
+  );
+  assert.deepEqual(
+    (await bob(`/api/code-scans/shared?repositories=${name}&project=OMS&output_locale=vi`)).body,
+    { shared: null },
+  );
+  assert.deepEqual(
+    (await bob(`/api/code-scans/shared?repositories=${name}&project=Payment&output_locale=en`)).body,
+    { shared: null },
+  );
+  const hit = await bob<{ shared: { analysis_id: number } }>(
+    `/api/code-scans/shared?repositories=${name}&project=oms&output_locale=en`,
+  );
+  assert.equal(hit.body.shared.analysis_id, enOmsId);
 });

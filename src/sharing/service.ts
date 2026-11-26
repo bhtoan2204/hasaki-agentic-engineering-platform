@@ -7,7 +7,7 @@ import { ignoreError } from "../ignoreError.ts";
 import type { SharedKey } from "./key.ts";
 import { sharingHooks, type SharedActor, type SharedOutcomeName } from "./hooks.ts";
 import { retryState } from "./policy.ts";
-import { scrubText } from "./scrub.ts";
+import { scrubKeyParts } from "./scrub.ts";
 import {
   attachRun,
   byId,
@@ -51,10 +51,6 @@ export type LookupResult =
   | { outcome: "miss" | "forced"; analysis: SharedRow; runId: number }
   | { outcome: "bypass"; analysis: SharedRow | null };
 
-/** Free text a member typed (the assessment focus) is stored in key_parts: scrubbed like a result. */
-const scrubParts = (parts: Record<string, unknown>) =>
-  typeof parts.focus === "string" ? { ...parts, focus: scrubText(parts.focus) } : parts;
-
 export interface LookupRequest {
   key: SharedKey;
   actor: SharedActor;
@@ -82,6 +78,42 @@ const NO_PROVENANCE: Provenance = {
   definitionVersion: null,
   rubricHash: null,
 };
+
+function proposedRow(r: LookupRequest, now: Date, latest: SharedRow | null): SharedRow {
+  return {
+    id: 0,
+    kind: r.key.kind,
+    key: r.key.key,
+    version: (latest?.version ?? 0) + 1,
+    status: "running",
+    key_parts: r.key.parts,
+    scope_repos: [...new Set(r.scopeRepos ?? [])].sort(),
+    error_key: r.errorKey ?? null,
+    result: null,
+    source_run_id: null,
+    created_by: r.actor.id,
+    created_by_name: r.actor.username ?? null,
+    trigger: r.force ? "force" : (r.trigger ?? "manual"),
+    provider: r.provenance?.provider ?? null,
+    model: r.provenance?.model ?? null,
+    definition_version: r.provenance?.definitionVersion ?? null,
+    rubric_hash: r.provenance?.rubricHash ?? null,
+    tokens_in: null,
+    tokens_out: null,
+    cost_usd: null,
+    duration_ms: null,
+    observed: null,
+    started_at: now,
+    finished_at: null,
+    valid_until: null,
+    stale_reason: null,
+    failure: null,
+    attempts: 0,
+    next_retry_at: null,
+    reuse_count: 0,
+    last_reused_at: null,
+  };
+}
 
 export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
   const hooks = sharingHooks();
@@ -161,6 +193,14 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
       note("wait", latest, latest.source_run_id);
       return { outcome: "wait", analysis: latest };
     }
+    // A member without access to read a runtime RCA (log access) must not claim or publish one (REVIEW.md N8).
+    if (
+      kind === "prod_error.runtime_rca" &&
+      !(await hooks.canRead(proposedRow(r, now, latest), r.actor))
+    ) {
+      note("bypass", latest, null, { reason: "access" });
+      return { outcome: "bypass", analysis: null };
+    }
     // A failed key is held back by its backoff and its attempt limit; a force re-run is the way past both.
     if (!r.force && !hooks.mayStart(latest, now)) {
       const held = latest ? retryState(latest, now).state : "none";
@@ -175,7 +215,7 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
         const row = await insertRunning(client, {
           kind,
           key,
-          keyParts: scrubParts(r.key.parts),
+          keyParts: scrubKeyParts(r.key.parts),
           scopeRepos: [...new Set(r.scopeRepos ?? [])].sort(),
           errorKey: r.errorKey ?? null,
           createdBy: r.actor.id,

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { REDACTED, scrubText, scrubValue } from "../src/sharing/scrub.ts";
+import { REDACTED, scrubResult, scrubText, scrubValue } from "../src/sharing/scrub.ts";
 
 // Realistic shapes, assembled at runtime so no literal credential sits in the repository.
 const ANTHROPIC = "sk-ant-api03-" + "Zx9".repeat(12);
@@ -100,4 +100,90 @@ test("scrub is idempotent: scrubbing a scrubbed snapshot changes nothing", () =>
   const snapshot = { text: SAMPLES.map(([, t]) => t).join("\n") + " a@b.vn 0912345678" };
   const once = scrubValue(snapshot);
   assert.deepEqual(scrubValue(once), once);
+});
+
+test("N6: object keys containing secrets or PII are scrubbed", () => {
+  const out = scrubValue({
+    ["nguyen.van.a@gmail.com"]: "user",
+    [ANTHROPIC]: "leaked key in map",
+    ["Authorization: Bearer " + "abcDEF123456ghiJKL789"]: 1,
+    normal_key: "ok",
+  }) as Record<string, unknown>;
+  const text = JSON.stringify(out);
+  assert.ok(!text.includes("nguyen.van.a@"));
+  assert.ok(!text.includes(ANTHROPIC));
+  assert.ok(!text.includes("abcDEF123456ghiJKL789"));
+  assert.equal(out.normal_key, "ok");
+});
+
+test("N6: non-string credential values and unanchored credential field names are redacted without breaking token counts", () => {
+  const sampleFp = ["87d5edbc", "020d1f804eb9"].join("");
+  const out = scrubValue({
+    token: 12345678,
+    password: { value: "secret123", nested: { code: 99 } },
+    api_key: [111, "abc"],
+    "x-api-key": "raw-val",
+    AWS_SECRET_ACCESS_KEY: "raw-aws",
+    db_password: "dbp",
+    dbPassword: "dbp2",
+    xApiKey: "xak",
+    sentry_dsn: "https://dsn.example/1",
+    db_connection_string: "Server=a;Database=b",
+    empty_password: "",
+    null_token: null,
+    tokens: 1200,
+    input_tokens: 500,
+    contextTokens: 24000,
+    author: "alice",
+    error_key: sampleFp,
+  }) as Record<string, unknown>;
+  assert.equal(out.token, REDACTED);
+  assert.deepEqual(out.password, { value: REDACTED, nested: { code: REDACTED } });
+  assert.deepEqual(out.api_key, [REDACTED, REDACTED]);
+  assert.equal(out["x-api-key"], REDACTED);
+  assert.equal(out.AWS_SECRET_ACCESS_KEY, REDACTED);
+  assert.equal(out.db_password, REDACTED);
+  assert.equal(out.dbPassword, REDACTED);
+  assert.equal(out.xApiKey, REDACTED);
+  assert.equal(out.sentry_dsn, REDACTED);
+  assert.equal(out.db_connection_string, REDACTED);
+  assert.equal(out.empty_password, "");
+  assert.equal(out.null_token, null);
+  assert.equal(out.tokens, 1200);
+  assert.equal(out.input_tokens, 500);
+  assert.equal(out.contextTokens, 24000);
+  assert.equal(out.author, "alice");
+  assert.equal(out.error_key, sampleFp);
+});
+
+test("N6: span-level redaction preserves surrounding report prose on looksSecret matches and keeps config paths", () => {
+  const awsVal = ["wJalr", "XUtnFEMI_K7MDENG", "_bPxRfiCY123456"].join("");
+  const dbVal = ["superSecret", "Value123"].join("");
+  const report =
+    "## Findings\nCheck env config:\n`AWS_SECRET_ACCESS_KEY = " +
+    awsVal +
+    "`\n" +
+    `and \`db_secret_key=${dbVal}\`.\n` +
+    "Reference path: `secretB64 = payment_client.ecom_global.secret`.\nDone.";
+  const out = scrubText(report);
+  assert.notEqual(out, REDACTED, "must not replace the entire report with [redacted]");
+  assert.ok(out.includes("## Findings"), "keeps surrounding prose");
+  assert.ok(out.includes("Reference path: `secretB64 = payment_client.ecom_global.secret`"), "keeps config path");
+  assert.ok(!out.includes(awsVal));
+  assert.ok(!out.includes(dbVal));
+  assert.equal(scrubText(out), out, "span redaction is idempotent");
+});
+
+test("N6: scrubResult rejects snapshots whose content is completely redacted, while keeping empty-findings and partial redactions", () => {
+  assert.deepEqual(scrubResult("code_assessment", { findings: [] }), { findings: [] });
+  assert.deepEqual(
+    scrubResult("code_assessment", {
+      findings: [{ title: "timeout" }],
+      config: { db_password: "secret" },
+    }),
+    { findings: [{ title: "timeout" }], config: { db_password: REDACTED } },
+  );
+  assert.throws(() => scrubResult("code_assessment", PEM), /redacted/i);
+  assert.throws(() => scrubResult("code_assessment", { report: PEM }), /redacted/i);
+  assert.throws(() => scrubResult("code_assessment", { password: "x", token: 1234 }), /redacted/i);
 });

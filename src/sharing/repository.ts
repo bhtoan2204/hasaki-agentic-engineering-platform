@@ -267,14 +267,22 @@ export async function validForError(db: Db, errorKey: string, kind: SharedKind, 
   return rows.map((r) => shape(r)!);
 }
 
-/** The valid code assessments of exactly these repositories and this (stored) focus, newest first. */
-export async function validForRepositories(db: Db, repos: string[], focus: string, scope: string) {
+/** The valid code assessments of exactly these repositories, focus, project and locale, newest first. */
+export async function validForRepositories(
+  db: Db,
+  repos: string[],
+  focus: string,
+  scope: string,
+  project = "",
+  locale = "vi",
+) {
   const rows = await q<SharedRow>(
     db,
     `${SELECT} WHERE a.kind = 'code_assessment' AND a.scope_repos = $1 AND COALESCE(a.key_parts->>'focus', '') = $2
-                AND a.key_parts->>'scope' = $3 AND a.status = 'valid'
+                AND a.key_parts->>'scope' = $3 AND COALESCE(a.key_parts->>'project', '') = $4
+                AND COALESCE(a.key_parts->>'locale', 'vi') = $5 AND a.status = 'valid'
       ORDER BY a.id DESC LIMIT 5`,
-    [repos, focus, scope],
+    [repos, focus, scope, project, locale],
   );
   return rows.map((r) => shape(r)!);
 }
@@ -296,14 +304,22 @@ export function latestForError(
   );
 }
 
-/** The latest code assessment (any status, any commit) of exactly these repositories and this (stored) focus. */
-export function latestForRepositories(db: Db, repos: string[], focus: string, scope: string) {
+/** The latest code assessment (any status, any commit) of exactly these repositories, focus, project and locale. */
+export function latestForRepositories(
+  db: Db,
+  repos: string[],
+  focus: string,
+  scope: string,
+  project = "",
+  locale = "vi",
+) {
   return one<SharedRow>(
     db,
     `${SELECT} WHERE a.kind = 'code_assessment' AND a.scope_repos = $1 AND COALESCE(a.key_parts->>'focus', '') = $2
-                AND a.key_parts->>'scope' = $3
+                AND a.key_parts->>'scope' = $3 AND COALESCE(a.key_parts->>'project', '') = $4
+                AND COALESCE(a.key_parts->>'locale', 'vi') = $5
       ORDER BY a.id DESC LIMIT 1`,
-    [repos, focus, scope],
+    [repos, focus, scope, project, locale],
   );
 }
 
@@ -406,17 +422,23 @@ export async function fail(
 }
 
 /**
- * Valid rows of the same subject as the published `row` (same kind, repositories, error and focus; for an RCA also the same
- * model identity, so another provider's RCA is another subject) under another key, published BEFORE it: of two
- * publications of one subject only the older one can be replaced by the newer one, never the other way round.
+ * Valid rows of the same subject as the published `row` (same kind, repositories, error, focus/project/locale and model
+ * identity, so another provider's or model's result is another subject while a configuration change still replaces the
+ * same model) under another key, published BEFORE it: of two publications of one subject only the older one can be
+ * replaced by the newer one, never the other way round.
  */
 export function olderOfSubject(db: Db, row: SharedRow, modelIdentity: string) {
   return q<{ id: number; key: string; version: number; key_parts: Record<string, unknown> }>(
     db,
     `SELECT id, key, version, key_parts FROM shared_analyses
       WHERE kind = $1 AND status = 'valid' AND key <> $2 AND scope_repos = $3 AND error_key IS NOT DISTINCT FROM $4
-        AND key_parts->>'scope' = $5 AND ($1 <> 'code_assessment' OR key_parts->>'focus' = $6)
-        AND ($1 <> 'prod_error.runtime_rca' OR split_part(key_parts->>'model', '#', 1) = $7)
+        AND key_parts->>'scope' = $5
+        AND ($1 <> 'code_assessment' OR (
+          COALESCE(key_parts->>'focus', '') = $6
+          AND COALESCE(key_parts->>'project', '') = $9
+          AND COALESCE(key_parts->>'locale', 'vi') = $10
+        ))
+        AND split_part(key_parts->>'model', '#', 1) = $7
         AND finished_at < $8`,
     [
       row.kind,
@@ -424,9 +446,11 @@ export function olderOfSubject(db: Db, row: SharedRow, modelIdentity: string) {
       row.scope_repos,
       row.error_key,
       row.key_parts.scope,
-      row.key_parts.focus ?? null,
+      row.key_parts.focus ?? "",
       modelIdentity,
       row.finished_at,
+      row.key_parts.project ?? "",
+      row.key_parts.locale ?? "vi",
     ],
   );
 }

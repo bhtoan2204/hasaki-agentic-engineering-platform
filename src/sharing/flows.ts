@@ -48,6 +48,8 @@ const repoCommits = (commits: Record<string, string>): RepoAtCommit[] =>
 export async function sharedCodeAssessment(x: {
   actor: SharedActor;
   focus: string;
+  project?: string;
+  outputLocale?: string;
   provider?: string;
   /** The base commit of every repository, as the run would read it; null when one cannot be established. */
   commits: Record<string, string> | null;
@@ -61,6 +63,8 @@ export async function sharedCodeAssessment(x: {
     scope: await installationId(),
     repos: repoCommits(x.commits),
     focus: x.focus,
+    project: x.project,
+    outputLocale: x.outputLocale,
     ...ctx,
   });
   return auditForce(

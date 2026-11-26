@@ -132,16 +132,36 @@ export function frontmatter(text: string): { fields: Record<string, string>; bod
   return { fields, body: m[2] };
 }
 
+const isExemptAssignment = (text: string, index: number, value: string) =>
+  IDENTIFIER_PATH.test(value) ||
+  // PayPal approval links carry the order ID as `token`; it is a public identifier, not a credential.
+  /paypal\.com\/checkoutnow\?$/i.test(text.slice(Math.max(0, index - 60), index));
+
 export function looksSecret(text: string) {
   if (SECRET_RE.some((re) => re.test(text))) return true;
   for (const m of text.matchAll(SECRET_ASSIGNMENT)) {
-    if (IDENTIFIER_PATH.test(m[2])) continue;
-    // PayPal approval links carry the order ID as `token`; it is a public identifier, not a credential.
-    if (/paypal\.com\/checkoutnow\?$/i.test(text.slice(Math.max(0, m.index - 60), m.index)))
-      continue;
-    return true;
+    if (!isExemptAssignment(text, m.index, m[2])) return true;
   }
   return false;
+}
+
+/** Replace matched secret spans while keeping surrounding prose and exempt references. */
+export function redactSecretMatches(text: string, replacement = "[redacted]") {
+  const out = SECRET_RE.reduce(
+    (acc, re) =>
+      acc.replace(
+        new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`),
+        replacement,
+      ),
+    text,
+  );
+  return out.replace(
+    SECRET_ASSIGNMENT,
+    (full, _kind: string, val: string, offset: number, src: string) =>
+      isExemptAssignment(src, offset, val)
+        ? full
+        : full.slice(0, full.length - val.length) + replacement,
+  );
 }
 
 export function firstHeading(text: string) {
