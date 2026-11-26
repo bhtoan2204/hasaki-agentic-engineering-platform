@@ -160,7 +160,9 @@ async function catchUp(client: Client, afterId: number | null) {
   } finally {
     const queued = client.queued ?? [];
     client.queued = null;
-    for (const p of queued) send(client, p);
+    // Everything up to the cursor was replayed, or is covered by a reset: a late NOTIFY for it must not stream again.
+    const floor = client.cursor ?? 0;
+    for (const p of queued) if (p.id > floor) send(client, p);
   }
 }
 

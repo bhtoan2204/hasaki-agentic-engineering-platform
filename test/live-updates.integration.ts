@@ -355,6 +355,7 @@ test("a gap larger than the replay limit asks the client to reload instead of st
   const s = await stream(A.cookie, `?after=${from}`);
   await s.until(() => s.hello().length === 1);
   assert.equal(s.hello()[0].data.reset, true);
+  await sleep(300); // the 501 NOTIFYs of the insert may still be on their way: none of them may stream after a reset
   assert.equal(s.changes().length, 0);
   const polled = await A.call(`/api/events?after=${from}`);
   assert.equal(polled.body.reset, true);
