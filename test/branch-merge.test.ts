@@ -247,6 +247,41 @@ test("a failure that release/qc does not have still blocks the merge", async () 
   assert.doesNotMatch(prompts[1], /TestOld/, "the revision prompt lists only the new failures");
 });
 
+test("the revision prompt carries the new failures' test output and test code, not the pre-existing ones", async () => {
+  const testFile = 'package a\n\nfunc TestNew(t *testing.T) { expectSpan(t, "use_case") }\n';
+  const { clone } = conflict([["a_test.go", testFile]]);
+  const prompts: string[] = [];
+  resolveTo(prompts);
+  await assert.rejects(
+    mergeAndPush(
+      context([]),
+      async (_cmd, cwd) => ({
+        code: 1,
+        output: [
+          "--- FAIL: TestOld (0.00s)",
+          "    old_test.go:3: an old, known failure",
+          "--- FAIL: TestNew (0.00s)",
+          `    controller.go:97: missing call(s) to Generate() ${cwd}/a_test.go:3`,
+          "panic: runtime error: invalid memory address or nil pointer dereference",
+          "goroutine 10 [running]:",
+          `example.com/svc.A() ${cwd}/a.go:3`,
+          `FAIL\t${PKG}\t0.010s`,
+        ].join("\n"),
+        timedOut: false,
+      }),
+      { repo: "svc", branch: "feature", path: clone },
+      "release/qc",
+      lock,
+      { baseline: baselineOf(["TestOld"]) },
+    ),
+    /nothing was pushed/,
+  );
+  assert.match(prompts[1], /missing call\(s\) to Generate\(\)/);
+  assert.match(prompts[1], /panic: runtime error/);
+  assert.match(prompts[1], /Test code in `a_test.go`[\s\S]*expectSpan\(t, "use_case"\)/);
+  assert.doesNotMatch(prompts[1], /an old, known failure/);
+});
+
 test("stale mocks are regenerated and kept when that makes the tests pass", async () => {
   const gen = "package a\n\n//go:generate mockgen -source=a.go -destination=a_mock.go -package=a\n";
   const { origin, clone } = conflict([["gen.go", gen]]);

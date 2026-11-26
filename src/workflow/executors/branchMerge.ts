@@ -323,7 +323,38 @@ interface Verification {
 }
 
 type Verdict =
-  { ok: true; preExisting: string[] } | { ok: false; summary: string; newFailures: boolean };
+  | { ok: true; preExisting: string[] }
+  | { ok: false; summary: string; newFailures: boolean; detail?: string };
+
+/** The `go test` output of the given failing tests (their `--- FAIL` blocks) and of any panic, without the others. */
+function failureDetail(output: string, tests: string[]) {
+  const wanted = new Set(tests.flatMap((t) => [t, t.split("/")[0]]));
+  const out: string[] = [];
+  let keep = false;
+  for (const line of output.split("\n")) {
+    const head = /^\s*--- FAIL: (\S+)/.exec(line);
+    if (head) keep = wanted.has(head[1]);
+    else if (/^panic: /.test(line)) keep = true;
+    else if (/^(FAIL|ok|PASS|=== RUN)\b/.test(line)) keep = false;
+    if (keep) out.push(line);
+  }
+  return clip(out.join("\n"), 6000);
+}
+
+/** Test files named in failure output (absolute paths inside `dir` or repository-relative), read for context. */
+async function failingTestSources(dir: string, text: string, exclude: string[]) {
+  const named = new Set<string>();
+  for (const m of text.matchAll(/([\w./-]*_test\.go):\d+/g)) {
+    const p = m[1].startsWith(dir + "/") ? m[1].slice(dir.length + 1) : m[1];
+    if (!p.startsWith("/") && !exclude.includes(p)) named.add(p);
+  }
+  const sources: Array<{ file: string; text: string }> = [];
+  for (const file of [...named].slice(0, 3)) {
+    const text = await readFile(join(dir, file), "utf8").catch(() => null);
+    if (text !== null) sources.push({ file, text: clip(text, 12000) });
+  }
+  return sources;
+}
 
 const revertTree = async (dir: string) => {
   await git(dir, "reset", "--hard", "HEAD");
@@ -459,7 +490,15 @@ async function testResolution(
       const summary = c.regressions
         .map((x) => `${x.package}: ${[...x.tests, ...x.build_errors].join("; ") || x.reason}`)
         .join("\n");
-      return { ok: false, summary, newFailures: true };
+      return {
+        ok: false,
+        summary,
+        newFailures: true,
+        detail: failureDetail(
+          r.output,
+          c.regressions.flatMap((x) => x.tests),
+        ),
+      };
     } catch (e) {
       await ctx.log(
         "system",
@@ -507,6 +546,16 @@ async function testResolution(
     const cause = verdict.newFailures
       ? ` with failures that \`${target}\` does not have on its own`
       : "";
+    const tests = await failingTestSources(dir, verdict.detail ?? verdict.summary, files);
+    const evidence = [
+      ...(verdict.detail ? ["Test output:", "```", verdict.detail, "```"] : []),
+      ...tests.flatMap((t) => [
+        `Test code in \`${t.file}\` (context only, not part of this resolution):`,
+        "```",
+        t.text,
+        "```",
+      ]),
+    ];
     for (const file of files) {
       const current = await readFile(join(dir, file), "utf8");
       const prompt = [
@@ -514,6 +563,7 @@ async function testResolution(
         "```",
         verdict.summary,
         "```",
+        ...evidence,
         `If \`${file}\` causes this failure, fix it while keeping both sides' changes; otherwise return it unchanged.`,
         `Current ${file}:`,
         "```",
