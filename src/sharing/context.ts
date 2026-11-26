@@ -11,6 +11,8 @@ export interface AnalysisContext {
   workflow: WorkflowRef;
   rubricHash: string;
   model: string;
+  /** Providers of the agent steps (for provenance; not part of the key by itself: the model part covers them). */
+  providers: string[];
 }
 
 /**
@@ -85,5 +87,6 @@ export async function analysisContext(
     workflow: { key: definitionKey, version: dv.version },
     rubricHash: rubric,
     model: `${models.join("+") || `${chosen}/cli-default`}#cfg:${configuration}`,
+    providers: providers.length ? providers : [chosen],
   };
 }

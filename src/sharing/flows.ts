@@ -6,7 +6,8 @@ import { bugHuntKey, codeAssessmentKey, runtimeRcaKey, type RepoAtCommit } from 
 import { installationId } from "./scope.ts";
 import { lookupOrStart, type LookupResult } from "./service.ts";
 import type { SharedActor } from "./hooks.ts";
-import type { SharedRow } from "./repository.ts";
+import { audit } from "../authz/access.ts";
+import type { AnalysisContext } from "./context.ts";
 
 /**
  * The three analyses wrapped by lookup-before-compute. Each returns null when sharing does not apply (its flag is off,
@@ -22,6 +23,25 @@ const RCA_WORKFLOW = "production-incident-investigation";
 const HUNT_WORKFLOW = "production-bug-hunt";
 const ASSESS_WORKFLOW = "codebase-assessment";
 
+/** What an analysis runs with, stored on its row. */
+const provenanceOf = (ctx: AnalysisContext) => ({
+  provider: ctx.providers.join(","),
+  model: ctx.model,
+  definitionVersion: ctx.workflow.version,
+  rubricHash: ctx.rubricHash,
+});
+
+/** A force re-run starts a new version: record who asked, on the audit trail (the version's own row says it too). */
+async function auditForce(x: { actor: SharedActor; force?: boolean }, r: LookupResult) {
+  if (x.force && r.outcome === "forced")
+    await audit(x.actor.id, "shared_analysis.force", "shared_analysis", String(r.analysis.id), {
+      kind: r.analysis.kind,
+      version: r.analysis.version,
+      key: r.analysis.key,
+    });
+  return r;
+}
+
 const repoCommits = (commits: Record<string, string>): RepoAtCommit[] =>
   Object.entries(commits).map(([repo, commit]) => ({ repo, commit }));
 
@@ -31,6 +51,7 @@ export async function sharedCodeAssessment(x: {
   provider?: string;
   /** The base commit of every repository, as the run would read it; null when one cannot be established. */
   commits: Record<string, string> | null;
+  force?: boolean;
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.codeAssessment || !x.commits) return null;
@@ -41,7 +62,17 @@ export async function sharedCodeAssessment(x: {
     focus: x.focus,
     ...ctx,
   });
-  return lookupOrStart({ key, actor: x.actor, scopeRepos: Object.keys(x.commits), start: x.start });
+  return auditForce(
+    x,
+    await lookupOrStart({
+      key,
+      actor: x.actor,
+      scopeRepos: Object.keys(x.commits),
+      force: x.force,
+      provenance: provenanceOf(ctx),
+      start: x.start,
+    }),
+  );
 }
 
 export async function sharedRuntimeRca(x: {
@@ -49,6 +80,7 @@ export async function sharedRuntimeRca(x: {
   fingerprint: string;
   contract: string;
   provider?: string;
+  force?: boolean;
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.prodErrors) return null;
@@ -59,7 +91,17 @@ export async function sharedRuntimeRca(x: {
     contract: x.contract,
     ...ctx,
   });
-  return lookupOrStart({ key, actor: x.actor, errorKey: x.fingerprint, start: x.start });
+  return auditForce(
+    x,
+    await lookupOrStart({
+      key,
+      actor: x.actor,
+      errorKey: x.fingerprint,
+      force: x.force,
+      provenance: provenanceOf(ctx),
+      start: x.start,
+    }),
+  );
 }
 
 export async function sharedBugHunt(x: {
@@ -67,6 +109,7 @@ export async function sharedBugHunt(x: {
   fingerprint: string;
   provider?: string;
   commits: Record<string, string> | null;
+  force?: boolean;
   start: Start;
 }): Promise<LookupResult | null> {
   if (!config.sharedResults.prodErrors || !x.commits) return null;
@@ -77,33 +120,19 @@ export async function sharedBugHunt(x: {
     repos: repoCommits(x.commits),
     ...ctx,
   });
-  return lookupOrStart({
-    key,
-    actor: x.actor,
-    errorKey: x.fingerprint,
-    scopeRepos: Object.keys(x.commits),
-    start: x.start,
-  });
+  return auditForce(
+    x,
+    await lookupOrStart({
+      key,
+      actor: x.actor,
+      errorKey: x.fingerprint,
+      scopeRepos: Object.keys(x.commits),
+      force: x.force,
+      provenance: provenanceOf(ctx),
+      start: x.start,
+    }),
+  );
 }
 
-/**
- * What an API answer says about a shared analysis. The source run id is only given to the member who started it (runs stay
- * owner-only); the result is only included on a hit (the access check already passed).
- */
-export function sharedView(r: LookupResult, actor: SharedActor) {
-  const a = r.analysis as SharedRow;
-  const own = a.created_by === actor.id;
-  return {
-    outcome: r.outcome,
-    analysis_id: a.id,
-    kind: a.kind,
-    version: a.version,
-    status: a.status,
-    created_by: a.created_by,
-    started_at: a.started_at,
-    finished_at: a.finished_at,
-    reuse_count: a.reuse_count,
-    ...(own && a.source_run_id ? { run_id: a.source_run_id } : {}),
-    ...(r.outcome === "hit" ? { result: a.result } : {}),
-  };
-}
+/** What an API answer says about a shared analysis (freshness, who ran it, provenance): see view.ts. */
+export { describeAnalysis as sharedView } from "./view.ts";

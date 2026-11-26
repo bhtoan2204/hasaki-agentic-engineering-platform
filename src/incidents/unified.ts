@@ -758,20 +758,29 @@ async function runtimeOrShared(
       );
     let run;
     try {
-      // Shared results (flag SHARED_RESULTS_PROD_ERRORS): an RCA another member ran, or is running, for this incident.
-      const shared =
-        sharing && body.force !== true
-          ? await sharedRuntimeRca({
-              actor,
-              fingerprint: fp,
-              contract: VERIFICATION_CONTRACT,
-              provider: body.provider ? String(body.provider) : undefined,
-              start: async (tx) => Number((await start(tx)).id),
-            })
-          : null;
-      if (shared && shared.outcome !== "miss" && shared.outcome !== "bypass")
-        return { created: false, shared: sharedView(shared, actor) };
-      run = shared?.outcome === "miss" ? { id: shared.runId } : await start();
+      // Shared results (flag SHARED_RESULTS_PROD_ERRORS): an RCA another member ran, or is running, for this incident;
+      // `force` is a new version of it (still never beside a running one).
+      const shared = sharing
+        ? await sharedRuntimeRca({
+            actor,
+            fingerprint: fp,
+            contract: VERIFICATION_CONTRACT,
+            provider: body.provider ? String(body.provider) : undefined,
+            force: body.force === true,
+            start: async (tx) => Number((await start(tx)).id),
+          })
+        : null;
+      if (
+        shared &&
+        shared.outcome !== "miss" &&
+        shared.outcome !== "forced" &&
+        shared.outcome !== "bypass"
+      )
+        return { created: false, shared: await sharedView(shared, actor) };
+      run =
+        shared?.outcome === "miss" || shared?.outcome === "forced"
+          ? { id: shared.runId }
+          : await start();
     } catch (e) {
       if (e instanceof EngineError) throw new HttpError(e.status ?? 400, e.message);
       throw e;

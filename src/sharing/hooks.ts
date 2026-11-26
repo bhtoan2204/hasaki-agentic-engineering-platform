@@ -1,16 +1,20 @@
 import { log } from "../logging.ts";
+import { canStart, isServable } from "./policy.ts";
 import type { SharedRow } from "./repository.ts";
 import type { SharedKind } from "./key.ts";
 
-export type SharedOutcomeName = "hit" | "wait" | "miss" | "bypass" | "lost_race";
+export type SharedOutcomeName = "hit" | "wait" | "miss" | "forced" | "bypass" | "lost_race";
 export interface SharedActor {
   id: number;
   role?: string;
+  /** For the answer's "run by" (the caller already has it). */
+  username?: string;
 }
 
 /**
  * Where the later steps plug in, without rewriting the lookup (docs/shared-results/PROGRESS.md, step 3):
- *  - step 4 (validity, retry, force): `servable` (TTL and staleness of a valid row) and `mayStart` (failed-row backoff);
+ *  - step 4 (validity, retry, force): `servable` (TTL and staleness of a valid row) and `mayStart` (failed-row backoff); both
+ *    now default to the rules of policy.ts;
  *  - step 5 (access, scrub): `canRead` (who may be served a row) and `scrub` (before a result is stored);
  *  - step 6 (metrics, tracing): `observe` (one call per lookup outcome and per settled row).
  * The defaults are the safe ones: a result is served only to the member who created it (no sharing across members
@@ -23,7 +27,7 @@ export interface SharingHooks {
   scrub(kind: SharedKind, result: unknown): unknown;
   observe(event: {
     kind: SharedKind;
-    outcome: SharedOutcomeName | "published" | "failed";
+    outcome: SharedOutcomeName | "published" | "failed" | "expired";
     analysisId: number | null;
     version: number | null;
     runId: number | null;
@@ -33,8 +37,8 @@ export interface SharingHooks {
 
 export const DEFAULT_HOOKS: SharingHooks = {
   canRead: (row, actor) => row.created_by === actor.id,
-  servable: (row) => row.status === "valid",
-  mayStart: () => true,
+  servable: (row, now) => isServable(row, now),
+  mayStart: (latest, now) => canStart(latest, now),
   scrub: (_kind, result) => result,
   // R1: only values already in scope; no query to enrich the line.
   observe: (e) =>

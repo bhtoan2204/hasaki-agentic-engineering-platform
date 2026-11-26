@@ -4,7 +4,7 @@
       follows the plan's proposals)
 - [x] 2. Schema + dedup key
 - [x] 3. Lookup + single-flight
-- [ ] 4. Invalidation + retry + force re-run + provenance
+- [x] 4. Invalidation + retry + force re-run + provenance
 - [ ] 5. Access + scrub
 - [ ] 6. Metrics + tracing + feature flags + backfill
 - [ ] 7. UI / API
@@ -161,3 +161,98 @@ Not checked (reasoned only, or not reproducible in tests):
   the second gets `bypass`, because access is not decided yet.
 - **Runtime RCA inputs include the requester's own prior evidence digest**, but the key does not (plan section 3.2). A
   shared RCA was computed with the creator's digest.
+
+## Step 4 (validity, retry, force re-run, provenance)
+
+Done:
+
+- `migrations/113_shared_analyses_provenance.sql` (additive): column `observed` (what was true at analysis time) and two
+  indexes (`shared_analyses_subject` for marking a subject's older results, `shared_analyses_expiry` for the TTL sweep).
+  Rollback: `docs/shared-results/rollback/113_shared_analyses_provenance.down.sql`; the 112 rollback now also removes 113's
+  record, since 113 only extends 112's tables (tests cover both, and re-applying).
+- `src/sharing/policy.ts` (pure): `isServable`, `validUntil`, `backoffMinutes`, `retryState`, `canStart`, `staleReason`. The
+  `servable` and `mayStart` hooks of step 3 now default to these.
+- `src/sharing/view.ts`: `describeAnalysis` (also exported as `sharedView`): the answer the API gives, ready for step 7.
+- Config: `SHARED_RESULTS_MAX_ATTEMPTS` (3), `SHARED_RESULTS_RETRY_CAP_MINUTES` (60); the TTLs of step 2 are now used.
+- Tests: `test/shared-policy.test.ts` (5), `test/shared-results-validity.integration.ts` (19), schema test (+2, 8 in all);
+  the step 3 test (14) adjusted for the two behaviours below. The three files are stable over 3 consecutive runs.
+
+### Rules as implemented
+
+**Stale / valid / failed**
+
+- A result is served only while `valid` and before `valid_until` (set at publish: RCA 24 h, bug hunt and assessment 30 d,
+  configurable). A row past its end is not served even before anything marks it.
+- `stale` is marked three ways, each with a reason: (1) the reconcile task marks valid rows past their end `ttl`;
+  (2) when a request claims a new key for the **same subject** (same kind, repositories, error, focus), the older valid
+  results of that subject become stale with `commit_changed:<repos>`, `definition_changed`, `rubric_changed`,
+  `model_changed` or `contract_changed` (computed by comparing the two keys' readable parts; this runs in the background
+  after a miss, never on the hit path); (3) nothing else: a different subject is never made stale.
+- `failed` is never served and not cached forever: the count of failures in a row is carried into the next version of the
+  key; the key may start again after `min(retry cap, 2^failures)` minutes (2, 4, 8, ... 60) and not at all after
+  `MAX_ATTEMPTS` (3) except by a force re-run. During backoff a request gets `bypass` (it runs its own analysis outside sharing, as
+  today). A failed latest version that follows a valid one holds the key too (the older valid is not served meanwhile).
+- A run **canceled by a person is not a failure**: attempts stay, no backoff, the key is free at once.
+  (A decision of mine: the plan says "failed: retry with backoff"; a cancel is not the analysis failing.)
+
+**Force re-run: a new version, never an overwrite** (as decided in the plan, section 4.4)
+
+- `force` claims version N+1 (trigger `force`, audit row `shared_analysis.force`). Version N stays `valid` and served while
+  N+1 runs; when N+1 is published, **in the same statement** every older valid version of the key becomes `superseded`. A
+  failed force leaves N in place.
+- Single-flight is unchanged: a force beside a running analysis gets `wait` (no third run); five parallel forces start nothing.
+- A member who may not read the existing valid result cannot force over it (`bypass`): that would supersede the result for
+  everyone who may read it. Who may force is a step 5 decision (hook `canRead`); `force` itself is not yet authorized.
+- The callers (code scans, RCA, bug hunt) now pass `force` into the shared path instead of skipping it, so a force with a flag
+  on is a new version; with the flag off it is the previous behaviour.
+
+**Production errors**: new occurrences never invalidate or re-run. The error group is updated by the scans as before;
+`observed` stores the counters at publish; the answer carries `occurrences`: `at_analysis`, `now`, and
+`new_since_analysis` (only when both are for the same scan day, otherwise null: per-window counts are not comparable).
+
+**Provenance** (all from rows the run already has; nothing is measured again):
+
+- At claim: who (`created_by`, name joined in the lookup query), trigger (manual / force / schedule), provider(s), model
+  (incl. the configuration fingerprint), definition version, rubric hash, the key's readable parts.
+- At publish: tokens in/out and cost from the run's attempt telemetry (null when no provider reported them, never an
+  invented 0), run wall time, `valid_until`, `observed`.
+- Reuse: `reuse_count`, `last_reused_at`, and a `shared_analysis_uses` row per use with `tokens_saved` (the original run's tokens)
+  on a hit. **The hit path adds no query**: one SELECT answers it (the runner's name is joined into it); the use row and the
+  counter are one statement run in the background after the answer (test: the answer returns while the row is locked
+  by another session, and the total is exactly 2 statements).
+- The answer (`describeAnalysis`): status, `freshness` (analysed_at, age_seconds, valid_until, expired, stale_reason),
+  `run_by` {id, name}, `provenance`, `reuse`, `failure` {attempts, reason, retry_at, exhausted}, `occurrences`, `run_id`
+  only for the member who started it, `result` only on a hit.
+
+### Hooks (additions to the step 3 table)
+
+`servable` and `mayStart` are now implemented (policy.ts) and remain overridable. Still open for later: `canRead` and `scrub`
+(step 5), `observe` (step 6; it now also receives `forced` and `expired`).
+
+### Where the step touched step 3's behaviour
+
+- **Not changed:** the claim, the unique-index single-flight, the settle task's guards.
+- **Changed, and the tests of step 3 were adjusted:** (1) the use is recorded in the background, so a test reads the counter
+  after `settleBackground()`; (2) a run that fails or times out now sets a backoff, so the next request is `bypass` until
+  the backoff passes (the step 3 test that expected an immediate re-claim after a timeout now clears the backoff first).
+
+### Decisions to confirm
+
+1. **Marking stale by subject** needs the old key's readable parts; this is the only reason for the new index. A result is
+   marked stale when someone _claims_ a newer key of its subject, not when the code merely moves. If nobody asks, the old
+   result stays `valid` until its TTL (it is never served anyway, since its key no longer matches any request).
+2. **Backoff and attempts count only the analysis's own failures** (run failed, nothing produced, timeout), not a cancel.
+3. **A failed force does not make the key `bypass` forever**: it is a failed latest version, so the normal backoff applies
+   after it.
+
+### Not checked / remaining risks
+
+- The cost and token sums are read from the run's attempts at publish. A run that publishes before its last attempt's
+  telemetry is final would store slightly lower numbers (not observed; `settle` runs after the run is terminal).
+- The TTL sweep marks at most 200 rows per tick; a large backlog clears over several ticks (rows past their end are not
+  served meanwhile, so this is cosmetic).
+- `occurrences.new_since_analysis` compares per-scan-window counters (the group's `today_count`), so it is only meaningful for
+  the same day; the view says null otherwise.
+- With a flag on, a bug hunt still resolves base commits (a fetch) while holding the per-owner advisory-lock connection
+  (unchanged from step 3).
+- The route-level behaviour of `force` with a flag on was exercised through the flows (`lookupOrStart`), not through HTTP.

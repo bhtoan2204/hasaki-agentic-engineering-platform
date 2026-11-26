@@ -157,18 +157,19 @@ export const codeFindingsRoutes: Route[] = [
         );
       // Shared results (flag SHARED_RESULTS_CODE_ASSESSMENT): another member's analysis of the same commits, or the one
       // running now, instead of a second run. Off, or a key that cannot be built: exactly the path below, as before.
-      if (body.force !== true && config.sharedResults.codeAssessment) {
+      if (config.sharedResults.codeAssessment) {
         const shared = await sharedCodeAssessment({
           actor,
           focus,
           provider: providerOf(body),
           commits: await commitsNow(repos),
+          force: body.force === true,
           start: async (tx) => Number((await start(tx)).id),
         });
-        if (shared && shared.outcome === "miss")
-          return { started: true, run_id: shared.runId, shared: sharedView(shared, actor) };
+        if (shared && (shared.outcome === "miss" || shared.outcome === "forced"))
+          return { started: true, run_id: shared.runId, shared: await sharedView(shared, actor) };
         if (shared && shared.outcome !== "bypass")
-          return { reused: "shared", shared: sharedView(shared, actor) };
+          return { reused: "shared", shared: await sharedView(shared, actor) };
       }
       const run = await start();
       return { started: true, run_id: run.id };

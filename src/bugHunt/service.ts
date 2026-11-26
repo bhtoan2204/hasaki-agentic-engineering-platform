@@ -66,7 +66,7 @@ async function huntOrShared(
       created: false;
       hunt_id?: undefined;
       run_id?: undefined;
-      shared: ReturnType<typeof sharedView>;
+      shared: Awaited<ReturnType<typeof sharedView>>;
     }
 > {
   if (!/^[0-9a-f]{20}$/.test(fingerprint)) throw new HttpError(400, "invalid fingerprint");
@@ -116,18 +116,27 @@ async function huntOrShared(
       // Shared results (flag SHARED_RESULTS_PROD_ERRORS): a hunt of the same incident at the same commits by another
       // member, or the one running now. The commits are only resolved when the flag is on.
       const shared =
-        sharing && config.sharedResults.prodErrors && body.force !== true
+        sharing && config.sharedResults.prodErrors
           ? await sharedBugHunt({
               actor,
               fingerprint,
               provider: body.provider ? String(body.provider) : undefined,
               commits: await currentBaseCommits(actor.id, [...repos].sort()),
+              force: body.force === true,
               start: async (tx) => Number((await start(tx)).id),
             })
           : null;
-      if (shared && shared.outcome !== "miss" && shared.outcome !== "bypass")
-        return { created: false, shared: sharedView(shared, actor) };
-      run = shared?.outcome === "miss" ? { id: shared.runId } : await start();
+      if (
+        shared &&
+        shared.outcome !== "miss" &&
+        shared.outcome !== "forced" &&
+        shared.outcome !== "bypass"
+      )
+        return { created: false, shared: await sharedView(shared, actor) };
+      run =
+        shared?.outcome === "miss" || shared?.outcome === "forced"
+          ? { id: shared.runId }
+          : await start();
     } catch (e) {
       if (e instanceof EngineError) throw new HttpError(e.status ?? 400, e.message);
       throw e;

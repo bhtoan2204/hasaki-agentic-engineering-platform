@@ -182,7 +182,7 @@ export function budgetLine(
   };
 }
 
-async function attemptRows(runIds: number[], db: Db = pool): Promise<AttemptCostRow[]> {
+export async function attemptRows(runIds: number[], db: Db = pool): Promise<AttemptCostRow[]> {
   if (!runIds.length) return [];
   return q<AttemptCostRow>(
     db,

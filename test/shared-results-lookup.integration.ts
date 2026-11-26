@@ -231,6 +231,7 @@ test("a completed run publishes its snapshot; the creator then gets a hit withou
   assert.equal(hit.outcome, "hit");
   assert.deepEqual(hit.analysis!.result, { findings: [{ id: "F1", title: "n+1 query" }] });
   assert.equal(starts, 1, "no second run");
+  await settleBackground(); // the use is recorded in the background, after the answer
   const [row] = await rowsOf(key);
   assert.equal(row.reuse_count, 1);
   const uses = await q<{ outcome: string }>(
@@ -271,7 +272,21 @@ test("a run stuck past the running timeout fails its claim so the key is not blo
   await complete(runId, { findings: [] });
   await settleSharedAnalyses();
   assert.equal((await rowsOf(key))[0].status, "failed", "the timed-out claim stays failed");
-  assert.equal((await lookupOrStart(request(key))).outcome, "miss");
+  assert.equal(
+    (await lookupOrStart(request(key))).outcome,
+    "bypass",
+    "a failure that counts holds the key back (backoff)",
+  );
+  await q(
+    pool,
+    "UPDATE shared_analyses SET next_retry_at = now() - interval '1 minute' WHERE kind = $1 AND key = $2",
+    [key.kind, key.key],
+  );
+  assert.equal(
+    (await lookupOrStart(request(key))).outcome,
+    "miss",
+    "and frees it when the backoff has passed",
+  );
 });
 
 test("a waiter gives up at its timeout and gets the running analysis back", async () => {

@@ -345,6 +345,10 @@ export interface Config {
     runningTimeoutMinutes: number;
     /** How long waitForAnalysis waits for a running analysis before it returns "timeout". */
     waitTimeoutMs: number;
+    /** Failures of one key in a row after which only a force re-run starts it again. */
+    maxAttempts: number;
+    /** A failed key may start again after min(retryCapMinutes, 2^failures) minutes. */
+    retryCapMinutes: number;
   };
   /** LOCAL checkout overrides, never synchronized to PostgreSQL. */
   repositories: Record<string, string>;
@@ -903,6 +907,8 @@ const defaults: Config = {
     ttl: { runtimeRcaHours: 24, bugHuntDays: 30, codeAssessmentDays: 30 },
     runningTimeoutMinutes: 360,
     waitTimeoutMs: 30_000,
+    maxAttempts: 3,
+    retryCapMinutes: 60,
   },
   codeIntelligence: {
     enabled: LIVE,
@@ -1368,6 +1374,13 @@ function load(): Config {
     shared.waitTimeoutMs,
     100,
     600_000,
+  );
+  shared.maxAttempts = integer("SHARED_RESULTS_MAX_ATTEMPTS", shared.maxAttempts, 1, 20);
+  shared.retryCapMinutes = integer(
+    "SHARED_RESULTS_RETRY_CAP_MINUTES",
+    shared.retryCapMinutes,
+    1,
+    24 * 60,
   );
   if (process.env.RADAR_INTERVAL_SECONDS)
     cfg.radar.intervalSeconds = Math.max(60, Number(process.env.RADAR_INTERVAL_SECONDS) || 300);

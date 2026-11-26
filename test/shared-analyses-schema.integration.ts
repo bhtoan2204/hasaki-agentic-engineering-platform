@@ -8,6 +8,17 @@ import { createUser } from "../src/auth/users.ts";
 import { installationId, resetInstallationIdForTests } from "../src/sharing/scope.ts";
 import { assessKeyForTest } from "./fixtures/sharedKeys.ts";
 
+const ROLLBACK_113 = readFileSync(
+  join(
+    import.meta.dirname,
+    "..",
+    "docs",
+    "shared-results",
+    "rollback",
+    "113_shared_analyses_provenance.down.sql",
+  ),
+  "utf8",
+);
 const ROLLBACK = readFileSync(
   join(
     import.meta.dirname,
@@ -212,7 +223,11 @@ test("rollback: the down script removes the tables, keeps the installation id, a
     ))!.t,
     null,
   );
-  assert.equal((await q(pool, "SELECT 1 FROM schema_migrations WHERE version = 112")).length, 0);
+  assert.equal(
+    (await q(pool, "SELECT 1 FROM schema_migrations WHERE version IN (112, 113)")).length,
+    0,
+    "113 only extends these tables: its record goes too",
+  );
   assert.equal(
     (await one<{ n: number }>(
       pool,
@@ -228,4 +243,56 @@ test("rollback: the down script removes the tables, keeps the installation id, a
   resetInstallationIdForTests();
   assert.equal(await installationId(), id, "the same scope after re-applying, so no key changed");
   await insert({ key: KEY(70) });
+});
+
+test("rollback of 113 alone: the column and indexes go, 112 stays usable, and the migrator applies 113 again", async () => {
+  await insert({ key: KEY(80) });
+  await pool.query(ROLLBACK_113);
+  assert.equal(
+    (
+      await q(
+        pool,
+        "SELECT 1 FROM information_schema.columns WHERE table_name = 'shared_analyses' AND column_name = 'observed'",
+      )
+    ).length,
+    0,
+  );
+  assert.equal(
+    (
+      await q(
+        pool,
+        "SELECT 1 FROM pg_indexes WHERE indexname IN ('shared_analyses_subject', 'shared_analyses_expiry')",
+      )
+    ).length,
+    0,
+  );
+  assert.equal(
+    (await q(pool, "SELECT 1 FROM schema_migrations WHERE version = 112")).length,
+    1,
+    "112 is untouched",
+  );
+  assert.equal(
+    (await q(pool, "SELECT 1 FROM shared_analyses WHERE key = $1", [KEY(80)])).length,
+    1,
+    "rows are kept",
+  );
+  await migrate();
+  assert.equal(
+    (
+      await q(
+        pool,
+        "SELECT 1 FROM information_schema.columns WHERE table_name = 'shared_analyses' AND column_name = 'observed'",
+      )
+    ).length,
+    1,
+  );
+  assert.equal(
+    (
+      await q(
+        pool,
+        "SELECT 1 FROM pg_indexes WHERE indexname IN ('shared_analyses_subject', 'shared_analyses_expiry')",
+      )
+    ).length,
+    2,
+  );
 });
