@@ -14,6 +14,7 @@ import { repositories, rankRepositories } from "../repos/service.ts";
 import { fusedSearchOrder, scoreKnowledge, summarizeValue } from "../context/plan.ts";
 import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import { memoryFreshness, type MemoryMeta } from "../knowledge/memory.ts";
+import { dormantKeys, noteKnowledgeUsage } from "../knowledge/agingUsage.ts";
 import { repoPath } from "../repos/service.ts";
 import { redactContextValue } from "../context/redact.ts";
 import type { PlatformToolEnv } from "./platformTools.ts";
@@ -431,7 +432,17 @@ export async function executeContextTool(
         .sort((a, b) => b.score - a.score || a.k.key.localeCompare(b.k.key));
       const semantic = await semanticRanksByKey(env.ownerId, args.query ?? "", candidates);
       if (semantic) ranked = fusedSearchOrder(scored, ranked, semantic);
+      // Dormant task memory (not loaded for a long time) ranks after active memory; any load wakes it.
+      const dormant = await dormantKeys(
+        ranked.filter((x) => x.k.category === "task_memory").map((x) => x.k.key),
+      );
+      if (dormant.size)
+        ranked = [
+          ...ranked.filter((x) => !dormant.has(x.k.key)),
+          ...ranked.filter((x) => dormant.has(x.k.key)),
+        ];
       const hits = [];
+      const loaded: Array<number | undefined> = [];
       for (const { k, score, why } of ranked.slice(0, args.limit)) {
         let freshness: { state: string; reason: string } = {
           state: "SNAPSHOT",
@@ -449,6 +460,7 @@ export async function executeContextTool(
               : { state: "UNKNOWN", reason: "not approved or verified" };
         }
         const visible = k.category !== "task_memory" || freshness.state === "FRESH";
+        if (k.category === "task_memory" && visible) loaded.push(k.id);
         hits.push({
           key: k.key,
           title: k.title,
@@ -467,6 +479,7 @@ export async function executeContextTool(
           ),
         });
       }
+      noteKnowledgeUsage(loaded);
       return hits;
     }
     case "search_causal_memory": {

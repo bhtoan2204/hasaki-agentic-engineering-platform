@@ -83,8 +83,15 @@
   gap: var(--sp-2);
 }
 
-.kn-filter > .search {
+.kn-filter > .search,
+.kn-filter > .kn-archived {
   grid-column: 1 / -1;
+}
+
+.kn-item-aging {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
 }
 
 .kn-none {

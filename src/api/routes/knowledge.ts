@@ -12,6 +12,13 @@ import {
 } from "../../knowledge/visibility.ts";
 import { reviewMemory } from "../../knowledge/memory.ts";
 import {
+  agingForItems,
+  type AgingInfo,
+  isArchivedState,
+  restoreMemory,
+  unpinMemory,
+} from "../../knowledge/aging.ts";
+import {
   approveProposal,
   listProposals,
   rejectProposal,
@@ -72,7 +79,7 @@ export const knowledgeRoutes: Route[] = [
       const sp = c.url.searchParams;
       const category = sp.get("category") || undefined;
       const paged = sp.has("page");
-      const rows = await visibleKnowledge(
+      const listed = await visibleKnowledge(
         c.actor.id,
         paged
           ? knowledge.listPageSummaries({
@@ -83,7 +90,19 @@ export const knowledgeRoutes: Route[] = [
             })
           : knowledge.list({ category, summary: true, ...mine(c) }),
       );
-      if (!paged) return rows;
+      // Archived task memory (aging, docs/architecture/memory-aging.md): shown with its reason; the paged list hides it
+      // unless ?archived=1 asks for exactly that.
+      type Listed = { id: number; category: string; aging?: AgingInfo } & Record<string, unknown>;
+      const items = listed as Listed[];
+      const aged = await agingForItems(
+        items.filter((k) => k.category === "task_memory").map((k) => Number(k.id)),
+      );
+      const withAging = items.map((k) =>
+        aged.has(Number(k.id)) ? { ...k, aging: aged.get(Number(k.id)) } : k,
+      );
+      if (!paged) return withAging;
+      const onlyArchived = sp.get("archived") === "1";
+      const rows = withAging.filter((k) => isArchivedState(k.aging?.state) === onlyArchived);
       const counts: Record<string, number> = { "": rows.length };
       for (const k of rows) counts[k.category] = (counts[k.category] ?? 0) + 1;
       const matched = category ? rows.filter((k) => k.category === category) : rows;
@@ -265,6 +284,27 @@ export const knowledgeRoutes: Route[] = [
       const used = await knowledgeUsage(c.p[0], scope.ownerId, scope.all);
       const assigned = await knowledge.assignments(c.p[0], undefined, scope);
       return { used, assigned };
+    },
+  ],
+  // Task memory aging: bring an archived or replaced item back (pinned, so automatic aging leaves it alone), or unpin it.
+  [
+    "POST",
+    /^\/api\/knowledge\/([a-z0-9_.-]+)\/restore$/,
+    async (c) => {
+      const item = await readableKnowledge(c, c.p[0]);
+      if (item.category !== "task_memory") throw new HttpError(400, "only task memory is archived");
+      if (item.owner_id == null) requireAdmin(c.actor);
+      return restoreMemory(item.key, item.owner_id ?? null, c.actor.username);
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/knowledge\/([a-z0-9_.-]+)\/unpin$/,
+    async (c) => {
+      const item = await readableKnowledge(c, c.p[0]);
+      if (item.category !== "task_memory") throw new HttpError(400, "only task memory is archived");
+      if (item.owner_id == null) requireAdmin(c.actor);
+      return unpinMemory(item.key, item.owner_id ?? null, c.actor.username);
     },
   ],
   // Cross-task memory: a human promotes (or rejects) agent conclusions; nothing else makes them trusted.

@@ -1,6 +1,6 @@
-# Task memory aging (proposal)
+# Task memory aging
 
-Status: **proposal, awaiting approval**. Nothing in this document is implemented yet.
+Status: **implemented** (approved plan, with the deviations listed in section 10).
 
 Task memory (`category = 'task_memory'`) only grows today: nothing archives, merges or removes it, so stale items
 accumulate and every step re-checks them. This document records how memory works now (with file:line references),
@@ -387,3 +387,36 @@ insert evict the oldest beyond `MEMORY_FRESHNESS_CACHE_MAX`, default 2000). Its 
 - `buildStepInput` checks freshness inside the step transaction while git runs (`context.ts:418`); that is bounded by
   `GIT_TIMEOUT_MS` but still holds a connection. Aging does not make it worse. Moving it out of the transaction is a
   separate change.
+
+## 10. Implementation notes and deviations
+
+Code: `src/knowledge/agingPolicy.ts` (pure policies), `src/knowledge/aging.ts` (load, claim, apply, restore, job),
+`src/knowledge/agingUsage.ts` (usage and dormant lookups; a leaf module), `src/cli/memoryAging.ts`
+(`npm run memory:aging -- [--dry-run] [--owner ID] [--repo NAME] [--batch N] [--budget SECONDS] [--json]`),
+`migrations/111_task_memory_aging.sql`. API: `POST /api/knowledge/:key/restore` and `/unpin`, `?archived=1` on the
+paged list, `aging` on list rows and on the item. Metrics: `memory_aging` in `GET /api/metrics/runtime`.
+
+Where the implementation differs from the plan above, and why:
+
+- **Claiming.** The claim is one short transaction: `pg_try_advisory_xact_lock`, select the least recently examined run
+  memory (`checked_at`), mark it, commit. It does not use `FOR UPDATE SKIP LOCKED` on `knowledge_aging`, because most items
+  have no row there yet. An instance that cannot take the lock skips that sub-batch; items marked within the interval
+  are not claimed again. The git-free policies (replacement, unapproved, disuse, lessons, chat, cap, purge) run on the
+  instance that wins one upsert of `settings.memory_aging.pure_pass` per interval, so N instances do not each scan every
+  item. Every apply is guarded regardless: it locks the item row, then reads its aging row in a _second statement_ (a join
+  would show the state from before the lock wait and let two passes archive the same item twice; an integration test
+  covers this).
+- **Dormant ranking** applies to the lesson top-N in `buildStepInput` and to `search_task_memory`. It does not reorder the
+  generic on-demand disclosure index in `context/plan.ts`; task memory is not inlined there, and touching the planner
+  would have changed curated knowledge ranking.
+- **Restore never enables unverified agent conclusions.** Restoring a `conclusions` item whose trust is not `approved`
+  records the restore (and pins it against re-archiving) but leaves it disabled; approval stays the only way in.
+- **Replacement** also needs the successor to be enabled at apply time (the resolver ignores `superseded_by` when the
+  successor is disabled); otherwise the decision is refused and the next pass decides again.
+- **Metrics.** `memory_aging.active_task_memory.per_owner` is the one owner-keyed metric. It is bounded to the 50 largest
+  owners (the rest summed into `other`) and only on the admin endpoint.
+- **Audit.** A `BEFORE INSERT` trigger on `knowledge_audit` fills `item_key` and `owner_id`, so every existing writer is
+  covered without changing its INSERT.
+- **Not changed, on purpose:** how memory is created, the freshness rules (`memoryFreshness` was split into
+  `repoFreshnessContext` + `memoryFreshnessIn` and returns an extra `code`; states and reasons are unchanged), curated
+  knowledge, and the freshness call in `buildStepInput` (still inside the step transaction; separate task).

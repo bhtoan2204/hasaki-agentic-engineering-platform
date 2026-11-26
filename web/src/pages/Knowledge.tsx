@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   BookMarked,
   BookOpen,
@@ -124,6 +126,21 @@ type KnowledgeMetadata = Record<string, unknown> & {
   companions?: string[];
   memory?: MemoryInfo;
 };
+/** Aging state of task memory (docs/architecture/memory-aging.md); absent while the item is simply active. */
+type AgingInfo = {
+  state: "dormant" | "archived" | "superseded" | "restored";
+  policy: string | null;
+  reason: string | null;
+  replaced_by_key: string | null;
+  at: string;
+  pinned: boolean;
+};
+const AGING_TONE: Record<AgingInfo["state"], string> = {
+  archived: "CANCELED",
+  superseded: "CANCELED",
+  dormant: "WAITING",
+  restored: "READY",
+};
 type KnowledgeSummary = {
   key: string;
   title: string;
@@ -136,6 +153,7 @@ type KnowledgeSummary = {
   current_version: number;
   updated_at: string;
   metadata?: KnowledgeMetadata | null;
+  aging?: AgingInfo;
 };
 type KnowledgeVersion = {
   version: number;
@@ -240,6 +258,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
   const [q, setQ] = useState("");
   const [scope, setScope] = useState("");
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
+  const [archived, setArchived] = useState(false);
   const [page, setPage] = useState(1);
   const [needle, setNeedle] = useState("");
   useEffect(() => {
@@ -255,6 +274,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
   if (cat) params.set("category", cat);
   if (scope) params.set("scope", scope);
   if (needle) params.set("q", needle);
+  if (archived) params.set("archived", "1");
   const { data, error, loading, refreshing, reload, reloadFresh } = useApi<KnowledgePage>(
     `/api/knowledge?${params}`,
   );
@@ -269,7 +289,7 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
     reloadFresh();
     pendingProposals.reload();
   };
-  const filtered = !!(cat || scope || needle);
+  const filtered = !!(cat || scope || needle || archived);
   const detailKey = itemKey === "~proposals" && subKey ? `${itemKey}/${subKey}` : itemKey;
   const updatedDate = new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-GB", {
     dateStyle: "medium",
@@ -368,6 +388,19 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
               <option value="newest">{t("kn.updatedNewest")}</option>
               <option value="oldest">{t("kn.updatedOldest")}</option>
             </select>
+            <button
+              type="button"
+              className={`sm kn-archived${archived ? "" : " ghost"}`}
+              aria-pressed={archived}
+              title={t("kn.archivedFilterTip")}
+              onClick={() => {
+                setArchived(!archived);
+                setPage(1);
+              }}
+            >
+              <Archive size={14} />
+              {t("kn.archivedFilter")}
+            </button>
           </div>
           {data && !error && (
             <div className="kn-list-meta">
@@ -419,9 +452,18 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                               {k.owner_id ? t("auth.my") : t("auth.shared")}
                             </Badge>
                             {k.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
-                            {!k.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>}
+                            {k.aging ? (
+                              <Badge s={AGING_TONE[k.aging.state]}>
+                                {t(`kn.agingState.${k.aging.state}`)}
+                              </Badge>
+                            ) : (
+                              !k.enabled && <Badge s="CANCELED">{t("kn.enabledNo")}</Badge>
+                            )}
                           </span>
                           <span className="kn-item-key mono">{k.key}</span>
+                          {k.aging?.reason && (
+                            <span className="kn-item-aging">{k.aging.reason}</span>
+                          )}
                           <span className="kn-item-meta">
                             <ScopeBadge type={k.scope_type} scopeRef={k.scope_ref} />
                             <span className="kn-tag">{t(catKey(k.category))}</span>
@@ -884,6 +926,9 @@ function KnowledgeEditor({
       <div className="card kn-body">
         <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
+        {tab === "overview" && item?.aging && (
+          <AgingCard itemKey={item.key} aging={item.aging} onDone={reload} />
+        )}
         {tab === "overview" && item && cur?.metadata?.memory && (
           <MemoryProvenance itemKey={item.key} m={cur.metadata.memory} onDone={reload} />
         )}
@@ -1244,6 +1289,97 @@ function KnowledgeEditor({
               )}
             </Section>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Why task memory was archived (or is dormant), and the way back: Restore pins it against automatic aging. */
+function AgingCard({
+  itemKey,
+  aging,
+  onDone,
+}: {
+  itemKey: string;
+  aging: AgingInfo;
+  onDone: () => void;
+}) {
+  const { t, locale } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const archivedNow = aging.state === "archived" || aging.state === "superseded";
+  const run = async (path: "restore" | "unpin", ok: string) => {
+    setBusy(true);
+    try {
+      if (await act(() => api(`/api/knowledge/${itemKey}/${path}`, {}), ok)) onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const policyKey = `kn.agingPolicy.${aging.policy}`;
+  const policy = aging.policy ? t(policyKey) : "";
+  return (
+    <div className="card kn-aging">
+      <div className="card-head">
+        <h4>{t("kn.agingTitle")}</h4>
+        <Badge s={AGING_TONE[aging.state]}>{t(`kn.agingState.${aging.state}`)}</Badge>
+        {aging.pinned && <span className="pill">{t("kn.agingPinned")}</span>}
+      </div>
+      <div className="kv small">
+        {aging.policy && (
+          <>
+            <span>{t("kn.agingPolicy")}</span>
+            <span>{policy === policyKey ? aging.policy : policy}</span>
+          </>
+        )}
+        {aging.reason && (
+          <>
+            <span>{t("kn.agingReason")}</span>
+            <span>{aging.reason}</span>
+          </>
+        )}
+        {aging.replaced_by_key && (
+          <>
+            <span>{t("kn.agingReplacedBy")}</span>
+            <a className="mono" href={`#/knowledge/${aging.replaced_by_key}`}>
+              {aging.replaced_by_key}
+            </a>
+          </>
+        )}
+        <span>{t("kn.agingAt")}</span>
+        <time dateTime={aging.at}>
+          {new Intl.DateTimeFormat(locale === "vi" ? "vi-VN" : "en-GB", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(new Date(aging.at))}
+        </time>
+      </div>
+      {aging.state === "dormant" && <div className="small muted">{t("kn.agingDormantHint")}</div>}
+      <div className="row">
+        {archivedNow || aging.state === "dormant" ? (
+          <>
+            <span className="small muted grow">{t("kn.agingRestoreHint")}</span>
+            <button
+              type="button"
+              className="sm"
+              disabled={busy}
+              onClick={() => run("restore", t("kn.agingRestored"))}
+            >
+              <ArchiveRestore size={14} />
+              {t("kn.agingRestore")}
+            </button>
+          </>
+        ) : (
+          aging.pinned && (
+            <button
+              type="button"
+              className="sm ghost"
+              disabled={busy}
+              onClick={() => run("unpin", t("kn.agingUnpinned"))}
+            >
+              {t("kn.agingUnpin")}
+            </button>
+          )
         )}
       </div>
     </div>

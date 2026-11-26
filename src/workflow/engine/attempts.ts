@@ -38,6 +38,7 @@ import { background } from "../background.ts";
 import { localJobs } from "../local.ts";
 import { runEvents } from "../events.ts";
 import { buildStepInput, resolveContext } from "../context.ts";
+import { noteKnowledgeUsage } from "../../knowledge/agingUsage.ts";
 import type {
   AttemptRow,
   ExecResult,
@@ -126,7 +127,7 @@ export async function beginAttempt(
   preview?: JobPreview | null,
 ): Promise<BegunAttempt | null> {
   const healthSwitch = await healthyProviderSwitch(job.id, preview);
-  return withTx(async (c) => {
+  return withTx(async (c, afterCommit) => {
     const run = await lockRun(c, job.run_id);
     if (run.worker_instance !== config.instanceId || !(await ownsInstance(c))) return null;
     if (run.owner_id == null) {
@@ -225,6 +226,12 @@ export async function beginAttempt(
         error: null,
       },
       `attempt #${n}`,
+    );
+    // Best-effort and after COMMIT: a usage row shared by two runs must not make one wait for the other's transaction.
+    afterCommit(() =>
+      noteKnowledgeUsage(
+        context.knowledge.filter((k) => k.category === "task_memory").map((k) => k.id),
+      ),
     );
     return { run, step, attempt, input, context };
   });

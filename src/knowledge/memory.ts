@@ -254,31 +254,99 @@ export async function reviewMemory(
 }
 
 export type Freshness = "FRESH" | "STALE" | "UNKNOWN";
+/**
+ * Why a freshness check ended as it did (machine-readable twin of `reason`). The aging job treats the codes that
+ * cannot recover (`no_provenance`, `no_commit`, `no_file_list`) differently from environmental ones.
+ */
+export type FreshnessCode =
+  | "fresh"
+  | "stale"
+  | "no_provenance"
+  | "no_commit"
+  | "no_file_list"
+  | "repo_missing"
+  | "base_missing"
+  | "fetch_old"
+  | "commit_missing"
+  | "git_error";
+export interface FreshnessResult {
+  state: Freshness;
+  reason: string;
+  code: FreshnessCode;
+}
 /** Remote-tracking refs older than this cannot vouch for "nothing changed since" (the base may have moved upstream). */
 export const MEMORY_REF_MAX_AGE_MS = 24 * 3600_000;
 
-const freshCache = new Map<string, Freshness>();
-/**
- * Freshness of a memory item against origin/<base> in `repoDir`. Only FRESH items may be loaded.
- *  FRESH   — provenance is complete, the commit exists locally, origin/<base> was fetched recently, and none of the
- *            item's files changed on the base branch since the task (merged unchanged, or untouched since branching).
- *  STALE   — one of the item's files was changed on the base branch after the task.
- *  UNKNOWN — anything that prevents proving freshness: missing provenance (commit / file list / repo), a repo that is
- *            not available, a commit not in this clone (history rewritten), no or old remote-tracking ref, git errors.
- * Missing provenance is never assumed fresh.
- */
-export async function memoryFreshness(
+/** Insertion-ordered LRU: a hit moves the entry to the back, an insert beyond `max` drops the oldest. */
+export class LruMap<K, V> {
+  private readonly map = new Map<K, V>();
+  private readonly max: number;
+  constructor(max: number) {
+    this.max = max;
+  }
+  get size() {
+    return this.map.size;
+  }
+  get(key: K): V | undefined {
+    const v = this.map.get(key);
+    if (v === undefined) return undefined;
+    this.map.delete(key);
+    this.map.set(key, v);
+    return v;
+  }
+  set(key: K, value: V) {
+    this.map.delete(key);
+    this.map.set(key, value);
+    while (this.map.size > this.max) this.map.delete(this.map.keys().next().value as K);
+  }
+  clear() {
+    this.map.clear();
+  }
+}
+const freshCacheMax = () => {
+  const n = Number(config.memoryAging.freshnessCacheMax);
+  return Number.isInteger(n) && n > 0 ? n : 2000;
+};
+export const freshCache = new LruMap<string, Freshness>(freshCacheMax());
+
+/** Provenance that every check needs, whatever the repository looks like: null when it is complete. */
+export function provenanceProblem(
   meta: Partial<MemoryMeta> | null | undefined,
-  repoDir: string | null,
-  opts: { maxRefAgeMs?: number; now?: number } = {},
-): Promise<{ state: Freshness; reason: string }> {
-  if (!meta || typeof meta !== "object") return { state: "UNKNOWN", reason: "no provenance" };
+): FreshnessResult | null {
+  if (!meta || typeof meta !== "object")
+    return { state: "UNKNOWN", reason: "no provenance", code: "no_provenance" };
   if (!meta.commit_sha || !/^[0-9a-f]{7,40}$/i.test(meta.commit_sha))
-    return { state: "UNKNOWN", reason: "no commit recorded" };
-  if (!Array.isArray(meta.files)) return { state: "UNKNOWN", reason: "no file list recorded" };
+    return { state: "UNKNOWN", reason: "no commit recorded", code: "no_commit" };
+  if (!Array.isArray(meta.files))
+    return { state: "UNKNOWN", reason: "no file list recorded", code: "no_file_list" };
+  return null;
+}
+
+/** What is true of one repository checkout for every item that names the same base branch (computed once per pass). */
+export interface RepoFreshnessContext {
+  repoDir: string;
+  base: string;
+  baseSha: string;
+}
+
+/**
+ * The repository-level part of a freshness check: the checkout exists, `origin/<base>` resolves and was fetched
+ * recently. Returns the context, or the UNKNOWN result every item of this repository would get.
+ */
+export async function repoFreshnessContext(
+  repoDir: string | null,
+  baseBranch: string | undefined,
+  opts: { maxRefAgeMs?: number; now?: number } = {},
+): Promise<{ context: RepoFreshnessContext } | { result: FreshnessResult }> {
   if (!repoDir || !existsSync(repoDir))
-    return { state: "UNKNOWN", reason: "repository not available locally" };
-  const base = `origin/${meta.base_branch || config.baseBranch}`;
+    return {
+      result: {
+        state: "UNKNOWN",
+        reason: "repository not available locally",
+        code: "repo_missing",
+      },
+    };
+  const base = `origin/${baseBranch || config.baseBranch}`;
   const baseSha = await git(
     repoDir,
     "rev-parse",
@@ -286,7 +354,10 @@ export async function memoryFreshness(
     "--quiet",
     `refs/remotes/${base}`,
   ).catch(() => "");
-  if (!baseSha) return { state: "UNKNOWN", reason: `${base} not available` };
+  if (!baseSha)
+    return {
+      result: { state: "UNKNOWN", reason: `${base} not available`, code: "base_missing" },
+    };
   // Age of the last fetch: an old remote-tracking ref cannot prove that the base did not move.
   const commonDir = await git(
     repoDir,
@@ -302,42 +373,50 @@ export async function memoryFreshness(
   const age = (opts.now ?? Date.now()) - Math.max(...fetched);
   if (age > (opts.maxRefAgeMs ?? MEMORY_REF_MAX_AGE_MS))
     return {
-      state: "UNKNOWN",
-      reason: `${base} was last fetched too long ago to vouch for freshness`,
+      result: {
+        state: "UNKNOWN",
+        reason: `${base} was last fetched too long ago to vouch for freshness`,
+        code: "fetch_old",
+      },
     };
-  const exists = await git(repoDir, "cat-file", "-e", `${meta.commit_sha}^{commit}`).then(
+  return { context: { repoDir, base, baseSha } };
+}
+
+/** The per-item part of a freshness check, given complete provenance and a usable repository context. */
+export async function memoryFreshnessIn(
+  ctx: RepoFreshnessContext,
+  meta: Partial<MemoryMeta>,
+): Promise<FreshnessResult> {
+  const { repoDir, base, baseSha } = ctx;
+  const commit = meta.commit_sha as string;
+  const files = meta.files as string[];
+  const exists = await git(repoDir, "cat-file", "-e", `${commit}^{commit}`).then(
     () => true,
     () => false,
   );
   if (!exists)
     return {
       state: "UNKNOWN",
-      reason: `commit ${meta.commit_sha.slice(0, 12)} is not in this clone (history rewritten or another clone)`,
+      reason: `commit ${commit.slice(0, 12)} is not in this clone (history rewritten or another clone)`,
+      code: "commit_missing",
     };
-  if (!meta.files.length) return { state: "FRESH", reason: "no files to go stale" };
-  const k = `${repoDir}|${meta.commit_sha}|${baseSha}|${meta.files.join(",")}`;
+  if (!files.length) return { state: "FRESH", reason: "no files to go stale", code: "fresh" };
+  const k = `${repoDir}|${commit}|${baseSha}|${files.join(",")}`;
   const cached = freshCache.get(k);
-  if (cached) return { state: cached, reason: "cached" };
+  if (cached)
+    return { state: cached, reason: "cached", code: cached === "STALE" ? "stale" : "fresh" };
   try {
     // Files changed on the base since the branch point AND different from the task commit → edited after the task.
-    const mb = await git(repoDir, "merge-base", meta.commit_sha, baseSha);
-    const changedOnBase = await git(
-      repoDir,
-      "diff",
-      "--name-only",
-      mb,
-      baseSha,
-      "--",
-      ...meta.files,
-    );
+    const mb = await git(repoDir, "merge-base", commit, baseSha);
+    const changedOnBase = await git(repoDir, "diff", "--name-only", mb, baseSha, "--", ...files);
     const differsFromTask = await git(
       repoDir,
       "diff",
       "--name-only",
-      meta.commit_sha,
+      commit,
       baseSha,
       "--",
-      ...meta.files,
+      ...files,
     );
     const state: Freshness = changedOnBase && differsFromTask ? "STALE" : "FRESH";
     freshCache.set(k, state);
@@ -347,10 +426,36 @@ export async function memoryFreshness(
         state === "STALE"
           ? `changed on ${base} since the task: ${differsFromTask.split("\n").slice(0, 5).join(", ")}`
           : "unchanged since the task",
+      code: state === "STALE" ? "stale" : "fresh",
     };
   } catch (e) {
-    return { state: "UNKNOWN", reason: `git error: ${(e as Error).message.split("\n")[0]}` };
+    return {
+      state: "UNKNOWN",
+      reason: `git error: ${(e as Error).message.split("\n")[0]}`,
+      code: "git_error",
+    };
   }
+}
+
+/**
+ * Freshness of a memory item against origin/<base> in `repoDir`. Only FRESH items may be loaded.
+ *  FRESH   — provenance is complete, the commit exists locally, origin/<base> was fetched recently, and none of the
+ *            item's files changed on the base branch since the task (merged unchanged, or untouched since branching).
+ *  STALE   — one of the item's files was changed on the base branch after the task.
+ *  UNKNOWN — anything that prevents proving freshness: missing provenance (commit / file list / repo), a repo that is
+ *            not available, a commit not in this clone (history rewritten), no or old remote-tracking ref, git errors.
+ * Missing provenance is never assumed fresh.
+ */
+export async function memoryFreshness(
+  meta: Partial<MemoryMeta> | null | undefined,
+  repoDir: string | null,
+  opts: { maxRefAgeMs?: number; now?: number } = {},
+): Promise<FreshnessResult> {
+  const problem = provenanceProblem(meta);
+  if (problem) return problem;
+  const repo = await repoFreshnessContext(repoDir, meta!.base_branch, opts);
+  if ("result" in repo) return repo.result;
+  return memoryFreshnessIn(repo.context, meta!);
 }
 
 /** Compatibility wrapper: anything not provably FRESH counts as stale (fail closed). */

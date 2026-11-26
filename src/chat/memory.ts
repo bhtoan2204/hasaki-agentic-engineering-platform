@@ -7,6 +7,9 @@ import { fusedSearchOrder, scoreKnowledge } from "../context/plan.ts";
 import { semanticRanksByKey } from "../retrieval/semantic.ts";
 import { redactPii } from "../integrations/redact.ts";
 import { chatRepository } from "./repository.ts";
+import { noteKnowledgeUsage } from "../knowledge/agingUsage.ts";
+import { restoreProcedureIfArchived } from "../knowledge/aging.ts";
+import { ignoreError } from "../ignoreError.ts";
 import { emitChatEvent } from "./events.ts";
 
 /**
@@ -93,6 +96,9 @@ async function remember(
       },
       ownerId,
     );
+    // A procedure that worked again after it was archived for failing comes back by itself, unpinned.
+    if (kind === "procedure")
+      await restoreProcedureIfArchived(ownerId, key).catch(ignoreError("chat.procedure_restore"));
     return "reinforced";
   }
   await knowledge.create({
@@ -244,7 +250,9 @@ export async function recallMemories(ownerId: number, message: string) {
     .sort((a, b) => b.s - a.s);
   const semantic = await semanticRanksByKey(ownerId, message, rows, ["chat_memory"]);
   if (semantic) ranked = fusedSearchOrder(scored, ranked, semantic);
-  return ranked.slice(0, MAX_RECALL).map(({ k: r }) => ({
+  const recalled = ranked.slice(0, MAX_RECALL);
+  noteKnowledgeUsage(recalled.map(({ k }) => k.id));
+  return recalled.map(({ k: r }) => ({
     key: r.key,
     kind: String((r.metadata as { memory?: { kind?: string } }).memory?.kind ?? ""),
     text: r.content,

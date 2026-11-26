@@ -91,6 +91,37 @@ const DECISIONS = [
   "RECORD",
 ] as const;
 
+/** Task memory aging (knowledge/aging.ts): decisions per policy and action, fixed label sets. */
+export const MEMORY_AGING_POLICIES = [
+  "replacement",
+  "stale",
+  "unknown",
+  "unapproved",
+  "disuse",
+  "lesson_contradicted",
+  "lesson_disputed",
+  "chat_contradicted",
+  "procedure_failed",
+  "cap",
+  "purge",
+  "manual",
+] as const;
+export type MemoryAgingPolicy = (typeof MEMORY_AGING_POLICIES)[number];
+export const MEMORY_AGING_ACTIONS = [
+  "archive",
+  "supersede",
+  "dormant",
+  "restore",
+  "purge",
+] as const;
+export type MemoryAgingAction = (typeof MEMORY_AGING_ACTIONS)[number];
+const aging = new Map<string, number>(
+  MEMORY_AGING_POLICIES.flatMap((p) => MEMORY_AGING_ACTIONS.map((a) => [`${p}.${a}`, 0] as const)),
+);
+/** Active task memory per owner: the one owner-keyed metric (admin endpoint only), bounded to the largest owners. */
+const MAX_AGING_OWNERS = 50;
+let activeTaskMemory = { total: 0, per_owner: {} as Record<string, number>, other: 0 };
+
 const counters = new Map<string, number>(COUNTERS.map((c) => [c, 0]));
 const histograms = new Map<string, Histogram>(
   Object.entries(HISTOGRAMS).map(([name, bounds]) => [name, new Histogram([...bounds])]),
@@ -118,6 +149,20 @@ export function countDecision(action: string) {
   if (decisions.has(action)) decisions.set(action, decisions.get(action)! + 1);
 }
 
+export function countMemoryAging(policy: MemoryAgingPolicy, action: MemoryAgingAction) {
+  const key = `${policy}.${action}`;
+  if (aging.has(key)) aging.set(key, aging.get(key)! + 1);
+}
+export function setActiveTaskMemory(byOwner: Record<string, number>) {
+  const sorted = Object.entries(byOwner).sort((a, b) => b[1] - a[1]);
+  const shown = sorted.slice(0, MAX_AGING_OWNERS);
+  activeTaskMemory = {
+    total: sorted.reduce((n, [, v]) => n + v, 0),
+    per_owner: Object.fromEntries(shown),
+    other: sorted.slice(MAX_AGING_OWNERS).reduce((n, [, v]) => n + v, 0),
+  };
+}
+
 /** Gauges read at snapshot time (pool sizes, busy workers), registered by their owners. */
 const gauges = new Map<string, () => number>();
 export function registerGauge(name: string, read: () => number) {
@@ -133,6 +178,7 @@ export function runtimeMetricsSnapshot() {
     histograms: Object.fromEntries([...histograms].map(([k, h]) => [k, h.snapshot()])),
     replay_decisions: Object.fromEntries(decisions),
     ignored_errors: Object.fromEntries(ignored),
+    memory_aging: { actions: Object.fromEntries(aging), active_task_memory: activeTaskMemory },
     gauges: Object.fromEntries([...gauges].map(([k, read]) => [k, read()])),
     event_loop_ms: {
       p50: ms(loop.percentile(50)),
@@ -149,6 +195,8 @@ export function resetRuntimeMetrics() {
   for (const [k, bounds] of Object.entries(HISTOGRAMS))
     histograms.set(k, new Histogram([...bounds]));
   for (const k of decisions.keys()) decisions.set(k, 0);
+  for (const k of aging.keys()) aging.set(k, 0);
+  activeTaskMemory = { total: 0, per_owner: {}, other: 0 };
   ignored.clear();
   loop.reset();
 }

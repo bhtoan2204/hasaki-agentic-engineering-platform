@@ -245,6 +245,43 @@ export interface Config {
     /** VERIFY_MAX_CONCURRENT */
     maxConcurrent?: string;
   };
+  /** Task memory aging (knowledge/aging.ts). Raw env strings; the job applies documented defaults to blanks. */
+  memoryAging: {
+    /** MEMORY_AGING_ENABLED (default true; "false" or "0" turns the scheduled job off) */
+    enabled?: string;
+    /** MEMORY_AGING_INTERVAL_MINUTES (60) */
+    intervalMinutes?: string;
+    /** MEMORY_AGING_BATCH_SIZE (200) */
+    batchSize?: string;
+    /** MEMORY_AGING_CONCURRENCY (4) */
+    concurrency?: string;
+    /** MEMORY_AGING_BUDGET_SECONDS (60) */
+    budgetSeconds?: string;
+    /** MEMORY_AGING_UNKNOWN_DAYS (14) */
+    unknownDays?: string;
+    /** MEMORY_AGING_UNAPPROVED_DAYS (30) */
+    unapprovedDays?: string;
+    /** MEMORY_AGING_DORMANT_DAYS (60) */
+    dormantDays?: string;
+    /** MEMORY_AGING_DISUSE_DAYS (120) */
+    disuseDays?: string;
+    /** MEMORY_AGING_APPROVED_DORMANT_DAYS (120) */
+    approvedDormantDays?: string;
+    /** MEMORY_AGING_APPROVED_DISUSE_DAYS (240) */
+    approvedDisuseDays?: string;
+    /** MEMORY_AGING_LESSON_DORMANT_DAYS (90) */
+    lessonDormantDays?: string;
+    /** MEMORY_AGING_LESSON_DISUSE_DAYS (180) */
+    lessonDisuseDays?: string;
+    /** MEMORY_AGING_DISPUTED_DAYS (30) */
+    disputedDays?: string;
+    /** MEMORY_AGING_CAP_PER_REPO (50) */
+    capPerRepo?: string;
+    /** MEMORY_AGING_PURGE_DAYS (90; 0 = never hard-delete) */
+    purgeDays?: string;
+    /** MEMORY_FRESHNESS_CACHE_MAX (2000) */
+    freshnessCacheMax?: string;
+  };
   knowledge: {
     ponytail: { enabled: boolean; mapChars: number };
   };
@@ -832,6 +869,7 @@ const defaults: Config = {
   polling: {},
   trace: {},
   verification: {},
+  memoryAging: {},
   knowledge: { ponytail: { enabled: false, mapChars: 2000 } },
   retrieval: {
     internalToken: "",
@@ -1487,6 +1525,23 @@ function load(): Config {
   cfg.trace.minLevel = process.env.TRACE_MIN_LEVEL;
   cfg.verification.evidenceRetentionDays = process.env.VERIFICATION_EVIDENCE_RETENTION_DAYS;
   cfg.verification.maxConcurrent = process.env.VERIFY_MAX_CONCURRENT;
+  cfg.memoryAging.enabled = process.env.MEMORY_AGING_ENABLED;
+  cfg.memoryAging.intervalMinutes = process.env.MEMORY_AGING_INTERVAL_MINUTES;
+  cfg.memoryAging.batchSize = process.env.MEMORY_AGING_BATCH_SIZE;
+  cfg.memoryAging.concurrency = process.env.MEMORY_AGING_CONCURRENCY;
+  cfg.memoryAging.budgetSeconds = process.env.MEMORY_AGING_BUDGET_SECONDS;
+  cfg.memoryAging.unknownDays = process.env.MEMORY_AGING_UNKNOWN_DAYS;
+  cfg.memoryAging.unapprovedDays = process.env.MEMORY_AGING_UNAPPROVED_DAYS;
+  cfg.memoryAging.dormantDays = process.env.MEMORY_AGING_DORMANT_DAYS;
+  cfg.memoryAging.disuseDays = process.env.MEMORY_AGING_DISUSE_DAYS;
+  cfg.memoryAging.approvedDormantDays = process.env.MEMORY_AGING_APPROVED_DORMANT_DAYS;
+  cfg.memoryAging.approvedDisuseDays = process.env.MEMORY_AGING_APPROVED_DISUSE_DAYS;
+  cfg.memoryAging.lessonDormantDays = process.env.MEMORY_AGING_LESSON_DORMANT_DAYS;
+  cfg.memoryAging.lessonDisuseDays = process.env.MEMORY_AGING_LESSON_DISUSE_DAYS;
+  cfg.memoryAging.disputedDays = process.env.MEMORY_AGING_DISPUTED_DAYS;
+  cfg.memoryAging.capPerRepo = process.env.MEMORY_AGING_CAP_PER_REPO;
+  cfg.memoryAging.purgeDays = process.env.MEMORY_AGING_PURGE_DAYS;
+  cfg.memoryAging.freshnessCacheMax = process.env.MEMORY_FRESHNESS_CACHE_MAX;
   return cfg;
 }
 

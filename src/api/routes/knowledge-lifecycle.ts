@@ -7,6 +7,7 @@ import { requireAdmin, requireOwner, requireRun } from "../../authz/access.ts";
 import { knowledge } from "../../knowledge/service.ts";
 import type { Route } from "./types.ts";
 import { readableKnowledge, support } from "./shared.ts";
+import { agingOf } from "../../knowledge/aging.ts";
 
 export const knowledgeLifecycleRoutes: Route[] = [
   // Delete for good (with the skill's supporting files). Shared items: admins only, and refused while a workflow still
@@ -45,7 +46,15 @@ export const knowledgeLifecycleRoutes: Route[] = [
       return knowledge.revert(c.p[0], version, item.owner_id ?? null, c.actor.username);
     },
   ],
-  ["GET", /^\/api\/knowledge\/([a-z0-9_.-]+)$/, (c) => readableKnowledge(c, c.p[0])],
+  [
+    "GET",
+    /^\/api\/knowledge\/([a-z0-9_.-]+)$/,
+    async (c) => {
+      const item = await readableKnowledge(c, c.p[0]);
+      const aging = item.category === "task_memory" ? await agingOf(Number(item.id)) : undefined;
+      return aging ? { ...item, aging } : item;
+    },
+  ],
   [
     "POST",
     /^\/api\/knowledge\/([a-z0-9_.-]+)$/,

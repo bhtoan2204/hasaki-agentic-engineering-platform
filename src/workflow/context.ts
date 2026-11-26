@@ -21,6 +21,7 @@ import {
 import { projectsOfRepositories, repoPath } from "../repos/service.ts";
 import { independentUpstream, isIndependent, withheldSteps } from "../agent/independentReview.ts";
 import { memoryFreshness, type MemoryMeta } from "../knowledge/memory.ts";
+import { dormantKeys } from "../knowledge/agingUsage.ts";
 import { skillAvailability } from "../knowledge/external.ts";
 import { TEST_COMMAND } from "./templates.ts";
 import { verifyConfig } from "../agent/verify.ts";
@@ -435,6 +436,10 @@ export async function resolveContext(
         corroborated_by?: string[];
         extracted_at?: string;
       };
+    const dormant = await dormantKeys(
+      res.applied.filter(lesson).map((k) => k.key),
+      c,
+    );
     const relevant = res.applied
       .filter(lesson)
       .filter(
@@ -444,6 +449,7 @@ export async function resolveContext(
       )
       .sort(
         (a, b) =>
+          Number(dormant.has(a.key)) - Number(dormant.has(b.key)) ||
           (meta(b).corroborated_by?.length ?? 0) - (meta(a).corroborated_by?.length ?? 0) ||
           String(meta(b).extracted_at ?? "").localeCompare(String(meta(a).extracted_at ?? "")),
       )
