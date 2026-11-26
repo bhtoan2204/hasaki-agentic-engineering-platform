@@ -248,6 +248,15 @@ test("the CLI prints each policy's decisions and reasons; --dry-run changes noth
   assert.equal((await itemOf(stale))!.enabled, false);
 });
 
+test("a dry run looks at every item, not just the first sub-batch (nothing is marked, so it must skip what it saw)", async () => {
+  config.memoryAging.concurrency = "1";
+  for (let i = 0; i < 9; i++)
+    await facts(700 + i, { commit_sha: shaA, files: ["a.go", `dry${i}.go`] });
+  const r = await pass({ dryRun: true });
+  assert.equal(r.freshnessChecked, 9, "more than 4 (concurrency 1 x 4 per sub-batch)");
+  assert.equal(r.actions.length, 9);
+});
+
 test("running the pass twice changes nothing the second time", async () => {
   await facts(runs[0], { commit_sha: shaA, files: ["a.go"] });
   await facts(runs[1]);
@@ -322,6 +331,37 @@ test("an unprovable item is archived only after a permanent reason lasted N days
     "the transient sighting cleared the clock",
   );
   assert.equal((await itemOf(transient))!.enabled, true);
+});
+
+test("a repository whose registry row cannot be resolved does not abort the pass and is not evidence", async () => {
+  await repositories.upsert("bad-url-repo", { projects: ["AGING"] });
+  await q(
+    pool,
+    "UPDATE repositories SET provider = 'gitlab', repository_url = 'https://gitlab.not-allowed.example/group/project.git' WHERE name = 'bad-url-repo'",
+  );
+  const bad = await make(
+    `memory.run-${runs[0]}.bad-url-repo.facts`,
+    {
+      run_id: runs[0],
+      repo: "bad-url-repo",
+      commit_sha: shaB,
+      base_branch: "release/prod",
+      files: ["b.go"],
+      trust: "verified",
+      extracted_at: new Date().toISOString(),
+    },
+    { repo: "bad-url-repo" },
+  );
+  const fine = await facts(runs[1], { commit_sha: shaA, files: ["a.go"] });
+  const r = await pass();
+  assert.equal((await itemOf(bad))!.enabled, true);
+  assert.equal((await agingOf(bad))?.unknown_since ?? null, null);
+  assert.equal(
+    (await itemOf(fine))!.enabled,
+    false,
+    "the other items of the pass were still decided",
+  );
+  assert.ok(r.freshnessChecked >= 2);
 });
 
 test("commit_missing is permanent only on the instance that ran the task", async () => {

@@ -225,7 +225,14 @@ async function loadOperations(db: Db, items: AgingItem[]) {
  */
 async function nextForFreshness(
   n: number,
-  f: { ownerId?: number; repo?: string; intervalMs: number; passStart: Date; claim: boolean },
+  f: {
+    exclude: number[];
+    ownerId?: number;
+    repo?: string;
+    intervalMs: number;
+    passStart: Date;
+    claim: boolean;
+  },
 ) {
   const select = async (c: Db) =>
     (
@@ -234,10 +241,18 @@ async function nextForFreshness(
         `SELECT i.id FROM knowledge_items i LEFT JOIN knowledge_aging a ON a.item_id = i.id
           WHERE i.category = 'task_memory' AND i.enabled AND i.key ~ $5
             AND coalesce(a.state, 'active') NOT IN ('archived', 'superseded') AND coalesce(a.pinned, false) = false
-            AND ($1::bigint IS NULL OR i.owner_id = $1) AND ($2::text IS NULL OR i.scope_ref = $2)
+            AND ($1::bigint IS NULL OR i.owner_id = $1) AND ($2::text IS NULL OR i.scope_ref = $2) AND i.id <> ALL($7::bigint[])
             AND (a.checked_at IS NULL OR (a.checked_at < now() - make_interval(secs => $3) AND a.checked_at < $4))
           ORDER BY a.checked_at NULLS FIRST, i.id LIMIT $6`,
-        [f.ownerId ?? null, f.repo ?? null, f.intervalMs / 1000, f.passStart, RUN_MEMORY_KEY, n],
+        [
+          f.ownerId ?? null,
+          f.repo ?? null,
+          f.intervalMs / 1000,
+          f.passStart,
+          RUN_MEMORY_KEY,
+          n,
+          f.exclude,
+        ],
       )
     ).map((r) => Number(r.id));
   if (!f.claim) return { ids: await select(pool), contended: false };
@@ -307,7 +322,16 @@ async function examine(items: AgingItem[], concurrency: number): Promise<Map<num
     if (!repo) return void out.set(item.id, unknown("repo_unregistered", null));
     const base = String(item.memory.base_branch ?? "");
     const ck = `${item.repo}|${base}`;
-    if (!contexts.has(ck)) contexts.set(ck, repoFreshnessContext(repoPath(repo), base));
+    if (!contexts.has(ck)) {
+      // A registry row whose layout cannot be resolved (bad remote URL) is a configuration problem, not evidence.
+      let dir: string | null = null;
+      try {
+        dir = repoPath(repo);
+      } catch {
+        dir = null;
+      }
+      contexts.set(ck, repoFreshnessContext(dir, base));
+    }
     const ctx = await contexts.get(ck)!;
     if ("result" in ctx)
       return void out.set(item.id, unknown(ctx.result.code as UnknownCode, null));
@@ -531,6 +555,7 @@ export async function runMemoryAging(opts: AgingOptions = {}): Promise<AgingRepo
     }
     const next = await nextForFreshness(Math.min(sub, batchSize - checked.size), {
       ...opts,
+      exclude: [...checked],
       intervalMs,
       passStart,
       claim: !dryRun,
