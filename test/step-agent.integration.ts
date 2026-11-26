@@ -1,7 +1,7 @@
 import { test, before, after, afterEach } from "node:test";
 import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
@@ -810,6 +810,48 @@ test("a Copilot tool that skipped the PreToolUse hook stops the turn even after 
     assert.equal(result.isError, true, JSON.stringify(result));
     assert.equal(result.failure, "UNSAFE_SIDE_EFFECT");
     assert.ok(Date.now() - started < 25_000);
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("Copilot stops native tools on hook bypass, rejects delegation, keeps MCP config out of cwd, and cleans empty dirs", async () => {
+  const logFile = join(mkdtempSync(join(tmpdir(), "copilot-native-bypass-")), "log.jsonl");
+  const { ctx, restore } = await lifecycleAttempt("codex", "agent", {
+    COPILOT_BIN: join(import.meta.dirname, "fixtures/fake-copilot.mjs"),
+    FAKE_COPILOT_MODE: "native-nohook",
+    FAKE_COPILOT_LOG: logFile,
+  });
+  try {
+    const cwd = await runWorkingDirectory(ctx.run.id, ctx.step.id);
+    const denied = await copilotAgentTurn({
+      ctx,
+      mode: "analysis",
+      policy: { ...policy, delegation: true, workspaces: [] },
+      cwd,
+      prompt: "Delegate",
+      metrics: newMetrics(""),
+    });
+    assert.equal(denied.isError, true);
+    assert.equal(denied.failure, "POLICY_VIOLATION");
+    assert.equal(existsSync(logFile), false, "delegation fails before spawning CLI");
+
+    const bypass = await copilotAgentTurn({
+      ctx,
+      mode: "coding",
+      policy: { ...policy, mode: "coding", workspaces: [cwd] },
+      cwd,
+      prompt: "Bypass native tool",
+      metrics: newMetrics(""),
+    });
+    assert.equal(bypass.isError, true);
+    assert.equal(bypass.failure, "UNSAFE_SIDE_EFFECT");
+    const entry = JSON.parse(readFileSync(logFile, "utf8").trim().split("\n")[0]);
+    assert.equal(entry.cwdHasMcpConfig, false, "MCP config must stay outside worktree");
+    assert.equal(entry.tmpHasSettings, false, "orphaned settings.json must not be created");
+    assert.equal(existsSync(join(cwd, ".agents")), false, "empty .agents dir cleaned up");
+    assert.equal(existsSync(join(cwd, ".github")), false, "empty .github dir cleaned up");
   } finally {
     restore();
     await cancelRun(ctx.run.id);

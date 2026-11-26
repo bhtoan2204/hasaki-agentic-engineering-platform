@@ -101,7 +101,6 @@ export function buildCopilotArgs(opts: {
   useStdinPrompt?: boolean;
   model?: string;
   effort?: string;
-  sandbox?: boolean;
   conversationId?: string;
   additionalDirs?: string[];
   mcpConfigPath?: string;
@@ -120,8 +119,6 @@ export function buildCopilotArgs(opts: {
   if (opts.mcpConfigPath) args.push("--additional-mcp-config", `@${opts.mcpConfigPath}`);
   // Headless cannot answer permission prompts; approve tools and rely on platform hooks + broker.
   if (opts.allowTools !== false) args.push("--allow-all-tools");
-  // Sandbox subcommand exists separately; keep fail-closed coding isolation via env/hooks when requested.
-  void opts.sandbox;
   return args;
 }
 

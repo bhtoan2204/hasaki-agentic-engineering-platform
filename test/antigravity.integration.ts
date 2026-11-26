@@ -1,6 +1,6 @@
 import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +42,7 @@ import { startBroker } from "../src/agent/broker/server.ts";
 import { completeForRun } from "../src/agent/complete.ts";
 import { antigravityModelFor } from "../src/agent/stepAgent.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
+import { ToolLoopDetector } from "../src/agent/toolPolicy.ts";
 import { config } from "../src/config.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-agy.mjs");
@@ -459,6 +460,113 @@ test("antigravityHookDecision enforces read-only mode and denies mutations", () 
   assert.match(denySettings.reason ?? "", /credentials/i);
 });
 
+test("antigravityHookDecision allows coding write_file/edit_file inside workspace and gates inspection tools via decide()", () => {
+  const ws = "/tmp/agy-ws-policy";
+  const codingWithWs: PolicyContext = {
+    mode: "coding",
+    workspaces: [ws],
+    baseBranch: "main",
+    protectedPaths: [".github/"],
+    protectedRoots: ["/srv/protected"],
+  };
+
+  // write_file and edit_file must map to Write/Edit with { file_path } instead of falling into default deny.
+  assert.equal(
+    antigravityHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "write_file", tool_input: { Path: "src/app.ts" } },
+      codingWithWs,
+      ws,
+    ).allow,
+    true,
+  );
+  assert.equal(
+    antigravityHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "edit_file", tool_input: { path: `${ws}/src/app.ts` } },
+      codingWithWs,
+      ws,
+    ).allow,
+    true,
+  );
+  // Outside worktree and protected CI paths must stay denied.
+  assert.equal(
+    antigravityHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "write_file", tool_input: { Path: "/etc/passwd" } },
+      codingWithWs,
+      ws,
+    ).allow,
+    false,
+  );
+  assert.equal(
+    antigravityHookDecision(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "edit_file",
+        tool_input: { Path: `${ws}/.github/workflows/ci.yml` },
+      },
+      codingWithWs,
+      ws,
+    ).allow,
+    false,
+  );
+
+  // Inspection tools must enforce secret paths, protectedRoots secrets, ToolLoopDetector and toolBudget.
+  for (const [tool, input] of [
+    ["grep", { SearchPath: "/srv/protected/.env" }],
+    ["search_files", { SearchPath: "/srv/protected/config.json", Pattern: "*.env" }],
+    ["list_dir", { DirectoryPath: "/srv/protected/.env" }],
+    ["glob", { path: `${ws}/.` + "env" }],
+  ] as const) {
+    assert.equal(
+      antigravityHookDecision(
+        { hook_event_name: "PreToolUse", tool_name: tool, tool_input: input },
+        codingWithWs,
+        ws,
+      ).allow,
+      false,
+      `${tool} must deny secret path`,
+    );
+  }
+
+  const loop = new ToolLoopDetector({ consecutiveThreshold: 2, cycleThreshold: 2 });
+  const loopCtx: PolicyContext = { ...codingWithWs, loopDetector: loop };
+  assert.equal(
+    antigravityHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "grep", tool_input: { SearchPath: `${ws}/src`, Query: "foo" } },
+      loopCtx,
+      ws,
+    ).allow,
+    true,
+  );
+  assert.equal(
+    antigravityHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "grep", tool_input: { SearchPath: `${ws}/src`, Query: "foo" } },
+      loopCtx,
+      ws,
+    ).allow,
+    true,
+  );
+  assert.equal(
+    antigravityHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "grep", tool_input: { SearchPath: `${ws}/src`, Query: "foo" } },
+      loopCtx,
+      ws,
+    ).allow,
+    false,
+    "loop detector stops repeated identical grep calls",
+  );
+
+  const budgetCtx: PolicyContext = { ...codingWithWs, toolBudget: { calls: 1, limit: 1, exhausted: false } };
+  assert.equal(
+    antigravityHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "list_dir", tool_input: { DirectoryPath: ws } },
+      budgetCtx,
+      ws,
+    ).allow,
+    false,
+    "tool budget exhaustion stops inspection tools",
+  );
+});
+
 test("antigravityHookDecision allows the platform artifact reader", () => {
   const named = antigravityHookDecision(
     {
@@ -531,10 +639,37 @@ test("workspace config writes .agents/hooks.json and .agents/mcp_config.json, an
 
   const mcp = JSON.parse(readFileSync(join(dir, ".agents", "mcp_config.json"), "utf8"));
   assert.ok(mcp.mcpServers.platform.command);
+  assert.equal(statSync(join(dir, ".agents", "mcp_config.json")).mode & 0o777, 0o600);
 
   excludeFromGit(join(dir, ".git"));
   const gitExclude = readFileSync(join(dir, ".git", "info", "exclude"), "utf8");
   assert.ok(gitExclude.includes(".agents/"));
+});
+
+test("antigravityAgentTurn rejects delegation in defense-in-depth and removes empty .agents dir in finally", async () => {
+  process.env.FAKE_AGY_MODE = "ok";
+  const dir = mkdtempSync(join(tmpdir(), "agy-delegation-clean-"));
+  const { ctx } = fakeCtx(new AbortController().signal);
+  const denied = await antigravityAgentTurn({
+    ctx,
+    mode: "analysis",
+    policy: { ...analysisPolicy, delegation: true },
+    cwd: dir,
+    prompt: "delegate",
+  });
+  assert.equal(denied.isError, true);
+  assert.equal(denied.failure, "POLICY_VIOLATION");
+  assert.equal(fakeLog().length, 0, "must reject before spawning CLI");
+
+  const emptyAgentsTurn = await antigravityAgentTurn({
+    ctx,
+    mode: "analysis",
+    policy: analysisPolicy,
+    cwd: dir,
+    prompt: "cleanup empty agents dir",
+  });
+  assert.equal(emptyAgentsTurn.isError, false);
+  assert.equal(existsSync(join(dir, ".agents")), false, "empty .agents directory is cleaned up");
 });
 
 // ------------------------------------------------------------------ CLI Invocation & Args

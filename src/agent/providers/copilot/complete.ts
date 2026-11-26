@@ -43,7 +43,6 @@ export async function copilotComplete(
     useStdinPrompt: useStdin,
     model: (opts?.model ?? cfg.model) || undefined,
     effort: (opts?.effort ?? cfg.effort) || undefined,
-    sandbox: false,
     allowTools: false,
   });
 

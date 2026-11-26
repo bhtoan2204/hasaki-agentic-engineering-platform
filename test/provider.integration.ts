@@ -1,6 +1,6 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pool } from "../src/db/pool.ts";
@@ -217,6 +217,7 @@ test("zero exit without a result event fails the turn", async () => {
   });
   assert.equal(result.isError, true);
   assert.match(result.text, /without a result event/);
+  assert.equal(existsSync(join(dir, ".cursor")), false, "empty .cursor directory is removed");
 });
 
 test("nonzero exit and a denied git push are failures", async () => {

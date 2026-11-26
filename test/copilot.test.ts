@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -35,6 +35,8 @@ import {
 } from "../src/agent/providers/copilot/policy.ts";
 import { buildCopilotArgs } from "../src/agent/providers/copilot/run.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
+import { ToolLoopDetector } from "../src/agent/toolPolicy.ts";
+import { providerCapabilities } from "../src/agent/providerCapabilities.ts";
 import { ResumeHandoff } from "../src/workflow/engine.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-copilot.mjs");
@@ -396,6 +398,86 @@ test("copilotHookDecision enforces read-only in analysis and worktree sandbox in
     ).allow,
     false,
   );
+
+  // 8. list_dir / glob / grep / search_files enforced via decide() (secrets, loops, budget)
+  const withProtected: PolicyContext = {
+    ...codingPolicy,
+    protectedRoots: ["/srv/protected"],
+  };
+  for (const [tool, args] of [
+    ["grep", { SearchPath: "/srv/protected/." + "env" }],
+    ["search_files", { SearchPath: "/srv/protected/config.json" }],
+    ["list_dir", { DirectoryPath: "/srv/protected/." + "env" }],
+    ["glob", { path: envFile }],
+  ] as const) {
+    assert.equal(
+      copilotHookDecision(
+        { hook_event_name: "PreToolUse", tool_name: tool, tool_input: args },
+        withProtected,
+        tempDir,
+      ).allow,
+      false,
+      `${tool} must deny secret targets`,
+    );
+  }
+  const loopCtx: PolicyContext = {
+    ...withProtected,
+    loopDetector: new ToolLoopDetector({ consecutiveThreshold: 2, cycleThreshold: 2 }),
+  };
+  assert.equal(
+    copilotHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "grep", tool_input: { SearchPath: tempDir, Query: "q" } },
+      loopCtx,
+      tempDir,
+    ).allow,
+    true,
+  );
+  assert.equal(
+    copilotHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "grep", tool_input: { SearchPath: tempDir, Query: "q" } },
+      loopCtx,
+      tempDir,
+    ).allow,
+    true,
+  );
+  assert.equal(
+    copilotHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "grep", tool_input: { SearchPath: tempDir, Query: "q" } },
+      loopCtx,
+      tempDir,
+    ).allow,
+    false,
+  );
+  const budgetCtx: PolicyContext = {
+    ...withProtected,
+    toolBudget: { calls: 1, limit: 1, exhausted: false },
+  };
+  assert.equal(
+    copilotHookDecision(
+      { hook_event_name: "PreToolUse", tool_name: "list_dir", tool_input: { DirectoryPath: tempDir } },
+      budgetCtx,
+      tempDir,
+    ).allow,
+    false,
+  );
+});
+
+test("PROVIDER_CAPABILITIES reflects real Copilot CLI 1.0 capabilities honestly", () => {
+  assert.equal(providerCapabilities("copilot").guarantees.writeSandbox, false);
+});
+
+test("writeCopilotWorkspaceConfig places MCP config in external scratch dir with 0600 permissions", () => {
+  const scratchDir = mkdtempSync(join(tmpdir(), "copilot-scratch-"));
+  const { mcpConfigPath } = writeCopilotWorkspaceConfig(tempDir, {
+    brokerSocket: "/tmp/mock.sock",
+    brokerToken: "mock-val",
+    mode: "coding",
+    mcpDir: scratchDir,
+  } as Parameters<typeof writeCopilotWorkspaceConfig>[1]);
+  assert.ok(mcpConfigPath.startsWith(scratchDir), "MCP config lives outside worktree");
+  assert.equal(existsSync(join(tempDir, ".agents", "mcp_config.json")), false);
+  assert.equal(statSync(mcpConfigPath).mode & 0o777, 0o600);
+  rmSync(scratchDir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------------ Workspace Config & Args

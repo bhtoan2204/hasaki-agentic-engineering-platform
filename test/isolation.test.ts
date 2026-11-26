@@ -323,7 +323,7 @@ test("performance: sandbox setup overhead on a no-op command (p50/p95, determini
 });
 
 import { guaranteeCheck } from "../src/agent/providerCapabilities.ts";
-import { prepareAgentSandbox } from "../src/agent/isolation.ts";
+import { prepareAgentSandbox, PROTECTED_IN_WORKTREE } from "../src/agent/isolation.ts";
 import { startBroker } from "../src/agent/broker/server.ts";
 import { connect } from "node:net";
 
@@ -432,4 +432,9 @@ test("broker: a wrong token is refused and a closed broker cannot be reused", as
   assert.match(await ask(broker.token), /"ok":true/);
   await broker.close();
   assert.match(await ask(broker.token), /^error:/);
+});
+
+test("PROTECTED_IN_WORKTREE includes non-Claude hook directories", () => {
+  assert.ok(PROTECTED_IN_WORKTREE.includes(".agents"));
+  assert.ok(PROTECTED_IN_WORKTREE.includes(".github/hooks"));
 });

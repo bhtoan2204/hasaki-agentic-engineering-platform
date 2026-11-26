@@ -76,12 +76,14 @@ test("Cursor token deltas become one transcript message per turn (not one line p
 });
 
 test("Cursor permissions: real env files stay unreadable, .env templates are readable and editable", async () => {
-  const { writeCursorPolicy, SECRET_ENV_FILES } =
+  const { writeCursorPolicy, writeMcpConfig, SECRET_ENV_FILES } =
     await import("../src/agent/providers/cursor/permissions.ts");
-  const { mkdtempSync, readFileSync } = await import("node:fs");
+  const { mkdtempSync, readFileSync, statSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { matchesGlob } = await import("node:path");
   const ws = mkdtempSync(join(tmpdir(), "cursor-policy-"));
+  const mcpPath = writeMcpConfig(ws, process.execPath, [], { PLATFORM_MODE: "analysis" });
+  assert.equal(statSync(mcpPath).mode & 0o777, 0o600);
   const { permissions } = JSON.parse(
     readFileSync(writeCursorPolicy(ws, { reposRoot: "/src", workspaces: [ws] }), "utf8"),
   );

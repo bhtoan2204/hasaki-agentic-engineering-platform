@@ -92,6 +92,8 @@ log({
   prompt,
   resumeId,
   cwd: process.cwd(),
+  cwdHasMcpConfig: existsSync(join(process.cwd(), ".agents", "mcp_config.json")),
+  tmpHasSettings: Boolean(process.env.TMPDIR && existsSync(join(process.env.TMPDIR, "settings.json"))),
   env: {
     DATABASE_URL: !!process.env.DATABASE_URL,
     AUTH_SECRET: !!process.env.AUTH_SECRET,
@@ -299,6 +301,16 @@ if (mode === "nohook") {
   out({
     type: "tool.execution_start",
     data: { toolName: "mcp__platform__ask_user", arguments: { questions: [] } },
+  });
+  await new Promise((r) => setTimeout(r, 30_000));
+  process.exit(0);
+}
+
+if (mode === "native-nohook") {
+  // Native tool without PreToolUse — hookBypassDetection must catch native tools too.
+  out({
+    type: "tool.execution_start",
+    data: { toolName: "bash", arguments: { command: "id" } },
   });
   await new Promise((r) => setTimeout(r, 30_000));
   process.exit(0);

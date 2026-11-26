@@ -9,6 +9,7 @@ import { workspacesOf } from "../../../git/provider.ts";
 import { redactSecrets } from "../../../integrations/redact.ts";
 import type { ExecutionContext } from "../../../workflow/executors/registry.ts";
 import { startBroker, type Broker } from "../../broker/server.ts";
+import { removeEmptyDirs } from "../../hookPolicy.ts";
 import {
   checkpointMark,
   readSubmitted,
@@ -101,6 +102,14 @@ function releaseSlot(max: number) {
 export async function antigravityAgentTurn(
   input: AntigravityTurnInput,
 ): Promise<AntigravityTurnResult> {
+  if (input.policy.delegation) {
+    return {
+      isError: true,
+      text: "Google Antigravity CLI cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.",
+      assistantTurns: 0,
+      failure: "POLICY_VIOLATION",
+    };
+  }
   const turnMark = await checkpointMark(input.ctx.attempt.id);
   const usageBase = { ...input.metrics?.tokens };
   const cap = await antigravityCapabilities(false, {
@@ -548,5 +557,6 @@ export async function antigravityAgentTurn(
     rmSync(scratchDir, { recursive: true, force: true });
     rmSync(join(input.cwd, ".agents", "hooks.json"), { force: true });
     rmSync(join(input.cwd, ".agents", "mcp_config.json"), { force: true });
+    removeEmptyDirs(join(input.cwd, ".agents"));
   }
 }
