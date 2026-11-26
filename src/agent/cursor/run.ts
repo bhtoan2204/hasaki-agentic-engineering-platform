@@ -226,7 +226,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       config.agent.cursorTimeoutMs ?? 45 * 60_000,
     );
     // Cursor is stopped at once (no grace), as before.
-    const proc = superviseSpawn({
+    const proc = await superviseSpawn({
       command: cap.bin,
       args,
       cwd: input.cwd,
@@ -549,7 +549,7 @@ export async function cursorComplete(
     if (!cap.supportsModel) throw new Error("Cursor CLI does not support model selection");
     args.push("--model", options.model);
   }
-  const proc = superviseSpawn({
+  const proc = await superviseSpawn({
     command: cap.bin,
     args,
     cwd: dir,

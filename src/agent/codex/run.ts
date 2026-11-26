@@ -512,7 +512,7 @@ export async function codexAgentTurn(input: CodexTurnInput): Promise<CodexTurnRe
   });
   const limits = turnLimits(input.ctx.attempt.effective_agent, codexConfig().timeoutMs);
   // Codex is stopped at once (no grace), as before; its MCP bridge and hook helpers go with it.
-  const proc = superviseSpawn({
+  const proc = await superviseSpawn({
     command: cap.bin,
     args,
     cwd: input.cwd,
@@ -879,7 +879,7 @@ export async function codexComplete(
   ] as Array<[string, unknown]>)
     args.push("-c", `${k}=${toml(v)}`);
   args.push("-C", dir, "-");
-  const proc = superviseSpawn({
+  const proc = await superviseSpawn({
     command: cap.bin,
     args,
     cwd: dir,

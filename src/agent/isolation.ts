@@ -697,7 +697,7 @@ export async function isolationDiagnostics(force = false) {
   const { AGENT_PROVIDERS } = await import("./provider.ts");
   const { supervisionRuntime, supervisionStats, delegatedScopeAvailable } =
     await import("./process/supervisor.ts");
-  if (force) delegatedScopeAvailable(true);
+  if (force) await delegatedScopeAvailable(true);
   const runtime = await probeIsolation(force);
   const enforce = config.isolation.mode === "enforce";
   const iso = { enforce, runtimeAvailable: runtime.available };
@@ -709,7 +709,7 @@ export async function isolationDiagnostics(force = false) {
     limits: config.isolation.limits,
     egress: config.isolation.egress,
     // Process supervision (ADR 0005): engine, launcher, delegated cgroup, PSI and counters since start.
-    supervision: { ...supervisionRuntime(), stats: supervisionStats },
+    supervision: { ...(await supervisionRuntime()), stats: supervisionStats },
     providers: AGENT_PROVIDERS.map((p) => ({
       provider: p,
       coding: guaranteeCheck(p, "coding", null, iso),

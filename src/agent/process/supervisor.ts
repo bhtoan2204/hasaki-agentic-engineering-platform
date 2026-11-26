@@ -15,7 +15,7 @@
  * its descriptors through), so stream protocols, stdin semantics, exit codes and signals are unchanged. The engine is
  * chosen when the process starts and never changes for it: nothing is ever retried under the other engine.
  */
-import { spawn, spawnSync, type ChildProcess, type StdioPipe } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type StdioPipe } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -110,7 +110,7 @@ function note(r: SupervisionReport) {
 }
 
 /** Start `command` under the configured engine. */
-export function superviseSpawn(o: SuperviseOptions): Supervised {
+export async function superviseSpawn(o: SuperviseOptions): Promise<Supervised> {
   return config.supervision.engine === "go" ? startGo(o) : startTypescript(o);
 }
 
@@ -233,29 +233,39 @@ export function supervisorBinary() {
 }
 
 let scopeProbe: { at: number; ok: boolean; problem?: string } | null = null;
-/** Whether `systemd-run --user --scope -p Delegate=yes` works here (cached 5 minutes). */
-export function delegatedScopeAvailable(force = false) {
-  if (!force && scopeProbe && Date.now() - scopeProbe.at < 300_000) return scopeProbe.ok;
-  const r = spawnSync(
-    "systemd-run",
-    ["--user", "--scope", "-q", "--collect", "-p", "Delegate=yes", "true"],
-    { env: { PATH: config.system.path, ...scopeEnvironment() }, timeout: 5000, encoding: "utf8" },
-  );
-  const ok = r.status === 0;
-  scopeProbe = {
-    at: Date.now(),
-    ok,
-    problem: ok
-      ? undefined
-      : (r.stderr || r.error?.message || "systemd-run failed").trim().slice(0, 300),
-  };
-  return ok;
+let scopeProbing: Promise<boolean> | null = null;
+/**
+ * Whether `systemd-run --user --scope -p Delegate=yes` works here (cached 5 minutes). The probe never blocks the
+ * event loop, and concurrent callers (including `force`) share the one in flight.
+ */
+export function delegatedScopeAvailable(force = false): Promise<boolean> {
+  if (!force && scopeProbe && Date.now() - scopeProbe.at < 300_000)
+    return Promise.resolve(scopeProbe.ok);
+  scopeProbing ??= new Promise<boolean>((resolveProbe) => {
+    execFile(
+      "systemd-run",
+      ["--user", "--scope", "-q", "--collect", "-p", "Delegate=yes", "true"],
+      { env: { PATH: config.system.path, ...scopeEnvironment() }, timeout: 5000, encoding: "utf8" },
+      (error, _stdout, stderr) => {
+        scopeProbe = {
+          at: Date.now(),
+          ok: !error,
+          problem: error
+            ? (stderr || error.message || "systemd-run failed").trim().slice(0, 300)
+            : undefined,
+        };
+        scopeProbing = null;
+        resolveProbe(!error);
+      },
+    );
+  });
+  return scopeProbing;
 }
 
 /** What the Go engine can use on this host (diagnostics). */
-export function supervisionRuntime() {
+export async function supervisionRuntime() {
   const bin = supervisorBinary();
-  const scope = delegatedScopeAvailable();
+  const scope = await delegatedScopeAvailable();
   return {
     engine: config.supervision.engine,
     launcher: existsSync(bin) ? bin : null,
@@ -269,7 +279,7 @@ export function supervisionRuntime() {
 
 const flag = (name: string, v: number | undefined) => (v && v > 0 ? [`--${name}=${v}`] : []);
 
-function startGo(o: SuperviseOptions): Supervised {
+async function startGo(o: SuperviseOptions): Promise<Supervised> {
   const started = Date.now();
   const bin = supervisorBinary();
   if (!existsSync(bin))
@@ -277,7 +287,7 @@ function startGo(o: SuperviseOptions): Supervised {
       `PROCESS_SUPERVISION_ENGINE=go but the launcher ${bin} is missing: run npm run build:go or set PLATFORM_SUPERVISE_BIN`,
     );
   const limits = { ...config.supervision.limits[o.class], ...(o.limits ?? {}) };
-  const scope = delegatedScopeAvailable();
+  const scope = await delegatedScopeAvailable();
   // With isolation enforced a delegated cgroup is mandatory (fail closed); otherwise it is used when present.
   if (!scope && config.isolation.mode === "enforce")
     throw new Error(

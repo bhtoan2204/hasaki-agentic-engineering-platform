@@ -62,12 +62,15 @@ if (!goToolchain()) {
       graceMs: 0,
       ...extra,
     });
-  const collect = (p: ReturnType<typeof run>) => {
+  const collect = (started: ReturnType<typeof run> | Awaited<ReturnType<typeof run>>) => {
     let out = "";
     let err = "";
-    p.child.stdout.on("data", (b: Buffer) => (out += b));
-    p.child.stderr.on("data", (b: Buffer) => (err += b));
-    return async () => ({ report: await p.done, out, err });
+    const p = Promise.resolve(started).then((s) => {
+      s.child.stdout.on("data", (b: Buffer) => (out += b));
+      s.child.stderr.on("data", (b: Buffer) => (err += b));
+      return s;
+    });
+    return async () => ({ report: await (await p).done, out, err });
   };
   const alive = (marker: string) =>
     readdirSync("/proc")
@@ -89,7 +92,7 @@ if (!goToolchain()) {
           process.stdin.on("data", d => { b += d; let i; while ((i = b.indexOf("\\n")) >= 0) {
             const l = b.slice(0, i); b = b.slice(i + 1); process.stdout.write(JSON.stringify({ echo: JSON.parse(l) }) + "\\n"); } });
           process.stdin.on("end", () => { process.stderr.write("bye\\n"); process.exit(3); });`;
-        const p = run(process.execPath, ["-e", echo]);
+        const p = await run(process.execPath, ["-e", echo]);
         const done = collect(p);
         p.child.stdin!.write('{"a":1}\n');
         p.child.stdin!.write('{"b":"$HOME $$"}\n');
@@ -105,7 +108,7 @@ if (!goToolchain()) {
         assert.equal(r.err, "bye\n");
         assert.equal(r.report.exit_code, 3);
         assert.equal(r.report.engine, engine);
-        const s = run("sh", ["-c", "kill -TERM $$"]);
+        const s = await run("sh", ["-c", "kill -TERM $$"]);
         const sr = await collect(s)();
         assert.equal(sr.report.exit_code, null);
         assert.equal(s.child.signalCode, "SIGTERM");
@@ -118,7 +121,7 @@ if (!goToolchain()) {
     test(`${engine}: stop() ends a SIGTERM-ignoring command and the descendants it detached`, () =>
       withEngine(engine, async () => {
         const m = `ctp-sup-${engine}-${Date.now()}`;
-        const p = run(
+        const p = await run(
           "bash",
           ["-c", `trap '' TERM; setsid bash -c '${sleeper(m)}' & ${sleeper(m)} & wait`],
           {
@@ -167,7 +170,7 @@ if (!goToolchain()) {
 
   test(
     "go: memory and process limits, OOM reported to the caller",
-    { skip: !sup.delegatedScopeAvailable() && "no delegated cgroup" },
+    { skip: !(await sup.delegatedScopeAvailable()) && "no delegated cgroup" },
     () =>
       withEngine("go", async () => {
         const oom = await collect(
@@ -215,7 +218,7 @@ if (!goToolchain()) {
       const bin = appConfig.binaries.superviseBin;
       appConfig.binaries.superviseBin = join(root, "missing-launcher");
       try {
-        assert.throws(() => run("touch", [marker]), /launcher .* is missing/);
+        await assert.rejects(run("touch", [marker]), /launcher .* is missing/);
       } finally {
         appConfig.binaries.superviseBin = bin;
       }
@@ -224,12 +227,12 @@ if (!goToolchain()) {
       appConfig.system.path = "/nonexistent";
       config.isolation.mode = "enforce";
       try {
-        sup.delegatedScopeAvailable(true);
-        assert.throws(() => run("/usr/bin/touch", [marker]), /delegated cgroup/);
+        await sup.delegatedScopeAvailable(true);
+        await assert.rejects(run("/usr/bin/touch", [marker]), /delegated cgroup/);
       } finally {
         appConfig.system.path = path;
         config.isolation.mode = mode;
-        sup.delegatedScopeAvailable(true);
+        await sup.delegatedScopeAvailable(true);
       }
       assert.equal(existsSync(marker), false);
     }));
@@ -266,7 +269,7 @@ if (!goToolchain()) {
     assert.equal(go.report.engine, "go");
     assert.ok(sup.supervisionStats.started.typescript > 0 && sup.supervisionStats.started.go > 0);
     assert.equal(sup.supervisionStats.active, 0);
-    const rt = sup.supervisionRuntime();
+    const rt = await sup.supervisionRuntime();
     assert.ok(rt.launcher);
     mkdirSync(join(root, "x"), { recursive: true });
     writeFileSync(join(root, "x", "y"), "");

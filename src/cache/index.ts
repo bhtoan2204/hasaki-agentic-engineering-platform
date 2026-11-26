@@ -1,8 +1,13 @@
-import pg from "pg";
 import { config } from "../config.ts";
 import { onCommittedWrite } from "../db/pool.ts";
+import {
+  configureListener,
+  listening,
+  subscribe,
+  type ListenerClient,
+  type Unsubscribe,
+} from "../db/listener.ts";
 import { log } from "../logging.ts";
-import { ignoreError } from "../ignoreError.ts";
 
 /**
  * In-process caches for data that is read often and written rarely. Every read that hits saves a database round trip
@@ -224,69 +229,53 @@ onCommittedWrite(invalidateTables);
 
 // ---------------------------------------------------------------- cross-process listener
 
-let client: ListenerClient | null = null;
-let stopped = false;
-let retryMs = 1000;
-let retryTimer: NodeJS.Timeout | null = null;
+export type { ListenerClient };
+let unsubscribe: Unsubscribe | null = null;
 
-/** Start listening for other processes' writes. While not connected, caches are bypassed (never trusted stale). */
-export type ListenerClient = Pick<pg.Client, "on" | "connect" | "query" | "end">;
-const defaultClientFactory = (connectionString: string): ListenerClient =>
-  new pg.Client({ connectionString, keepAlive: true, keepAliveInitialDelayMillis: 30000 });
-
-/** `makeClient` is injectable so tests can drive the listener without a database. */
+/**
+ * Start listening for other processes' writes (on the shared listener, db/listener.ts). While not connected, caches
+ * are bypassed (never trusted stale). `makeClient` is injectable so tests can drive it without a database.
+ */
 export async function startCacheInvalidation(
   connectionString = config.databaseUrl,
-  makeClient: (cs: string) => ListenerClient = defaultClientFactory,
+  makeClient?: (cs: string) => ListenerClient,
 ): Promise<void> {
-  stopped = false;
+  if (makeClient) configureListener(connectionString, makeClient);
+  await unsubscribe?.();
   listener = "down";
   flushAllCaches();
-  const c = makeClient(connectionString);
-  const lost = (why: string) => {
-    if (client !== c) return;
-    client = null;
+  const down = () => {
     listener = "down";
     flushAllCaches();
-    if (stopped) return;
-    log.error(`cache invalidation listener lost (${why}); caches bypassed until it reconnects`);
-    retryTimer = setTimeout(
-      () =>
-        void startCacheInvalidation(connectionString, makeClient).catch(
-          ignoreError("cache.invalidation_restart"),
-        ),
-      retryMs,
-    );
-    retryMs = Math.min(30_000, retryMs * 2);
   };
-  c.on(
-    "notification",
-    (n) => n.channel === "cache_invalidate" && n.payload && invalidateTables([n.payload]),
-  );
-  c.on("error", (e) => lost(e.message));
-  c.on("end", () => lost("connection ended"));
-  client = c;
-  try {
-    await c.connect();
-    await c.query("LISTEN cache_invalidate");
+  const up = () => {
     // Anything cached before this point may have missed notifications.
     flushAllCaches();
     listener = "connected";
-    retryMs = 1000;
+  };
+  const u = subscribe(
+    "cache_invalidate",
+    (table) => invalidateTables([table]),
+    up,
+    () => {
+      down();
+      log.error("cache invalidation listener lost; caches bypassed until it reconnects");
+    },
+  );
+  unsubscribe = u;
+  try {
+    await u.ready;
+    if (unsubscribe === u && listening("cache_invalidate")) up();
   } catch (e) {
-    lost((e as Error).message);
-    c.end().catch(ignoreError("cache.listener_end"));
+    log.error(`cache invalidation listener: ${(e as Error).message}`);
   }
 }
 
 export async function stopCacheInvalidation() {
-  stopped = true;
-  if (retryTimer) clearTimeout(retryTimer);
-  retryTimer = null;
-  const c = client;
-  client = null;
+  const u = unsubscribe;
+  unsubscribe = null;
   listener = "none";
-  await c?.end().catch(ignoreError("cache.listener_end"));
+  await u?.();
 }
 
 /** Bounded-cardinality snapshot for metrics: one row per cache (fixed names), no keys. */

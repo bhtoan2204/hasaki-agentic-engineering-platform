@@ -1,9 +1,8 @@
 import { HttpError } from "../http/error.ts";
 import { positiveId } from "../http/params.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import pg from "pg";
-import { config } from "../config.ts";
 import { pool } from "../db/pool.ts";
+import { listening, subscribe, type Unsubscribe } from "../db/listener.ts";
 import { sessionFromRequest } from "../auth/sessions.ts";
 import type { Actor } from "../authz/access.ts";
 import { log } from "../logging.ts";
@@ -40,7 +39,7 @@ type Client = {
   cursor: number | null;
 };
 const clients = new Set<Client>();
-let listener: pg.Client | null = null;
+let unsubscribe: Unsubscribe | null = null;
 let stopped = false;
 
 export const REPLAY_LIMIT = 500;
@@ -140,7 +139,7 @@ async function latestEventId() {
 
 function hello(client: Client, info: Record<string, unknown>) {
   client.res.write(
-    `retry: 3000\nevent: hello\ndata: ${JSON.stringify({ live: !!listener, ...info })}\n\n`,
+    `retry: 3000\nevent: hello\ndata: ${JSON.stringify({ live: listening("workflow_events"), ...info })}\n\n`,
   );
 }
 
@@ -165,71 +164,52 @@ async function catchUp(client: Client, afterId: number | null) {
   }
 }
 
+function onNotify(payload: string) {
+  let p: LivePayload;
+  try {
+    const raw = JSON.parse(payload);
+    if (raw.run_id == null || raw.id == null) return;
+    p = {
+      id: Number(raw.id),
+      run_id: Number(raw.run_id),
+      step_id: raw.step_id ?? null,
+      attempt_id: raw.attempt_id ?? null,
+      kind: String(raw.kind),
+    };
+  } catch {
+    return;
+  }
+  fanOut(p);
+}
+
 export async function startEventStream() {
   stopped = false;
-  let failed = false;
-  const connect = async () => {
-    // keepAlive: this LISTEN connection is idle between events; without it a VPN/NAT hop can drop it silently.
-    const c = new pg.Client({
-      connectionString: config.databaseUrl,
-      keepAlive: true,
-      keepAliveInitialDelayMillis: 30000,
-    });
-    c.on("notification", (n) => {
-      if (!n.payload) return;
-      let p: LivePayload;
-      try {
-        const raw = JSON.parse(n.payload);
-        if (raw.run_id == null || raw.id == null) return;
-        p = {
-          id: Number(raw.id),
-          run_id: Number(raw.run_id),
-          step_id: raw.step_id ?? null,
-          attempt_id: raw.attempt_id ?? null,
-          kind: String(raw.kind),
-        };
-      } catch {
-        return;
-      }
-      fanOut(p);
-    });
-    let dead = false;
-    c.on("error", (e) => {
-      // One broken connection can report several errors (terminated, then connection lost): reconnect once.
-      if (stopped || dead) return;
-      dead = true;
-      c.end().catch(ignoreError("event_stream.listener_end"));
-      log.error("event stream listener:", e.message);
-      listener = null;
-      failed = true;
-      // Connected browsers keep the stream but must not trust it for now: they switch to their polling fallback.
-      for (const cl of clients) hello(cl, { live: false });
-      const retry = () => connect().catch(() => !stopped && setTimeout(retry, 2000));
-      setTimeout(retry, 2000);
-    });
-    await c.connect();
-    await c.query("LISTEN workflow_events");
-    if (stopped) return void c.end().catch(ignoreError("event_stream.listener_end"));
-    listener = c;
-    if (failed) {
-      failed = false;
+  await unsubscribe?.();
+  unsubscribe = subscribe(
+    "workflow_events",
+    onNotify,
+    () => {
       // Notifications sent while LISTEN was down are lost; replay them to every client from what it last saw.
       for (const cl of clients)
         catchUp(cl, cl.cursor).catch((e) => log.error("event stream resync:", e.message));
-    }
-  };
-  await connect();
+    },
+    () => {
+      // Connected browsers keep the stream but must not trust it for now: they switch to their polling fallback.
+      if (!stopped) for (const cl of clients) hello(cl, { live: false });
+    },
+  );
+  await unsubscribe.ready;
 }
 
-/** Tests and shutdown: close the LISTEN connection and every open stream. */
+/** Tests and shutdown: stop listening and close every open stream. */
 export async function stopEventStream() {
   stopped = true;
   for (const cl of clients) cl.res.end();
   clients.clear();
   owners.clear();
-  const c = listener;
-  listener = null;
-  await c?.end().catch(ignoreError("event_stream.listener_end"));
+  const u = unsubscribe;
+  unsubscribe = null;
+  await u?.();
 }
 
 function cursorParam(raw: string | string[] | null | undefined): number | null {

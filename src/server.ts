@@ -30,7 +30,7 @@ import { registerDefaultExecutors } from "./workflow/executors/index.ts";
 import { registerReconcileTask, startScheduler } from "./workflow/scheduler.ts";
 import { dispatchIntake } from "./workitems/intake.ts";
 import { syncPullRequestLifecycles } from "./workflow/prLifecycle.ts";
-import { startCacheInvalidation } from "./cache/index.ts";
+import { startCacheInvalidation, stopCacheInvalidation } from "./cache/index.ts";
 import { syncRepositoriesFromConfig } from "./repos/service.ts";
 import { seedKnowledge } from "./knowledge/service.ts";
 import { startEventStream, stopEventStream } from "./api/stream.ts";
@@ -38,7 +38,7 @@ import { startGoService } from "./retrieval/goService.ts";
 import { stopChatStream } from "./chat/events.ts";
 import { recoverInstanceTurns } from "./chat/runtime.ts";
 import { childGroups } from "./workflow/local.ts";
-import { stopSupervised } from "./agent/process/supervisor.ts";
+import { delegatedScopeAvailable, stopSupervised } from "./agent/process/supervisor.ts";
 import { log } from "./logging.ts";
 import { ignoreError } from "./ignoreError.ts";
 
@@ -133,6 +133,8 @@ registerReconcileTask("login_attempts", async () => {
 const scheduler = startScheduler();
 const telegram = startTelegramTransport();
 const goService = startGoService();
+// Probed off the launch path so the first supervised start does not wait for systemd-run.
+if (config.supervision.engine === "go") void delegatedScopeAvailable();
 if (config.codeIntelligence.enabled)
   background("code intelligence startup", async () => {
     for (const repo of await repositories.list())
@@ -157,6 +159,7 @@ async function shutdown(reason: string, code: number) {
   server.close();
   void stopEventStream(); // open SSE responses would otherwise keep server.close() waiting
   void stopChatStream();
+  void stopCacheInvalidation(); // the last subscriber closes the shared LISTEN connection
   childGroups.killAll(); // detached command process groups (go test, ...) would otherwise outlive the server
   void stopSupervised(); // Go launchers clean up their cgroup (they also do by themselves when this process dies)
   // Releasing needs a few database round trips per step (slow over VPN): allow time, but never hang forever.

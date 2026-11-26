@@ -357,7 +357,7 @@ export async function antigravityAgentTurn(
     }
 
     // SIGTERM, then SIGKILL after 5 s, as before.
-    proc = superviseSpawn({
+    proc = await superviseSpawn({
       command: cfg.bin,
       args,
       cwd: input.cwd,
@@ -698,7 +698,7 @@ export async function antigravityComplete(
   });
 
   const env = antigravityEnv(process.env);
-  const proc = superviseSpawn({
+  const proc = await superviseSpawn({
     command: cfg.bin,
     args,
     cwd: process.cwd(),

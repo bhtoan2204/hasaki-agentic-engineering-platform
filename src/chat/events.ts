@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import pg from "pg";
-import { config } from "../config.ts";
+import { listening, subscribe, type Unsubscribe } from "../db/listener.ts";
 import { sessionFromRequest } from "../auth/sessions.ts";
 import type { Actor } from "../authz/access.ts";
 import { chatRepository } from "./repository.ts";
@@ -22,9 +21,8 @@ type Client = {
   queued: EventRow[] | null;
 };
 const clients = new Set<Client>();
-let listener: pg.Client | null = null;
-let starting: Promise<void> | null = null;
-let stopped = false;
+let unsubscribe: Unsubscribe | null = null;
+const holders = new Set<object>();
 const REPLAY_LIMIT = 500;
 
 /** Open chat streams (for tests and diagnostics). */
@@ -74,62 +72,46 @@ function fanOut(raw: { id: number; conversation_id: number; owner_id: number }) 
     .catch((e) => log.error("chat stream fan-out:", (e as Error).message));
 }
 
-async function connect() {
-  const c = new pg.Client({
-    connectionString: config.databaseUrl,
-    keepAlive: true,
-    keepAliveInitialDelayMillis: 30000,
-  });
-  c.on("notification", (n) => {
-    if (!n.payload) return;
-    try {
-      const raw = JSON.parse(n.payload);
-      fanOut({
-        id: Number(raw.id),
-        conversation_id: Number(raw.conversation_id),
-        owner_id: Number(raw.owner_id),
-      });
-    } catch {
-      /* malformed payload */
-    }
-  });
-  let dead = false;
-  c.on("error", (e) => {
-    if (stopped || dead) return;
-    dead = true;
-    listener = null;
-    c.end().catch(ignoreError("chat_stream.listener_end"));
-    log.error("chat stream listener:", e.message);
-    const retry = () =>
-      connect()
-        .then(() => {
-          // Notifications sent while LISTEN was down are lost: replay each client from its cursor.
-          for (const cl of clients) void catchUp(cl).catch(ignoreError("chat_stream.catch_up"));
-        })
-        .catch(() => !stopped && setTimeout(retry, 2000));
-    setTimeout(retry, 2000);
-  });
-  await c.connect();
-  await c.query("LISTEN chat_events");
-  if (stopped) return void c.end().catch(ignoreError("chat_stream.listener_end"));
-  listener = c;
+function onNotify(payload: string) {
+  try {
+    const raw = JSON.parse(payload);
+    fanOut({
+      id: Number(raw.id),
+      conversation_id: Number(raw.conversation_id),
+      owner_id: Number(raw.owner_id),
+    });
+  } catch {
+    /* malformed payload */
+  }
 }
 
-/** Lazy: the dedicated LISTEN connection exists only while someone uses chat on this instance. */
-function ensureListener() {
-  if (listener || stopped) return Promise.resolve();
-  starting ??= connect().finally(() => (starting = null));
-  return starting;
+/**
+ * Lazy: chat_events is LISTENed (on the shared listener) only while a stream on this instance holds it; the last
+ * holder to leave UNLISTENs it.
+ */
+function holdListener(holder: object) {
+  holders.add(holder);
+  unsubscribe ??= subscribe("chat_events", onNotify, () => {
+    // Notifications sent while LISTEN was down are lost: replay each client from its cursor.
+    for (const cl of clients) void catchUp(cl).catch(ignoreError("chat_stream.catch_up"));
+  });
+  return listening("chat_events") ? Promise.resolve() : unsubscribe.ready;
+}
+
+function releaseListener(holder: object) {
+  if (!holders.delete(holder) || holders.size || !unsubscribe) return;
+  const u = unsubscribe;
+  unsubscribe = null;
+  void u().catch(ignoreError("chat_stream.unlisten"));
 }
 
 export async function stopChatStream() {
-  stopped = true;
   for (const c of clients) c.res.end();
   clients.clear();
-  const l = listener;
-  listener = null;
-  await l?.end().catch(ignoreError("chat_stream.listener_end"));
-  stopped = false;
+  holders.clear();
+  const u = unsubscribe;
+  unsubscribe = null;
+  await u?.();
 }
 
 async function catchUp(client: Client) {
@@ -148,7 +130,7 @@ async function catchUp(client: Client) {
         (await chatRepository.latestEventId(client.conversationId))?.id ?? client.cursor;
     } else for (const r of rows) write(client, r);
     client.res.write(
-      `retry: 3000\nevent: hello\ndata: ${JSON.stringify({ live: !!listener, cursor: client.cursor, replayed: reset ? 0 : rows.length, reset })}\n\n`,
+      `retry: 3000\nevent: hello\ndata: ${JSON.stringify({ live: listening("chat_events"), cursor: client.cursor, replayed: reset ? 0 : rows.length, reset })}\n\n`,
     );
   } finally {
     const queued = client.queued ?? [];
@@ -183,15 +165,17 @@ export async function handleChatStream(
   let closed = false;
   let ping: ReturnType<typeof setInterval> | null = null;
   let client: Client | null = null;
+  const holder = {};
   const release = () => {
     closed = true;
     if (ping) clearInterval(ping);
     if (client) clients.delete(client);
+    releaseListener(holder);
   };
   req.on("close", release);
   const after =
     cursorParam(req.headers["last-event-id"]) ?? cursorParam(url.searchParams.get("after"));
-  await ensureListener().catch((e) => log.error("chat stream listen:", (e as Error).message));
+  await holdListener(holder).catch((e) => log.error("chat stream listen:", (e as Error).message));
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",

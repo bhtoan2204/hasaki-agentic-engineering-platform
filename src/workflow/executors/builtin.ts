@@ -491,30 +491,30 @@ unset PLATFORM_COMMAND_PATH platform_command_dirs platform_command_dir`;
 node() { if [ "\${1:-}" = "\${PLATFORM_NODE_DEPENDENCIES:-}" ]; then PLATFORM_DEPENDENCY_EVIDENCE_DIR="$platform_evidence_dir" command node "$@"; else command node "$@"; fi; }`;
   const script = `${restorePath}\n${helperScope}\n${pg[TEST_POSTGRES_BIN_ENV] ? `export PATH="$${TEST_POSTGRES_BIN_ENV}:$PATH"\n` : ""}${command}`;
   const git = useBwrap ? await gitMounts([cwd]) : [];
+  // The whole tree (bash + go test + test binaries, and anything they detach) goes on abort or timeout, at once.
+  const proc = await superviseSpawn({
+    command: useBwrap ? "bwrap" : "bash",
+    args: useBwrap
+      ? [
+          ...bwrapArguments(
+            cwd,
+            proc0.isolation?.liveRoot ?? null,
+            git,
+            opts.network === false,
+            opts.readOnly === true,
+          ),
+          "bash",
+          "-lc",
+          script,
+        ]
+      : ["-lc", script],
+    cwd,
+    env: childEnv,
+    class: "verification",
+    graceMs: 0,
+    timeoutMs: timeoutMs + 30_000,
+  });
   const r = await new Promise<CommandResult>((resolve) => {
-    // The whole tree (bash + go test + test binaries, and anything they detach) goes on abort or timeout, at once.
-    const proc = superviseSpawn({
-      command: useBwrap ? "bwrap" : "bash",
-      args: useBwrap
-        ? [
-            ...bwrapArguments(
-              cwd,
-              proc0.isolation?.liveRoot ?? null,
-              git,
-              opts.network === false,
-              opts.readOnly === true,
-            ),
-            "bash",
-            "-lc",
-            script,
-          ]
-        : ["-lc", script],
-      cwd,
-      env: childEnv,
-      class: "verification",
-      graceMs: 0,
-      timeoutMs: timeoutMs + 30_000,
-    });
     const child = proc.child;
     const stop = () => proc.stop();
     signal.addEventListener("abort", stop, { once: true });

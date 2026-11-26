@@ -354,7 +354,7 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
     }
 
     // SIGTERM, then SIGKILL after 5 s, as before.
-    proc = superviseSpawn({
+    proc = await superviseSpawn({
       command: cfg.bin,
       args,
       cwd: input.cwd,
@@ -716,7 +716,7 @@ export async function copilotComplete(
   });
 
   const env = copilotEnv(process.env);
-  const proc = superviseSpawn({
+  const proc = await superviseSpawn({
     command: cfg.bin,
     args,
     cwd: process.cwd(),

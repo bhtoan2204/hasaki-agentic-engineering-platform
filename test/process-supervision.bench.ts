@@ -74,12 +74,12 @@ interface Handle {
   stop(): void;
   closed: Promise<void>;
 }
-function start(
+async function start(
   engine: Engine,
   command: string,
   args: string[],
   cls: "agent" | "verification" = "agent",
-): Handle {
+): Promise<Handle> {
   if (engine === "legacy") {
     const child = spawn(command, args, { detached: true, stdio: ["pipe", "pipe", "pipe"] });
     const closed = new Promise<void>((r) => child.once("close", () => r()));
@@ -87,7 +87,7 @@ function start(
     return { child: child as Handle["child"], stop: () => legacyKillTree(child), closed };
   }
   config.supervision.engine = engine;
-  const p = sup.superviseSpawn({
+  const p = await sup.superviseSpawn({
     command,
     args,
     cwd: root,
@@ -152,14 +152,16 @@ const workloads: Record<string, (e: Engine) => Promise<object>> = {
   async agents(e) {
     let first = Infinity;
     const t = performance.now();
-    const hs = Array.from({ length: AGENTS }, () =>
-      start(
-        e,
-        "python3",
-        python(`import json,sys,time
+    const hs = await Promise.all(
+      Array.from({ length: AGENTS }, () =>
+        start(
+          e,
+          "python3",
+          python(`import json,sys,time
 for i in range(2000):
   sys.stdout.write(json.dumps({"type":"item","i":i,"text":"x"*200})+"\\n")
   if i % 100 == 0: sys.stdout.flush(); time.sleep(0.01)`),
+        ),
       ),
     );
     let lines = 0;
@@ -185,12 +187,14 @@ for i in range(2000):
     await Promise.all(
       Array.from(
         { length: n },
-        () =>
-          start(
-            e,
-            "python3",
-            python("import time\nt=time.time()\nwhile time.time()-t<2: pass"),
-            "verification",
+        async () =>
+          (
+            await start(
+              e,
+              "python3",
+              python("import time\nt=time.time()\nwhile time.time()-t<2: pass"),
+              "verification",
+            )
           ).closed,
       ),
     );
@@ -198,7 +202,7 @@ for i in range(2000):
   },
   // High-volume stdout: BENCH_FLOOD_MB through a pipe the platform drains.
   async flood(e) {
-    const h = start(e, "sh", ["-c", `head -c ${FLOOD_MB * 1048576} /dev/zero`]);
+    const h = await start(e, "sh", ["-c", `head -c ${FLOOD_MB * 1048576} /dev/zero`]);
     let bytes = 0;
     h.child.stdout.on("data", (b: Buffer) => (bytes += b.length));
     await h.closed;
@@ -208,7 +212,7 @@ for i in range(2000):
   async tree(e) {
     const marker = `ctp-bench-${e}-${Date.now()}`;
     const sleeper = `python3 -c "import time; time.sleep(600)" ${marker}`;
-    const h = start(e, "bash", [
+    const h = await start(e, "bash", [
       "-c",
       `for i in $(seq ${TREE / 4}); do (${sleeper}) & setsid ${sleeper} & (setsid ${sleeper} &) ; (${sleeper} &) ; done; wait`,
     ]);
@@ -253,7 +257,7 @@ const result: Record<string, unknown> = {
     cpus: availableParallelism(),
     kernel: readFileSync("/proc/sys/kernel/osrelease", "utf8").trim(),
   },
-  delegated_cgroup: sup.delegatedScopeAvailable(),
+  delegated_cgroup: await sup.delegatedScopeAvailable(),
   workloads: {} as Record<string, Record<string, object>>,
 };
 const res = result.workloads as Record<string, Record<string, object>>;
