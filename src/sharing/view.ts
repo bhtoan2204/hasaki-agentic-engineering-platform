@@ -9,10 +9,14 @@ import type { LookupResult } from "./service.ts";
  * often it was reused, what holds a failed one back, and, for a production error, the occurrences now next to the occurrences when it was
  * analysed (the error group is updated by every scan; the analysis is not re-run for that).
  *
- * The source run id is only given to the member who started it (runs stay owner-only); the result only on a hit (the
- * access check has passed by then).
+ * The source run id is only given to the member who started it (runs stay owner-only); the result only on a hit or a read
+ * (the access check has passed by then). Callers describe only rows the actor may read.
  */
-export async function describeAnalysis(r: LookupResult, actor: SharedActor, now = new Date()) {
+export async function describeAnalysis(
+  r: LookupResult | { outcome: "read"; analysis: SharedRow },
+  actor: SharedActor,
+  now = new Date(),
+) {
   const a = r.analysis as SharedRow;
   const own = a.created_by === actor.id;
   const published = a.finished_at && a.status !== "failed" ? a.finished_at : null;
@@ -35,7 +39,10 @@ export async function describeAnalysis(r: LookupResult, actor: SharedActor, now 
     run_by: {
       id: a.created_by,
       name: a.created_by_name ?? (own ? (actor.username ?? null) : null),
+      is_you: own,
     },
+    repositories: a.scope_repos,
+    focus: typeof a.key_parts.focus === "string" ? a.key_parts.focus : null,
     provenance: {
       trigger: a.trigger,
       started_at: a.started_at,
@@ -63,7 +70,10 @@ export async function describeAnalysis(r: LookupResult, actor: SharedActor, now 
       : {}),
     ...(a.error_key ? { occurrences: await occurrences(a) } : {}),
     ...(own && a.source_run_id ? { run_id: a.source_run_id } : {}),
-    ...(r.outcome === "hit" ? { result: a.result } : {}),
+    // A read (GET) also returns a stale result, labelled as such: the reader decides whether to re-run it.
+    ...(r.outcome === "hit" || (r.outcome === "read" && a.result != null)
+      ? { result: a.result }
+      : {}),
   };
 }
 

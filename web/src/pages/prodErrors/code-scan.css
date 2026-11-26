@@ -262,3 +262,6 @@
 .cs-row:has(.is-resolved, .is-dismissed) .cs-issue {
   color: var(--ink-2);
 }
+.cs-shared {
+  margin-top: 12px;
+}

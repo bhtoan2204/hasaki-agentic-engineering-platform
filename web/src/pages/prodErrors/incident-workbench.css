@@ -111,3 +111,8 @@
     color: var(--muted);
   }
 }
+.wb-shared {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}

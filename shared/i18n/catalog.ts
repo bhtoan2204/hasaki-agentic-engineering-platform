@@ -31,6 +31,7 @@ import { runsMessages } from "./catalog/runs.ts";
 import { rvMessages } from "./catalog/rv.ts";
 import { setMessages } from "./catalog/set.ts";
 import { siMessages } from "./catalog/si.ts";
+import { srMessages } from "./catalog/sr.ts";
 import { trMessages } from "./catalog/tr.ts";
 import { traceMessages } from "./catalog/trace.ts";
 import { tsMessages } from "./catalog/ts.ts";
@@ -71,6 +72,7 @@ const parts = [
   rvMessages,
   setMessages,
   siMessages,
+  srMessages,
   trMessages,
   traceMessages,
   tsMessages,

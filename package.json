@@ -71,6 +71,7 @@
     "smoke:chat": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/chat.browser.ts",
     "smoke:run-detail": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test --test-concurrency=4 test/run-detail.browser.ts",
     "smoke:bug-hunter": "node --disable-warning=ExperimentalWarning test/run-integration.ts --test-concurrency=4 test/bug-hunter.browser.ts",
+    "smoke:shared-results": "node --disable-warning=ExperimentalWarning test/run-integration.ts test/shared-results.browser.ts",
     "smoke:ui-quality": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts test/ui-quality.browser.ts",
     "arch:check": "node --disable-warning=ExperimentalWarning scripts/arch-check.ts",
     "arch:baseline": "node --disable-warning=ExperimentalWarning scripts/arch-check.ts --write-baseline",

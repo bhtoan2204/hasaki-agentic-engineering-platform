@@ -1,0 +1,50 @@
+.shared-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: 8px;
+  background: var(--surface-2);
+  min-width: 0;
+}
+.shared-card.tone-ok {
+  border-left-color: var(--ok);
+}
+.shared-card.tone-wait {
+  border-left-color: var(--warn);
+}
+.shared-card.tone-err {
+  border-left-color: var(--err);
+}
+.shared-card.tone-run {
+  border-left-color: var(--brand);
+}
+.shared-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.shared-card p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.shared-card.tone-ok .shared-state {
+  color: var(--ok);
+}
+.shared-card.tone-wait .shared-state,
+.shared-warn {
+  color: var(--warn);
+}
+.shared-card.tone-err .shared-state,
+.shared-err {
+  color: var(--err);
+}
+.shared-result summary {
+  cursor: pointer;
+}
+.shared-actions {
+  display: flex;
+  justify-content: flex-end;
+}

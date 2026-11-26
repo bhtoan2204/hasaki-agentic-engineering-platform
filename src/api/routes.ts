@@ -8,6 +8,7 @@ import { metricsRoutes } from "./routes/metrics.ts";
 import { memoryRoutingRoutes } from "./routes/memory-routing.ts";
 import { impactRadarRoutes } from "./routes/impact-radar.ts";
 import { codeFindingsRoutes } from "./routes/code-findings.ts";
+import { sharedAnalysesRoutes } from "./routes/shared-analyses.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { learningDeliveryRoutes } from "./routes/learning-delivery.ts";
 import { intakeRoutes } from "./routes/intake.ts";
@@ -36,6 +37,7 @@ export const routes: Route[] = [
   ...metricsRoutes,
   ...memoryRoutingRoutes,
   ...impactRadarRoutes,
+  ...sharedAnalysesRoutes,
   ...codeFindingsRoutes,
   ...runRoutes,
   ...learningDeliveryRoutes,

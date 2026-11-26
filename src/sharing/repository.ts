@@ -246,6 +246,34 @@ export async function keyExists(db: Db, kind: SharedKind, key: string) {
   ]));
 }
 
+/** The latest version (any status) of each kind of analysis of one production error in this scope. */
+export function latestForError(
+  db: Db,
+  errorKey: string,
+  kinds: readonly SharedKind[],
+  scope: string,
+) {
+  return q<SharedRow>(
+    db,
+    `${SELECT} WHERE a.id IN (
+       SELECT DISTINCT ON (kind) id FROM shared_analyses
+        WHERE error_key = $1 AND kind = ANY($2::text[]) AND key_parts->>'scope' = $3
+        ORDER BY kind, id DESC)`,
+    [errorKey, kinds, scope],
+  );
+}
+
+/** The latest code assessment (any status, any commit) of exactly these repositories and this (stored) focus. */
+export function latestForRepositories(db: Db, repos: string[], focus: string, scope: string) {
+  return one<SharedRow>(
+    db,
+    `${SELECT} WHERE a.kind = 'code_assessment' AND a.scope_repos = $1 AND COALESCE(a.key_parts->>'focus', '') = $2
+                AND a.key_parts->>'scope' = $3
+      ORDER BY a.id DESC LIMIT 1`,
+    [repos, focus, scope],
+  );
+}
+
 /** Running rows that can be settled now: their run ended, the run is gone, or they outlived the running timeout. */
 export function settleable(
   db: Db,

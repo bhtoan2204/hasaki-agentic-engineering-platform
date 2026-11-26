@@ -14,6 +14,8 @@ import {
   X,
 } from "lucide-react";
 import { api, useApi, useLive } from "../../api.ts";
+import { SharedAnalysisCard } from "../../components/SharedAnalysis.tsx";
+import type { SharedView } from "../../sharedAnalysis.ts";
 import { dialog } from "../../dialog/index.ts";
 import { useI18n } from "../../i18n/index.tsx";
 import {
@@ -185,12 +187,34 @@ export function CodeScan() {
   const inProject = available.filter((r) => !project || (r.projects ?? []).includes(project));
   const targets = repo ? [repo] : project ? inProject.map((r) => r.name) : [];
 
+  // Shared results (flag SHARED_RESULTS_CODE_ASSESSMENT): the latest assessment of exactly these repositories and focus
+  // that the viewer may read, from any member; an older commit shows as "may be outdated".
+  const [sharedFocus, setSharedFocus] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setSharedFocus(focus.trim()), 400);
+    return () => clearTimeout(id);
+  }, [focus]);
+  const shared = useApi<{ shared: SharedView | null }>(
+    targets.length
+      ? `/api/code-scans/shared?${new URLSearchParams({ repositories: targets.join(","), focus: sharedFocus })}`
+      : null,
+  );
+  const sharedView = shared.data?.shared ?? null;
+  const reloadShared = shared.reload;
+  useEffect(() => {
+    if (sharedView?.status !== "running") return;
+    const id = setInterval(() => reloadShared(), 4000);
+    return () => clearInterval(id);
+  }, [sharedView?.status, reloadShared]);
+
   const assess = async (force = false): Promise<void> => {
     const text = focus.trim();
     const subject = repo || project;
     const res = await act(() =>
       api<
-        { started: true; run_id: number } | { reused: "running" | "same_commits"; run_id: number }
+        | { started: true; run_id: number; shared?: SharedView }
+        | { reused: "running" | "same_commits"; run_id: number }
+        | { reused: "shared"; shared: SharedView }
       >("/api/code-scans", {
         repositories: targets,
         ...(project ? { project } : {}),
@@ -201,9 +225,16 @@ export function CodeScan() {
     );
     if (!res) return;
     scans.reload();
+    shared.reload();
     if ("started" in res) {
       setFocus("");
-      toast.success(t("cs.started"));
+      toast.success(t(force && res.shared ? "sr.forced" : "cs.started"));
+      return;
+    }
+    if (res.reused === "shared") {
+      if (res.shared.outcome === "hit")
+        toast.success(t("sr.toastHit", { name: res.shared.run_by.name ?? "—" }));
+      else toast.info(t("sr.toastWait"));
       return;
     }
     if (res.reused === "running") {
@@ -288,6 +319,11 @@ export function CodeScan() {
             </span>
           )}
         </div>
+        {sharedView && (
+          <div className="cs-shared">
+            <SharedAnalysisCard view={sharedView} onForce={() => assess(true)} />
+          </div>
+        )}
       </section>
 
       {view === "findings" && running.map((scan) => <ScanCard key={scan.id} scan={scan} />)}

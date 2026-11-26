@@ -7,7 +7,7 @@
 - [x] 4. Invalidation + retry + force re-run + provenance
 - [x] 5. Access + scrub
 - [x] 6. Metrics + tracing + feature flags + backfill
-- [ ] 7. UI / API
+- [x] 7. UI / API
 
 ## Step 2 (schema and key)
 
@@ -449,3 +449,60 @@ context's `request_id`/`correlation_id` (AsyncLocalStorage, in memory). If spans
 - Counters are per process (like every runtime metric); several instances must be summed by whoever scrapes them.
 - Two unrelated timing-based integration tests (`chat-knowledge`, `codeact-evidence`) failed once under full-suite load
   and passed alone (2 of 2) and on the next full run.
+
+## Step 7 (UI and API)
+
+Done:
+
+- **API, additive only.** Existing start routes keep their shapes; their `shared` field is the same view as below.
+  - `GET /api/shared-analyses/:id`: one analysis.
+    - A reader the access rules (step 5) refuse gets 404, so no runner name is leaked.
+    - Admin support access (`?scope=all`) is allowed and audited (`support.read`), as plan 6.1 says.
+  - `GET /api/prod-errors/:fp/shared` returns `{runtime_rca, bug_hunt}`: the latest version (any status) of each that the
+    reader may read, or null.
+  - `GET /api/code-scans/shared?repositories=a,b&focus=` returns `{shared}`: the latest code assessment of exactly these
+    repositories and this focus. The focus is normalized and scrubbed like the stored key part, and an older commit shows
+    as stale.
+  - A kind whose flag is off answers as if nothing were shared; with both flags off nothing is queried.
+  - The view (`describeAnalysis`) gains three fields: `run_by.is_you`, `repositories` and `focus`. It also accepts a
+    `read` outcome: a read returns the result, a stale one included, labelled by its status.
+- **UI** (`web/src/components/SharedAnalysis.tsx`, pure decisions in `web/src/sharedAnalysis.ts`, copy in
+  `shared/i18n/catalog/sr.ts`, vi/en). Existing components only (`Button`, `JsonBlock`, `dialog.confirm`, pills); no new
+  library. The card shows:
+  - the badge "Reused", the kind, the state (valid / may be outdated / someone else is running it / you are running it /
+    failed / a newer version exists) and the version;
+  - who ran it ("you", the name, or "another member" when the API has no name), how long ago, the reuse count, and the
+    validity end;
+  - **stale**: shown, never hidden, with a warning and the reasons (code changed (repos), model, prompt/rubric, workflow,
+    verification rules, validity period);
+  - **failed**: the reason, when it may run again, and whether it is out of attempts;
+  - **production errors**: occurrences when analysed against today's, new ones since (same day), and last seen;
+  - the result (collapsible `JsonBlock` with its item count);
+  - **Re-run** (not while running): a confirmation, then the step 4 force through the existing start routes.
+  - Incident Workbench: the RCA and bug hunt cards at the top. They are polled while one is running, and the bug hunt
+    re-run uses the row's repositories.
+  - Code Assessment: the card for the chosen repositories and focus (focus debounced 400 ms), polled while running.
+  - The start toast says "reused X's result" or "someone else is running it" instead of "started".
+- **Fixed on the way** (client only): `POST /api/code-scans` answering `{reused: "shared"}` (step 3, flag on) fell into
+  the "same commits" dialog with no run id.
+
+### Tests
+
+- `test/shared-analysis-view.test.ts` (unit, 6): states, stale (row or past its end) with reasons, re-run availability, the
+  runner rule, age, and every label in both locales.
+- `test/shared-results-api.integration.ts` (6): the view contract; reader vs other member (no `run_id`); 404 without
+  access; admin support read audited; subject lookup with focus normalization; stale returned and labelled; running by
+  another member; RCA with log access only; flags off.
+- `test/shared-results.browser.ts` (3, `npm run smoke:shared-results`, real browser on the production bundle):
+  - valid and reused (runner, age, reuses, result, Re-run);
+  - stale with its warning and reason, where Re-run asks first and Cancel starts nothing;
+  - someone else running it (Vietnamese), with no Re-run.
+
+### Not checked / remaining risks
+
+- The Incident Workbench cards are covered by the API test and type checks, not by a browser test (it needs a full incident
+  fixture).
+- The subject endpoints show the **latest** version only. If it is not readable by the viewer, nothing is shown, even if an
+  older readable one exists (fail closed).
+- The "Reused" badge is also shown on the reader's own result and on a running one; it means "shared", not "someone
+  else's".

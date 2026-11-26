@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Activity, Bug, ExternalLink, Layers, Wrench } from "lucide-react";
 import { api, useApi } from "../../api.ts";
 import { Button, ErrorBox, toast } from "../../ui.tsx";
 import { dialog } from "../../dialog/index.ts";
 import { useI18n } from "../../i18n/index.tsx";
 import { usePolling } from "./bugHuntParts.tsx";
+import { SharedAnalysisCard } from "../../components/SharedAnalysis.tsx";
+import type { SharedView } from "../../sharedAnalysis.ts";
 import "./incident-workbench.css";
 
 /** Shapes of GET /api/prod-errors/:fp/workbench (src/incidents/unified.ts). */
@@ -241,10 +243,22 @@ export function IncidentWorkbench({
 }) {
   const { t } = useI18n();
   const wb = useApi<Workbench>(`/api/prod-errors/${fingerprint}/workbench`);
+  // Shared results (flags SHARED_RESULTS_*): the latest RCA and bug hunt of this error that the viewer may read.
+  const shared = useApi<{ runtime_rca: SharedView | null; bug_hunt: SharedView | null }>(
+    `/api/prod-errors/${fingerprint}/shared`,
+  );
   const [picking, setPicking] = useState<null | "bug-hunt" | "both">(null);
   const [busy, setBusy] = useState(false);
   const d = wb.data;
-  usePolling(!!(d?.runtime?.active || d?.bug_hunt?.active), wb.reload);
+  const sh = shared.data;
+  const sharedRunning = sh?.runtime_rca?.status === "running" || sh?.bug_hunt?.status === "running";
+  const { reload: reloadWb } = wb;
+  const { reload: reloadShared } = shared;
+  const reloadAll = useCallback(() => {
+    reloadWb();
+    reloadShared();
+  }, [reloadWb, reloadShared]);
+  usePolling(!!(d?.runtime?.active || d?.bug_hunt?.active || sharedRunning), reloadAll);
 
   const start = async (
     kind: "runtime" | "bug-hunt" | "both",
@@ -262,11 +276,19 @@ export function IncidentWorkbench({
       );
       const errs =
         kind === "both" ? Object.values(r).filter((x) => (x as { error?: string })?.error) : [];
+      const reused = (kind === "both" ? [r.runtime, r.bug_hunt] : [r])
+        .map((x) => (x as { shared?: SharedView } | undefined)?.shared)
+        .find((s) => s && (s.outcome === "hit" || s.outcome === "wait"));
       if (errs.length) toast(errs.map((e) => (e as { error: string }).error).join("\n"), "err");
+      else if (force) toast(t("sr.forced"), "ok");
+      else if (reused?.outcome === "hit")
+        toast(t("sr.toastHit", { name: reused.run_by.name ?? "—" }), "ok");
+      else if (reused) toast(t("sr.toastWait"), "ok");
       else toast(t("an.wb.started"), "ok");
       const hunt = (kind === "both" ? r.bug_hunt : r) as { hunt_id?: number } | undefined;
       if (hunt?.hunt_id && onHunt) onHunt(hunt.hunt_id, "queued");
       wb.reload();
+      shared.reload();
     } catch (e) {
       const msg = (e as Error).message;
       if (/already completed/.test(msg) && !force) {
@@ -322,6 +344,24 @@ export function IncidentWorkbench({
   );
   return (
     <section className="wb" aria-label={t("an.wb.title")} data-testid="incident-workbench">
+      {(sh?.runtime_rca || sh?.bug_hunt) && (
+        <div className="wb-shared" data-testid="wb-shared">
+          {sh.runtime_rca && (
+            <SharedAnalysisCard
+              view={sh.runtime_rca}
+              busy={busy}
+              onForce={() => start("runtime", undefined, true)}
+            />
+          )}
+          {sh.bug_hunt && (
+            <SharedAnalysisCard
+              view={sh.bug_hunt}
+              busy={busy}
+              onForce={() => start("bug-hunt", sh.bug_hunt!.repositories, true)}
+            />
+          )}
+        </div>
+      )}
       <div className="wb-summary" data-testid="wb-summary">
         <div className="wb-summary-head">
           <h4>
