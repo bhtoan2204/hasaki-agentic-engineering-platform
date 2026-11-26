@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -280,6 +280,52 @@ test("the revision prompt carries the new failures' test output and test code, n
   assert.match(prompts[1], /panic: runtime error/);
   assert.match(prompts[1], /Test code in `a_test.go`[\s\S]*expectSpan\(t, "use_case"\)/);
   assert.doesNotMatch(prompts[1], /an old, known failure/);
+});
+
+test("a file without a conflict that a build error points at is revised too (semantic conflict)", async () => {
+  const iface = (methods: string) => `package a\n\ntype UseCase interface {\n${methods}}\n`;
+  const { origin, clone } = conflict([["iface.go", iface("\tA() int\n")]]);
+  sh(clone, "checkout", "-q", "release/qc");
+  commit(clone, "iface.go", iface("\tA() int\n\tCancelOrder() error\n"), "qc: new method");
+  sh(clone, "push", "-q", "origin", "release/qc");
+  sh(clone, "checkout", "-q", "feature");
+  const traced =
+    "package a\n\ntype traced struct{ next UseCase }\n\nvar _ UseCase = (*traced)(nil)\n\nfunc (t *traced) A() int { return t.next.A() }\n";
+  commit(clone, "traced.go", traced, "feature: tracing decorator");
+  sh(clone, "push", "-q", "origin", "feature");
+  const prompts: string[] = [];
+  setMergeModel(async (_run, prompt) => {
+    prompts.push(prompt);
+    if (prompt.includes("Current traced.go"))
+      return `<<<RESOLVED\n${traced}\nfunc (t *traced) CancelOrder() error { return t.next.CancelOrder() }\nRESOLVED>>>`;
+    return "<<<RESOLVED\npackage a\n\nfunc A() int { return 2 + 3 }\nRESOLVED>>>";
+  });
+  const r = await mergeAndPush(
+    context([]),
+    async (_cmd, cwd) => {
+      return readFileSync(join(cwd, "traced.go"), "utf8").includes("CancelOrder")
+        ? { code: 0, output: "ok", timedOut: false }
+        : {
+            code: 1,
+            output: `# ${PKG}\ntraced.go:5:17: cannot use (*traced)(nil) (value of type *traced) as UseCase value in variable declaration: *traced does not implement UseCase (missing method CancelOrder)\nFAIL\t${PKG} [build failed]`,
+            timedOut: false,
+          };
+    },
+    { repo: "svc", branch: "feature", path: clone },
+    "release/qc",
+    lock,
+    { baseline: baselineOf([]) },
+  );
+  assert.equal(r.status, "merged");
+  const revision = prompts.find((p) => p.includes("Current traced.go"))!;
+  assert.match(revision, /had no conflict, but the merge brings it in/);
+  assert.match(
+    revision,
+    /iface\.go:\d+:\s*CancelOrder\(\) error/,
+    "the missing method's declaration is shown",
+  );
+  assert.match(show(origin, "release/qc", "traced.go"), /func \(t \*traced\) CancelOrder\(\)/);
+  assert.deepEqual(r.conflicts, ["a.go"]);
 });
 
 test("stale mocks are regenerated and kept when that makes the tests pass", async () => {

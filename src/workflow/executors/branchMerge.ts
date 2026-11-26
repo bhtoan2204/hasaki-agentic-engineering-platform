@@ -356,6 +356,42 @@ async function failingTestSources(dir: string, text: string, exclude: string[]) 
   return sources;
 }
 
+/**
+ * Files without a conflict that the merge still brings in (changed against the target) and that a build error points
+ * at: a semantic conflict, e.g. the target added an interface method that a file from the branch does not implement.
+ */
+async function implicatedFiles(dir: string, output: string, conflicted: string[]) {
+  const changed = new Set(
+    (await git(dir, "diff", "--name-only", "HEAD^1", "HEAD")).split("\n").filter(Boolean),
+  );
+  const out = new Set<string>();
+  for (const m of output.matchAll(/^(\S+\.go):\d+:\d+: /gm)) {
+    const p = m[1].startsWith(dir + "/") ? m[1].slice(dir.length + 1) : m[1].replace(/^\.\//, "");
+    if (changed.has(p) && !conflicted.includes(p) && !p.endsWith("_test.go")) out.add(p);
+  }
+  return [...out].slice(0, 3);
+}
+
+/** Where the methods a build error reports as missing are declared on the merged tree (`missing method X`). */
+async function missingMethodDeclarations(dir: string, output: string) {
+  const names = [...new Set([...output.matchAll(/missing method (\w+)/g)].map((m) => m[1]))];
+  const found: string[] = [];
+  for (const name of names.slice(0, 3)) {
+    const hits = await git(
+      dir,
+      "grep",
+      "-n",
+      "-E",
+      `^\\s*(func \\([^)]*\\) )?${name}\\(`,
+      "--",
+      "*.go",
+      ":!*_test.go",
+    ).catch(() => "");
+    found.push(...hits.split("\n").filter(Boolean).slice(0, 5));
+  }
+  return found;
+}
+
 const revertTree = async (dir: string) => {
   await git(dir, "reset", "--hard", "HEAD");
   await git(dir, "clean", "-fdq");
@@ -547,6 +583,8 @@ async function testResolution(
       ? ` with failures that \`${target}\` does not have on its own`
       : "";
     const tests = await failingTestSources(dir, verdict.detail ?? verdict.summary, files);
+    const extra = await implicatedFiles(dir, r.output, files);
+    const declarations = await missingMethodDeclarations(dir, r.output);
     const evidence = [
       ...(verdict.detail ? ["Test output:", "```", verdict.detail, "```"] : []),
       ...tests.flatMap((t) => [
@@ -555,8 +593,11 @@ async function testResolution(
         t.text,
         "```",
       ]),
+      ...(declarations.length
+        ? ["Declarations of the missing methods on the merged tree:", "```", ...declarations, "```"]
+        : []),
     ];
-    for (const file of files) {
+    for (const file of [...files, ...extra]) {
       const current = await readFile(join(dir, file), "utf8");
       const prompt = [
         `A merge into \`${target}\` resolved conflicts in ${files.join(", ")}, and the build/test now fails${cause}:`,
@@ -564,6 +605,11 @@ async function testResolution(
         verdict.summary,
         "```",
         ...evidence,
+        ...(extra.includes(file)
+          ? [
+              `\`${file}\` had no conflict, but the merge brings it in and the build error points at it: it may need to follow a change on \`${target}\` (for example a new interface method), in the style of the code around it.`,
+            ]
+          : []),
         `If \`${file}\` causes this failure, fix it while keeping both sides' changes; otherwise return it unchanged.`,
         `Current ${file}:`,
         "```",
@@ -574,7 +620,7 @@ async function testResolution(
       const reply = await ask(ctx, prompt);
       await writeFile(join(dir, file), resolvedText(reply, current));
     }
-    await git(dir, "add", "--", ...files);
+    await git(dir, "add", "--", ...files, ...extra);
     await git(dir, ...IDENTITY, "commit", "--amend", "--no-edit");
   }
 }
