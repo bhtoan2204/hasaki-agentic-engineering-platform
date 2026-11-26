@@ -1,12 +1,12 @@
-import { log } from "../logging.ts";
 import { canStart, isServable } from "./policy.ts";
 import { canReadShared } from "./access.ts";
 import { scrubResult } from "./scrub.ts";
+import { recordSharedEvent } from "./telemetry.ts";
 import type { SharedRow } from "./repository.ts";
 import type { SharedKind } from "./key.ts";
+import type { SharedEvent } from "./types.ts";
 
-export type SharedOutcomeName =
-  "hit" | "wait" | "miss" | "forced" | "bypass" | "lost_race" | "denied";
+export type { SharedEvent, SharedOutcomeName } from "./types.ts";
 export interface SharedActor {
   id: number;
   role?: string;
@@ -27,14 +27,7 @@ export interface SharingHooks {
   servable(row: SharedRow, now: Date): boolean;
   mayStart(latest: SharedRow | null, now: Date): boolean;
   scrub(kind: SharedKind, result: unknown): unknown;
-  observe(event: {
-    kind: SharedKind;
-    outcome: SharedOutcomeName | "published" | "failed" | "expired";
-    analysisId: number | null;
-    version: number | null;
-    runId: number | null;
-    actorId: number | null;
-  }): void;
+  observe(event: SharedEvent): void;
 }
 
 export const DEFAULT_HOOKS: SharingHooks = {
@@ -42,11 +35,7 @@ export const DEFAULT_HOOKS: SharingHooks = {
   servable: (row, now) => isServable(row, now),
   mayStart: (latest, now) => canStart(latest, now),
   scrub: (kind, result) => scrubResult(kind, result),
-  // R1: only values already in scope; no query to enrich the line.
-  observe: (e) =>
-    log.info(
-      `shared result ${e.kind}: ${e.outcome} analysis=${e.analysisId ?? "-"} v=${e.version ?? "-"} run=${e.runId ?? "-"} actor=${e.actorId ?? "-"}`,
-    ),
+  observe: (e) => recordSharedEvent(e),
 };
 
 let current: SharingHooks = DEFAULT_HOOKS;

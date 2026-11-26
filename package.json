@@ -19,6 +19,7 @@
     "test:all": "npm test && npm run test:integration",
     "eval:investigation": "node --disable-warning=ExperimentalWarning src/cli/evalInvestigation.ts",
     "memory:aging": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/memoryAging.ts",
+    "shared:backfill": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/sharedBackfill.ts",
     "eval:retrieval": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalRetrieval.ts",
     "eval:autonomy": "node --use-system-ca --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/cli/evalAutonomy.ts",
     "eval:autonomy:ci": "node --disable-warning=ExperimentalWarning --import ./test/env.ts src/cli/evalAutonomy.ts --no-db",

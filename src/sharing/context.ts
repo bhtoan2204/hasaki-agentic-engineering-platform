@@ -2,6 +2,7 @@ import type { Db } from "../db/pool.ts";
 import { q } from "../db/pool.ts";
 import { definitions } from "../workflow/definitions.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
+import type { AgentConfiguration } from "../agent/configuration.ts";
 import { resolveAgentProvider } from "../agent/provider.ts";
 import { resolveStepAgent } from "../agent/stepAgent.ts";
 import { canonicalJson, rubricHash, sha256, type WorkflowRef } from "./key.ts";
@@ -13,6 +14,15 @@ export interface AnalysisContext {
   model: string;
   /** Providers of the agent steps (for provenance; not part of the key by itself: the model part covers them). */
   providers: string[];
+  /** The skills the rubric pins, with their version, sorted by key. */
+  pinned: Array<{ key: string; version: number }>;
+}
+
+/** A past run's context (backfill): its definition version, its frozen agent configuration, the skills as of its start. */
+export interface RunContextAt {
+  version: number;
+  configuration: AgentConfiguration;
+  startedAt: Date;
 }
 
 /**
@@ -28,10 +38,11 @@ export async function analysisContext(
   db: Db,
   definitionKey: string,
   provider: string | undefined,
+  at?: RunContextAt,
 ): Promise<AnalysisContext> {
-  const dv = await definitions.version(definitionKey, undefined, db, null);
+  const dv = await definitions.version(definitionKey, at?.version, db, null);
   if (!dv) throw new Error(`workflow "${definitionKey}" has no published version`);
-  const cfg = await loadAgentConfiguration(db);
+  const cfg = at ? at.configuration : await loadAgentConfiguration(db);
   const chosen = resolveAgentProvider(provider || cfg.default_provider);
   const steps = dv.spec.steps.filter((s) => s.type === "agent" || s.type === "coding_agent");
   const skillKeys = [
@@ -41,13 +52,20 @@ export async function analysisContext(
       ),
     ),
   ];
-  const versions = skillKeys.length
-    ? await q<{ key: string; current_version: number }>(
-        db,
-        "SELECT key, current_version FROM knowledge_items WHERE owner_id IS NULL AND key = ANY($1)",
-        [skillKeys],
-      )
-    : [];
+  const versions = !skillKeys.length
+    ? []
+    : at
+      ? await q<{ key: string; current_version: number }>(
+          db,
+          `SELECT i.key, max(v.version) AS current_version FROM knowledge_items i JOIN knowledge_versions v ON v.item_id = i.id
+            WHERE i.owner_id IS NULL AND i.key = ANY($1) AND v.created_at <= $2 GROUP BY i.key`,
+          [skillKeys, at.startedAt],
+        )
+      : await q<{ key: string; current_version: number }>(
+          db,
+          "SELECT key, current_version FROM knowledge_items WHERE owner_id IS NULL AND key = ANY($1)",
+          [skillKeys],
+        );
   const rubric = rubricHash({
     instructions: canonicalJson(
       steps.map((s) => ({
@@ -88,5 +106,8 @@ export async function analysisContext(
     rubricHash: rubric,
     model: `${models.join("+") || `${chosen}/cli-default`}#cfg:${configuration}`,
     providers: providers.length ? providers : [chosen],
+    pinned: versions
+      .map((v) => ({ key: v.key, version: Number(v.current_version) }))
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
   };
 }

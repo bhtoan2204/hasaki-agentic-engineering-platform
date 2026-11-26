@@ -6,7 +6,7 @@ import { background } from "../workflow/background.ts";
 import { ignoreError } from "../ignoreError.ts";
 import type { SharedKey } from "./key.ts";
 import { sharingHooks, type SharedActor, type SharedOutcomeName } from "./hooks.ts";
-import { staleReason } from "./policy.ts";
+import { retryState, staleReason } from "./policy.ts";
 import { scrubText } from "./scrub.ts";
 import {
   attachRun,
@@ -81,7 +81,14 @@ const NO_PROVENANCE: Provenance = {
 export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
   const hooks = sharingHooks();
   const { kind, key } = r.key;
-  const note = (outcome: SharedOutcomeName, row: SharedRow | null, runId: number | null = null) =>
+  const begun = performance.now();
+  const scope = typeof r.key.parts.scope === "string" ? r.key.parts.scope : null;
+  const note = (
+    outcome: SharedOutcomeName,
+    row: SharedRow | null,
+    runId: number | null = null,
+    extra: { reason?: string; tokensSaved?: number } = {},
+  ) =>
     hooks.observe({
       kind,
       outcome,
@@ -89,16 +96,18 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
       version: row?.version ?? null,
       runId,
       actorId: r.actor.id,
+      key,
+      scope,
+      durationMs: outcome === "lost_race" ? undefined : performance.now() - begun,
+      ...extra,
     });
+  const saved = (row: SharedRow) =>
+    row.tokens_in != null ? row.tokens_in + (row.tokens_out ?? 0) : null;
   const use = (row: SharedRow, outcome: "hit" | "wait" | "miss" | "forced") =>
     background("shared use", () =>
-      recordUse(
-        pool,
-        row.id,
-        r.actor.id,
-        outcome,
-        outcome === "hit" && row.tokens_in != null ? row.tokens_in + (row.tokens_out ?? 0) : null,
-      ).catch(ignoreError("shared.use")),
+      recordUse(pool, row.id, r.actor.id, outcome, outcome === "hit" ? saved(row) : null).catch(
+        ignoreError("shared.use"),
+      ),
     );
   for (let attempt = 1; ; attempt++) {
     const now = new Date();
@@ -107,18 +116,18 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
       // A valid result the caller may not read is never replaced by the caller's own run (a hit or a force): that would
       // supersede it for everyone who may read it. The caller runs unshared.
       if (!(await hooks.canRead(latest, r.actor))) {
-        note("bypass", latest);
+        note("bypass", latest, null, { reason: "access" });
         return { outcome: "bypass", analysis: null };
       }
       if (!r.force) {
         use(latest, "hit");
-        note("hit", latest, latest.source_run_id);
+        note("hit", latest, latest.source_run_id, { tokensSaved: saved(latest) ?? undefined });
         return { outcome: "hit", analysis: latest };
       }
     }
     if (latest?.status === "running") {
       if (!(await hooks.canRead(latest, r.actor))) {
-        note("bypass", latest);
+        note("bypass", latest, null, { reason: "access" });
         return { outcome: "bypass", analysis: null };
       }
       use(latest, "wait");
@@ -127,7 +136,8 @@ export async function lookupOrStart(r: LookupRequest): Promise<LookupResult> {
     }
     // A failed key is held back by its backoff and its attempt limit; a force re-run is the way past both.
     if (!r.force && !hooks.mayStart(latest, now)) {
-      note("bypass", latest);
+      const held = latest ? retryState(latest, now).state : "none";
+      note("bypass", latest, null, { reason: held === "none" ? "not_allowed" : held });
       return {
         outcome: "bypass",
         analysis: latest && (await hooks.canRead(latest, r.actor)) ? latest : null,
@@ -179,8 +189,19 @@ export async function markReplaced(row: SharedRow) {
   for (const older of await olderOfSubject(pool, row)) {
     const reason = staleReason(older.key_parts, row.key_parts);
     if (!reason) continue;
-    await markStale(pool, older.id, reason);
+    if (!(await markStale(pool, older.id, reason))) continue;
     marked++;
+    sharingHooks().observe({
+      kind: row.kind,
+      outcome: "stale",
+      analysisId: older.id,
+      version: older.version,
+      runId: null,
+      actorId: null,
+      key: older.key,
+      scope: typeof older.key_parts.scope === "string" ? older.key_parts.scope : null,
+      reason,
+    });
   }
   return marked;
 }
@@ -210,6 +231,9 @@ export async function waitForAnalysis(
     version: r.analysis.version,
     runId: null,
     actorId: actor.id,
+    key: r.analysis.key,
+    scope: typeof r.analysis.key_parts.scope === "string" ? r.analysis.key_parts.scope : null,
+    reason: "access",
   });
   return { status: "denied", analysis: null };
 }

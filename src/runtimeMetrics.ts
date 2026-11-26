@@ -78,6 +78,7 @@ const HISTOGRAMS = {
   "workflow.checkpoint_bytes": BYTE_BUCKETS,
   "http.route_ms": BUCKETS,
   "http.response_bytes": BYTE_BUCKETS,
+  "shared.lookup_ms": BUCKETS,
 } as const;
 export type HistogramName = keyof typeof HISTOGRAMS;
 /** Replay and checkpoint decisions (execution_decisions.action values), counted per action. */
@@ -122,6 +123,36 @@ const aging = new Map<string, number>(
 const MAX_AGING_OWNERS = 50;
 let activeTaskMemory = { total: 0, per_owner: {} as Record<string, number>, other: 0 };
 
+/** Shared results (src/sharing): events per kind, fixed label sets. */
+export const SHARED_METRIC_KINDS = [
+  "code_assessment",
+  "prod_error.runtime_rca",
+  "prod_error.bug_hunt",
+] as const;
+export const SHARED_METRIC_EVENTS = [
+  "hit",
+  "wait",
+  "miss",
+  "forced",
+  "bypass",
+  "retry_held",
+  "denied",
+  "lost_race",
+  "published",
+  "failed",
+  "stale",
+  "expired",
+] as const;
+export type SharedMetricEvent = (typeof SHARED_METRIC_EVENTS)[number];
+const sharedZero = () =>
+  new Map<string, number>(
+    SHARED_METRIC_KINDS.flatMap((k) => [
+      ...SHARED_METRIC_EVENTS.map((e) => [`${k}.${e}`, 0] as const),
+      [`${k}.tokens_saved`, 0] as const,
+    ]),
+  );
+let shared = sharedZero();
+
 const counters = new Map<string, number>(COUNTERS.map((c) => [c, 0]));
 const histograms = new Map<string, Histogram>(
   Object.entries(HISTOGRAMS).map(([name, bounds]) => [name, new Histogram([...bounds])]),
@@ -153,6 +184,38 @@ export function countMemoryAging(policy: MemoryAgingPolicy, action: MemoryAgingA
   const key = `${policy}.${action}`;
   if (aging.has(key)) aging.set(key, aging.get(key)! + 1);
 }
+/** Unknown kinds or events are dropped: the label set stays fixed. */
+export function countShared(kind: string, event: SharedMetricEvent | "tokens_saved", by = 1) {
+  const key = `${kind}.${event}`;
+  if (shared.has(key)) shared.set(key, shared.get(key)! + by);
+}
+function sharedSnapshot() {
+  return Object.fromEntries(
+    SHARED_METRIC_KINDS.map((k) => {
+      const n = (e: string) => shared.get(`${k}.${e}`)!;
+      const lookups = ["hit", "wait", "miss", "forced", "bypass", "retry_held"].reduce(
+        (s, e) => s + n(e),
+        0,
+      );
+      return [
+        k,
+        {
+          ...(Object.fromEntries(SHARED_METRIC_EVENTS.map((e) => [e, n(e)])) as Record<
+            SharedMetricEvent,
+            number
+          >),
+          tokens_saved: n("tokens_saved"),
+          lookups,
+          // A hit and a wait both avoid a run of the model.
+          avoided_runs: n("hit") + n("wait"),
+          hit_rate: lookups ? Math.round((n("hit") / lookups) * 1000) / 1000 : null,
+          stale_total: n("stale") + n("expired"),
+        },
+      ];
+    }),
+  );
+}
+
 export function setActiveTaskMemory(byOwner: Record<string, number>) {
   const sorted = Object.entries(byOwner).sort((a, b) => b[1] - a[1]);
   const shown = sorted.slice(0, MAX_AGING_OWNERS);
@@ -179,6 +242,7 @@ export function runtimeMetricsSnapshot() {
     replay_decisions: Object.fromEntries(decisions),
     ignored_errors: Object.fromEntries(ignored),
     memory_aging: { actions: Object.fromEntries(aging), active_task_memory: activeTaskMemory },
+    shared_results: sharedSnapshot(),
     gauges: Object.fromEntries([...gauges].map(([k, read]) => [k, read()])),
     event_loop_ms: {
       p50: ms(loop.percentile(50)),
@@ -197,6 +261,7 @@ export function resetRuntimeMetrics() {
   for (const k of decisions.keys()) decisions.set(k, 0);
   for (const k of aging.keys()) aging.set(k, 0);
   activeTaskMemory = { total: 0, per_owner: {}, other: 0 };
+  shared = sharedZero();
   ignored.clear();
   loop.reset();
 }

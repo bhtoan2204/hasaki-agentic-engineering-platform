@@ -6,7 +6,7 @@
 - [x] 3. Lookup + single-flight
 - [x] 4. Invalidation + retry + force re-run + provenance
 - [x] 5. Access + scrub
-- [ ] 6. Metrics + tracing + feature flags + backfill
+- [x] 6. Metrics + tracing + feature flags + backfill
 - [ ] 7. UI / API
 
 ## Step 2 (schema and key)
@@ -374,3 +374,78 @@ Kept on purpose: request and trace ids, IPs, commit SHAs, order ids, numbers.
 - Snapshots stored before step 5 (flags were off by default, so none are expected) have no `scrub_version` and are not
   re-scrubbed; a re-scrub job is step 6 (backfill) if wanted.
 - Who may **force** is still "anyone who may read". No role restriction was added.
+
+## Step 6 (metrics, logs, tracing, flags, backfill)
+
+Done:
+
+- **Metrics** (`runtimeMetrics.ts`, shown by `GET /api/metrics/runtime` (admin) under `shared_results`). Fixed labels only:
+  the three kinds × events `hit, wait, miss, forced, bypass, retry_held, denied, lost_race, published, failed, stale,
+expired`, and `tokens_saved`. Computed per kind:
+  - `lookups`;
+  - `hit_rate` = hit / lookups;
+  - `avoided_runs` = hit + wait (a wait also avoids a model run);
+  - `stale_total` = stale + expired.
+    A histogram `shared.lookup_ms` times each lookup. No key, user or repository ever becomes a label.
+- **Logs** (`src/sharing/telemetry.ts`, the default `observe` hook). One line per event: `shared result <hit | miss |
+single-flight wait | force re-run | stale | failed | failed-retry held | bypass | denied | published>: kind= key=
+tenant= analysis= v= run= actor= [reason=] [ms=]`.
+  - `tenant` is the installation scope; failed and denied are logged at warn level.
+  - Inside an HTTP request, the JSON log mode adds `request_id`/`correlation_id` from the in-memory log context.
+- **R1.** Every field comes from values the code already holds:
+  - the lookup's key and parts;
+  - the row returned by the guarded UPDATE that settles it (`settleable` now also returns `version` and
+    `key_parts->>'scope'`);
+  - `markStale`/`expireDue` now RETURNING the row; `olderOfSubject` also selects `key` and `version`.
+    These are columns added to queries that already ran, not new queries. A test checks that a hit is still exactly one
+    SELECT plus one background statement with the default hook logging and counting.
+- **Bypass reasons**: `access`, `backoff`, `exhausted`, `not_allowed`. Backoff and exhausted are counted and logged as
+  `retry_held` ("failed-retry held").
+- **Flags**, reviewed path by path:
+  - the flows return null before any query;
+  - the routes call the flows only under their flag;
+  - **the reconcile task and the TTL sweep now only touch the kinds whose flag is on** (before, either flag let them work on
+    every kind);
+  - the backfill only covers kinds whose flag is on;
+  - the access check, scrub and telemetry only run inside a lookup.
+    With both flags off, not one statement runs (test).
+- **Backfill** (`src/sharing/backfill.ts`, `npm run shared:backfill -- [--apply] [--batch N] [--max-batches N] [--restart]
+[--json]`, the plan's section 7):
+  - Dry-run by default; batches go from the newest run down.
+  - **Resumable:** in apply mode, the cursor (the last run id handled) is saved in `settings` after each batch.
+  - **Idempotent:** the INSERT writes version 1 only when the key has no row at all, so a re-run writes nothing.
+  - A run is published only when the key a request would build **today** is provably its own:
+    - the shared definition, at today's published version;
+    - its frozen `agent_configuration` (immutable since run start) resolves to today's model fingerprint;
+    - the skills it pins had, at its start, today's versions;
+    - every repository has its full analysed commit (`source_revisions`), and a bug hunt has its incident;
+    - the result is not already past its TTL.
+  - Skips are counted by reason: `exists`, `definition_changed`, `model_changed`, `rubric_changed`, `commits_unknown`,
+    `expired`, `no_result`, `no_owner`, `personal_definition`, `not_recorded`, `no_incident`.
+  - The result is scrubbed before the write, records `scrub_version` and `trigger = 'backfill'`, and is owned by the run's
+    owner (step 5's access rules apply to reads).
+  - `analysisContext` gained an optional "as of a run" argument (version, frozen configuration, start time) and returns
+    the sorted `pinned` skills. Called without it, its result and the keys are unchanged.
+
+### Tracing
+
+The Node service has **no tracing SDK** (OpenTelemetry exists only in the Go supervisor, retrieval and gateway). This step
+adds no tracer: that would be a new dependency and outside this step. The correlation available today is the log
+context's `request_id`/`correlation_id` (AsyncLocalStorage, in memory). If spans are wanted, the `SharedEvent` fields
+(all in memory, no I/O) are the attributes to set, guarded by `span.isRecording()`.
+
+### Decisions to confirm
+
+1. **No RCA backfill.** The run does not record its verification contract, and an RCA lives 24 hours, so the gain is
+   almost nil.
+2. **`hit_rate` counts only hits.** A wait is counted in `avoided_runs` but not in `hit_rate`.
+3. **A backfilled key is "today's key" or nothing.** A run whose definition, model or skills differ from today's is
+   skipped: it would never be served anyway.
+
+### Not checked / remaining risks
+
+- The backfill CLI was run by hand with both flags off ("nothing to do"); the apply path is covered by the integration test,
+  not run against a real database.
+- Counters are per process (like every runtime metric); several instances must be summed by whoever scrapes them.
+- Two unrelated timing-based integration tests (`chat-knowledge`, `codeact-evidence`) failed once under full-suite load
+  and passed alone (2 of 2) and on the next full run.

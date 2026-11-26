@@ -29,7 +29,15 @@ export async function snapshotOf(kind: SharedKind, runId: number): Promise<unkno
   return s?.output ?? null;
 }
 
-const enabled = () => config.sharedResults.prodErrors || config.sharedResults.codeAssessment;
+/** The kinds whose flag is on: each flag gates its own kinds, also in the reconcile task. */
+export function enabledKinds(): SharedKind[] {
+  return [
+    ...(config.sharedResults.codeAssessment ? (["code_assessment"] as const) : []),
+    ...(config.sharedResults.prodErrors
+      ? (["prod_error.runtime_rca", "prod_error.bug_hunt"] as const)
+      : []),
+  ];
+}
 
 /**
  * Provenance of a finished run, from the run's own records (nothing is measured again): the tokens and cost the providers
@@ -90,31 +98,29 @@ export async function factsOf(
  * canceled by a person does not (the key is free at once).
  */
 export async function settleSharedAnalyses(limit = 50) {
-  if (!enabled()) return 0;
+  const kinds = enabledKinds();
+  if (!kinds.length) return 0;
   const hooks = sharingHooks();
   const cap = config.sharedResults.retryCapMinutes;
   let settled = 0;
-  for (const r of await settleable(pool, config.sharedResults.runningTimeoutMinutes, limit)) {
+  for (const r of await settleable(
+    pool,
+    config.sharedResults.runningTimeoutMinutes,
+    limit,
+    kinds,
+  )) {
     const id = Number(r.id);
     const runId = r.source_run_id == null ? null : Number(r.source_run_id);
-    let published = false;
+    let why: string | null = null;
+    const failWith = (reason: string, counts: boolean, extra: Record<string, unknown> = {}) => {
+      why = reason;
+      return fail(pool, id, { reason, run_id: runId, ...extra }, { counts, capMinutes: cap });
+    };
     let ok: boolean;
-    if (runId == null || r.run_status == null)
-      ok = await fail(
-        pool,
-        id,
-        { reason: "run missing", run_id: runId },
-        { counts: true, capMinutes: cap },
-      );
+    if (runId == null || r.run_status == null) ok = await failWith("run missing", true);
     else if (r.run_status === "COMPLETED") {
       const snapshot = await snapshotOf(r.kind, runId);
-      if (snapshot == null)
-        ok = await fail(
-          pool,
-          id,
-          { reason: "completed without a result", run_id: runId },
-          { counts: true, capMinutes: cap },
-        );
+      if (snapshot == null) ok = await failWith("completed without a result", true);
       else {
         // Scrubbed before it is written; a scrub that throws publishes nothing.
         let scrubbed: unknown;
@@ -123,51 +129,28 @@ export async function settleSharedAnalyses(limit = 50) {
         } catch {
           scrubbed = undefined;
         }
-        if (scrubbed == null)
-          ok = await fail(
-            pool,
-            id,
-            { reason: "scrub failed", run_id: runId },
-            { counts: true, capMinutes: cap },
-          );
-        else {
+        if (scrubbed == null) ok = await failWith("scrub failed", true);
+        else
           ok = await publish(pool, id, scrubbed, {
             ...(await factsOf(r.kind, runId, r.error_key)),
             scrubVersion: SCRUB_VERSION,
           });
-          published = ok;
-        }
       }
-    } else if (r.run_status === "CANCELED")
-      ok = await fail(
-        pool,
-        id,
-        { reason: "run canceled", run_id: runId },
-        { counts: false, capMinutes: cap },
-      );
-    else if (r.run_status === "FAILED")
-      ok = await fail(
-        pool,
-        id,
-        { reason: "run failed", run_id: runId },
-        { counts: true, capMinutes: cap },
-      );
-    else
-      ok = await fail(
-        pool,
-        id,
-        { reason: "timeout", run_id: runId, run_status: r.run_status },
-        { counts: true, capMinutes: cap },
-      );
+    } else if (r.run_status === "CANCELED") ok = await failWith("run canceled", false);
+    else if (r.run_status === "FAILED") ok = await failWith("run failed", true);
+    else ok = await failWith("timeout", true, { run_status: r.run_status });
     if (ok) {
       settled++;
       hooks.observe({
         kind: r.kind,
-        outcome: published ? "published" : "failed",
+        outcome: why ? "failed" : "published",
         analysisId: id,
-        version: null,
+        version: Number(r.version),
         runId,
         actorId: null,
+        key: r.key,
+        scope: r.scope,
+        ...(why ? { reason: why } : {}),
       });
     }
   }
@@ -176,8 +159,23 @@ export async function settleSharedAnalyses(limit = 50) {
 
 /** Valid results past their end become stale (reason "ttl"). Returns how many. */
 export async function expireSharedAnalyses(limit = 200) {
-  if (!enabled()) return 0;
-  return expireDue(pool, limit);
+  const kinds = enabledKinds();
+  if (!kinds.length) return 0;
+  const hooks = sharingHooks();
+  const rows = await expireDue(pool, limit, kinds);
+  for (const r of rows)
+    hooks.observe({
+      kind: r.kind,
+      outcome: "expired",
+      analysisId: Number(r.id),
+      version: Number(r.version),
+      runId: null,
+      actorId: null,
+      key: r.key,
+      scope: r.scope,
+      reason: "ttl",
+    });
+  return rows.length;
 }
 
 /** The reconcile task: settle, then expire. */

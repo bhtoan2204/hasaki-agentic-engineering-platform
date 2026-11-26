@@ -181,25 +181,97 @@ export async function recordUse(
   );
 }
 
+/**
+ * A backfilled analysis: version 1 of its key, valid, written only when the key has no row at all (so a re-run of the
+ * backfill, or a key claimed since, is never touched). Returns the id, or null when the key already had a row.
+ */
+export async function insertBackfilled(
+  db: Db,
+  x: {
+    kind: SharedKind;
+    key: string;
+    keyParts: Record<string, unknown>;
+    scopeRepos: string[];
+    errorKey: string | null;
+    createdBy: number;
+    provenance: Provenance;
+    runId: number;
+    result: unknown;
+    startedAt: Date;
+    finishedAt: Date;
+    validUntil: Date;
+    tokensIn: number | null;
+    tokensOut: number | null;
+    costUsd: number | null;
+    durationMs: number | null;
+  },
+) {
+  const row = await one<{ id: number }>(
+    db,
+    `INSERT INTO shared_analyses (kind, key, version, status, key_parts, scope_repos, error_key, created_by, trigger,
+                                  provider, model, definition_version, rubric_hash, source_run_id, result, started_at,
+                                  finished_at, valid_until, tokens_in, tokens_out, cost_usd, duration_ms)
+     SELECT $1, $2, 1, 'valid', $3, $4, $5, $6, 'backfill', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+      WHERE NOT EXISTS (SELECT 1 FROM shared_analyses WHERE kind = $1 AND key = $2)
+     ON CONFLICT DO NOTHING RETURNING id`,
+    [
+      x.kind,
+      x.key,
+      json(x.keyParts),
+      x.scopeRepos,
+      x.errorKey,
+      x.createdBy,
+      x.provenance.provider,
+      x.provenance.model,
+      x.provenance.definitionVersion,
+      x.provenance.rubricHash,
+      x.runId,
+      json(x.result),
+      x.startedAt,
+      x.finishedAt,
+      x.validUntil,
+      x.tokensIn,
+      x.tokensOut,
+      x.costUsd,
+      x.durationMs,
+    ],
+  );
+  return row ? Number(row.id) : null;
+}
+
+export async function keyExists(db: Db, kind: SharedKind, key: string) {
+  return !!(await one(db, "SELECT 1 FROM shared_analyses WHERE kind = $1 AND key = $2 LIMIT 1", [
+    kind,
+    key,
+  ]));
+}
+
 /** Running rows that can be settled now: their run ended, the run is gone, or they outlived the running timeout. */
-export function settleable(db: Db, timeoutMinutes: number, limit: number) {
+export function settleable(
+  db: Db,
+  timeoutMinutes: number,
+  limit: number,
+  kinds: readonly SharedKind[],
+) {
   return q<{
     id: number;
     kind: SharedKind;
     key: string;
+    version: number;
+    scope: string | null;
     error_key: string | null;
     source_run_id: number | null;
     run_status: string | null;
     timed_out: boolean;
   }>(
     db,
-    `SELECT a.id, a.kind, a.key, a.error_key, a.source_run_id, r.status AS run_status,
+    `SELECT a.id, a.kind, a.key, a.version, a.key_parts->>'scope' AS scope, a.error_key, a.source_run_id, r.status AS run_status,
             a.started_at < now() - make_interval(mins => $1) AS timed_out
        FROM shared_analyses a LEFT JOIN workflow_runs r ON r.id = a.source_run_id
-      WHERE a.status = 'running'
+      WHERE a.status = 'running' AND a.kind = ANY($3::text[])
         AND (r.id IS NULL OR r.status IN ('COMPLETED', 'FAILED', 'CANCELED') OR a.started_at < now() - make_interval(mins => $1))
       ORDER BY a.id LIMIT $2`,
-    [timeoutMinutes, limit],
+    [timeoutMinutes, limit, kinds],
   );
 }
 
@@ -274,9 +346,9 @@ export async function fail(
 
 /** Valid rows of the same subject as `row` (same kind, repositories, error and focus) under another key. */
 export function olderOfSubject(db: Db, row: SharedRow) {
-  return q<{ id: number; key_parts: Record<string, unknown> }>(
+  return q<{ id: number; key: string; version: number; key_parts: Record<string, unknown> }>(
     db,
-    `SELECT id, key_parts FROM shared_analyses
+    `SELECT id, key, version, key_parts FROM shared_analyses
       WHERE kind = $1 AND status = 'valid' AND key <> $2 AND scope_repos = $3 AND error_key IS NOT DISTINCT FROM $4
         AND key_parts->>'scope' = $5 AND ($1 <> 'code_assessment' OR key_parts->>'focus' = $6)`,
     [
@@ -291,22 +363,23 @@ export function olderOfSubject(db: Db, row: SharedRow) {
 }
 
 export async function markStale(db: Db, id: number, reason: string) {
-  await q(
+  const rows = await q(
     db,
-    "UPDATE shared_analyses SET status = 'stale', stale_reason = $2 WHERE id = $1 AND status = 'valid'",
+    "UPDATE shared_analyses SET status = 'stale', stale_reason = $2 WHERE id = $1 AND status = 'valid' RETURNING id",
     [id, reason],
   );
+  return rows.length > 0;
 }
 
 /** Valid rows past their end become stale ("ttl"); bounded, safe on every instance. */
-export async function expireDue(db: Db, limit: number) {
-  const rows = await q(
+export function expireDue(db: Db, limit: number, kinds: readonly SharedKind[]) {
+  return q<{ id: number; kind: SharedKind; key: string; version: number; scope: string | null }>(
     db,
     `UPDATE shared_analyses SET status = 'stale', stale_reason = 'ttl'
       WHERE id IN (SELECT id FROM shared_analyses WHERE status = 'valid' AND valid_until IS NOT NULL AND valid_until <= now()
+                      AND kind = ANY($2::text[])
                     ORDER BY valid_until LIMIT $1 FOR UPDATE SKIP LOCKED)
-      RETURNING id`,
-    [limit],
+      RETURNING id, kind, key, version, key_parts->>'scope' AS scope`,
+    [limit, kinds],
   );
-  return rows.length;
 }
