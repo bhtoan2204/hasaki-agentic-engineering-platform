@@ -21,15 +21,19 @@ import {
   checkModel,
   resetCapabilitiesCache,
   type CopilotModel,
-} from "../src/agent/copilot/capabilities.ts";
-import { CopilotStream, TextBatch, classifyCopilotError } from "../src/agent/copilot/stream.ts";
+} from "../src/agent/providers/copilot/capabilities.ts";
+import {
+  CopilotStream,
+  TextBatch,
+  classifyCopilotError,
+} from "../src/agent/providers/copilot/stream.ts";
 import {
   copilotHookDecision,
   writeCopilotWorkspaceConfig,
   excludeFromGit,
   copilotHeadlessSettings,
-} from "../src/agent/copilot/policy.ts";
-import { buildCopilotArgs } from "../src/agent/copilot/run.ts";
+} from "../src/agent/providers/copilot/policy.ts";
+import { buildCopilotArgs } from "../src/agent/providers/copilot/run.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
 import { ResumeHandoff } from "../src/workflow/engine.ts";
 

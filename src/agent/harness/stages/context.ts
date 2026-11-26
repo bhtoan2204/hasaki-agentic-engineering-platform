@@ -4,10 +4,11 @@ import { config } from "../../../config.ts";
 import { ContextBudgetError, ensureContextPack } from "../../../context/pack.ts";
 import { protectedRootsFor } from "../../../platform/selfDevelopment.ts";
 import { runWorkingDirectory } from "../../../repos/workspaces.ts";
-import { SUBAGENTS } from "../../claude.ts";
+import { SUBAGENTS } from "../../sessions.ts";
 import { isIndependent } from "../../independentReview.ts";
 import { languagePolicy, outputLocale } from "../../language.ts";
 import { newMetrics } from "../../metrics.ts";
+import { providerCapabilities } from "../../providerCapabilities.ts";
 import { selectedSkills } from "../../skillTracing.ts";
 import {
   type PolicyContext,
@@ -90,12 +91,13 @@ export async function contextStage(s: LifecycleState): Promise<ExecResult | void
     source: effective.source,
     effort: effective.reasoning_effort ?? undefined,
   };
-  const metrics = newMetrics(routed.model || (provider === "claude" ? "default" : ""));
+  const caps = providerCapabilities(provider);
+  const metrics = newMetrics(routed.model || caps.runtime.emptyModelSentinel);
   metrics.skills = selectedSkills(ctx.context);
   metrics.model_source = routed.source;
   metrics.provider = provider;
   if (routed.effort) metrics.reasoning_effort = routed.effort;
-  if (provider !== "claude") {
+  if (!caps.completion.reportedCost) {
     metrics.cost_usd = null;
     metrics.tokens = null;
   }

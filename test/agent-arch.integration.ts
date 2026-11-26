@@ -12,7 +12,7 @@ import {
   type KnowledgeLike,
 } from "../src/context/plan.ts";
 import { decide, toolsFor, type PolicyContext } from "../src/agent/toolPolicy.ts";
-import { accumulateMetrics, newMetrics } from "../src/agent/claude.ts";
+import { accumulateMetrics, newMetrics } from "../src/agent/metrics.ts";
 import {
   callTool,
   describeTool,
@@ -393,7 +393,7 @@ test("metrics accumulate tokens, cost, tool usage and errors across sessions", (
 });
 
 test("post-submit reaper: stops a session that outlives its submitted result, once, and never before it is armed", async () => {
-  const { postSubmitReaper } = await import("../src/agent/claude.ts");
+  const { postSubmitReaper } = await import("../src/agent/sessions.ts");
   let stops = 0;
   const r = postSubmitReaper(() => stops++, 20);
   await new Promise((res) => setTimeout(res, 40));

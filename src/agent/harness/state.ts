@@ -7,7 +7,7 @@ import type { PolicyContext, ToolMode } from "../toolPolicy.ts";
 import type { VerificationRound } from "../verify.ts";
 import type { executionWorkspaces, implementationBaseline } from "../implementationEvidence.ts";
 import type { liveRuntime } from "../../eval/liveRuntime.ts";
-import type { ClaudeTurnInput } from "../claude.ts";
+import type { ClaudeTurnInput } from "../providers/claude/run.ts";
 import type { GuaranteeCheck } from "../providerCapabilities.ts";
 import type { StageTrace } from "./lifecycle.ts";
 

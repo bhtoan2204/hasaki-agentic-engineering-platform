@@ -13,7 +13,7 @@ import { registerExecutor, type ExecutionContext } from "../src/workflow/executo
 import type { AttemptRow, RunRow, StepRow } from "../src/workflow/types.ts";
 import type { ResolvedContext, StepInput } from "../src/workflow/context.ts";
 import type { AgentMetrics } from "../src/agent/metrics.ts";
-import { newMetrics } from "../src/agent/claude.ts";
+import { newMetrics } from "../src/agent/metrics.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
 import { resolveAgentProvider } from "../src/agent/provider.ts";
 import {
@@ -21,23 +21,23 @@ import {
   antigravityEnv,
   checkModel,
   resetCapabilitiesCache,
-} from "../src/agent/antigravity/capabilities.ts";
+} from "../src/agent/providers/antigravity/capabilities.ts";
 import {
   AntigravityStream,
   TextBatch,
   classifyAntigravityError,
-} from "../src/agent/antigravity/stream.ts";
+} from "../src/agent/providers/antigravity/stream.ts";
 import {
   antigravityHookDecision,
   writeAntigravityWorkspaceConfig,
   excludeFromGit,
   antigravityHeadlessSettings,
-} from "../src/agent/antigravity/policy.ts";
+} from "../src/agent/providers/antigravity/policy.ts";
 import {
   antigravityAgentTurn,
   antigravityComplete,
   buildAntigravityArgs,
-} from "../src/agent/antigravity/run.ts";
+} from "../src/agent/providers/antigravity/run.ts";
 import { startBroker } from "../src/agent/broker/server.ts";
 import { completeForRun } from "../src/agent/complete.ts";
 import { antigravityModelFor } from "../src/agent/stepAgent.ts";
@@ -45,7 +45,7 @@ import type { PolicyContext } from "../src/agent/toolPolicy.ts";
 import { config } from "../src/config.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-agy.mjs");
-const HOOK = join(import.meta.dirname, "..", "src", "agent", "antigravity", "hook.ts");
+const HOOK = join(import.meta.dirname, "..", "src", "agent", "providers", "antigravity", "hook.ts");
 let logFile = "";
 let defSeq = 0;
 

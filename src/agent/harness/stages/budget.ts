@@ -4,7 +4,7 @@ import type { TurnResult } from "../turn.ts";
 import { config } from "../../../config.ts";
 import { q, pool } from "../../../db/pool.ts";
 import { budgetsForRun } from "../../../report/cost.ts";
-import { GUARANTEES } from "../../providerCapabilities.ts";
+import { providerCapabilities } from "../../providerCapabilities.ts";
 
 /**
  * Budget gate inside the attempt. Run and work-item spend is projected before the job is queued and charged after the
@@ -42,7 +42,7 @@ export async function budgetStage(s: LifecycleState): Promise<ExecResult | void>
     // An overrun at attempt start is the engine's (pre-queue and post-attempt) to report; only "pause" stops a turn.
     remainingUsd: config.costBudget.action === "pause" && least != null && least > 0 ? least : null,
     scopes: open.map(([scope]) => scope),
-    enforcement: GUARANTEES[provider].includes("reported_cost")
+    enforcement: providerCapabilities(provider).completion.reportedCost
       ? "between_turns"
       : "preflight_only",
   };

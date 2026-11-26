@@ -33,9 +33,9 @@ export interface CheckResult {
 
 export type Graph = Map<string, string[]>;
 
-export const PROVIDERS = ["codex", "cursor", "antigravity", "copilot"] as const;
-/** Files a provider exposes to the rest of the code base; everything else under src/agent/<provider>/ is internal. */
-export const PROVIDER_ENTRY_FILES = ["run.ts", "capabilities.ts", "index.ts"];
+export const PROVIDERS = ["claude", "codex", "cursor", "antigravity", "copilot"] as const;
+/** Files a provider exposes to the rest of the code base; everything else under src/agent/providers/<provider>/ is internal. */
+export const PROVIDER_ENTRY_FILES = ["run.ts", "complete.ts", "capabilities.ts", "index.ts"];
 const CORE_PREFIXES = ["src/workflow/", "src/eval/"];
 
 const IMPORT_RE =
@@ -127,7 +127,7 @@ export function findCycles(graph: Graph): string[][] {
 }
 
 function providerOf(file: string): string | undefined {
-  const m = /^src\/agent\/([^/]+)\//.exec(file);
+  const m = /^src\/agent\/providers\/([^/]+)\//.exec(file);
   return m && (PROVIDERS as readonly string[]).includes(m[1]) ? m[1] : undefined;
 }
 
@@ -191,8 +191,7 @@ export function findViolations(graph: Graph): Violation[] {
         });
       }
       const toProvider = providerOf(to);
-      const isClaudeModule = to === "src/agent/claude.ts";
-      if (CORE_PREFIXES.some((p) => from.startsWith(p)) && (isClaudeModule || toProvider)) {
+      if (CORE_PREFIXES.some((p) => from.startsWith(p)) && toProvider) {
         out.push({
           rule: "no-provider-from-core",
           key: `no-provider-from-core:${from}->${to}`,

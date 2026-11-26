@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { stallGuard, TurnStream, visibleAnswer } from "../src/chat/streaming.ts";
 import { setImmediate } from "node:timers/promises";
 import { chatRepository } from "../src/chat/repository.ts";
-import { codexProgress, type CodexItem } from "../src/agent/codex/stream.ts";
+import { codexProgress, type CodexItem } from "../src/agent/providers/codex/stream.ts";
 import { mayFallback } from "../src/chat/admission.ts";
 import { applyChatEvent, seedFromTurn, type LiveTurn } from "../web/src/pages/chatStream.ts";
 

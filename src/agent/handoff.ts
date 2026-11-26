@@ -1,6 +1,5 @@
 import { pool, q, one } from "../db/pool.ts";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { config } from "../config.ts";
 import { inspectHandoffWorkspace } from "../git/workspaceCheckpoint.ts";
 export {
   inspectHandoffWorkspace,
@@ -11,16 +10,10 @@ import { safeDiagnostics, normalizeProviderFailure, type FailureCategory } from 
 import { redactContextValue } from "../context/redact.ts";
 import { summarizeValue } from "../context/plan.ts";
 import { evidenceSummary, type ApprovedScope } from "./evidence.ts";
-import { config } from "../config.ts";
-import { codexCapabilities } from "./codex/run.ts";
-import { cursorCapabilities } from "./cursor/run.ts";
-import { antigravityCapabilities } from "./antigravity/capabilities.ts";
-import { copilotCapabilities } from "./copilot/capabilities.ts";
-import { agentEnvironment } from "./environment.ts";
+import { probeHandoffReadiness } from "./providerProbes.ts";
 import type { EffectiveAgent } from "./stepAgent.ts";
 import type { RunRow, StepRow, AttemptRow, ExecResult } from "../workflow/types.ts";
 
-const exec = promisify(execFile);
 export const AUTOMATIC_FAILURES: FailureCategory[] = [
   "RATE_LIMIT",
   "QUOTA_EXHAUSTED",
@@ -266,54 +259,7 @@ export const readinessSeamVersion = () => readinessSeam;
 export async function handoffReadiness(a: EffectiveAgent) {
   if (testReadiness) return testReadiness(a);
   try {
-    if (a.provider === "codex") {
-      const c = await codexCapabilities(false, {
-        model: a.model ?? "",
-        effort: a.reasoning_effort ?? "",
-      });
-      return { ok: c.ok, error: c.error, quota: "unknown", cost: "unknown" };
-    }
-    if (a.provider === "cursor") {
-      const c = await cursorCapabilities();
-      return {
-        ok: c.ok && (!a.model || !!c.supportsModel),
-        error: c.error ?? (a.model && !c.supportsModel ? "Cursor --model unsupported" : undefined),
-        quota: "unknown",
-        cost: "unknown",
-      };
-    }
-    if (a.provider === "copilot") {
-      const c = await copilotCapabilities(false, {
-        model: a.model ?? "",
-        effort: a.reasoning_effort ?? "",
-      });
-      return { ok: c.ok, error: c.error, quota: "unknown", cost: "unknown" };
-    }
-    if (a.provider === "antigravity") {
-      const c = await antigravityCapabilities(false, {
-        model: a.model ?? "",
-        effort: a.reasoning_effort ?? "",
-      });
-      return { ok: c.ok, error: c.error, quota: "unknown", cost: "unknown" };
-    }
-    const configured = config.agent.claudeBin;
-    const bin = configured || "claude";
-    const { stdout } = await exec(
-      process.execPath === bin ? bin : bin.endsWith(".js") ? process.execPath : bin,
-      bin.endsWith(".js") ? [bin, "auth", "status", "--json"] : ["auth", "status", "--json"],
-      {
-        timeout: 15000,
-        maxBuffer: 64000,
-        env: agentEnvironment(process.env, "claude"),
-      },
-    );
-    const status = JSON.parse(stdout);
-    return {
-      ok: status.loggedIn === true,
-      error: status.loggedIn === true ? undefined : "Claude authentication readiness not confirmed",
-      quota: "unknown",
-      cost: "unknown",
-    };
+    return await probeHandoffReadiness(a.provider, a);
   } catch (error) {
     return {
       ok: false,

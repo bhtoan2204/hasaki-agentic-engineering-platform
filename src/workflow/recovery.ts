@@ -20,7 +20,7 @@ import { existsSync } from "node:fs";
 import { readdir, readlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { GUARANTEES } from "../agent/providerCapabilities.ts";
+import { providerCapabilities } from "../agent/providerCapabilities.ts";
 import { isolationEnforced } from "../agent/isolation.ts";
 import { workspacesOf } from "../git/provider.ts";
 import { executionWorkspace } from "../git/workspaceCheckpoint.ts";
@@ -400,7 +400,7 @@ async function automaticRecovery(
   //    a PR step only calls the host's query-then-update operation, keyed by source and target branch.
   if (action === "RESUME") {
     const provider = attempt.agent_provider ?? run.agent_provider ?? "claude";
-    if (!GUARANTEES[provider]?.includes("pre_tool_policy"))
+    if (!providerCapabilities(provider)?.guarantees.preToolPolicy)
       missing.push(`${provider} cannot enforce the tool policy: external effects are unknown`);
     if (step.config?.network === true)
       missing.push("the step may use the network: external effects are unknown");

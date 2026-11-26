@@ -532,7 +532,7 @@ test("published feature and bug templates enable a bounded independent review re
 
 test("model routing: step config > profile/role routing > '*' > global default; verifiers route separately", async () => {
   const { config } = await import("../src/config.ts");
-  const { modelFor } = await import("../src/agent/claude.ts");
+  const { modelFor } = await import("../src/agent/stepAgent.ts");
   const saved = { models: config.agent.models, model: config.model };
   try {
     config.agent.models = {

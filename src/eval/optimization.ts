@@ -4,7 +4,8 @@ import { q, one, withTx, type Db } from "../db/pool.ts";
 import { pool } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { RECOMMENDATION_VERSION, recommendationDetail } from "./recommendations.ts";
-import { providerEnabled } from "../agent/provider.ts";
+import { parseAgentProvider, providerEnabled } from "../agent/provider.ts";
+import { providerCapabilities } from "../agent/providerCapabilities.ts";
 import { resolveStepAgent, type StepAgentConfig } from "../agent/stepAgent.ts";
 import { handoffReadiness } from "../agent/handoff.ts";
 import type { WorkflowSpec } from "../workflow/types.ts";
@@ -144,7 +145,10 @@ export async function applyOptimizationDefaults(
         { agent_provider: "claude", profile },
         { ...step, config: cfg },
       )!;
-      if (agent.provider !== "claude" && original.delegation?.enabled)
+      if (
+        (!agent.provider || !providerCapabilities(agent.provider).guarantees.delegation) &&
+        original.delegation?.enabled
+      )
         throw new Error("Delegation permission cannot be enforced by target provider");
       const ready = await handoffReadiness(effective);
       if (!ready.ok) throw new Error(ready.error ?? "Provider unavailable");
@@ -238,7 +242,11 @@ async function applyAdaptiveRouting(
     };
     if (decision.applied && decision.chosen) {
       try {
-        if (decision.chosen.provider !== "claude" && original.delegation?.enabled)
+        const chosenProvider = parseAgentProvider(decision.chosen.provider);
+        if (
+          (!chosenProvider || !providerCapabilities(chosenProvider).guarantees.delegation) &&
+          original.delegation?.enabled
+        )
           throw new Error("Delegation permission cannot be enforced by target provider");
         const cfg = {
           ...original,

@@ -8,7 +8,7 @@ import {
 } from "../src/agent/metrics.ts";
 import { codeRetrievalKey, roleBudget } from "../src/context/pack.ts";
 import { evidenceSummary } from "../src/agent/evidence.ts";
-import { codexEnabledTools } from "../src/agent/codex/run.ts";
+import { codexEnabledTools } from "../src/agent/providers/codex/run.ts";
 import { advertisedContextTools, CONTEXT_TOOLS } from "../src/agent/contextToolSchemas.ts";
 import { config } from "../src/config.ts";
 

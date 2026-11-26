@@ -43,7 +43,7 @@ import { recordWorkspace } from "../src/git/provider.ts";
 import { ensureContextPack } from "../src/context/pack.ts";
 import { newMetrics } from "../src/agent/metrics.ts";
 import { dispatchPlatformTool, envFromExecution } from "../src/agent/platformTools.ts";
-import { resumableSession } from "../src/agent/claude.ts";
+import { resumableSession } from "../src/agent/sessions.ts";
 import { handle } from "../src/http/app.ts";
 import { config } from "../src/config.ts";
 import type { ExecResult } from "../src/workflow/types.ts";

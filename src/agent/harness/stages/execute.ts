@@ -9,11 +9,12 @@ import { workspaceKey, workspacesOf } from "../../../git/provider.ts";
 import { repositoryBaseBranch } from "../../../repos/service.ts";
 import { branchFor } from "../../../workflow/branches.ts";
 import { downloadAttachments } from "../../attachments.ts";
-import { progressNotes, worktreeState } from "../../claude.ts";
+import { progressNotes, worktreeState } from "../../sessions.ts";
 import { blocksRebuild, failedTurn } from "../failure.ts";
 import { runEvents } from "../../../workflow/events.ts";
 import { outputLocale } from "../../language.ts";
 import { type AgentMetrics, addUsage } from "../../metrics.ts";
+import { providerCapabilities } from "../../providerCapabilities.ts";
 import {
   OCR_REVIEW_INSTRUCTIONS,
   openCodeReviewGuide,
@@ -391,7 +392,7 @@ export async function executeStage(s: LifecycleState): Promise<ExecResult | void
     }
     sessionKey = randomUUID();
     sessionStart = Date.now();
-    metrics.model = routed.model || (provider === "claude" ? "default" : "");
+    metrics.model = routed.model || providerCapabilities(provider).runtime.emptyModelSentinel;
     setLiveUsageOffset(metrics);
     metrics.tokens = null;
     metrics.cost_usd = null;

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { parseAgentProvider } from "../agent/provider.ts";
+import { providerCapabilities } from "../agent/providerCapabilities.ts";
 import { ancestors, downstream, topoOrder } from "./graph.ts";
 import type { Profile, StepSpec, WorkflowSpec } from "./types.ts";
 import { FEATURE_MICRO_TARGETED_COMMAND, FEATURE_TARGETED_COMMAND } from "./templates.ts";
@@ -101,10 +103,11 @@ export function classifyProfile(
             ? "low"
             : "unknown",
   };
-  const cursor = s.provider === "cursor";
+  const microCaps = providerCapabilities(parseAgentProvider(s.provider) ?? "claude");
+  const microUnsupported = !microCaps.guarantees.microProfile;
   const evidence = s.evidence;
   const eligible =
-    !cursor &&
+    !microUnsupported &&
     !highRisk &&
     !MULTI.test(text) &&
     !BIG.test(text) &&
@@ -137,8 +140,8 @@ export function classifyProfile(
       requested,
       confidence: "high",
       reasons: [
-        cursor
-          ? "MICRO declined: Cursor cannot enforce pre-execution tool boundaries"
+        microUnsupported
+          ? `MICRO declined: ${microCaps.shortLabel} cannot enforce pre-execution tool boundaries`
           : "MICRO declined: verified low-risk scope and dependency impact are required",
       ],
       warnings,
@@ -439,17 +442,21 @@ export function applyProfile(
       `step "${configured.key}" has explicit agent configuration; preserve its execution boundary`,
     );
   if (micro) {
-    if (
-      spec.steps.some(
-        (s) =>
-          s.config?.agent &&
-          typeof s.config.agent === "object" &&
-          (s.config.agent as { provider?: string }).provider === "cursor",
-      )
-    )
+    const blockedStep = spec.steps.find((s) => {
+      const p =
+        s.config?.agent && typeof s.config.agent === "object"
+          ? parseAgentProvider((s.config.agent as { provider?: string }).provider)
+          : null;
+      return p != null && !providerCapabilities(p).guarantees.microProfile;
+    });
+    if (blockedStep) {
+      const label = providerCapabilities(
+        parseAgentProvider((blockedStep.config!.agent as { provider?: string }).provider)!,
+      ).shortLabel;
       throw new ProfileNotApplicable(
-        "MICRO cannot run on Cursor: provider does not support pre-execution tool interception",
+        `MICRO cannot run on ${label}: provider does not support pre-execution tool interception`,
       );
+    }
     if (
       [...merged, ...reviews].some(
         (step) => step.config.independent === true || step.config.output_contract != null,
@@ -634,8 +641,10 @@ export async function classifyWithFallback(
 ): Promise<ProfileDecision> {
   const base = classifyProfile(s, requested);
   const e = s.evidence;
+  const microUnsupported = !providerCapabilities(parseAgentProvider(s.provider) ?? "claude")
+    .guarantees.microProfile;
   if (
-    s.provider === "cursor" ||
+    microUnsupported ||
     !["AUTO", "MICRO"].includes(requested) ||
     base.profile === "MICRO" ||
     base.signals.high_risk_term ||

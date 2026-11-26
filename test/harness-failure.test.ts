@@ -10,8 +10,8 @@ import {
 } from "../src/agent/harness/failure.ts";
 import { classifyFailure } from "../src/workflow/failures.ts";
 import { normalizeProviderFailure } from "../src/agent/telemetry.ts";
-import { classifyCopilotError } from "../src/agent/copilot/stream.ts";
-import { classifyAntigravityError } from "../src/agent/antigravity/stream.ts";
+import { classifyCopilotError } from "../src/agent/providers/copilot/stream.ts";
+import { classifyAntigravityError } from "../src/agent/providers/antigravity/stream.ts";
 
 test("failure table covers every harness failure code", () => {
   assert.deepEqual(Object.keys(FAILURE_POLICY).sort(), [...HARNESS_FAILURE_CODES].sort());

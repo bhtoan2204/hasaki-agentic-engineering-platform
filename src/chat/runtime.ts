@@ -5,13 +5,12 @@ import { background } from "../workflow/background.ts";
 import {
   completeForRun,
   completionAgent,
-  NATIVE_TOOL_PROVIDERS,
-  VISION_PROVIDERS,
   type CompletionRunner,
   type NativeTools,
 } from "../agent/complete.ts";
 import { loadAgentConfiguration } from "../agent/configurationStore.ts";
 import { AGENT_PROVIDERS, type AgentProvider } from "../agent/provider.ts";
+import { providerCapabilities, VISION_PROVIDERS } from "../agent/providerCapabilities.ts";
 import { documentsForTurn, documentText, imagesForTurn } from "./attachments.ts";
 import { invalidateSharedAgentHealth, rememberProviderQuota } from "../agent/health.ts";
 import { boundedContextJson } from "../agent/contextTools.ts";
@@ -71,7 +70,8 @@ let providerSeam: Providers | undefined;
 /** Native tool calls unless CHAT_NATIVE_TOOLS=off (then every provider uses the chat-tool block protocol). */
 const nativeToolsFor = (provider: string) =>
   config.chat.nativeTools !== "off" &&
-  (NATIVE_TOOL_PROVIDERS as readonly string[]).includes(provider);
+  (AGENT_PROVIDERS as readonly string[]).includes(provider) &&
+  providerCapabilities(provider as AgentProvider).completion.chatNativeTools;
 
 export function setChatProviders(p: Providers | undefined) {
   providerSeam = p;
@@ -496,7 +496,7 @@ async function executeTurn(
     if (
       strategy === "manual" &&
       preferred &&
-      !VISION_PROVIDERS.includes(preferred as AgentProvider)
+      !providerCapabilities(preferred as AgentProvider)?.completion.visionImages
     )
       throw new ChatTurnError(
         chatFailure(
@@ -505,7 +505,9 @@ async function executeTurn(
           { provider: preferred, retryable: false, actions: ["retry_other_provider"] },
         ),
       );
-    for (const p of AGENT_PROVIDERS) if (!VISION_PROVIDERS.includes(p)) avoid.add(p);
+    for (const p of AGENT_PROVIDERS) {
+      if (!providerCapabilities(p).completion.visionImages) avoid.add(p);
+    }
   }
   // One configuration document for the whole turn: admission, agent resolution and every completion use it.
   const cfg = await loadAgentConfiguration();

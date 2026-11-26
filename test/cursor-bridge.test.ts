@@ -9,7 +9,7 @@ async function exchange(raw: string): Promise<string> {
     process.execPath,
     [
       "--disable-warning=ExperimentalWarning",
-      join(import.meta.dirname, "../src/agent/cursor/bridge.ts"),
+      join(import.meta.dirname, "../src/agent/providers/cursor/bridge.ts"),
     ],
     {
       env: {
@@ -58,7 +58,7 @@ test("Cursor MCP bridge still answers Content-Length framed requests with Conten
 });
 
 test("Cursor token deltas become one transcript message per turn (not one line per word)", async () => {
-  const { TextCoalescer } = await import("../src/agent/cursor/stream.ts");
+  const { TextCoalescer } = await import("../src/agent/providers/cursor/stream.ts");
   const out: Array<[string, string]> = [];
   const c = new TextCoalescer(async (k, t) => void out.push([k, t]));
   for (const w of ["I'll", " read", " the", " task", " prompt"]) await c.push("agent", w);
@@ -77,7 +77,7 @@ test("Cursor token deltas become one transcript message per turn (not one line p
 
 test("Cursor permissions: real env files stay unreadable, .env templates are readable and editable", async () => {
   const { writeCursorPolicy, SECRET_ENV_FILES } =
-    await import("../src/agent/cursor/permissions.ts");
+    await import("../src/agent/providers/cursor/permissions.ts");
   const { mkdtempSync, readFileSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { matchesGlob } = await import("node:path");

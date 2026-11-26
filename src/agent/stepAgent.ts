@@ -14,6 +14,7 @@ import {
   substituteEnabledProvider,
   type AgentProvider,
 } from "./provider.ts";
+import { providerCapabilities } from "./providerCapabilities.ts";
 
 export const FallbackPolicy = z
   .object({
@@ -113,13 +114,14 @@ export interface EffectiveAgent extends StepAgentConfig {
 export function validateAgentOptions(a: StepAgentConfig, provider = a.provider) {
   if (!provider) return;
   validateConfigurationValues(provider, a);
-  if (provider === "cursor" && a.allowed_tools != null)
+  const caps = providerCapabilities(provider);
+  if (caps.guarantees.allowedToolsEnforcement === "unsupported" && a.allowed_tools != null)
     throw new Error(
-      "Cursor cannot enforce a custom native tool allowlist; use its existing platform policy",
+      `${caps.shortLabel} cannot enforce a custom native tool allowlist; use its existing platform policy`,
     );
-  if (provider === "cursor" && a.execution_profile === "MICRO")
+  if (!caps.guarantees.microProfile && a.execution_profile === "MICRO")
     throw new Error(
-      "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
+      `${caps.shortLabel} cannot enforce pre-execution tool boundaries required by MICRO profile`,
     );
 }
 

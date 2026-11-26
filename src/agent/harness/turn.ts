@@ -1,9 +1,9 @@
 import type { AgentProvider } from "../provider.ts";
-import { claudeAgentTurn, codexEnvironmentNotes } from "../claude.ts";
-import { cursorAgentTurn } from "../cursor/run.ts";
-import { codexAgentTurn } from "../codex/run.ts";
-import { copilotAgentTurn } from "../copilot/run.ts";
-import { antigravityAgentTurn } from "../antigravity/run.ts";
+import { claudeAgentTurn } from "../providers/claude/run.ts";
+import { cursorAgentTurn } from "../providers/cursor/run.ts";
+import { codexAgentTurn, codexEnvironmentNotes } from "../providers/codex/run.ts";
+import { copilotAgentTurn } from "../providers/copilot/run.ts";
+import { antigravityAgentTurn } from "../providers/antigravity/run.ts";
 import type { LifecycleState, TurnResult } from "./state.ts";
 
 export type { TurnResult };

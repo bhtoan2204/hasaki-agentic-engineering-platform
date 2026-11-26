@@ -11,7 +11,7 @@ import { goBaseline, knownBaseFailures } from "../../../workflow/executors/basel
 import { runVerificationCommand as runCommand } from "../../../workflow/executors/builtin.ts";
 import { collectMicroEvidence } from "../../../workflow/microEvidence.ts";
 import { TEST_COMMAND } from "../../../workflow/templates.ts";
-import { SINCE_HUMAN_REEXECUTE, worktreeState } from "../../claude.ts";
+import { SINCE_HUMAN_REEXECUTE, worktreeState } from "../../sessions.ts";
 import {
   attemptArtifacts,
   compactionDecision,

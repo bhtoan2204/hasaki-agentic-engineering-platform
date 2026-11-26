@@ -1,15 +1,10 @@
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
+import { config } from "../config.ts";
 import { currentUserId } from "../auth/execution.ts";
-import { agentEnvironment } from "./environment.ts";
-import { cursorBinary, cursorCapabilities } from "./cursor/run.ts";
-import { codexCapabilities } from "./codex/run.ts";
-import { antigravityCapabilities } from "./antigravity/capabilities.ts";
-import { copilotCapabilities } from "./copilot/capabilities.ts";
+import { discoverProviderAdapter } from "./providerProbes.ts";
 
 import { AGENT_PROVIDERS, type AgentProvider } from "./provider.ts";
 import { primeSharedAgentHealth, probeAgentHealth } from "./health.ts";
-import { DiscoveryCache, type DiscoveryProbe } from "./providerDiscovery.ts";
+import { DiscoveryCache } from "./providerDiscovery.ts";
 import { providerControlState } from "./providerCapabilities.ts";
 import { loadAgentConfiguration } from "./configurationStore.ts";
 
@@ -42,73 +37,9 @@ export async function agentProviderStatus(refresh = false) {
 }
 
 const catalogs = new DiscoveryCache();
-async function claudeDiscovery() {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  // Keep stdin open for control requests, without sending a model prompt.
-  const prompt: AsyncIterable<SDKUserMessage> = {
-    [Symbol.asyncIterator]: () => ({
-      async next() {
-        if (!controller.signal.aborted)
-          await new Promise<void>((resolve) =>
-            controller.signal.addEventListener("abort", () => resolve(), { once: true }),
-          );
-        return { done: true, value: undefined };
-      },
-    }),
-  };
-  const session = query({
-    prompt,
-    options: {
-      ...(config.agent.claudeBin
-        ? {
-            pathToClaudeCodeExecutable: config.agent.claudeBin,
-          }
-        : {}),
-      env: agentEnvironment(process.env, "claude"),
-      tools: [],
-      settingSources: [],
-      persistSession: false,
-      abortController: controller,
-    },
-  });
-  try {
-    const models = await session.supportedModels();
-    return {
-      ok: true,
-      models: models.map((m) => ({
-        slug: m.value,
-        name: m.displayName,
-        efforts: m.supportedEffortLevels ?? [],
-      })),
-    };
-  } finally {
-    controller.abort();
-    session.close();
-    clearTimeout(timer);
-  }
-}
+
 export async function discoverProvider(provider: AgentProvider, refresh = false) {
-  const probes: Record<AgentProvider, { bin: string; probe: DiscoveryProbe }> = {
-    claude: { bin: config.agent.claudeBin ?? "sdk", probe: claudeDiscovery },
-    codex: {
-      bin: codexConfig().bin,
-      probe: async () => {
-        const c = await codexCapabilities(refresh, { model: "", effort: "" });
-        return { ...c, models: c.models?.map((m) => ({ ...m, name: m.slug })) };
-      },
-    },
-    cursor: { bin: cursorBinary(), probe: async () => cursorCapabilities(refresh) },
-    antigravity: {
-      bin: antigravityConfig().bin,
-      probe: async () => antigravityCapabilities(refresh, { model: "", effort: "" }),
-    },
-    copilot: {
-      bin: copilotConfig().bin,
-      probe: async () => copilotCapabilities(refresh, { model: "", effort: "" }),
-    },
-  };
-  const adapter = probes[provider];
+  const adapter = discoverProviderAdapter(provider, refresh);
   return catalogs.get(
     `${provider}:${adapter.bin}:${config.instanceId}:${currentUserId() ?? "worker"}`,
     adapter.probe,

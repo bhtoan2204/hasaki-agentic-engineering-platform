@@ -28,14 +28,16 @@ import { workspacesOf, recordWorkspace } from "../src/git/provider.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
-import {
-  codexModelFor,
-  rankRepositoriesWithClaude,
-  resumableSession,
-} from "../src/agent/claude.ts";
+import { codexModelFor } from "../src/agent/stepAgent.ts";
+import { rankRepositoriesWithClaude } from "../src/agent/repoRanking.ts";
+import { resumableSession } from "../src/agent/sessions.ts";
 import { resolveAgentProvider } from "../src/agent/provider.ts";
-import { classifyCodexError, JsonlStream } from "../src/agent/codex/stream.ts";
-import { codexHookDecision, patchPaths, shellCommandText } from "../src/agent/codex/policy.ts";
+import { classifyCodexError, JsonlStream } from "../src/agent/providers/codex/stream.ts";
+import {
+  codexHookDecision,
+  patchPaths,
+  shellCommandText,
+} from "../src/agent/providers/codex/policy.ts";
 import { startBroker } from "../src/agent/broker/server.ts";
 import {
   codexAgentTurn,
@@ -44,12 +46,12 @@ import {
   codexEnv,
   checkModel,
   redact,
-} from "../src/agent/codex/run.ts";
+} from "../src/agent/providers/codex/run.ts";
 import { npmCacheDir } from "../src/git/provider.ts";
 import { completeForRun } from "../src/agent/complete.ts";
 import { contractKeys, missingContractKeys } from "../src/agent/contract.ts";
 import { claudeTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
-import { newMetrics } from "../src/agent/claude.ts";
+import { newMetrics } from "../src/agent/metrics.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
 import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
 import type { AttemptRow, RunRow, StepRow } from "../src/workflow/types.ts";
@@ -58,8 +60,8 @@ import type { AgentMetrics } from "../src/agent/metrics.ts";
 import { config } from "../src/config.ts";
 
 const FAKE = join(import.meta.dirname, "fixtures", "fake-codex.mjs");
-const HOOK = join(import.meta.dirname, "..", "src", "agent", "codex", "hook.ts");
-const BRIDGE = join(import.meta.dirname, "..", "src", "agent", "codex", "bridge.ts");
+const HOOK = join(import.meta.dirname, "..", "src", "agent", "providers", "codex", "hook.ts");
+const BRIDGE = join(import.meta.dirname, "..", "src", "agent", "providers", "codex", "bridge.ts");
 let logFile = "";
 let defSeq = 0;
 

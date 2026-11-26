@@ -7,7 +7,7 @@ import {
   type AgentMetrics,
 } from "../src/agent/metrics.ts";
 import { normalizeProviderFailure, safeDiagnostics, usageSummary } from "../src/agent/telemetry.ts";
-import { parseCodexLine } from "../src/agent/codex/stream.ts";
+import { parseCodexLine } from "../src/agent/providers/codex/stream.ts";
 import { telemetryGroups } from "../src/api/metrics.ts";
 test("missing final Claude events and partial Codex usage never invent tokens or cost", () => {
   const m = newMetrics("claude-test");

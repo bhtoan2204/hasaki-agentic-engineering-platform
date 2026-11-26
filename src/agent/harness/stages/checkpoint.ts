@@ -3,7 +3,7 @@ import type { LifecycleState } from "../state.ts";
 import { config } from "../../../config.ts";
 import { one, pool } from "../../../db/pool.ts";
 import { repositoryBaseBranch } from "../../../repos/service.ts";
-import { SINCE_HUMAN_REEXECUTE, execP, resumableSession } from "../../claude.ts";
+import { SINCE_HUMAN_REEXECUTE, execP, resumableSession } from "../../sessions.ts";
 import { approvedScopeIn } from "../../evidence.ts";
 import { executionWorkspaces, implementationBaseline } from "../../implementationEvidence.ts";
 import {

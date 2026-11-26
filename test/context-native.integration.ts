@@ -42,7 +42,7 @@ import {
 import { captureContextContinuity } from "../src/context/continuity.ts";
 import { buildUserPrompt, buildSystemAppend } from "../src/agent/stepPrompt.ts";
 import { startBroker } from "../src/agent/broker/server.ts";
-import { codexHookDecision } from "../src/agent/codex/policy.ts";
+import { codexHookDecision } from "../src/agent/providers/codex/policy.ts";
 import { brokerRequest } from "../src/agent/broker/client.ts";
 import { handle } from "../src/http/app.ts";
 import { estimateTokens } from "../src/context/plan.ts";

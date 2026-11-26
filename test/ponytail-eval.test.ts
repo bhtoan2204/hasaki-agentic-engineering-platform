@@ -138,7 +138,7 @@ test("Ponytail metrics count changed-file token clones and added/removed LOC", (
 });
 
 test("Cursor incremental raw usage can abort before final result and unknown usage is not zero", async () => {
-  const { cursorUsage } = await import("../src/agent/cursor/stream.ts");
+  const { cursorUsage } = await import("../src/agent/providers/cursor/stream.ts");
   assert.equal(cursorUsage({ type: "assistant" }), null);
   const usage = cursorUsage({ type: "assistant", usage: { input_tokens: 80, output_tokens: 40 } });
   assert.ok(usage);

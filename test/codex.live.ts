@@ -24,7 +24,7 @@ import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import type { StepRow } from "../src/workflow/types.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
-import { codexCapabilities } from "../src/agent/codex/run.ts";
+import { codexCapabilities } from "../src/agent/providers/codex/capabilities.ts";
 import { config } from "../src/config.ts";
 
 const live = process.env.CODEX_LIVE === "1";

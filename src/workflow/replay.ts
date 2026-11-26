@@ -202,7 +202,9 @@ const runtimeRevision = (() => {
     const hash = createHash("sha256");
     for (const path of [
       "../../package-lock.json",
-      "../agent/claude.ts",
+      "../agent/providers/claude/run.ts",
+      "../agent/providers/claude/mcp.ts",
+      "../agent/sessions.ts",
       "../agent/stepPrompt.ts",
       "../agent/toolPolicy.ts",
       "../agent/platformTools.ts",

@@ -24,6 +24,7 @@ import {
   probeAgentHealth,
   rememberProviderQuota,
 } from "../../agent/health.ts";
+import { providerCapabilities } from "../../agent/providerCapabilities.ts";
 import {
   fallbackPolicy,
   resolveStepAgent,
@@ -634,7 +635,7 @@ async function assertHandoffAuthorized(x: ResumeContext) {
   );
   if (permitted.length !== repos.length)
     throw new EngineError("Repository permissions no longer permit this step", 409);
-  if (input.provider !== "claude" && s.config.delegation?.enabled)
+  if (!providerCapabilities(input.provider).guarantees.delegation && s.config.delegation?.enabled)
     throw new EngineError(
       "Target provider cannot enforce the approved delegation sandbox policy",
       409,

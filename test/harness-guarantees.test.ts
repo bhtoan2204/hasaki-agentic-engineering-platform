@@ -1,6 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { GUARANTEES, guaranteeCheck } from "../src/agent/providerCapabilities.ts";
+import {
+  GUARANTEES,
+  guaranteeCheck,
+  NATIVE_TOOL_PROVIDERS,
+  OS_ISOLATED_PROVIDERS,
+  PROVIDER_CAPABILITIES,
+  providerCapabilities,
+  providerControls,
+  VISION_PROVIDERS,
+} from "../src/agent/providerCapabilities.ts";
+import { discoverProviderAdapter } from "../src/agent/providerProbes.ts";
 import { decide, type PolicyContext } from "../src/agent/toolPolicy.ts";
 
 const PROVIDERS = ["claude", "codex", "cursor", "copilot", "antigravity"] as const;
@@ -38,4 +48,29 @@ test("web tools are denied while a step can write, unless the step allows networ
   assert.equal(decide("WebFetch", { url: "https://x" }, coding).allow, false);
   assert.equal(decide("WebSearch", { query: "x" }, { ...coding, network: true }).allow, true);
   assert.equal(decide("WebSearch", { query: "x" }, { ...coding, mode: "analysis" }).allow, true);
+});
+
+test("PROVIDER_CAPABILITIES is complete and consistent with derived capability tables", () => {
+  assert.deepEqual(Object.keys(PROVIDER_CAPABILITIES).sort(), [...PROVIDERS].sort());
+  assert.deepEqual(Object.keys(providerControls).sort(), [...PROVIDERS].sort());
+  for (const p of PROVIDERS) {
+    const caps = providerCapabilities(p);
+    assert.equal(caps.id, p);
+    assert.deepEqual(providerControls[p].efforts, [...caps.controls.efforts]);
+    assert.deepEqual(providerControls[p].options, [...caps.controls.options]);
+    assert.equal(providerControls[p].max_turns, caps.controls.max_turns);
+    assert.equal(providerControls[p].model, caps.controls.model);
+    assert.equal(VISION_PROVIDERS.includes(p), caps.completion.visionImages);
+    assert.equal(NATIVE_TOOL_PROVIDERS.includes(p), caps.completion.chatNativeTools);
+    assert.equal(OS_ISOLATED_PROVIDERS.includes(p), caps.guarantees.osIsolation);
+    assert.equal(GUARANTEES[p].includes("reported_cost"), caps.completion.reportedCost);
+    assert.equal(GUARANTEES[p].includes("pre_tool_policy"), caps.guarantees.preToolPolicy);
+    assert.equal(typeof discoverProviderAdapter(p).bin, "string");
+  }
+  assert.equal(providerCapabilities("claude").guarantees.delegation, true);
+  for (const p of ["codex", "copilot", "antigravity", "cursor"] as const) {
+    assert.equal(providerCapabilities(p).guarantees.delegation, false);
+  }
+  assert.equal(providerCapabilities("cursor").guarantees.microProfile, false);
+  assert.equal(providerCapabilities("cursor").guarantees.allowedToolsEnforcement, "unsupported");
 });

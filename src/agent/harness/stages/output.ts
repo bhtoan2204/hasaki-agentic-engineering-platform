@@ -1,6 +1,7 @@
 import type { ExecResult } from "../../../workflow/types.ts";
 import { one, pool } from "../../../db/pool.ts";
 import type { LifecycleState } from "../state.ts";
+import { providerCapabilities } from "../../providerCapabilities.ts";
 import { workspacesOf } from "../../../git/provider.ts";
 import { missingContractKeys, validateOutputContract } from "../../contract.ts";
 import { evidenceRole, normalizeInvestigationOutput, unavailableSources } from "../../evidence.ts";
@@ -23,18 +24,7 @@ async function lastRejection(attemptId: number): Promise<string[] | null> {
 /** Output contract validation of the submitted result, coding outcome normalization and investigation evidence normalization. */
 export async function outputStage(s: LifecycleState): Promise<ExecResult | void> {
   const { ctx, mode, provider, independent, submitted, result, metrics } = s;
-  const pName =
-    provider === "codex"
-      ? "Codex"
-      : provider === "copilot"
-        ? "Copilot"
-        : provider === "cursor"
-          ? "Cursor"
-          : provider === "antigravity"
-            ? "Antigravity"
-            : provider === "claude"
-              ? "Claude"
-              : String(provider);
+  const pName = providerCapabilities(provider)?.shortLabel ?? String(provider);
   if (!independent) {
     if (ctx.step.config?.output_schema || ctx.step.config?.output_contract) {
       if (!submitted) {

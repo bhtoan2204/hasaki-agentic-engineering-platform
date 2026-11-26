@@ -1,4 +1,4 @@
-import { providerControls } from "./providerCapabilities.ts";
+import { providerCapabilities } from "./providerCapabilities.ts";
 import { z } from "zod";
 import { config, codexConfig, antigravityConfig, copilotConfig } from "../config.ts";
 import { isOwned } from "../platform/operatorState.ts";
@@ -80,22 +80,18 @@ export type FieldSources = Partial<
 export { providerControls } from "./providerCapabilities.ts";
 
 export function validateConfigurationValues(provider: AgentProvider, values: AgentValues) {
-  const controls = providerControls[provider];
+  const caps = providerCapabilities(provider);
+  const controls = caps.controls;
   if (values.max_turns !== undefined && !controls.max_turns)
     throw new Error(`${provider} does not support max_turns`);
   if (values.reasoning_effort && !controls.efforts.includes(values.reasoning_effort)) {
-    const label = provider.charAt(0).toUpperCase() + provider.slice(1);
     throw new Error(
-      provider === "cursor"
-        ? "Cursor does not support explicit reasoning_effort"
-        : `Unsupported ${label} reasoning_effort`,
+      !controls.efforts.length
+        ? `${caps.shortLabel} does not support explicit reasoning_effort`
+        : `Unsupported ${caps.shortLabel} reasoning_effort`,
     );
   }
-  if (
-    values.options &&
-    Object.keys(values.options).length &&
-    !["antigravity", "copilot"].includes(provider)
-  )
+  if (values.options && Object.keys(values.options).length && !controls.options.length)
     throw new Error(`${provider} does not support these provider options`);
   assertModelAllowed(values.model, `${provider} configuration`);
   const model = values.model?.toLowerCase();

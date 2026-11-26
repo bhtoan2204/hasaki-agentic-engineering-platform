@@ -1,6 +1,7 @@
 import type { ExecResult } from "../../../workflow/types.ts";
 import type { LifecycleState } from "../state.ts";
-import { guaranteeCheck } from "../../providerCapabilities.ts";
+import { guaranteeCheck, providerCapabilities } from "../../providerCapabilities.ts";
+import { probePreflightCapability } from "../../providerProbes.ts";
 import { probeIsolation } from "../../isolation.ts";
 import { one, pool } from "../../../db/pool.ts";
 import { config } from "../../../config.ts";
@@ -16,10 +17,6 @@ import { repositories } from "../../../repos/service.ts";
 import { checkoutForRun, prepareRepository } from "../../../repos/workspaces.ts";
 import { resolveSourceRevisions } from "../../../workflow/sourceRevision.ts";
 import { validateMicroWorkspace } from "../../../workflow/microEvidence.ts";
-import { antigravityCapabilities } from "../../antigravity/capabilities.ts";
-import { codexCapabilities } from "../../codex/run.ts";
-import { copilotCapabilities } from "../../copilot/capabilities.ts";
-import { cursorCapabilities } from "../../cursor/run.ts";
 import { executionWorkspaces } from "../../implementationEvidence.ts";
 import { outputLocale } from "../../language.ts";
 import { attemptIsLive } from "../../platformTools.ts";
@@ -160,76 +157,57 @@ export async function preflightStage(s: LifecycleState): Promise<ExecResult | vo
         "Agent isolation is enforced: the sandboxed Claude CLI cannot read the host login (~/.claude is hidden). Run `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for the worker (subscription; API keys are never passed).",
       details: { failure_code: "GUARANTEE_UNMET", isolation: runtime },
     };
-  if (provider !== "claude") {
-    const label =
-      provider === "codex"
-        ? "OpenAI Codex"
-        : provider === "cursor"
-          ? "This Cursor CLI"
-          : provider === "antigravity"
-            ? "Google Antigravity CLI"
-            : "GitHub Copilot CLI";
-    // Checked BEFORE anything runs: subagent delegation cannot be held to the platform's read-only subagent policy.
-    if (
-      ctx.run.profile !== "MICRO" &&
-      (ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true
-    )
-      return {
-        kind: "failed",
-        error: `${label} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`,
-        retryable: false,
-      };
-    if (ctx.run.profile === "MICRO" && provider === "cursor")
-      return {
-        kind: "profile_escalation",
-        request: {
-          target: "STANDARD",
-          risk: "unknown",
-          reason: "Cursor cannot enforce pre-execution tool boundaries required by MICRO profile",
-          expectedRevision:
-            (
-              ctx.run.graph as
-                | (import("../../../workflow/types.ts").WorkflowSpec & {
-                    profile_revision?: number;
-                  })
-                | undefined
-            )?.profile_revision ?? 0,
-        },
-      };
-    if (guarantees.unmet.length)
-      return {
-        kind: "failed",
-        retryable: false,
-        error: `Provider ${provider} cannot enforce ${guarantees.unmet.join(", ")}, which ${mode === "coding" ? "implementation" : "this"} step requires. Run the step with a provider that enforces them; the platform does not fall back to another provider.`,
-        details: { failure_code: "GUARANTEE_UNMET", guarantees },
-      };
-    if (guarantees.degraded.length)
-      await ctx.log(
-        "system",
-        `${provider} runs this read-only step without ${guarantees.degraded.join(", ")}`,
-        { guarantees },
-      );
-    const cap =
-      provider === "codex"
-        ? await codexCapabilities(false, {
-            model: effective.model ?? "",
-            effort: effective.reasoning_effort ?? "",
-          })
-        : provider === "cursor"
-          ? await cursorCapabilities()
-          : provider === "antigravity"
-            ? await antigravityCapabilities(false, {
-                model: effective.model ?? "",
-                effort: effective.reasoning_effort ?? "",
-              })
-            : await copilotCapabilities(false, {
-                model: effective.model ?? "",
-                effort: effective.reasoning_effort ?? "",
-              });
+  const caps = providerCapabilities(provider);
+  // Checked BEFORE anything runs: subagent delegation cannot be held to a provider's missing delegation sandbox.
+  if (
+    !caps.guarantees.delegation &&
+    ctx.run.profile !== "MICRO" &&
+    (ctx.step.config.delegation as { enabled?: boolean } | undefined)?.enabled === true
+  )
+    return {
+      kind: "failed",
+      error: `${caps.cliLabel} cannot enforce the platform's read-only subagent policy (delegation is unsupported for this provider). Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.`,
+      retryable: false,
+    };
+  if (ctx.run.profile === "MICRO" && !caps.guarantees.microProfile)
+    return {
+      kind: "profile_escalation",
+      request: {
+        target: "STANDARD",
+        risk: "unknown",
+        reason: `${caps.shortLabel} cannot enforce pre-execution tool boundaries required by MICRO profile`,
+        expectedRevision:
+          (
+            ctx.run.graph as
+              | (import("../../../workflow/types.ts").WorkflowSpec & {
+                  profile_revision?: number;
+                })
+              | undefined
+          )?.profile_revision ?? 0,
+      },
+    };
+  if (guarantees.unmet.length)
+    return {
+      kind: "failed",
+      retryable: false,
+      error: `Provider ${provider} cannot enforce ${guarantees.unmet.join(", ")}, which ${mode === "coding" ? "implementation" : "this"} step requires. Run the step with a provider that enforces them; the platform does not fall back to another provider.`,
+      details: { failure_code: "GUARANTEE_UNMET", guarantees },
+    };
+  if (guarantees.degraded.length)
+    await ctx.log(
+      "system",
+      `${provider} runs this read-only step without ${guarantees.degraded.join(", ")}`,
+      { guarantees },
+    );
+  if (caps.runtime.preflightProbe) {
+    const cap = await probePreflightCapability(provider, {
+      model: effective.model ?? "",
+      effort: effective.reasoning_effort ?? "",
+    });
     if (!cap.ok)
       return {
         kind: "failed",
-        error: cap.error || `${label} is not usable`,
+        error: cap.error || `${caps.cliLabel} is not usable`,
         retryable: false,
         details: {
           provider_error: {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { codexArgs } from "../src/agent/codex/run.ts";
+import { codexArgs } from "../src/agent/providers/codex/run.ts";
 
 test("Codex coding sandbox authorizes exact prepared worktrees on fresh and resumed turns", () => {
   const workspace = "/data/worktrees/run 123/repo";

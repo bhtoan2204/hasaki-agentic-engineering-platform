@@ -44,39 +44,49 @@ test("findCycles reports a two-file cycle and ignores acyclic edges", () => {
   assert.deepEqual(findCycles(g), [["src/a.ts", "src/b.ts"]]);
 });
 
-test("workflow importing the Claude module or a provider adapter is a core violation", () => {
+test("workflow importing a provider adapter is a core violation", () => {
   const g = graphOf({
-    "src/workflow/x.ts": 'import "../agent/claude.ts"; import "../agent/codex/run.ts";',
-    "src/agent/claude.ts": "",
-    "src/agent/codex/run.ts": "",
+    "src/workflow/x.ts":
+      'import "../agent/providers/claude/run.ts"; import "../agent/providers/codex/run.ts";',
+    "src/agent/providers/claude/run.ts": "",
+    "src/agent/providers/codex/run.ts": "",
   });
   const keys = findViolations(g).map((v) => v.key);
-  assert.ok(keys.includes("no-provider-from-core:src/workflow/x.ts->src/agent/claude.ts"));
-  assert.ok(keys.includes("no-provider-from-core:src/workflow/x.ts->src/agent/codex/run.ts"));
+  assert.ok(
+    keys.includes("no-provider-from-core:src/workflow/x.ts->src/agent/providers/claude/run.ts"),
+  );
+  assert.ok(
+    keys.includes("no-provider-from-core:src/workflow/x.ts->src/agent/providers/codex/run.ts"),
+  );
 });
 
 test("importing a provider internal file from outside is flagged, its entry file is not", () => {
   const g = graphOf({
-    "src/agent/other.ts": 'import "./codex/policy.ts"; import "./codex/run.ts";',
-    "src/agent/codex/policy.ts": "",
-    "src/agent/codex/run.ts": 'import "./policy.ts";',
+    "src/agent/other.ts":
+      'import "./providers/codex/policy.ts"; import "./providers/codex/run.ts"; import "./providers/claude/complete.ts";',
+    "src/agent/providers/codex/policy.ts": "",
+    "src/agent/providers/codex/run.ts": 'import "./policy.ts";',
+    "src/agent/providers/claude/complete.ts": "",
   });
   const v = findViolations(g);
   assert.deepEqual(
     v.map((x) => x.key),
-    ["no-provider-internals:src/agent/other.ts->src/agent/codex/policy.ts"],
+    ["no-provider-internals:src/agent/other.ts->src/agent/providers/codex/policy.ts"],
   );
 });
 
 test("a provider directory cannot import another provider, even its entry file", () => {
   const g = graphOf({
-    "src/agent/cursor/run.ts": 'import "../codex/run.ts"; import "../broker/server.ts";',
-    "src/agent/codex/run.ts": "",
+    "src/agent/providers/cursor/run.ts":
+      'import "../codex/run.ts"; import "../../broker/server.ts";',
+    "src/agent/providers/codex/run.ts": "",
     "src/agent/broker/server.ts": "",
   });
   assert.deepEqual(
     findViolations(g).map((x) => x.key),
-    ["no-provider-cross-import:src/agent/cursor/run.ts->src/agent/codex/run.ts"],
+    [
+      "no-provider-cross-import:src/agent/providers/cursor/run.ts->src/agent/providers/codex/run.ts",
+    ],
   );
 });
 
