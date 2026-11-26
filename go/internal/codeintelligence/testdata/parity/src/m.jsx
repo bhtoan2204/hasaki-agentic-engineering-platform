@@ -1,3 +1,1 @@
-export default function App() {
-  return <main>{" "}</main>;
-}
+export default function App() { return <main>{" "}</main>; }

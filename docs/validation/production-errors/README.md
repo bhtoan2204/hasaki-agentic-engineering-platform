@@ -14,24 +14,24 @@ Implemented against latest main `b08a01f23350a98a47162d0e2c7006a4938bc54f`. Both
 
 ## Navigation and compatibility
 
-| Destination                 | Route                                             |
-| --------------------------- | ------------------------------------------------- |
-| Overview (default)          | `#/prod-errors` or `#/prod-errors/overview`       |
-| Operational incident list   | `#/prod-errors/incidents`                         |
-| Service comparisons         | `#/prod-errors/services`                          |
-| Service details             | `#/prod-errors/service?namespace=...&service=...` |
-| Historical incident details | `#/prod-errors/incident/:fingerprint`             |
-| Scan & Settings             | `#/prod-errors/settings`                          |
-| Insights default            | `#/insights` → Usage & Cost content               |
+| Destination | Route |
+| --- | --- |
+| Overview (default) | `#/prod-errors` or `#/prod-errors/overview` |
+| Operational incident list | `#/prod-errors/incidents` |
+| Service comparisons | `#/prod-errors/services` |
+| Service details | `#/prod-errors/service?namespace=...&service=...` |
+| Historical incident details | `#/prod-errors/incident/:fingerprint` |
+| Scan & Settings | `#/prod-errors/settings` |
+| Insights default | `#/insights` → Usage & Cost content |
 
 All Production Errors child routes select Production Errors in the global sidebar. Insights primary tabs are Usage & Cost, Agent Performance, and Workflow Analytics. Existing Agent Evaluation and advanced quality navigation remain available.
 
-| Legacy URL                            | New behavior                                                               |
-| ------------------------------------- | -------------------------------------------------------------------------- |
-| `#/insights/health?...`               | Replaces the history entry with `#/prod-errors/overview?...`               |
-| `#/insights/health?view=service&...`  | Replaces the history entry with `#/prod-errors/service?view=service&...`   |
-| `#/prod-errors/:fingerprint`          | Maps to historical incident details within the Production Errors workspace |
-| `#/prod-errors/incident/:fingerprint` | Continues to open incident details                                         |
+| Legacy URL | New behavior |
+| --- | --- |
+| `#/insights/health?...` | Replaces the history entry with `#/prod-errors/overview?...` |
+| `#/insights/health?view=service&...` | Replaces the history entry with `#/prod-errors/service?view=service&...` |
+| `#/prod-errors/:fingerprint` | Maps to historical incident details within the Production Errors workspace |
+| `#/prod-errors/incident/:fingerprint` | Continues to open incident details |
 
 Legacy redirect queries are preserved verbatim. Service details carry `return_query` and `return_tab`; incident details carry a validated `return_to`. Return links accept only known internal Production Errors pages, including translated legacy Health destinations. Routing preserves embedded question marks in query values. Browser back/forward is verified.
 
@@ -75,16 +75,16 @@ CHROMIUM_BIN=/nix/store/fqriy9vihl23l4md56qgiks8z0d2xdlw-chromium-156.0.8078.79/
 
 ## Screenshots
 
-| View                                              | English                                                                                                            | Vietnamese                                | Mobile                                                               |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- | -------------------------------------------------------------------- |
-| Overview                                          | [EN](overview-en.png)                                                                                              | [VI](overview-vi.png)                     | [EN](overview-en-mobile.png), [VI](overview-vi-mobile.png)           |
-| Incidents (expanded operational evidence/actions) | [EN](incidents-en.png)                                                                                             | [VI](incidents-vi.png)                    | [EN](incidents-en-mobile.png), [VI](incidents-vi-mobile.png)         |
-| Services                                          | [EN](services-en.png)                                                                                              | [VI](services-vi.png)                     | [EN](services-en-mobile.png), [VI](services-vi-mobile.png)           |
-| Service Details                                   | [EN](service-en.png)                                                                                               | [VI](service-vi.png)                      | [EN](service-en-mobile.png), [VI](service-vi-mobile.png)             |
-| Incident Details                                  | [EN](incident-en.png)                                                                                              | [VI](incident-vi.png)                     | [EN](incident-en-mobile.png), [VI](incident-vi-mobile.png)           |
-| Scan & Settings                                   | [EN](settings-en.png)                                                                                              | [VI](settings-vi.png)                     | [EN](settings-en-mobile.png), [VI](settings-vi-mobile.png)           |
-| Scan controls (simulated connection)              | [EN](scan-controls-en.png)                                                                                         | [VI](scan-controls-vi.png)                | [EN](scan-controls-en-mobile.png), [VI](scan-controls-vi-mobile.png) |
-| Updated Insights                                  | [Usage](insights-usage-en.png), [Performance](insights-performance-en.png), [Workflows](insights-workflows-en.png) | [Workflows VI](insights-workflows-vi.png) | —                                                                    |
+| View | English | Vietnamese | Mobile |
+| --- | --- | --- | --- |
+| Overview | [EN](overview-en.png) | [VI](overview-vi.png) | [EN](overview-en-mobile.png), [VI](overview-vi-mobile.png) |
+| Incidents (expanded operational evidence/actions) | [EN](incidents-en.png) | [VI](incidents-vi.png) | [EN](incidents-en-mobile.png), [VI](incidents-vi-mobile.png) |
+| Services | [EN](services-en.png) | [VI](services-vi.png) | [EN](services-en-mobile.png), [VI](services-vi-mobile.png) |
+| Service Details | [EN](service-en.png) | [VI](service-vi.png) | [EN](service-en-mobile.png), [VI](service-vi-mobile.png) |
+| Incident Details | [EN](incident-en.png) | [VI](incident-vi.png) | [EN](incident-en-mobile.png), [VI](incident-vi-mobile.png) |
+| Scan & Settings | [EN](settings-en.png) | [VI](settings-vi.png) | [EN](settings-en-mobile.png), [VI](settings-vi-mobile.png) |
+| Scan controls (simulated connection) | [EN](scan-controls-en.png) | [VI](scan-controls-vi.png) | [EN](scan-controls-en-mobile.png), [VI](scan-controls-vi-mobile.png) |
+| Updated Insights | [Usage](insights-usage-en.png), [Performance](insights-performance-en.png), [Workflows](insights-workflows-en.png) | [Workflows VI](insights-workflows-vi.png) | — |
 
 [Scanner progress (simulated)](scan-progress-en.png).
 

@@ -28,7 +28,14 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["implement", "fix", "refactor", "test", "regression_test", "fix_test"]
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor",
+          "test",
+          "regression_test",
+          "fix_test"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -72,7 +79,13 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["root_cause", "fix_proposal", "analyze_findings", "analyze_code", "correlate"]
+        "step_keys": [
+          "root_cause",
+          "fix_proposal",
+          "analyze_findings",
+          "analyze_code",
+          "correlate"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -132,9 +145,18 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["implement", "fix", "refactor", "regression_test", "test", "fix_test"]
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor",
+          "regression_test",
+          "test",
+          "fix_test"
+        ]
       },
-      "supersedes": ["user.skill.tdd"],
+      "supersedes": [
+        "user.skill.tdd"
+      ],
       "files": [
         {
           "file": "SKILL.md",
@@ -181,7 +203,10 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["plan", "fix_proposal"]
+        "step_keys": [
+          "plan",
+          "fix_proposal"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -226,7 +251,10 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["security", "review"]
+        "step_keys": [
+          "security",
+          "review"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -289,10 +317,18 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["implement", "fix", "refactor"],
-        "repos": ["oms-frontend"]
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor"
+        ],
+        "repos": [
+          "oms-frontend"
+        ]
       },
-      "supersedes": ["user.skill.frontend-design"],
+      "supersedes": [
+        "user.skill.frontend-design"
+      ],
       "files": [
         {
           "file": "SKILL.md",
@@ -318,7 +354,10 @@
       },
       "status": "blocked",
       "runtime": {
-        "binaries": ["uv", "gh"],
+        "binaries": [
+          "uv",
+          "gh"
+        ],
         "network": true,
         "scripts": true
       },
@@ -329,7 +368,9 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["security"]
+        "step_keys": [
+          "security"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -358,7 +399,9 @@
       },
       "status": "blocked",
       "runtime": {
-        "binaries": ["playwright-cli"],
+        "binaries": [
+          "playwright-cli"
+        ],
         "network": true,
         "scripts": false
       },
@@ -369,7 +412,10 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["test", "regression_test"]
+        "step_keys": [
+          "test",
+          "regression_test"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -412,7 +458,11 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["understand", "architecture", "plan"]
+        "step_keys": [
+          "understand",
+          "architecture",
+          "plan"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -454,7 +504,11 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["implement", "fix", "refactor"]
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor"
+        ]
       },
       "supersedes": [],
       "files": [
@@ -491,8 +545,15 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["implement", "fix", "refactor"],
-        "step_types": ["agent", "coding_agent"]
+        "step_keys": [
+          "implement",
+          "fix",
+          "refactor"
+        ],
+        "step_types": [
+          "agent",
+          "coding_agent"
+        ]
       },
       "supersedes": [],
       "conflict_key": "engineering.reuse",
@@ -531,8 +592,13 @@
         "antigravity": "supported"
       },
       "applicability": {
-        "step_keys": ["review"],
-        "step_types": ["agent", "coding_agent"]
+        "step_keys": [
+          "review"
+        ],
+        "step_types": [
+          "agent",
+          "coding_agent"
+        ]
       },
       "supersedes": [],
       "conflict_key": "engineering.review.lean",

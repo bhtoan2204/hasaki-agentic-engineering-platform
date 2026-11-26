@@ -25,8 +25,12 @@
   "model_check": {
     "status": "unverified",
     "models": [],
-    "requested": ["(account default)"],
-    "efforts": ["(default)"],
+    "requested": [
+      "(account default)"
+    ],
+    "efforts": [
+      "(default)"
+    ],
     "unresolved_samples": 40,
     "mismatched_pairs": []
   },
@@ -40,12 +44,18 @@
     "correct": {
       "n": 20,
       "mean": 0.05,
-      "ci95": [0, 0.15]
+      "ci95": [
+        0,
+        0.15
+      ]
     },
     "sdk_calls": {
       "n": 20,
       "mean": -0.9,
-      "ci95": [-1.15, -0.65]
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
     },
     "model_turns": {
       "n": 0,
@@ -60,27 +70,42 @@
     "tool_calls": {
       "n": 20,
       "mean": -0.9,
-      "ci95": [-1.15, -0.65]
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
     },
     "prompt_chars_total": {
       "n": 20,
       "mean": -7421.65,
-      "ci95": [-9092.1, -5618.35]
+      "ci95": [
+        -9092.1,
+        -5618.35
+      ]
     },
     "prompt_chars_max": {
       "n": 20,
       "mean": -2228.3,
-      "ci95": [-2896.7, -1660.9]
+      "ci95": [
+        -2896.7,
+        -1660.9
+      ]
     },
     "tool_result_chars": {
       "n": 20,
       "mean": -3095.1,
-      "ci95": [-3847, -2324.8]
+      "ci95": [
+        -3847,
+        -2324.8
+      ]
     },
     "latency_ms": {
       "n": 20,
       "mean": 60.45,
-      "ci95": [51.4, 70.3]
+      "ci95": [
+        51.4,
+        70.3
+      ]
     },
     "input_tokens": {
       "n": 0,
@@ -374,12 +399,18 @@
     "correct": {
       "n": 20,
       "mean": 0.05,
-      "ci95": [0, 0.15]
+      "ci95": [
+        0,
+        0.15
+      ]
     },
     "sdk_calls": {
       "n": 20,
       "mean": -0.9,
-      "ci95": [-1.15, -0.65]
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
     },
     "model_turns": {
       "n": 0,
@@ -394,27 +425,42 @@
     "tool_calls": {
       "n": 20,
       "mean": -0.9,
-      "ci95": [-1.15, -0.65]
+      "ci95": [
+        -1.15,
+        -0.65
+      ]
     },
     "prompt_chars_total": {
       "n": 20,
       "mean": -7421.65,
-      "ci95": [-9092.1, -5618.35]
+      "ci95": [
+        -9092.1,
+        -5618.35
+      ]
     },
     "prompt_chars_max": {
       "n": 20,
       "mean": -2228.3,
-      "ci95": [-2896.7, -1660.9]
+      "ci95": [
+        -2896.7,
+        -1660.9
+      ]
     },
     "tool_result_chars": {
       "n": 20,
       "mean": -3095.1,
-      "ci95": [-3847, -2324.8]
+      "ci95": [
+        -3847,
+        -2324.8
+      ]
     },
     "latency_ms": {
       "n": 20,
       "mean": 60.45,
-      "ci95": [51.4, 70.3]
+      "ci95": [
+        51.4,
+        70.3
+      ]
     },
     "input_tokens": {
       "n": 0,
@@ -1074,121 +1120,181 @@
     {
       "task_id": "INC-provider-timeout-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-retry-amplification-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-kafka-consumer-lag-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-db-pool-saturation-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-downstream-http-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-idempotency-conflict-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-misleading-warnings-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-missing-spans-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-partial-outage-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-event-ordering-1",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-provider-timeout-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-retry-amplification-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-kafka-consumer-lag-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-db-pool-saturation-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-downstream-http-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-idempotency-conflict-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-misleading-warnings-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-missing-spans-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-partial-outage-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "INC-event-ordering-2",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     }
   ],
@@ -1241,7 +1347,9 @@
         "status": "CONFIRMED",
         "affected_orders": 10,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -1329,7 +1437,9 @@
         "status": "CONFIRMED",
         "affected_orders": 10,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -1352,7 +1462,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8917,
       "prompt_chars_max": 4915,
       "estimated_prompt_tokens": 2230,
@@ -1417,7 +1529,9 @@
         "status": "CONFIRMED",
         "affected_orders": 8,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker refund.retry"]
+        "next_actions": [
+          "inspect refund-worker refund.retry"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -1505,7 +1619,9 @@
         "status": "CONFIRMED",
         "affected_orders": 8,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker refund.retry"]
+        "next_actions": [
+          "inspect refund-worker refund.retry"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -1528,7 +1644,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 8912,
       "prompt_chars_max": 4901,
       "estimated_prompt_tokens": 2229,
@@ -1593,7 +1712,9 @@
         "status": "CONFIRMED",
         "affected_orders": 8,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker consume.refund-events"]
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -1681,7 +1802,9 @@
         "status": "CONFIRMED",
         "affected_orders": 8,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker consume.refund-events"]
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -1704,7 +1827,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs"],
+      "composed_tools": [
+        "rca.logs"
+      ],
       "prompt_chars_total": 8721,
       "prompt_chars_max": 4734,
       "estimated_prompt_tokens": 2181,
@@ -1769,7 +1894,9 @@
         "status": "CONFIRMED",
         "affected_orders": 10,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker refund.db.acquire"]
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -1857,7 +1984,9 @@
         "status": "CONFIRMED",
         "affected_orders": 10,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker refund.db.acquire"]
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -1880,7 +2009,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8919,
       "prompt_chars_max": 4911,
       "estimated_prompt_tokens": 2230,
@@ -1945,7 +2076,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect fraud-service fraud.check"]
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -2033,7 +2166,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect fraud-service fraud.check"]
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -2056,7 +2191,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8899,
       "prompt_chars_max": 4899,
       "estimated_prompt_tokens": 2225,
@@ -2121,7 +2258,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect order-api refund.submit"]
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -2209,7 +2348,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect order-api refund.submit"]
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -2232,7 +2373,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 8885,
       "prompt_chars_max": 4886,
       "estimated_prompt_tokens": 2222,
@@ -2297,7 +2441,9 @@
         "status": "CONFIRMED",
         "affected_orders": 11,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -2385,7 +2531,9 @@
         "status": "CONFIRMED",
         "affected_orders": 11,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -2408,7 +2556,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8937,
       "prompt_chars_max": 4925,
       "estimated_prompt_tokens": 2235,
@@ -2473,7 +2623,9 @@
         "status": "CONFIRMED",
         "affected_orders": 9,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -2561,7 +2713,9 @@
         "status": "CONFIRMED",
         "affected_orders": 9,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -2584,7 +2738,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 8898,
       "prompt_chars_max": 4904,
       "estimated_prompt_tokens": 2225,
@@ -2648,8 +2805,12 @@
         "cause": "provider_timeout",
         "status": "PROBABLE",
         "affected_orders": 14,
-        "missing_sources": ["rca.traces"],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 4,
       "model_turns": null,
@@ -2736,8 +2897,12 @@
         "cause": "provider_timeout",
         "status": "PROBABLE",
         "affected_orders": 14,
-        "missing_sources": ["rca.traces"],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -2760,7 +2925,10 @@
         "nested_failures_in_ok_executions": 1,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 9038,
       "prompt_chars_max": 5041,
       "estimated_prompt_tokens": 2261,
@@ -2825,7 +2993,9 @@
         "status": "CONFIRMED",
         "affected_orders": 9,
         "missing_sources": [],
-        "next_actions": ["inspect ledger-service ledger.apply"]
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -2913,7 +3083,9 @@
         "status": "CONFIRMED",
         "affected_orders": 9,
         "missing_sources": [],
-        "next_actions": ["inspect ledger-service ledger.apply"]
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -2936,7 +3108,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs"],
+      "composed_tools": [
+        "rca.logs"
+      ],
       "prompt_chars_total": 8725,
       "prompt_chars_max": 4730,
       "estimated_prompt_tokens": 2182,
@@ -3001,7 +3175,9 @@
         "status": "CONFIRMED",
         "affected_orders": 11,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -3089,7 +3265,9 @@
         "status": "CONFIRMED",
         "affected_orders": 11,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -3112,7 +3290,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8923,
       "prompt_chars_max": 4920,
       "estimated_prompt_tokens": 2231,
@@ -3274,7 +3454,9 @@
         "status": "CONFIRMED",
         "affected_orders": 11,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker refund.retry"]
+        "next_actions": [
+          "inspect refund-worker refund.retry"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -3297,7 +3479,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 8920,
       "prompt_chars_max": 4908,
       "estimated_prompt_tokens": 2230,
@@ -3362,7 +3547,9 @@
         "status": "CONFIRMED",
         "affected_orders": 14,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker consume.refund-events"]
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -3450,7 +3637,9 @@
         "status": "CONFIRMED",
         "affected_orders": 14,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker consume.refund-events"]
+        "next_actions": [
+          "inspect refund-worker consume.refund-events"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -3473,7 +3662,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs"],
+      "composed_tools": [
+        "rca.logs"
+      ],
       "prompt_chars_total": 8727,
       "prompt_chars_max": 4739,
       "estimated_prompt_tokens": 2182,
@@ -3538,7 +3729,9 @@
         "status": "CONFIRMED",
         "affected_orders": 12,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker refund.db.acquire"]
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -3626,7 +3819,9 @@
         "status": "CONFIRMED",
         "affected_orders": 12,
         "missing_sources": [],
-        "next_actions": ["inspect refund-worker refund.db.acquire"]
+        "next_actions": [
+          "inspect refund-worker refund.db.acquire"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -3649,7 +3844,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8926,
       "prompt_chars_max": 4917,
       "estimated_prompt_tokens": 2233,
@@ -3714,7 +3911,9 @@
         "status": "CONFIRMED",
         "affected_orders": 10,
         "missing_sources": [],
-        "next_actions": ["inspect fraud-service fraud.check"]
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -3802,7 +4001,9 @@
         "status": "CONFIRMED",
         "affected_orders": 10,
         "missing_sources": [],
-        "next_actions": ["inspect fraud-service fraud.check"]
+        "next_actions": [
+          "inspect fraud-service fraud.check"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -3825,7 +4026,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8904,
       "prompt_chars_max": 4904,
       "estimated_prompt_tokens": 2226,
@@ -3890,7 +4093,9 @@
         "status": "CONFIRMED",
         "affected_orders": 13,
         "missing_sources": [],
-        "next_actions": ["inspect order-api refund.submit"]
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -3978,7 +4183,9 @@
         "status": "CONFIRMED",
         "affected_orders": 13,
         "missing_sources": [],
-        "next_actions": ["inspect order-api refund.submit"]
+        "next_actions": [
+          "inspect order-api refund.submit"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -4001,7 +4208,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 8889,
       "prompt_chars_max": 4890,
       "estimated_prompt_tokens": 2223,
@@ -4066,7 +4276,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -4154,7 +4366,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -4177,7 +4391,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.traces"],
+      "composed_tools": [
+        "rca.traces"
+      ],
       "prompt_chars_total": 8942,
       "prompt_chars_max": 4930,
       "estimated_prompt_tokens": 2236,
@@ -4242,7 +4458,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 3,
       "model_turns": null,
@@ -4330,7 +4548,9 @@
         "status": "CONFIRMED",
         "affected_orders": 16,
         "missing_sources": [],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -4353,7 +4573,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 8904,
       "prompt_chars_max": 4910,
       "estimated_prompt_tokens": 2227,
@@ -4417,8 +4640,12 @@
         "cause": "provider_timeout",
         "status": "PROBABLE",
         "affected_orders": 16,
-        "missing_sources": ["rca.traces"],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 4,
       "model_turns": null,
@@ -4505,8 +4732,12 @@
         "cause": "provider_timeout",
         "status": "PROBABLE",
         "affected_orders": 16,
-        "missing_sources": ["rca.traces"],
-        "next_actions": ["inspect payment-provider provider.refund.http"]
+        "missing_sources": [
+          "rca.traces"
+        ],
+        "next_actions": [
+          "inspect payment-provider provider.refund.http"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -4529,7 +4760,10 @@
         "nested_failures_in_ok_executions": 1,
         "episodes": []
       },
-      "composed_tools": ["rca.logs", "rca.traces"],
+      "composed_tools": [
+        "rca.logs",
+        "rca.traces"
+      ],
       "prompt_chars_total": 9043,
       "prompt_chars_max": 5046,
       "estimated_prompt_tokens": 2262,
@@ -4594,7 +4828,9 @@
         "status": "CONFIRMED",
         "affected_orders": 15,
         "missing_sources": [],
-        "next_actions": ["inspect ledger-service ledger.apply"]
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -4682,7 +4918,9 @@
         "status": "CONFIRMED",
         "affected_orders": 15,
         "missing_sources": [],
-        "next_actions": ["inspect ledger-service ledger.apply"]
+        "next_actions": [
+          "inspect ledger-service ledger.apply"
+        ]
       },
       "sdk_calls": 2,
       "model_turns": null,
@@ -4705,7 +4943,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["rca.logs"],
+      "composed_tools": [
+        "rca.logs"
+      ],
       "prompt_chars_total": 8727,
       "prompt_chars_max": 4732,
       "estimated_prompt_tokens": 2182,

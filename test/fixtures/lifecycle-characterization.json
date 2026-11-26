@@ -4,7 +4,9 @@
       "kind": "completed",
       "output": {
         "goal": "from codex",
-        "requirements": ["r1"]
+        "requirements": [
+          "r1"
+        ]
       }
     },
     "artifacts": [
@@ -13,7 +15,14 @@
         "name": "agent lifecycle evidence"
       }
     ],
-    "eventKinds": ["system_prompt", "prompt", "system", "tool", "tool_result", "agent"]
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
   },
   "coding": {
     "result": {
@@ -34,7 +43,9 @@
       "kind": "completed",
       "output": {
         "goal": "from codex",
-        "requirements": ["r1"]
+        "requirements": [
+          "r1"
+        ]
       }
     },
     "artifacts": [
@@ -43,7 +54,14 @@
         "name": "agent lifecycle evidence"
       }
     ],
-    "eventKinds": ["system_prompt", "prompt", "system", "tool", "tool_result", "agent"]
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
   },
   "independent-review": {
     "result": {
@@ -83,7 +101,9 @@
       "kind": "completed",
       "output": {
         "goal": "from codex",
-        "requirements": ["r1"]
+        "requirements": [
+          "r1"
+        ]
       }
     },
     "artifacts": [
@@ -92,14 +112,23 @@
         "name": "agent lifecycle evidence"
       }
     ],
-    "eventKinds": ["system_prompt", "prompt", "system", "tool", "tool_result", "agent"]
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
   },
   "resume": {
     "result": {
       "kind": "completed",
       "output": {
         "goal": "from codex",
-        "requirements": ["r1"]
+        "requirements": [
+          "r1"
+        ]
       }
     },
     "artifacts": [
@@ -108,7 +137,14 @@
         "name": "agent lifecycle evidence"
       }
     ],
-    "eventKinds": ["system_prompt", "prompt", "system", "tool", "tool_result", "agent"]
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
   },
   "waiting_input": {
     "result": {
@@ -127,14 +163,23 @@
         "name": "agent lifecycle evidence"
       }
     ],
-    "eventKinds": ["system_prompt", "prompt", "system", "tool", "tool_result", "agent"]
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
   },
   "reexecute": {
     "result": {
       "kind": "completed",
       "output": {
         "goal": "from codex",
-        "requirements": ["r1"]
+        "requirements": [
+          "r1"
+        ]
       }
     },
     "artifacts": [
@@ -143,6 +188,13 @@
         "name": "agent lifecycle evidence"
       }
     ],
-    "eventKinds": ["system_prompt", "prompt", "system", "tool", "tool_result", "agent"]
+    "eventKinds": [
+      "system_prompt",
+      "prompt",
+      "system",
+      "tool",
+      "tool_result",
+      "agent"
+    ]
   }
 }

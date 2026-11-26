@@ -516,7 +516,9 @@
       "codeact_failed": 1,
       "nested_calls": 6,
       "repairs": 0,
-      "composed_tools": ["eval.traces"],
+      "composed_tools": [
+        "eval.traces"
+      ],
       "prompt_chars_total": 3463,
       "prompt_chars_max": 3463,
       "estimated_prompt_tokens": 866,

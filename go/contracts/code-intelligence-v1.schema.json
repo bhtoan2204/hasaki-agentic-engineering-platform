@@ -7,16 +7,7 @@
     "Limits": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "max_file_bytes",
-        "max_symbols",
-        "max_files",
-        "max_scan_bytes",
-        "timeout_ms",
-        "excludes",
-        "include_generated",
-        "include_dependencies"
-      ],
+      "required": ["max_file_bytes", "max_symbols", "max_files", "max_scan_bytes", "timeout_ms", "excludes", "include_generated", "include_dependencies"],
       "properties": {
         "max_file_bytes": { "type": "integer", "minimum": 1 },
         "max_symbols": { "type": "integer", "minimum": 1 },
@@ -43,35 +34,14 @@
     "IndexRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "repository_id",
-        "primary",
-        "root",
-        "base",
-        "run_id",
-        "parser_version",
-        "instance_id",
-        "limits"
-      ],
+      "required": ["repository_id", "primary", "root", "base", "run_id", "parser_version", "instance_id", "limits"],
       "properties": {
         "repository_id": { "type": "integer", "minimum": 1 },
-        "primary": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Validated primary checkout (absolute path)"
-        },
-        "root": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Run worktree (absolute path); the primary checkout for base indexing"
-        },
+        "primary": { "type": "string", "minLength": 1, "description": "Validated primary checkout (absolute path)" },
+        "root": { "type": "string", "minLength": 1, "description": "Run worktree (absolute path); the primary checkout for base indexing" },
         "base": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
         "run_id": { "type": ["integer", "null"], "minimum": 1 },
-        "parser_version": {
-          "type": "string",
-          "minLength": 1,
-          "description": "parserVersion() of the TypeScript platform; refused (409) unless it starts with the Go extractor version"
-        },
+        "parser_version": { "type": "string", "minLength": 1, "description": "parserVersion() of the TypeScript platform; refused (409) unless it starts with the Go extractor version" },
         "instance_id": { "type": "string", "minLength": 1 },
         "fence": { "oneOf": [{ "$ref": "#/$defs/Fence" }, { "type": "null" }] },
         "limits": { "$ref": "#/$defs/Limits" }
@@ -96,14 +66,7 @@
         },
         "metrics": {
           "type": "object",
-          "required": [
-            "indexed_files",
-            "skipped_files",
-            "parse_failures",
-            "index_cache_hits",
-            "db_statements",
-            "parse_workers"
-          ],
+          "required": ["indexed_files", "skipped_files", "parse_failures", "index_cache_hits", "db_statements", "parse_workers"],
           "properties": {
             "indexed_files": { "type": "integer" },
             "skipped_files": { "type": "integer" },
@@ -124,16 +87,7 @@
       "required": ["error", "code"],
       "properties": {
         "error": { "type": "string" },
-        "code": {
-          "enum": [
-            "invalid_request",
-            "version_mismatch",
-            "lease_lost",
-            "index_failed",
-            "timeout",
-            "unavailable"
-          ]
-        }
+        "code": { "enum": ["invalid_request", "version_mismatch", "lease_lost", "index_failed", "timeout", "unavailable"] }
       }
     },
     "Provenance": {
@@ -166,34 +120,17 @@
       "description": "POST /internal/v1/code-intelligence/search (CODE_SEARCH_ENGINE=go, ADR 0006). Repositories keep the caller's scope order.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "op",
-        "repositories",
-        "unavailable",
-        "allowed_roots",
-        "instance_id",
-        "parser_version",
-        "context_chars",
-        "limits"
-      ],
+      "required": ["op", "repositories", "unavailable", "allowed_roots", "instance_id", "parser_version", "context_chars", "limits"],
       "properties": {
         "op": { "enum": ["symbols", "dependencies", "exact", "context"] },
         "text": { "type": "string", "maxLength": 8000 },
         "symbol": { "type": "string", "maxLength": 512 },
-        "pattern": {
-          "type": "string",
-          "maxLength": 256,
-          "description": "exact only: fixed string, no newline or NUL"
-        },
+        "pattern": { "type": "string", "maxLength": 256, "description": "exact only: fixed string, no newline or NUL" },
         "limit": { "type": "integer", "minimum": 0, "maximum": 200 },
         "depth": { "type": "integer", "maximum": 3 },
         "direction": { "enum": ["", "in", "out"] },
         "any_file": { "type": "boolean" },
-        "repositories": {
-          "type": "array",
-          "maxItems": 30,
-          "items": { "$ref": "#/$defs/SearchRepository" }
-        },
+        "repositories": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/SearchRepository" } },
         "unavailable": {
           "type": "array",
           "maxItems": 30,
@@ -218,12 +155,7 @@
       "properties": {
         "repository": { "type": "string" },
         "file_path": { "type": "string" },
-        "line_range": {
-          "type": "array",
-          "items": { "type": "integer" },
-          "minItems": 2,
-          "maxItems": 2
-        },
+        "line_range": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
         "match_type": { "type": "string" },
         "confidence": { "type": "number" },
         "snapshot": { "$ref": "#/$defs/Provenance" },
@@ -238,23 +170,7 @@
       "description": "A relation row; candidate_definitions only on unresolved (candidate) edges",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "extraction_id",
-        "file_path",
-        "source_name",
-        "target_name",
-        "relation_type",
-        "resolution",
-        "line",
-        "content_hash",
-        "repository",
-        "snapshot",
-        "line_range",
-        "match_type",
-        "confidence",
-        "depth"
-      ],
+      "required": ["id", "extraction_id", "file_path", "source_name", "target_name", "relation_type", "resolution", "line", "content_hash", "repository", "snapshot", "line_range", "match_type", "confidence", "depth"],
       "properties": {
         "id": { "type": "integer" },
         "extraction_id": { "type": "integer" },
@@ -267,12 +183,7 @@
         "content_hash": { "type": "string" },
         "repository": { "type": "string" },
         "snapshot": { "$ref": "#/$defs/Provenance" },
-        "line_range": {
-          "type": "array",
-          "items": { "type": "integer" },
-          "minItems": 2,
-          "maxItems": 2
-        },
+        "line_range": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
         "match_type": { "type": "string" },
         "confidence": { "type": "number" },
         "depth": { "type": "integer" },
@@ -294,25 +205,14 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["repository", "run_id"],
-            "properties": {
-              "repository": { "type": "string" },
-              "run_id": { "type": ["integer", "null"] }
-            }
+            "properties": { "repository": { "type": "string" }, "run_id": { "type": ["integer", "null"] } }
           }
         },
         "body": { "type": "string" },
         "metrics": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "statements",
-            "git_processes",
-            "rg_processes",
-            "source_reads",
-            "source_bytes",
-            "freshness_checks",
-            "took_ms"
-          ],
+          "required": ["statements", "git_processes", "rg_processes", "source_reads", "source_bytes", "freshness_checks", "took_ms"],
           "properties": {
             "statements": { "type": "integer" },
             "git_processes": { "type": "integer" },

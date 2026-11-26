@@ -137,7 +137,10 @@
     "stale_fallback": "PASS",
     "base_unaffected": "PASS",
     "primary_checkout_unchanged": "PASS",
-    "snapshot_ids": [9, 10]
+    "snapshot_ids": [
+      9,
+      10
+    ]
   },
   "live_ai_tokens": "NOT VERIFIED: no paid provider invoked",
   "database": {
@@ -150,7 +153,9 @@
     {
       "query": "app.NewAuthHandlerMap",
       "expected_source_repository": "oms-api",
-      "exact_definition_repositories": ["oms-api"],
+      "exact_definition_repositories": [
+        "oms-api"
+      ],
       "metadata_ms": 0.11491800000112562,
       "hybrid_ms": 925.9004420000001,
       "metadata_top": "oms-api",
@@ -160,24 +165,33 @@
         {
           "repo": "oms-api",
           "score": 2,
-          "reasons": ["no keyword match", "code evidence +2: qualified"]
+          "reasons": [
+            "no keyword match",
+            "code evidence +2: qualified"
+          ]
         },
         {
           "repo": "oms-background",
           "score": 0,
-          "reasons": ["no keyword match"]
+          "reasons": [
+            "no keyword match"
+          ]
         },
         {
           "repo": "oms-frontend",
           "score": 0,
-          "reasons": ["no keyword match"]
+          "reasons": [
+            "no keyword match"
+          ]
         }
       ]
     },
     {
       "query": "useGetMe",
       "expected_source_repository": "oms-frontend",
-      "exact_definition_repositories": ["oms-frontend"],
+      "exact_definition_repositories": [
+        "oms-frontend"
+      ],
       "metadata_ms": 0.31940700000268407,
       "hybrid_ms": 1019.7600280000006,
       "metadata_top": "oms-api",
@@ -187,24 +201,33 @@
         {
           "repo": "oms-frontend",
           "score": 2.5,
-          "reasons": ["no keyword match", "code evidence +2.5: path, qualified"]
+          "reasons": [
+            "no keyword match",
+            "code evidence +2.5: path, qualified"
+          ]
         },
         {
           "repo": "oms-api",
           "score": 0,
-          "reasons": ["no keyword match"]
+          "reasons": [
+            "no keyword match"
+          ]
         },
         {
           "repo": "oms-background",
           "score": 0,
-          "reasons": ["no keyword match"]
+          "reasons": [
+            "no keyword match"
+          ]
         }
       ]
     },
     {
       "query": "http.handleErr",
       "expected_source_repository": "oms-background",
-      "exact_definition_repositories": ["oms-background"],
+      "exact_definition_repositories": [
+        "oms-background"
+      ],
       "metadata_ms": 0.12091300000247429,
       "hybrid_ms": 1105.8928039999992,
       "metadata_top": "oms-api",
@@ -214,17 +237,24 @@
         {
           "repo": "oms-background",
           "score": 2,
-          "reasons": ["no keyword match", "code evidence +2: qualified"]
+          "reasons": [
+            "no keyword match",
+            "code evidence +2: qualified"
+          ]
         },
         {
           "repo": "oms-api",
           "score": 0,
-          "reasons": ["no keyword match"]
+          "reasons": [
+            "no keyword match"
+          ]
         },
         {
           "repo": "oms-frontend",
           "score": 0,
-          "reasons": ["no keyword match"]
+          "reasons": [
+            "no keyword match"
+          ]
         }
       ]
     }

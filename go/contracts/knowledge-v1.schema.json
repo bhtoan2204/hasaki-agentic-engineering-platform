@@ -21,10 +21,7 @@
       "additionalProperties": false,
       "required": ["version", "repositories", "user_skills_dir", "limits"],
       "properties": {
-        "version": {
-          "const": "knowledge-scan-1",
-          "description": "Discovery rules version; another one answers 409"
-        },
+        "version": { "const": "knowledge-scan-1", "description": "Discovery rules version; another one answers 409" },
         "repositories": {
           "type": "array",
           "maxItems": 500,
@@ -34,15 +31,8 @@
             "required": ["name", "root", "self"],
             "properties": {
               "name": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^/]+$" },
-              "root": {
-                "type": "string",
-                "pattern": "^/",
-                "description": "Absolute, clean; real path inside the trusted roots; holds .git"
-              },
-              "self": {
-                "type": "boolean",
-                "description": "This installation's own checkout (docs/architecture is imported too)"
-              }
+              "root": { "type": "string", "pattern": "^/", "description": "Absolute, clean; real path inside the trusted roots; holds .git" },
+              "self": { "type": "boolean", "description": "This installation's own checkout (docs/architecture is imported too)" }
             }
           }
         },
@@ -53,30 +43,9 @@
     "Target": {
       "description": "Where a candidate applies; TypeScript resolves it (assembleCandidates)",
       "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "repo"],
-          "properties": {
-            "kind": { "enum": ["repository", "wiki_siblings", "wiki_projects"] },
-            "repo": { "type": "string" }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "repos"],
-          "properties": {
-            "kind": { "const": "repositories" },
-            "repos": { "type": "array", "minItems": 1, "items": { "type": "string" } }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["kind", "name"],
-          "properties": { "kind": { "const": "user_skill" }, "name": { "type": "string" } }
-        }
+        { "type": "object", "additionalProperties": false, "required": ["kind", "repo"], "properties": { "kind": { "enum": ["repository", "wiki_siblings", "wiki_projects"] }, "repo": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "repos"], "properties": { "kind": { "const": "repositories" }, "repos": { "type": "array", "minItems": 1, "items": { "type": "string" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "name"], "properties": { "kind": { "const": "user_skill" }, "name": { "type": "string" } } }
       ]
     },
     "Candidate": {
@@ -85,25 +54,10 @@
       "required": ["key", "category", "title", "content", "metadata", "source", "target"],
       "properties": {
         "key": { "type": "string", "minLength": 1 },
-        "category": {
-          "enum": [
-            "repository_convention",
-            "coding_standard",
-            "agent_skill",
-            "architecture_guideline",
-            "domain_knowledge"
-          ]
-        },
+        "category": { "enum": ["repository_convention", "coding_standard", "agent_skill", "architecture_guideline", "domain_knowledge"] },
         "title": { "type": "string" },
         "content": { "type": "string" },
-        "metadata": {
-          "type": "object",
-          "required": ["load", "description"],
-          "properties": {
-            "load": { "enum": ["inline", "on_demand"] },
-            "description": { "type": "string" }
-          }
-        },
+        "metadata": { "type": "object", "required": ["load", "description"], "properties": { "load": { "enum": ["inline", "on_demand"] }, "description": { "type": "string" } } },
         "source": {
           "type": "array",
           "minItems": 1,
@@ -111,11 +65,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["repo", "path", "sha256"],
-            "properties": {
-              "repo": { "type": "string" },
-              "path": { "type": "string" },
-              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
-            }
+            "properties": { "repo": { "type": "string" }, "path": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
           }
         },
         "target": { "$ref": "#/$defs/Target" }
@@ -129,33 +79,15 @@
         "candidates": { "type": "array", "items": { "$ref": "#/$defs/Candidate" } },
         "skipped": {
           "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["path", "reason"],
-            "properties": { "path": { "type": "string" }, "reason": { "type": "string" } }
-          }
+          "items": { "type": "object", "additionalProperties": false, "required": ["path", "reason"], "properties": { "path": { "type": "string" }, "reason": { "type": "string" } } }
         },
-        "scanned": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Repositories scanned completely: the only ones retirement may consider"
-        },
-        "incomplete": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Scan stopped early (budget, deadline, root gone): never a reason to retire"
-        },
+        "scanned": { "type": "array", "items": { "type": "string" }, "description": "Repositories scanned completely: the only ones retirement may consider" },
+        "incomplete": { "type": "array", "items": { "type": "string" }, "description": "Scan stopped early (budget, deadline, root gone): never a reason to retire" },
         "metrics": {
           "type": "object",
           "additionalProperties": false,
           "required": ["files_read", "bytes_read", "entries", "took_ms"],
-          "properties": {
-            "files_read": { "type": "integer" },
-            "bytes_read": { "type": "integer" },
-            "entries": { "type": "integer" },
-            "took_ms": { "type": "integer" }
-          }
+          "properties": { "files_read": { "type": "integer" }, "bytes_read": { "type": "integer" }, "entries": { "type": "integer" }, "took_ms": { "type": "integer" } }
         }
       }
     },
@@ -164,10 +96,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["error", "code"],
-      "properties": {
-        "error": { "type": "string" },
-        "code": { "enum": ["invalid_request", "version_mismatch", "unavailable", "timeout"] }
-      }
+      "properties": { "error": { "type": "string" }, "code": { "enum": ["invalid_request", "version_mismatch", "unavailable", "timeout"] } }
     }
   }
 }

@@ -40,7 +40,6 @@ independently testable deliverable.
 ## Step Granularity
 
 **Each step is one action with a checkable result:**
-
 - "Write the failing test" - step
 - "Run it to make sure it fails" - step
 - "Implement the minimal code to make the test pass" - step
@@ -93,13 +92,11 @@ owns the code, in that task's own step style.]
 ### Task N: [Component Name]
 
 **Files:**
-
 - Create: `exact/path/to/file.py`
 - Modify: `exact/path/to/existing.py:123-145`
 - Test: `tests/exact/path/to/test.py`
 
 **Interfaces:**
-
 - Consumes: [what this task uses from earlier tasks — exact signatures]
 - Produces: [what later tasks rely on — exact function names, parameter
   and return types. A task's implementer sees only their own task; this

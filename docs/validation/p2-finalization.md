@@ -4,50 +4,50 @@ Validated on main based on `20cd7ba`, 2026-11-07 Asia/Bangkok. All changes remai
 
 ## Completion status
 
-| Capability                              | Status and evidence                                                                                                                                                                                                    |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Existing architecture reused            | Implemented: existing DAG integration steps, PostgreSQL job leases, checkpoints, approval/resume, metrics, artifacts, repository registry, P1 ranking/context and Insights. [Audit](../architecture/p2-evaluation.md). |
-| Versioned executable dataset            | Implemented/tested: 15 synthetic cases, pinned Git commits and source/harness/runtime hashes. `dataset.ts`, `fixtures.ts`, database immutability tests.                                                                |
-| Objective validators and scores         | Implemented/tested: actual TypeScript compilation and behavior tests, hidden regressions, SQL/proto structure, capability/path restrictions, mandatory gates and versioned configurable weights.                       |
-| PostgreSQL persistence                  | Implemented/tested locally: migration 027 plus existing `eval_results`; no new queue or database service. Fresh migrations, idempotence and history protection pass regression tests.                                  |
-| Durable runner                          | Implemented/tested: bounded existing scheduler execution, retries, restart recovery, cancellation, concurrent A/B worktrees, expired worker publication fencing and cleanup.                                           |
-| Human checkpoints                       | Implemented/tested: approval, clarification before changes, answer/resume with original pinned context. CLI reference controls explicitly script answers.                                                              |
-| Real executor integration               | Tested with deterministic Codex process fixture through the actual executor. Plausible no-change output fails independent validation. **Live models NOT VERIFIED; live execution BLOCKED.**                            |
-| Baseline/candidate and regression gates | Implemented/tested: persisted compatible configurations, paired repetitions, critical gates, insufficient-data verdicts and cost/latency warnings.                                                                     |
-| P1 OFF/ON evaluation                    | Implemented/tested: actual ranking, context retrieval, changed-worktree freshness and direct-search fallback. No global flag mutations across concurrent runs.                                                         |
-| Dashboard                               | Implemented/browser verified: persisted local runs #5/#6, paired PASS plus latency warning, private case evidence and artifact/workflow links. [Screenshot](p2-dashboard.png). Zero browser errors.                    |
-| Cost/provider usage                     | Unknown metrics remain null; fixture provider cost is zero. No live usage, token savings or provider cost accuracy claim.                                                                                              |
-| Production readiness                    | NOT VERIFIED: production migration/configuration, portable runtime adapter and live spending controls remain outstanding.                                                                                              |
+| Capability | Status and evidence |
+| --- | --- |
+| Existing architecture reused | Implemented: existing DAG integration steps, PostgreSQL job leases, checkpoints, approval/resume, metrics, artifacts, repository registry, P1 ranking/context and Insights. [Audit](../architecture/p2-evaluation.md). |
+| Versioned executable dataset | Implemented/tested: 15 synthetic cases, pinned Git commits and source/harness/runtime hashes. `dataset.ts`, `fixtures.ts`, database immutability tests. |
+| Objective validators and scores | Implemented/tested: actual TypeScript compilation and behavior tests, hidden regressions, SQL/proto structure, capability/path restrictions, mandatory gates and versioned configurable weights. |
+| PostgreSQL persistence | Implemented/tested locally: migration 027 plus existing `eval_results`; no new queue or database service. Fresh migrations, idempotence and history protection pass regression tests. |
+| Durable runner | Implemented/tested: bounded existing scheduler execution, retries, restart recovery, cancellation, concurrent A/B worktrees, expired worker publication fencing and cleanup. |
+| Human checkpoints | Implemented/tested: approval, clarification before changes, answer/resume with original pinned context. CLI reference controls explicitly script answers. |
+| Real executor integration | Tested with deterministic Codex process fixture through the actual executor. Plausible no-change output fails independent validation. **Live models NOT VERIFIED; live execution BLOCKED.** |
+| Baseline/candidate and regression gates | Implemented/tested: persisted compatible configurations, paired repetitions, critical gates, insufficient-data verdicts and cost/latency warnings. |
+| P1 OFF/ON evaluation | Implemented/tested: actual ranking, context retrieval, changed-worktree freshness and direct-search fallback. No global flag mutations across concurrent runs. |
+| Dashboard | Implemented/browser verified: persisted local runs #5/#6, paired PASS plus latency warning, private case evidence and artifact/workflow links. [Screenshot](p2-dashboard.png). Zero browser errors. |
+| Cost/provider usage | Unknown metrics remain null; fixture provider cost is zero. No live usage, token savings or provider cost accuracy claim. |
+| Production readiness | NOT VERIFIED: production migration/configuration, portable runtime adapter and live spending controls remain outstanding. |
 
 ## Dataset and origins
 
 Suite: **backend-v1@3**, hash `a27305539405a6b94802e8924f13ad80ce778e061fc02bc54554e40d7c57ba2f`. All cases are labeled `synthetic`. Existing CLI examples, workflow tests and P1 fixtures inspired coverage, but none had sufficient provenance to claim a real completed historical task. No customer data or credentials were copied.
 
-| Case      | Objective coverage                                            |
-| --------- | ------------------------------------------------------------- |
-| BENCH-001 | Refund remaining quantities and over-refund clamp             |
+| Case | Objective coverage |
+| --- | --- |
+| BENCH-001 | Refund remaining quantities and over-refund clamp |
 | BENCH-002 | Legal order transitions; reject backwards/skipped transitions |
-| BENCH-003 | API currency mapping without private-field exposure           |
-| BENCH-004 | Parameterized SQL keyset pagination                           |
-| BENCH-005 | Proto currency field tag; preserve existing RPC/fields        |
-| BENCH-006 | Shared proto and payment client updated together              |
-| BENCH-007 | Payment idempotency across duplicate/distinct keys            |
-| BENCH-008 | Newer-only event versions; duplicates/out-of-order safety     |
-| BENCH-009 | Money rounding including zero/negative regression checks      |
+| BENCH-003 | API currency mapping without private-field exposure |
+| BENCH-004 | Parameterized SQL keyset pagination |
+| BENCH-005 | Proto currency field tag; preserve existing RPC/fields |
+| BENCH-006 | Shared proto and payment client updated together |
+| BENCH-007 | Payment idempotency across duplicate/distinct keys |
+| BENCH-008 | Newer-only event versions; duplicates/out-of-order safety |
+| BENCH-009 | Money rounding including zero/negative regression checks |
 | BENCH-010 | Clarify historical refund policy before edits, approve/resume |
-| BENCH-011 | One batch lookup; preserve order/duplicate customer mappings  |
-| BENCH-012 | Failed transfer cannot partially mutate balances              |
+| BENCH-011 | One batch lookup; preserve order/duplicate customer mappings |
+| BENCH-012 | Failed transfer cannot partially mutate balances |
 | BENCH-013 | Declared transient failure, existing scheduler retry/recovery |
-| BENCH-014 | Select the correct refund repository among similar fixtures   |
-| BENCH-015 | Changed worktree context excludes old source; safe fallback   |
+| BENCH-014 | Select the correct refund repository among similar fixtures |
+| BENCH-015 | Changed worktree context excludes old source; safe fallback |
 
 Pinned repositories:
 
-| Synthetic repository    | Base commit                                |
-| ----------------------- | ------------------------------------------ |
+| Synthetic repository | Base commit |
+| --- | --- |
 | fixture-payment-service | `5cda97a16016aba453b7f828de618944a8d05335` |
-| fixture-alpha-service   | `1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0` |
-| fixture-shared-proto    | `11780d1986b858c0fd12a8a01fede220f83bad69` |
+| fixture-alpha-service | `1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0` |
+| fixture-shared-proto | `11780d1986b858c0fd12a8a01fede220f83bad69` |
 
 Complete task descriptions, allowed paths, expected behavior, frozen configurations, validation checks and paired repetition results are in [the measured JSON report](p2-benchmark.json). PostgreSQL holds full evidence and existing workflow artifacts retain bounded diffs/context. Dataset revisions 1/2 from development remain preserved; version 3 records the final harness.
 
@@ -57,24 +57,24 @@ Command: `TMPDIR=/var/tmp EVAL_REPORT=/tmp/p2-verified-report.json npm run bench
 
 Both configurations use **scripted reference implementations**, 15 cases × 2 repetitions each. Baseline: P1 OFF/context none. Candidate: P1 ON/symbol retrieval. Local database evaluation IDs 5/6, workflow IDs 5/6; both COMPLETED. The full raw local report remains `/tmp/p2-verified-report.json`; the repository JSON retains compact auditable results. Neither configuration invoked a live agent.
 
-| Metric                            |               P1 OFF |                P1 ON |
-| --------------------------------- | -------------------: | -------------------: |
-| Success / graded executions       |                28/30 |                30/30 |
-| Hard-gate pass rate               |                93.3% |                 100% |
-| Wilson 95% success interval       |           78.7–98.2% |            88.6–100% |
-| Mean / median score               |          95.67 / 100 |            100 / 100 |
-| Score sample SD                   |                16.49 |                    0 |
-| Median duration                   |             1,449 ms |             2,342 ms |
-| p95 duration                      |             2,019 ms |             3,486 ms |
-| Duration sample SD                |               389 ms |               626 ms |
-| Repository accuracy               |                93.3% |                 100% |
-| Average retrieved context         |         0 characters |     260.6 characters |
-| Median first correct file         |                41 ms |               685 ms |
-| Retry rate                        |                 6.7% |                 6.7% |
-| Scripted human intervention rate  |                 6.7% |                 6.7% |
-| Regression rate                   |                   0% |                   0% |
-| Provider cost per success         | $0, no model invoked | $0, no model invoked |
-| Actual input/output/cached tokens |              Unknown |              Unknown |
+| Metric | P1 OFF | P1 ON |
+| --- | ---: | ---: |
+| Success / graded executions | 28/30 | 30/30 |
+| Hard-gate pass rate | 93.3% | 100% |
+| Wilson 95% success interval | 78.7–98.2% | 88.6–100% |
+| Mean / median score | 95.67 / 100 | 100 / 100 |
+| Score sample SD | 16.49 | 0 |
+| Median duration | 1,449 ms | 2,342 ms |
+| p95 duration | 2,019 ms | 3,486 ms |
+| Duration sample SD | 389 ms | 626 ms |
+| Repository accuracy | 93.3% | 100% |
+| Average retrieved context | 0 characters | 260.6 characters |
+| Median first correct file | 41 ms | 685 ms |
+| Retry rate | 6.7% | 6.7% |
+| Scripted human intervention rate | 6.7% | 6.7% |
+| Regression rate | 0% | 0% |
+| Provider cost per success | $0, no model invoked | $0, no model invoked |
+| Actual input/output/cached tokens | Unknown | Unknown |
 
 The configured quality verdict is **PASS**, with **“Latency regression exceeds configured ratio”**. BENCH-014 fails in both baseline repetitions and passes with P1; the remaining reference controls pass in both configurations. P1 adds indexing/search overhead in these tiny fixtures. These correlated scripted samples validate framework behavior; they do not establish model superiority, live completion improvement, statistical significance, token savings, or real workload speedups. Infrastructure cost is not included in the zero provider cost.
 

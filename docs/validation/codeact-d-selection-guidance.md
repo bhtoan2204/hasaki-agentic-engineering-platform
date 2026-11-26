@@ -36,24 +36,23 @@ choice was wrong.
 
 ## Overhead
 
-| Description                                            | Before    | After      |
-| ------------------------------------------------------ | --------- | ---------- |
+| Description | Before | After |
+| --- | --- | --- |
 | chat `code.execute` (native definition, incl. example) | 738 chars | 1095 chars |
-| workflow `execute_code`                                | 738 chars | 1089 chars |
+| workflow `execute_code` | 738 chars | 1089 chars |
 
 That is about +90 tokens by the chars/4 **estimate**, only where CodeAct is offered. A disabled CodeAct is still not
 advertised.
 
 ## Verification
 
-| Level | Command                                                                                                                                    | Exit | Result                                                                                                             |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------ |
-| 1     | `node --import ./test/env.ts --test test/codeact-guidance.test.ts`                                                                         | 0    | 4/4: same guidance on both surfaces, no count threshold, recovery wording agrees with `recoveryAdvice`, size bound |
-| 2     | `node test/run-integration.ts test/codeact-effect.integration.ts test/codeact-composition.integration.ts test/chat-agentic.integration.ts` | 0    | 27/27                                                                                                              |
-| –     | `npm test`                                                                                                                                 | 0    | 1169/1169                                                                                                          |
+| Level | Command | Exit | Result |
+| --- | --- | --- | --- |
+| 1 | `node --import ./test/env.ts --test test/codeact-guidance.test.ts` | 0 | 4/4: same guidance on both surfaces, no count threshold, recovery wording agrees with `recoveryAdvice`, size bound |
+| 2 | `node test/run-integration.ts test/codeact-effect.integration.ts test/codeact-composition.integration.ts test/chat-agentic.integration.ts` | 0 | 27/27 |
+| – | `npm test` | 0 | 1169/1169 |
 
 Deterministic dataset checks with the simulated policy (C report, OS sandbox):
-
 - T01 and T10 never use CodeAct (0/2 each).
 - T03, T06 and T08 are solved with one program each.
 - T09 reports the SigNoz outage explicitly.

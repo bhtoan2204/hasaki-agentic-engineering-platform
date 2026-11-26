@@ -10,26 +10,26 @@ Compiler unused-declaration diagnostics, repository-wide identifier searches, im
 
 ## Finding classifications
 
-| Classification         | Finding and action                                                                                                                                                                                                                              |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SAFE_TO_REMOVE         | Compiler-proven unused imports/locals in agent prompts, APIs, code intelligence, evaluation, Git/repository code and tests: removed; assertions remain.                                                                                         |
-| SAFE_TO_REMOVE         | Unreferenced private frontend `supportViewOn`, obsolete Vietnamese-only `STATUS_LABELS`, unused `Mono` component, and unused `EvaluationConfiguration` type: removed after call-site searches. Localized status rendering remains in i18n.      |
-| SAFE_TO_REMOVE         | `repo.dir` and `repo.remote` have no static or finite dynamic-key consumers: removed in both languages. Actual legacy-layout labels remain.                                                                                                     |
-| SAFE_TO_REMOVE         | `hasakiWork.chromiumPath` has no reader: removed from the type/defaults. Older JSON configurations remain accepted and ignored; explicit local-browser configuration is unchanged.                                                              |
-| REFACTOR_REQUIRED      | Identical legacy SSH-origin conversion in Git, checkout validation and explicit migration: one helper in `repos/remote.ts`; strict HTTPS registration is unchanged.                                                                             |
-| REFACTOR_REQUIRED      | Duplicate Bitbucket reference parsing and repeated credential reads: one private reference parser and one credential resolution per REST operation. No cross-operation credential cache; rotation takes effect on the next call.                |
-| REFACTOR_REQUIRED      | Repeated repository/workspace reads: combined assignment/owner/scope query, direct per-repository workspace lookup, joined recovery lookup and single-query agent-directory resolution. All post-provisioning permission/fencing checks remain. |
-| REFACTOR_REQUIRED      | Repeated fetch/connection argument construction: shared locally within provisioning; locking, validation before/after fetch, interrupted clone handling and authentication remain unchanged.                                                    |
-| REFACTOR_REQUIRED      | Auxiliary completions imported the large agent orchestrator for metrics, creating a runtime import cycle: moved pure metrics to `agent/metrics.ts`; established `claude.ts` exports remain available.                                           |
-| REFACTOR_REQUIRED      | Answer persistence made one UPDATE per question: one batch UPDATE per locked run, in the same transaction, followed by unchanged step/resume logic.                                                                                             |
-| REFACTOR_REQUIRED      | Independent verifier upstream filtering deleted/reassigned properties unnecessarily: directly use the existing filtering function's result.                                                                                                     |
-| REFACTOR_REQUIRED      | Repository list fetched index status only rendered on detail pages: make that request conditional on detail navigation; remove the one-use legacy label wrapper.                                                                                |
-| REFACTOR_REQUIRED      | Test bootstrap forcibly dropped a fixed database: create unique local test databases without dropping/reusing existing databases.                                                                                                               |
-| COMPATIBILITY_REQUIRED | Legacy repository paths, overrides, configured-source discovery, explicit migration, fixture storage and worktree/session recovery remain required by live data. Retained.                                                                      |
-| COMPATIBILITY_REQUIRED | Workflow versions, DAG transitions, executor registry, Git provider seam, checkpoint/recovery policies, idempotency, audit/event contracts, RBAC and instance/job fencing have live or runtime call sites. Retained.                            |
-| COMPATIBILITY_REQUIRED | Codex `hook.ts` is launched by a configured filename; browser ambient `env.d.ts` is compiler-loaded. Neither is dead despite lacking a normal import edge.                                                                                      |
-| COMPATIBILITY_REQUIRED | Provider-specific stream parsers, cancellation/process groups, credentials, approvals and sandbox differences cannot be unified safely as a cleanup. Retained.                                                                                  |
-| UNCERTAIN              | Dynamic CSS classes, dynamic translation families, infrequent configuration, unmeasured index usage and historical operational documents are not proven unused. Retained.                                                                       |
+| Classification | Finding and action |
+| --- | --- |
+| SAFE_TO_REMOVE | Compiler-proven unused imports/locals in agent prompts, APIs, code intelligence, evaluation, Git/repository code and tests: removed; assertions remain. |
+| SAFE_TO_REMOVE | Unreferenced private frontend `supportViewOn`, obsolete Vietnamese-only `STATUS_LABELS`, unused `Mono` component, and unused `EvaluationConfiguration` type: removed after call-site searches. Localized status rendering remains in i18n. |
+| SAFE_TO_REMOVE | `repo.dir` and `repo.remote` have no static or finite dynamic-key consumers: removed in both languages. Actual legacy-layout labels remain. |
+| SAFE_TO_REMOVE | `hasakiWork.chromiumPath` has no reader: removed from the type/defaults. Older JSON configurations remain accepted and ignored; explicit local-browser configuration is unchanged. |
+| REFACTOR_REQUIRED | Identical legacy SSH-origin conversion in Git, checkout validation and explicit migration: one helper in `repos/remote.ts`; strict HTTPS registration is unchanged. |
+| REFACTOR_REQUIRED | Duplicate Bitbucket reference parsing and repeated credential reads: one private reference parser and one credential resolution per REST operation. No cross-operation credential cache; rotation takes effect on the next call. |
+| REFACTOR_REQUIRED | Repeated repository/workspace reads: combined assignment/owner/scope query, direct per-repository workspace lookup, joined recovery lookup and single-query agent-directory resolution. All post-provisioning permission/fencing checks remain. |
+| REFACTOR_REQUIRED | Repeated fetch/connection argument construction: shared locally within provisioning; locking, validation before/after fetch, interrupted clone handling and authentication remain unchanged. |
+| REFACTOR_REQUIRED | Auxiliary completions imported the large agent orchestrator for metrics, creating a runtime import cycle: moved pure metrics to `agent/metrics.ts`; established `claude.ts` exports remain available. |
+| REFACTOR_REQUIRED | Answer persistence made one UPDATE per question: one batch UPDATE per locked run, in the same transaction, followed by unchanged step/resume logic. |
+| REFACTOR_REQUIRED | Independent verifier upstream filtering deleted/reassigned properties unnecessarily: directly use the existing filtering function's result. |
+| REFACTOR_REQUIRED | Repository list fetched index status only rendered on detail pages: make that request conditional on detail navigation; remove the one-use legacy label wrapper. |
+| REFACTOR_REQUIRED | Test bootstrap forcibly dropped a fixed database: create unique local test databases without dropping/reusing existing databases. |
+| COMPATIBILITY_REQUIRED | Legacy repository paths, overrides, configured-source discovery, explicit migration, fixture storage and worktree/session recovery remain required by live data. Retained. |
+| COMPATIBILITY_REQUIRED | Workflow versions, DAG transitions, executor registry, Git provider seam, checkpoint/recovery policies, idempotency, audit/event contracts, RBAC and instance/job fencing have live or runtime call sites. Retained. |
+| COMPATIBILITY_REQUIRED | Codex `hook.ts` is launched by a configured filename; browser ambient `env.d.ts` is compiler-loaded. Neither is dead despite lacking a normal import edge. |
+| COMPATIBILITY_REQUIRED | Provider-specific stream parsers, cancellation/process groups, credentials, approvals and sandbox differences cannot be unified safely as a cleanup. Retained. |
+| UNCERTAIN | Dynamic CSS classes, dynamic translation families, infrequent configuration, unmeasured index usage and historical operational documents are not proven unused. Retained. |
 
 Both TypeScript configurations now enforce `noUnusedLocals` and `noUnusedParameters` to prevent recurrence.
 
@@ -47,15 +47,15 @@ A read-only EXPLAIN of the joined workspace lookup returned a nested loop with s
 
 ## Before and after: verified operation counts
 
-| Operation                                                    | Before                                | After           | Evidence                                                                                                                                  |
-| ------------------------------------------------------------ | ------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Personal-secret reads for new/update PR operation            | 6 (operation + two request resolvers) | 2               | Query-spy regression; both requests use the same owner and next operation sees rotation.                                                  |
-| Personal-secret reads for PR listing                         | 4                                     | 2               | Query-spy regression.                                                                                                                     |
-| Questions answered in one run                                | N UPDATE statements                   | 1 UPDATE        | Two-question regression checks one statement, trimmed answers, answerer/timestamps, one completed attempt and duplicate-answer rejection. |
-| Worker assignment + latest session directory                 | 2 SELECT statements                   | 1 SELECT        | Query-spy regression restores a recorded legacy session directory.                                                                        |
-| Assignment + saved repository workspace                      | 2 SELECT statements                   | 1 joined SELECT | Existing isolation/remote mismatch/legacy resume tests exercise the joined lookup.                                                        |
-| Initial workspace owner/scope checks                         | 2 SELECT statements                   | 1 SELECT        | Same fields read together; separate checks after provisioning retained.                                                                   |
-| Index-status requests while on repository list/create drawer | 1 on mount                            | 0               | Real Chromium browser smoke; requests resume on detail navigation.                                                                        |
+| Operation | Before | After | Evidence |
+| --- | --- | --- | --- |
+| Personal-secret reads for new/update PR operation | 6 (operation + two request resolvers) | 2 | Query-spy regression; both requests use the same owner and next operation sees rotation. |
+| Personal-secret reads for PR listing | 4 | 2 | Query-spy regression. |
+| Questions answered in one run | N UPDATE statements | 1 UPDATE | Two-question regression checks one statement, trimmed answers, answerer/timestamps, one completed attempt and duplicate-answer rejection. |
+| Worker assignment + latest session directory | 2 SELECT statements | 1 SELECT | Query-spy regression restores a recorded legacy session directory. |
+| Assignment + saved repository workspace | 2 SELECT statements | 1 joined SELECT | Existing isolation/remote mismatch/legacy resume tests exercise the joined lookup. |
+| Initial workspace owner/scope checks | 2 SELECT statements | 1 SELECT | Same fields read together; separate checks after provisioning retained. |
+| Index-status requests while on repository list/create drawer | 1 on mount | 0 | Real Chromium browser smoke; requests resume on detail navigation. |
 
 These are query/request-count improvements, not measured production latency or throughput claims. No cache, queue or concurrency infrastructure was added. Cache invalidation generations, transaction write tracking, cross-process notifications and deferred event persistence are unchanged.
 

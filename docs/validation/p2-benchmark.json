@@ -15,7 +15,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["bug_fix"],
+        "tags": [
+          "bug_fix"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-001",
         "category": "bug_fix",
@@ -29,7 +31,11 @@
           "export_name": "CalculateRefund",
           "public_checks": [
             {
-              "args": [10, 2, 0],
+              "args": [
+                10,
+                2,
+                0
+              ],
               "expected": 20
             }
           ],
@@ -37,7 +43,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Fix CalculateRefund to exclude previously refunded quantities and clamp negative remaining quantity.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "allowed_changes": [
           {
             "path": "refund.ts",
@@ -57,7 +65,9 @@
       "origin": "synthetic",
       "base_commit": "1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0",
       "definition": {
-        "tags": ["state_transition"],
+        "tags": [
+          "state_transition"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-002",
         "category": "state_transition",
@@ -71,7 +81,10 @@
           "export_name": "transition",
           "public_checks": [
             {
-              "args": ["pending", "paid"],
+              "args": [
+                "pending",
+                "paid"
+              ],
               "expected": "paid"
             }
           ],
@@ -79,14 +92,19 @@
         },
         "base_commit": "1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0",
         "description": "Allow pending \u2192 paid \u2192 shipped transitions only. Reject backwards and skipped transitions without changing state.",
-        "repositories": ["fixture-alpha-service"],
+        "repositories": [
+          "fixture-alpha-service"
+        ],
         "allowed_changes": [
           {
             "path": "state.ts",
             "repository": "fixture-alpha-service"
           }
         ],
-        "expected_behavior": ["Legal transitions advance", "Illegal transitions preserve state"]
+        "expected_behavior": [
+          "Legal transitions advance",
+          "Illegal transitions preserve state"
+        ]
       }
     },
     {
@@ -96,7 +114,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["api_change"],
+        "tags": [
+          "api_change"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-003",
         "category": "api_change",
@@ -124,14 +144,19 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Include currency in serializePayment without exposing internalSecret.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "allowed_changes": [
           {
             "path": "api.ts",
             "repository": "fixture-payment-service"
           }
         ],
-        "expected_behavior": ["ID and currency are returned", "Internal fields are excluded"]
+        "expected_behavior": [
+          "ID and currency are returned",
+          "Internal fields are excluded"
+        ]
       }
     },
     {
@@ -141,7 +166,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["query_optimization"],
+        "tags": [
+          "query_optimization"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-004",
         "category": "query_optimization",
@@ -157,7 +184,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Replace offset pagination with an id keyset query using WHERE id > $1 ORDER BY id LIMIT $2. Do not concatenate values.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "allowed_changes": [
           {
             "path": "pagination.sql",
@@ -177,7 +206,9 @@
       "origin": "synthetic",
       "base_commit": "11780d1986b858c0fd12a8a01fede220f83bad69",
       "definition": {
-        "tags": ["grpc_proto"],
+        "tags": [
+          "grpc_proto"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-005",
         "category": "grpc_proto",
@@ -193,7 +224,9 @@
         },
         "base_commit": "11780d1986b858c0fd12a8a01fede220f83bad69",
         "description": "Add optional string currency field number 2 to Request. Keep the Payment.Charge RPC and existing field numbers.",
-        "repositories": ["fixture-shared-proto"],
+        "repositories": [
+          "fixture-shared-proto"
+        ],
         "allowed_changes": [
           {
             "path": "payment.proto",
@@ -213,7 +246,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["cross_repository"],
+        "tags": [
+          "cross_repository"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-006",
         "category": "cross_repository",
@@ -227,7 +262,9 @@
           "export_name": "requestPayment",
           "public_checks": [
             {
-              "args": ["p1"],
+              "args": [
+                "p1"
+              ],
               "expected": {
                 "id": "p1"
               }
@@ -237,7 +274,10 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Update the shared Request currency contract and the payment client payload together. Preserve existing id callers.",
-        "repositories": ["fixture-payment-service", "fixture-shared-proto"],
+        "repositories": [
+          "fixture-payment-service",
+          "fixture-shared-proto"
+        ],
         "allowed_changes": [
           {
             "path": "client.ts",
@@ -248,7 +288,10 @@
             "repository": "fixture-shared-proto"
           }
         ],
-        "expected_behavior": ["Client sends currency", "Shared contract defines currency"]
+        "expected_behavior": [
+          "Client sends currency",
+          "Shared contract defines currency"
+        ]
       }
     },
     {
@@ -258,7 +301,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["idempotency"],
+        "tags": [
+          "idempotency"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-007",
         "category": "idempotency",
@@ -287,7 +332,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Charge events at most once per idempotency key. Different keys must both contribute.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "allowed_changes": [
           {
             "path": "idempotency.ts",
@@ -307,7 +354,9 @@
       "origin": "synthetic",
       "base_commit": "1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0",
       "definition": {
-        "tags": ["event_processing"],
+        "tags": [
+          "event_processing"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-008",
         "category": "event_processing",
@@ -341,14 +390,19 @@
         },
         "base_commit": "1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0",
         "description": "Apply only newer event versions. Duplicate and out-of-order events must preserve the latest state.",
-        "repositories": ["fixture-alpha-service"],
+        "repositories": [
+          "fixture-alpha-service"
+        ],
         "allowed_changes": [
           {
             "path": "events.ts",
             "repository": "fixture-alpha-service"
           }
         ],
-        "expected_behavior": ["Newer events apply", "Older or duplicate events do not overwrite"]
+        "expected_behavior": [
+          "Newer events apply",
+          "Older or duplicate events do not overwrite"
+        ]
       }
     },
     {
@@ -358,7 +412,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["regression"],
+        "tags": [
+          "regression"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-009",
         "category": "regression",
@@ -372,7 +428,9 @@
           "export_name": "money",
           "public_checks": [
             {
-              "args": [0],
+              "args": [
+                0
+              ],
               "expected": 0
             }
           ],
@@ -380,7 +438,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Round monetary values to two decimals rather than truncating them. Preserve zero and negative amounts.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "allowed_changes": [
           {
             "path": "money.ts",
@@ -400,7 +460,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["clarification"],
+        "tags": [
+          "clarification"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-010",
         "category": "clarification",
@@ -422,7 +484,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Change refund policy. The request does not specify whether historical refunds should change; clarify before editing.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "clarification": {
           "answer": "Future refunds only; preserve historical refunds.",
           "question": "Should historical refunds change, or should the policy affect future refunds only?"
@@ -446,7 +510,9 @@
       "origin": "synthetic",
       "base_commit": "1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0",
       "definition": {
-        "tags": ["avoid_n_plus_one"],
+        "tags": [
+          "avoid_n_plus_one"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-011",
         "category": "avoid_n_plus_one",
@@ -463,14 +529,19 @@
         },
         "base_commit": "1220b1d8d77475e9c1901d0e44ee3e7c50f7a9b0",
         "description": "Batch customer hydration in one query for all orders. Preserve order and duplicate-customer mappings.",
-        "repositories": ["fixture-alpha-service"],
+        "repositories": [
+          "fixture-alpha-service"
+        ],
         "allowed_changes": [
           {
             "path": "hydration.ts",
             "repository": "fixture-alpha-service"
           }
         ],
-        "expected_behavior": ["One batch query", "Order and customer mapping are correct"]
+        "expected_behavior": [
+          "One batch query",
+          "Order and customer mapping are correct"
+        ]
       }
     },
     {
@@ -480,7 +551,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["transaction_consistency"],
+        "tags": [
+          "transaction_consistency"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-012",
         "category": "transaction_consistency",
@@ -497,7 +570,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Reject transfer to a closed account before debiting the sender. Insufficient balance must not partially mutate either account.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "allowed_changes": [
           {
             "path": "transaction.ts",
@@ -517,7 +592,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["retry_recovery"],
+        "tags": [
+          "retry_recovery"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-013",
         "category": "retry_recovery",
@@ -539,7 +616,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Recover once from the synthetic transient worker failure, then implement retryValue returning true.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "transient_once": true,
         "allowed_changes": [
           {
@@ -560,7 +639,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["repository_discovery"],
+        "tags": [
+          "repository_discovery"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-014",
         "category": "repository_discovery",
@@ -583,7 +664,9 @@
           "fixture-shared-proto"
         ],
         "allowed_changes": [],
-        "expected_behavior": ["Select the repository containing the exact definition"]
+        "expected_behavior": [
+          "Select the repository containing the exact definition"
+        ]
       }
     },
     {
@@ -593,7 +676,9 @@
       "origin": "synthetic",
       "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
       "definition": {
-        "tags": ["snapshot_freshness"],
+        "tags": [
+          "snapshot_freshness"
+        ],
         "origin": "synthetic",
         "task_id": "BENCH-015",
         "category": "snapshot_freshness",
@@ -610,7 +695,9 @@
         },
         "base_commit": "5cda97a16016aba453b7f828de618944a8d05335",
         "description": "Update SnapshotMarker from old to new, then retrieve context from the changed worktree without returning old source.",
-        "repositories": ["fixture-payment-service"],
+        "repositories": [
+          "fixture-payment-service"
+        ],
         "allowed_changes": [
           {
             "path": "freshness.ts",
@@ -2977,7 +3064,9 @@
         "repository_accuracy": 1,
         "blocked": 0
       },
-      "warnings": ["Latency regression exceeds configured ratio"],
+      "warnings": [
+        "Latency regression exceeds configured ratio"
+      ],
       "sample_note": "30 task/repetition pairs; repeated tasks are not independent samples. No model superiority claim follows from fixture controls."
     },
     "pairs": [

@@ -8,17 +8,17 @@ sandbox for the runtime test.
 
 One program may now call, besides read-only integration tools, an **explicit allowlist** of platform reads:
 
-| Surface  | Name in a program                                                                                          | Family                              | Executed by (the direct path, unchanged) |
-| -------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------- | ---------------------------------------- |
-| Workflow | `platform.search_code`, `platform.get_symbol`, `platform.find_dependencies`                                | code_intelligence                   | `dispatchPlatformTool`                   |
-| Workflow | `platform.navigate_code`                                                                                   | lsp                                 | `dispatchPlatformTool`                   |
-| Workflow | `platform.search_knowledge`, `platform.get_business_rules`                                                 | knowledge                           | `dispatchPlatformTool`                   |
-| Workflow | `platform.search_task_memory`                                                                              | memory                              | `dispatchPlatformTool`                   |
-| Workflow | `platform.get_run_context`                                                                                 | run_context                         | `dispatchPlatformTool`                   |
-| Chat     | `platform.code.search` / `platform.code.navigate` / `platform.knowledge.search` / `platform.knowledge.get` | code_intelligence / lsp / knowledge | `executeChatTool`                        |
+| Surface | Name in a program | Family | Executed by (the direct path, unchanged) |
+| --- | --- | --- | --- |
+| Workflow | `platform.search_code`, `platform.get_symbol`, `platform.find_dependencies` | code_intelligence | `dispatchPlatformTool` |
+| Workflow | `platform.navigate_code` | lsp | `dispatchPlatformTool` |
+| Workflow | `platform.search_knowledge`, `platform.get_business_rules` | knowledge | `dispatchPlatformTool` |
+| Workflow | `platform.search_task_memory` | memory | `dispatchPlatformTool` |
+| Workflow | `platform.get_run_context` | run_context | `dispatchPlatformTool` |
+| Chat | `platform.code.search` / `platform.code.navigate` / `platform.knowledge.search` / `platform.knowledge.get` | code_intelligence / lsp / knowledge | `executeChatTool` |
 
 - **No second registry or policy engine.** The adapter (`CodeActCapability` in `src/codeact/surfaces.ts`) is a name, a
-  family and a `call` that _is_ the surface's own dispatcher. The workflow dispatcher is handed to `execute_code`
+  family and a `call` that *is* the surface's own dispatcher. The workflow dispatcher is handed to `execute_code`
   only (`PlatformToolEnv.dispatch`), so a nested read re-runs binding validation, frozen benchmark permissions,
   attempt `allowed_tools` (`platform.<name>`), the loop detector, repository scope, the per-attempt concurrency limit,
   the deadline, redaction and the `agent_context_tool_calls` journal — exactly as a direct call.
@@ -37,23 +37,22 @@ One program may now call, besides read-only integration tools, an **explicit all
 
 ## Verification
 
-| Level         | Command                                                                                                                                                                | Exit | Result                             |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------- |
-| 2 Integration | `node test/run-integration.ts test/codeact-composition.integration.ts`                                                                                                 | 0    | 14/14                              |
-| 3 Runtime     | same file, "runtime: the real OS sandbox composes …"                                                                                                                   | 0    | pass                               |
-| Regression    | `node test/run-integration.ts --test-concurrency=6 test/codeact-*.integration.ts test/context-native.integration.ts test/lsp.integration.ts test/chat*.integration.ts` | 0    | 116/116                            |
-| Regression    | `npm test`                                                                                                                                                             | 0    | 1128/1128                          |
-| Static        | `tsc` (root, web), `npm run lint`, `npm run arch:check`                                                                                                                | 0    | 5 cycles / 6 violations (baseline) |
+| Level | Command | Exit | Result |
+| --- | --- | --- | --- |
+| 2 Integration | `node test/run-integration.ts test/codeact-composition.integration.ts` | 0 | 14/14 |
+| 3 Runtime | same file, "runtime: the real OS sandbox composes …" | 0 | pass |
+| Regression | `node test/run-integration.ts --test-concurrency=6 test/codeact-*.integration.ts test/context-native.integration.ts test/lsp.integration.ts test/chat*.integration.ts` | 0 | 116/116 |
+| Regression | `npm test` | 0 | 1128/1128 |
+| Static | `tsc` (root, web), `npm run lint`, `npm run arch:check` | 0 | 5 cycles / 6 violations (baseline) |
 
 Tests: integration + code intelligence (journaled like direct calls, resolvable evidence); integration + knowledge +
 memory with another owner's private memory forged into the snapshot (dropped); integration + LSP + code intelligence
-
-- knowledge combined; uncommitted-worktree navigation; stale code index (fallback labelled candidates); missing
-  language server (`unavailable`, other sources still answer); LSP disabled (not composable); unauthorized repository
-  (`outside authorized run scope`, category `unauthorized`), mutation, recursion, clarification and submit attempts
-  (refused, no question created); partial integration failure (`missing_sources: ["integration"]`); shared call budget;
-  cancellation (no nested read after abort); stale memory (`STALE`, body withheld); Chat composition through
-  `executeChatTool` (recursion refused).
++ knowledge combined; uncommitted-worktree navigation; stale code index (fallback labelled candidates); missing
+language server (`unavailable`, other sources still answer); LSP disabled (not composable); unauthorized repository
+(`outside authorized run scope`, category `unauthorized`), mutation, recursion, clarification and submit attempts
+(refused, no question created); partial integration failure (`missing_sources: ["integration"]`); shared call budget;
+cancellation (no nested read after abort); stale memory (`STALE`, body withheld); Chat composition through
+`executeChatTool` (recursion refused).
 
 **Mutation check.** With the workflow capability list emptied, 11 of the (then 13) tests fail.
 

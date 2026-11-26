@@ -2,23 +2,22 @@
 
 Branch `feat/codeact-diagnostics-eval-reliability` from `main` @ `56824d6`.
 
-| Milestone                                     | Commit    | Evidence                                                                                                                           |
-| --------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| A Failure diagnostics and recovery accounting | `6a6c4a5` | [codeact-a-failure-diagnostics.md](codeact-a-failure-diagnostics.md)                                                               |
-| B Provider, model, turn and token accounting  | `4349f92` | [codeact-b-provider-accounting.md](codeact-b-provider-accounting.md)                                                               |
-| C Pair-aware evaluation and isolation         | `f4d2c5c` | [codeact-c-paired-evaluation.md](codeact-c-paired-evaluation.md), [codeact-c-fixture-sandbox.json](codeact-c-fixture-sandbox.json) |
-| D Selection and recovery guidance             | `f20b721` | [codeact-d-selection-guidance.md](codeact-d-selection-guidance.md)                                                                 |
+| Milestone | Commit | Evidence |
+| --- | --- | --- |
+| A Failure diagnostics and recovery accounting | `6a6c4a5` | [codeact-a-failure-diagnostics.md](codeact-a-failure-diagnostics.md) |
+| B Provider, model, turn and token accounting | `4349f92` | [codeact-b-provider-accounting.md](codeact-b-provider-accounting.md) |
+| C Pair-aware evaluation and isolation | `f4d2c5c` | [codeact-c-paired-evaluation.md](codeact-c-paired-evaluation.md), [codeact-c-fixture-sandbox.json](codeact-c-fixture-sandbox.json) |
+| D Selection and recovery guidance | `f20b721` | [codeact-d-selection-guidance.md](codeact-d-selection-guidance.md) |
 
 ## Broader regression (after all milestones)
 
-| Command                                                 | Exit | Result                                              |
-| ------------------------------------------------------- | ---- | --------------------------------------------------- |
-| `npm test`                                              | 0    | 1169/1169                                           |
-| `npm run test:integration`                              | 1    | 945/948, 0 skipped                                  |
-| `tsc` (root, web), `npm run lint`, `npm run arch:check` | 0    | clean; 5 cycles / 6 violations (unchanged baseline) |
+| Command | Exit | Result |
+| --- | --- | --- |
+| `npm test` | 0 | 1169/1169 |
+| `npm run test:integration` | 1 | 945/948, 0 skipped |
+| `tsc` (root, web), `npm run lint`, `npm run arch:check` | 0 | clean; 5 cycles / 6 violations (unchanged baseline) |
 
 The 3 failures are the known pre-existing ones, unrelated to this branch:
-
 - `evaluation.integration.ts` "Fixture evaluations use existing jobs…" and "Two evaluations can execute
   concurrently…" were reproduced identically on `f666c65` before this work.
 - `repository-remotes` "legacy dry-run…" comes from a host `~/.gitconfig` `insteadOf` rule.

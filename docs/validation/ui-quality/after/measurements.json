@@ -1,6 +1,8 @@
 {
   "phase": "after",
-  "errors": ["UI audit injected outage"],
+  "errors": [
+    "UI audit injected outage"
+  ],
   "measurements": [
     {
       "route": "overview",

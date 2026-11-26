@@ -79,8 +79,7 @@ function startMcp() {
   const names = JSON.parse(cfg("mcp_servers.platform.env_vars"));
   // Like codex: every `mcp_servers.platform.env` entry is set for the server process.
   const env = { PATH: process.env.PATH, PLATFORM_MODE: "analysis" };
-  for (const m of (cfg("mcp_servers.platform.env") || "").matchAll(/(\w+)="([^"]*)"/g))
-    env[m[1]] = m[2];
+  for (const m of (cfg("mcp_servers.platform.env") || "").matchAll(/(\w+)="([^"]*)"/g)) env[m[1]] = m[2];
   for (const n of names) if (process.env[n]) env[n] = process.env[n];
   const child = spawn(command, args, { env, stdio: ["pipe", "pipe", "inherit"] });
   let buf = "";
@@ -252,64 +251,27 @@ if (mode === "lifecycle") {
   const alreadyDone =
     process.env.FAKE_LIFECYCLE_REPAIR === "noop" &&
     existsSync(path + "/value.go") &&
-    readFileSync(path + "/value.go", "utf8").includes(
-      `return ${process.env.FAKE_LIFECYCLE_VALUE || 2} }`,
-    );
+    readFileSync(path + "/value.go", "utf8").includes(`return ${process.env.FAKE_LIFECYCLE_VALUE || 2} }`);
   if (process.env.FAKE_LIFECYCLE_ACTION !== "noop" && !alreadyDone) {
     const label = process.env.FAKE_LIFECYCLE_ACTION === "label";
-    const file =
-      path + (label ? `/${process.env.FAKE_LIFECYCLE_SOURCE || "label.go"}` : "/value.go");
-    const decision = callHook({
-      hook_event_name: "PreToolUse",
-      tool_name: "apply_patch",
-      tool_input: {
-        patch: `*** Begin Patch\n*** Update File: ${file}\n@@\n-func Value() int { return 1 }\n+func Value() int { return 2 }\n*** End Patch`,
-      },
-    });
+    const file = path + (label ? `/${process.env.FAKE_LIFECYCLE_SOURCE || "label.go"}` : "/value.go");
+    const decision = callHook({ hook_event_name: "PreToolUse", tool_name: "apply_patch",
+      tool_input: { patch: `*** Begin Patch\n*** Update File: ${file}\n@@\n-func Value() int { return 1 }\n+func Value() int { return 2 }\n*** End Patch` } });
     if (decision.status === 2) throw new Error("Implementation edit denied");
-    writeFileSync(
-      file,
-      label
-        ? process.env.FAKE_LIFECYCLE_SOURCE
-          ? 'export const label = "new";\n'
-          : 'package business\nconst Label = "new"\n'
-        : `package business\nfunc Value() int { return ${process.env.FAKE_LIFECYCLE_VALUE || 2} }\n`,
-    );
-    const committed = await tool(mcp, "commit_changes", {
-      repo,
-      message: "implement lifecycle value",
-    });
-    if (/ERROR:/.test(committed?.content?.[0]?.text || ""))
-      throw new Error(JSON.stringify(committed));
+    writeFileSync(file, label ? (process.env.FAKE_LIFECYCLE_SOURCE ? 'export const label = "new";\n' : 'package business\nconst Label = "new"\n') : `package business\nfunc Value() int { return ${process.env.FAKE_LIFECYCLE_VALUE || 2} }\n`);
+    const committed = await tool(mcp, "commit_changes", { repo, message: "implement lifecycle value" });
+    if (/ERROR:/.test(committed?.content?.[0]?.text || "")) throw new Error(JSON.stringify(committed));
   }
   if (process.env.FAKE_LIFECYCLE_ACTION === "fail-after-edit") {
     out({ type: "turn.failed", error: { message: "fixture interrupted after implementation" } });
-    mcp.close();
-    process.exit(1);
+    mcp.close(); process.exit(1);
   }
   if (process.env.FAKE_LIFECYCLE_ACTION === "ask") {
-    await tool(mcp, "ask_user", {
-      questions: [{ question: "Should the public label remain?", options: ["Yes", "No"] }],
-    });
-    out({ type: "turn.completed", usage });
-    mcp.close();
-    process.exit(0);
+    await tool(mcp, "ask_user", { questions: [{ question: "Should the public label remain?", options: ["Yes", "No"] }] });
+    out({ type: "turn.completed", usage }); mcp.close(); process.exit(0);
   }
-  await tool(mcp, "submit_result", {
-    output: {
-      outcome: "IMPLEMENTED",
-      goal: "Implement Value",
-      requirements: ["Value returns two"],
-      summary: "Implemented",
-      changes: [],
-      tests: [],
-      pull_requests: {},
-      verification: {},
-    },
-  });
-  out({ type: "turn.completed", usage });
-  mcp.close();
-  process.exit(0);
+  await tool(mcp, "submit_result", { output: { outcome: "IMPLEMENTED", goal: "Implement Value", requirements: ["Value returns two"], summary: "Implemented", changes: [], tests: [], pull_requests: {}, verification: {} } });
+  out({ type: "turn.completed", usage }); mcp.close(); process.exit(0);
 }
 
 if (mode === "push") {
@@ -363,19 +325,16 @@ if (mode === "no-submit") {
   process.exit(0);
 }
 if (mode.startsWith("repair-") && resumeId) {
-  writeFileSync(
-    process.env.FAKE_CODEX_WS + "/transport.go",
-    "package fixture\nfunc TransportValue() int { return 4 }\n",
-  );
+  writeFileSync(process.env.FAKE_CODEX_WS + "/transport.go", 'package fixture\nfunc TransportValue() int { return 4 }\n');
 }
 const output =
   mode.startsWith("outcome-") || (mode.startsWith("repair-") && resumeId)
     ? { goal: "declared outcome", requirements: [], outcome: mode.slice(mode.indexOf("-") + 1) }
     : mode === "bad-contract"
-      ? { summary: "missing keys" }
-      : resumeId
-        ? { goal: "resumed", requirements: [], answer_seen: prompt.includes("Không") }
-        : { goal: "from codex", requirements: ["r1"] };
+    ? { summary: "missing keys" }
+    : resumeId
+      ? { goal: "resumed", requirements: [], answer_seen: prompt.includes("Không") }
+      : { goal: "from codex", requirements: ["r1"] };
 await tool(mcp, "submit_result", { output });
 // The final message arrives in two stdout chunks that split a multi-byte character.
 const msg = Buffer.from(

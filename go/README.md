@@ -131,32 +131,32 @@ retry) with that message, since an indexing job never reads outside the trusted 
 
 ## Environment
 
-| Variable                      | Default                  | Notes                                                                                                                                                                        |
-| ----------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PLATFORM_GO_ADDR`            | `127.0.0.1:4646`         | must be loopback unless `PLATFORM_GO_ALLOW_NONLOOPBACK=true` (container only)                                                                                                |
-| `DATABASE_URL`                | required                 |                                                                                                                                                                              |
-| `DATABASE_POOL_MAX`           | `4`                      | 1–16                                                                                                                                                                         |
-| `RETRIEVAL_INTERNAL_TOKEN`    | required                 | ≥ 32 characters; `Authorization: Bearer` on `/internal/*`                                                                                                                    |
-| `REQUEST_TIMEOUT_MAX_MS`      | `2000`                   | request deadline = min(`X-Request-Timeout-Ms`, this)                                                                                                                         |
-| `PLATFORM_TRUSTED_ROOTS`      | empty                    | `:`-separated directories indexing, code search and knowledge scans may read below (ADR 0002, 0006, 0007); set by the supervising server; empty → those endpoints answer 503 |
-| `EMBEDDING_PROVIDER`          | `ollama`                 | `ollama` or `openai` (any OpenAI-compatible `/v1/embeddings`)                                                                                                                |
-| `EMBEDDING_URL`               | `http://127.0.0.1:11434` | `https://api.openai.com` for `openai`                                                                                                                                        |
-| `EMBEDDING_MODEL`             | `bge-m3`                 |                                                                                                                                                                              |
-| `EMBEDDING_DIMS`              | `1024`                   | every returned vector is checked                                                                                                                                             |
-| `EMBEDDING_API_KEY`           |                          | required for `openai`                                                                                                                                                        |
-| `EMBEDDING_REMOTE_AUTHORIZED` |                          | must be `true` for `openai` or a non-loopback `EMBEDDING_URL`, else startup fails                                                                                            |
-| `EMBEDDING_CONCURRENCY`       | `2`                      | concurrent embedding requests of the worker                                                                                                                                  |
-| `EMBEDDING_BATCH`             | `16`                     | texts per embedding request; the worker claims 2× this many sources at a time                                                                                                |
-| `WORKER_ENABLED`              | `true`                   |                                                                                                                                                                              |
-| `CODE_INDEX_PARSE_WORKERS`    | `0`                      | parse goroutines per indexing job; 0 = half the cores, at most 4                                                                                                             |
-| `CODE_INDEX_JOBS`             | `1`                      | indexing jobs at a time (callers beyond it wait: backpressure)                                                                                                               |
-| `ANALYTICS_MAX_CONCURRENT`    | `2`                      | 1–8: connections of the separate read-only analytics pool = statements at once                                                                                               |
-| `ANALYTICS_TIMEOUT_MS`        | `15000`                  | analytics request deadline (slot wait included) and the pool's `statement_timeout`                                                                                           |
-| `PROD_ERRORS_ENGINE`          | `typescript`             | `go`: claim and run production error scans (requires `PLATFORM_INTERNAL_URL`); the platform always passes `go`                                                               |
-| `PLATFORM_INTERNAL_URL`       |                          | loopback URL of the supervising platform server (its provider gateway); set by the supervisor                                                                                |
-| `PROD_SCAN_WORKERS`           | `1`                      | 1–4 scans at once                                                                                                                                                            |
-| `PROD_SCAN_POLL_MS`           | `60000`                  | fallback claim poll; TypeScript wakes the runner when it queues a scan                                                                                                       |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` |                          | enables OTLP/HTTP traces and metrics (standard `OTEL_*` variables apply)                                                                                                     |
+| Variable | Default | Notes |
+|---|---|---|
+| `PLATFORM_GO_ADDR` | `127.0.0.1:4646` | must be loopback unless `PLATFORM_GO_ALLOW_NONLOOPBACK=true` (container only) |
+| `DATABASE_URL` | required | |
+| `DATABASE_POOL_MAX` | `4` | 1–16 |
+| `RETRIEVAL_INTERNAL_TOKEN` | required | ≥ 32 characters; `Authorization: Bearer` on `/internal/*` |
+| `REQUEST_TIMEOUT_MAX_MS` | `2000` | request deadline = min(`X-Request-Timeout-Ms`, this) |
+| `PLATFORM_TRUSTED_ROOTS` | empty | `:`-separated directories indexing, code search and knowledge scans may read below (ADR 0002, 0006, 0007); set by the supervising server; empty → those endpoints answer 503 |
+| `EMBEDDING_PROVIDER` | `ollama` | `ollama` or `openai` (any OpenAI-compatible `/v1/embeddings`) |
+| `EMBEDDING_URL` | `http://127.0.0.1:11434` | `https://api.openai.com` for `openai` |
+| `EMBEDDING_MODEL` | `bge-m3` | |
+| `EMBEDDING_DIMS` | `1024` | every returned vector is checked |
+| `EMBEDDING_API_KEY` | | required for `openai` |
+| `EMBEDDING_REMOTE_AUTHORIZED` | | must be `true` for `openai` or a non-loopback `EMBEDDING_URL`, else startup fails |
+| `EMBEDDING_CONCURRENCY` | `2` | concurrent embedding requests of the worker |
+| `EMBEDDING_BATCH` | `16` | texts per embedding request; the worker claims 2× this many sources at a time |
+| `WORKER_ENABLED` | `true` | |
+| `CODE_INDEX_PARSE_WORKERS` | `0` | parse goroutines per indexing job; 0 = half the cores, at most 4 |
+| `CODE_INDEX_JOBS` | `1` | indexing jobs at a time (callers beyond it wait: backpressure) |
+| `ANALYTICS_MAX_CONCURRENT` | `2` | 1–8: connections of the separate read-only analytics pool = statements at once |
+| `ANALYTICS_TIMEOUT_MS` | `15000` | analytics request deadline (slot wait included) and the pool's `statement_timeout` |
+| `PROD_ERRORS_ENGINE` | `typescript` | `go`: claim and run production error scans (requires `PLATFORM_INTERNAL_URL`); the platform always passes `go` |
+| `PLATFORM_INTERNAL_URL` | | loopback URL of the supervising platform server (its provider gateway); set by the supervisor |
+| `PROD_SCAN_WORKERS` | `1` | 1–4 scans at once |
+| `PROD_SCAN_POLL_MS` | `60000` | fallback claim poll; TypeScript wakes the runner when it queues a scan |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | | enables OTLP/HTTP traces and metrics (standard `OTEL_*` variables apply) |
 
 The model id stored with every embedding is `<provider>/<model>@<dims>`. Changing any part re-queues every eligible
 source at startup; rows of the previous model are removed per source once the new model has handled it.

@@ -52,7 +52,9 @@
   "findings": [
     {
       "kind": "unrestricted_global",
-      "keys": ["security-review"],
+      "keys": [
+        "security-review"
+      ],
       "classification": "verified",
       "action": "Assign explicitly or restrict applicability",
       "autoApply": false,
@@ -60,7 +62,10 @@
     },
     {
       "kind": "exact_duplicate",
-      "keys": ["inside-product-worker-usa.claude", "oms-background.claude"],
+      "keys": [
+        "inside-product-worker-usa.claude",
+        "oms-background.claude"
+      ],
       "classification": "needs human approval",
       "action": "Keep the older canonical item; deprecate the duplicate through a proposal",
       "autoApply": false,
@@ -68,7 +73,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["inside-product-worker-usa.claude"],
+      "keys": [
+        "inside-product-worker-usa.claude"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -76,7 +83,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["oms-api.claude"],
+      "keys": [
+        "oms-api.claude"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -84,7 +93,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["oms-background.claude"],
+      "keys": [
+        "oms-background.claude"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -92,7 +103,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["oms-frontend.rule.oms-frontend"],
+      "keys": [
+        "oms-frontend.rule.oms-frontend"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -100,7 +113,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["oms-gateway.claude"],
+      "keys": [
+        "oms-gateway.claude"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -108,7 +123,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["payment-vnpay.claude"],
+      "keys": [
+        "payment-vnpay.claude"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -116,7 +133,9 @@
     },
     {
       "kind": "excessive_context",
-      "keys": ["payment-wiki.docs.partners.fiserv.index"],
+      "keys": [
+        "payment-wiki.docs.partners.fiserv.index"
+      ],
       "classification": "verified",
       "action": "Review splitting or on-demand disclosure",
       "autoApply": false,
@@ -124,7 +143,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.amazon-sp-api"],
+      "keys": [
+        "skill.amazon-sp-api"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -132,7 +153,9 @@
     },
     {
       "kind": "codebase_map_consolidation",
-      "keys": ["skill.oms-codebase-map.inside-product-worker-usa"],
+      "keys": [
+        "skill.oms-codebase-map.inside-product-worker-usa"
+      ],
       "classification": "needs human approval",
       "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
       "autoApply": false,
@@ -140,7 +163,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-codebase-map.inside-product-worker-usa"],
+      "keys": [
+        "skill.oms-codebase-map.inside-product-worker-usa"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -148,7 +173,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-es-search"],
+      "keys": [
+        "skill.oms-es-search"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -156,7 +183,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-grpc-endpoint"],
+      "keys": [
+        "skill.oms-grpc-endpoint"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -164,7 +193,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-money-model"],
+      "keys": [
+        "skill.oms-money-model"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -172,7 +203,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-outbox-async"],
+      "keys": [
+        "skill.oms-outbox-async"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -180,7 +213,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-shipment-order-status"],
+      "keys": [
+        "skill.oms-shipment-order-status"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -188,7 +223,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-test-baseline"],
+      "keys": [
+        "skill.oms-test-baseline"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -196,7 +233,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-write-path.inside-product-worker-usa"],
+      "keys": [
+        "skill.oms-write-path.inside-product-worker-usa"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -204,7 +243,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.solid"],
+      "keys": [
+        "skill.solid"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -212,7 +253,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.tiktok-shop-us"],
+      "keys": [
+        "skill.tiktok-shop-us"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -220,7 +263,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.uber-go-style"],
+      "keys": [
+        "skill.uber-go-style"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -228,7 +273,9 @@
     },
     {
       "kind": "codebase_map_consolidation",
-      "keys": ["skill.oms-codebase-map.oms-background"],
+      "keys": [
+        "skill.oms-codebase-map.oms-background"
+      ],
       "classification": "needs human approval",
       "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
       "autoApply": false,
@@ -236,7 +283,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-kafka-consumer"],
+      "keys": [
+        "skill.oms-kafka-consumer"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -244,7 +293,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-merchant-connector"],
+      "keys": [
+        "skill.oms-merchant-connector"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -252,7 +303,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-ops-endpoint"],
+      "keys": [
+        "skill.oms-ops-endpoint"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -260,7 +313,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-outbox-es-sync"],
+      "keys": [
+        "skill.oms-outbox-es-sync"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -268,7 +323,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-write-path.oms-background"],
+      "keys": [
+        "skill.oms-write-path.oms-background"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -276,7 +333,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["skill.oms-gateway-auth"],
+      "keys": [
+        "skill.oms-gateway-auth"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -284,7 +343,9 @@
     },
     {
       "kind": "codebase_map_consolidation",
-      "keys": ["skill.oms-gateway-codebase-map"],
+      "keys": [
+        "skill.oms-gateway-codebase-map"
+      ],
       "classification": "needs human approval",
       "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
       "autoApply": false,
@@ -292,7 +353,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["user.skill.commit"],
+      "keys": [
+        "user.skill.commit"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -300,7 +363,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["user.skill.investigate"],
+      "keys": [
+        "user.skill.investigate"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -308,7 +373,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["user.skill.yagni"],
+      "keys": [
+        "user.skill.yagni"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -316,7 +383,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["oms-consistency-and-service-boundaries"],
+      "keys": [
+        "oms-consistency-and-service-boundaries"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -324,7 +393,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["oms-search-read-model"],
+      "keys": [
+        "oms-search-read-model"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -332,7 +403,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["oms-es-db-read-audit"],
+      "keys": [
+        "oms-es-db-read-audit"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -340,7 +413,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["memory.run-10.oms-api.facts"],
+      "keys": [
+        "memory.run-10.oms-api.facts"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -348,7 +423,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["go-tests-use-mockgen"],
+      "keys": [
+        "go-tests-use-mockgen"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -356,7 +433,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["payment-wiki.inventory.conflicts"],
+      "keys": [
+        "payment-wiki.inventory.conflicts"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -364,7 +443,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["payment-wiki.docs.architecture.event-sourcing.payment-order-aggregate"],
+      "keys": [
+        "payment-wiki.docs.architecture.event-sourcing.payment-order-aggregate"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -372,7 +453,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["payment-wiki.docs.async.asynq-tasks"],
+      "keys": [
+        "payment-wiki.docs.async.asynq-tasks"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -380,7 +463,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["payment-wiki.docs.development.add-gateway-endpoint"],
+      "keys": [
+        "payment-wiki.docs.development.add-gateway-endpoint"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -388,7 +473,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["payment-wiki.docs.overview.how-it-works"],
+      "keys": [
+        "payment-wiki.docs.overview.how-it-works"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -396,7 +483,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["payment-wiki.docs.overview.service-catalog"],
+      "keys": [
+        "payment-wiki.docs.overview.service-catalog"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -404,7 +493,9 @@
     },
     {
       "kind": "truncated_import",
-      "keys": ["payment-wiki.docs.partners.fiserv.fiserv-commercehub-apis"],
+      "keys": [
+        "payment-wiki.docs.partners.fiserv.fiserv-commercehub-apis"
+      ],
       "classification": "suspected",
       "action": "Review original source before restoring",
       "autoApply": false,
@@ -412,7 +503,9 @@
     },
     {
       "kind": "excessive_context",
-      "keys": ["payment-wiki.docs.partners.fiserv.fiserv-commercehub-apis"],
+      "keys": [
+        "payment-wiki.docs.partners.fiserv.fiserv-commercehub-apis"
+      ],
       "classification": "verified",
       "action": "Review splitting or on-demand disclosure",
       "autoApply": false,
@@ -420,7 +513,9 @@
     },
     {
       "kind": "excessive_context",
-      "keys": ["user.skill.oms-carrier-ghn"],
+      "keys": [
+        "user.skill.oms-carrier-ghn"
+      ],
       "classification": "verified",
       "action": "Review splitting or on-demand disclosure",
       "autoApply": false,
@@ -428,7 +523,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["user.skill.oms-carrier-ghn"],
+      "keys": [
+        "user.skill.oms-carrier-ghn"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -436,7 +533,9 @@
     },
     {
       "kind": "excessive_context",
-      "keys": ["user.skill.oms-carrier-ghtk"],
+      "keys": [
+        "user.skill.oms-carrier-ghtk"
+      ],
       "classification": "verified",
       "action": "Review splitting or on-demand disclosure",
       "autoApply": false,
@@ -444,7 +543,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["user.skill.oms-carrier-ghtk"],
+      "keys": [
+        "user.skill.oms-carrier-ghtk"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -452,7 +553,9 @@
     },
     {
       "kind": "excessive_context",
-      "keys": ["user.skill.oms-carrier-spx"],
+      "keys": [
+        "user.skill.oms-carrier-spx"
+      ],
       "classification": "verified",
       "action": "Review splitting or on-demand disclosure",
       "autoApply": false,
@@ -460,7 +563,9 @@
     },
     {
       "kind": "repeated_truncation",
-      "keys": ["user.skill.oms-carrier-spx"],
+      "keys": [
+        "user.skill.oms-carrier-spx"
+      ],
       "classification": "verified",
       "action": "Review splitting proposal",
       "autoApply": false,
@@ -468,7 +573,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["payment-techcom.claude"],
+      "keys": [
+        "payment-techcom.claude"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -476,7 +583,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.verification-before-completion"],
+      "keys": [
+        "skill.ext.verification-before-completion"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -484,7 +593,10 @@
     },
     {
       "kind": "conflict",
-      "keys": ["skill.ext.systematic-debugging", "skill.ext.test-driven-development"],
+      "keys": [
+        "skill.ext.systematic-debugging",
+        "skill.ext.test-driven-development"
+      ],
       "classification": "needs human approval",
       "action": "Review conflicting shared guidance; retain pending proposal",
       "autoApply": false,
@@ -492,7 +604,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.systematic-debugging"],
+      "keys": [
+        "skill.ext.systematic-debugging"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -500,7 +614,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.systematic-debugging.condition-based-waiting"],
+      "keys": [
+        "skill.ext.systematic-debugging.condition-based-waiting"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -508,7 +624,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.systematic-debugging.defense-in-depth"],
+      "keys": [
+        "skill.ext.systematic-debugging.defense-in-depth"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -516,7 +634,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.systematic-debugging.root-cause-tracing"],
+      "keys": [
+        "skill.ext.systematic-debugging.root-cause-tracing"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -524,7 +644,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.test-driven-development"],
+      "keys": [
+        "skill.ext.test-driven-development"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -532,7 +654,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.test-driven-development.writing-good-tests"],
+      "keys": [
+        "skill.ext.test-driven-development.writing-good-tests"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -540,7 +664,9 @@
     },
     {
       "kind": "provider_unavailable",
-      "keys": ["skill.ext.supply-chain-risk-auditor"],
+      "keys": [
+        "skill.ext.supply-chain-risk-auditor"
+      ],
       "classification": "verified",
       "action": "Review provider availability",
       "autoApply": false,
@@ -548,7 +674,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.ext.supply-chain-risk-auditor"],
+      "keys": [
+        "skill.ext.supply-chain-risk-auditor"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -556,7 +684,9 @@
     },
     {
       "kind": "unreachable",
-      "keys": ["skill.ext.playwright-cli"],
+      "keys": [
+        "skill.ext.playwright-cli"
+      ],
       "classification": "verified",
       "action": "Review applicability proposal",
       "autoApply": false,
@@ -564,7 +694,9 @@
     },
     {
       "kind": "provider_unavailable",
-      "keys": ["skill.ext.playwright-cli"],
+      "keys": [
+        "skill.ext.playwright-cli"
+      ],
       "classification": "verified",
       "action": "Review provider availability",
       "autoApply": false,
@@ -572,7 +704,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.ext.playwright-cli"],
+      "keys": [
+        "skill.ext.playwright-cli"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -580,7 +714,9 @@
     },
     {
       "kind": "codebase_map_consolidation",
-      "keys": ["skill.oms-codebase-map.oms-background.references.architecture"],
+      "keys": [
+        "skill.oms-codebase-map.oms-background.references.architecture"
+      ],
       "classification": "needs human approval",
       "action": "Review replacement by bounded code-intelligence map on Ponytail pilot",
       "autoApply": false,
@@ -588,7 +724,9 @@
     },
     {
       "kind": "truncated_import",
-      "keys": ["skill.uber-go-style.references.uber-go-guide"],
+      "keys": [
+        "skill.uber-go-style.references.uber-go-guide"
+      ],
       "classification": "suspected",
       "action": "Review original source before restoring",
       "autoApply": false,
@@ -596,7 +734,9 @@
     },
     {
       "kind": "excessive_context",
-      "keys": ["skill.uber-go-style.references.uber-go-guide"],
+      "keys": [
+        "skill.uber-go-style.references.uber-go-guide"
+      ],
       "classification": "verified",
       "action": "Review splitting or on-demand disclosure",
       "autoApply": false,
@@ -604,7 +744,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.stripe-best-practices.references.billing"],
+      "keys": [
+        "skill.stripe-best-practices.references.billing"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -612,7 +754,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.stripe-best-practices.references.connect"],
+      "keys": [
+        "skill.stripe-best-practices.references.connect"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -620,7 +764,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.stripe-best-practices.references.payments"],
+      "keys": [
+        "skill.stripe-best-practices.references.payments"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -628,7 +774,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.stripe-best-practices.references.security"],
+      "keys": [
+        "skill.stripe-best-practices.references.security"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -636,7 +784,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.stripe-best-practices.references.tax"],
+      "keys": [
+        "skill.stripe-best-practices.references.tax"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -644,7 +794,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.stripe-best-practices.references.treasury"],
+      "keys": [
+        "skill.stripe-best-practices.references.treasury"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -652,7 +804,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.fiserv-commercehub.reference.api-catalog"],
+      "keys": [
+        "skill.fiserv-commercehub.reference.api-catalog"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -660,7 +814,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.fiserv-commercehub.reference.authentication"],
+      "keys": [
+        "skill.fiserv-commercehub.reference.authentication"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -668,7 +824,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.fiserv-commercehub.reference.checkouts-hpp"],
+      "keys": [
+        "skill.fiserv-commercehub.reference.checkouts-hpp"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -676,7 +834,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.fiserv-commercehub.reference.pix-qr"],
+      "keys": [
+        "skill.fiserv-commercehub.reference.pix-qr"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -684,39 +844,9 @@
     },
     {
       "kind": "unused",
-      "keys": ["skill.fiserv-commercehub.reference.project-integration"],
-      "classification": "suspected",
-      "action": "Review usage and reachability; never disable from absence alone",
-      "autoApply": false,
-      "detail": "No usage evidence in the audit window"
-    },
-    {
-      "kind": "unrestricted_global",
-      "keys": ["latency-service-boundaries"],
-      "classification": "verified",
-      "action": "Assign explicitly or restrict applicability",
-      "autoApply": false,
-      "detail": "GLOBAL skills without restrictions are opt-in only"
-    },
-    {
-      "kind": "unused",
-      "keys": ["latency-service-boundaries"],
-      "classification": "suspected",
-      "action": "Review usage and reachability; never disable from absence alone",
-      "autoApply": false,
-      "detail": "No usage evidence in the audit window"
-    },
-    {
-      "kind": "unused",
-      "keys": ["skill.ext.ponytail"],
-      "classification": "suspected",
-      "action": "Review usage and reachability; never disable from absence alone",
-      "autoApply": false,
-      "detail": "No usage evidence in the audit window"
-    },
-    {
-      "kind": "unused",
-      "keys": ["skill.ext.ponytail-review"],
+      "keys": [
+        "skill.fiserv-commercehub.reference.project-integration"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,
@@ -724,7 +854,9 @@
     },
     {
       "kind": "unrestricted_global",
-      "keys": ["unit-test-generation"],
+      "keys": [
+        "latency-service-boundaries"
+      ],
       "classification": "verified",
       "action": "Assign explicitly or restrict applicability",
       "autoApply": false,
@@ -732,7 +864,49 @@
     },
     {
       "kind": "unused",
-      "keys": ["unit-test-generation"],
+      "keys": [
+        "latency-service-boundaries"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.ext.ponytail"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "skill.ext.ponytail-review"
+      ],
+      "classification": "suspected",
+      "action": "Review usage and reachability; never disable from absence alone",
+      "autoApply": false,
+      "detail": "No usage evidence in the audit window"
+    },
+    {
+      "kind": "unrestricted_global",
+      "keys": [
+        "unit-test-generation"
+      ],
+      "classification": "verified",
+      "action": "Assign explicitly or restrict applicability",
+      "autoApply": false,
+      "detail": "GLOBAL skills without restrictions are opt-in only"
+    },
+    {
+      "kind": "unused",
+      "keys": [
+        "unit-test-generation"
+      ],
       "classification": "suspected",
       "action": "Review usage and reachability; never disable from absence alone",
       "autoApply": false,

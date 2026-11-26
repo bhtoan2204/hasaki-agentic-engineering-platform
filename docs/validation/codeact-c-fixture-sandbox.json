@@ -25,8 +25,12 @@
   "model_check": {
     "status": "unverified",
     "models": [],
-    "requested": ["(account default)"],
-    "efforts": ["(default)"],
+    "requested": [
+      "(account default)"
+    ],
+    "efforts": [
+      "(default)"
+    ],
     "unresolved_samples": 40,
     "mismatched_pairs": []
   },
@@ -40,12 +44,18 @@
     "correct": {
       "n": 20,
       "mean": 0.5,
-      "ci95": [0.3, 0.7]
+      "ci95": [
+        0.3,
+        0.7
+      ]
     },
     "sdk_calls": {
       "n": 20,
       "mean": -0.6,
-      "ci95": [-0.9, -0.3]
+      "ci95": [
+        -0.9,
+        -0.3
+      ]
     },
     "model_turns": {
       "n": 0,
@@ -60,27 +70,42 @@
     "tool_calls": {
       "n": 20,
       "mean": -1,
-      "ci95": [-1.55, -0.45]
+      "ci95": [
+        -1.55,
+        -0.45
+      ]
     },
     "prompt_chars_total": {
       "n": 20,
       "mean": -6364.9,
-      "ci95": [-8557.55, -4122]
+      "ci95": [
+        -8557.55,
+        -4122
+      ]
     },
     "prompt_chars_max": {
       "n": 20,
       "mean": -3178.35,
-      "ci95": [-4312.55, -1968.35]
+      "ci95": [
+        -4312.55,
+        -1968.35
+      ]
     },
     "tool_result_chars": {
       "n": 20,
       "mean": -3710.8,
-      "ci95": [-5133.25, -2218.15]
+      "ci95": [
+        -5133.25,
+        -2218.15
+      ]
     },
     "latency_ms": {
       "n": 20,
       "mean": 53.1,
-      "ci95": [33.8, 68.9]
+      "ci95": [
+        33.8,
+        68.9
+      ]
     },
     "input_tokens": {
       "n": 0,
@@ -344,12 +369,18 @@
     "correct": {
       "n": 20,
       "mean": 0.5,
-      "ci95": [0.3, 0.7]
+      "ci95": [
+        0.3,
+        0.7
+      ]
     },
     "sdk_calls": {
       "n": 20,
       "mean": -0.6,
-      "ci95": [-0.9, -0.3]
+      "ci95": [
+        -0.9,
+        -0.3
+      ]
     },
     "model_turns": {
       "n": 0,
@@ -364,27 +395,42 @@
     "tool_calls": {
       "n": 20,
       "mean": -1,
-      "ci95": [-1.55, -0.45]
+      "ci95": [
+        -1.55,
+        -0.45
+      ]
     },
     "prompt_chars_total": {
       "n": 20,
       "mean": -6364.9,
-      "ci95": [-8557.55, -4122]
+      "ci95": [
+        -8557.55,
+        -4122
+      ]
     },
     "prompt_chars_max": {
       "n": 20,
       "mean": -3178.35,
-      "ci95": [-4312.55, -1968.35]
+      "ci95": [
+        -4312.55,
+        -1968.35
+      ]
     },
     "tool_result_chars": {
       "n": 20,
       "mean": -3710.8,
-      "ci95": [-5133.25, -2218.15]
+      "ci95": [
+        -5133.25,
+        -2218.15
+      ]
     },
     "latency_ms": {
       "n": 20,
       "mean": 53.1,
-      "ci95": [33.8, 68.9]
+      "ci95": [
+        33.8,
+        68.9
+      ]
     },
     "input_tokens": {
       "n": 0,
@@ -755,121 +801,181 @@
     {
       "task_id": "T01-single-lookup",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T02-independent-lookups",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T03-trace-log-correlation",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T04-slow-operations",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T05-common-failures",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T06-refund-timeout",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T07-cross-source-evidence",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T08-large-aggregation",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T09-partial-failure",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T10-codeact-unnecessary",
       "repetition": 0,
-      "variants": ["direct", "codeact"],
+      "variants": [
+        "direct",
+        "codeact"
+      ],
       "complete": true
     },
     {
       "task_id": "T01-single-lookup",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T02-independent-lookups",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T03-trace-log-correlation",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T04-slow-operations",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T05-common-failures",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T06-refund-timeout",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T07-cross-source-evidence",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T08-large-aggregation",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T09-partial-failure",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     },
     {
       "task_id": "T10-codeact-unnecessary",
       "repetition": 1,
-      "variants": ["codeact", "direct"],
+      "variants": [
+        "codeact",
+        "direct"
+      ],
       "complete": true
     }
   ],
@@ -1089,7 +1195,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.orders"],
+      "composed_tools": [
+        "eval.orders"
+      ],
       "prompt_chars_total": 7465,
       "prompt_chars_max": 4268,
       "estimated_prompt_tokens": 1867,
@@ -1207,7 +1315,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7381,
       "prompt_chars_max": 4100,
       "estimated_prompt_tokens": 1846,
@@ -1325,7 +1436,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.traces"],
+      "composed_tools": [
+        "eval.traces"
+      ],
       "prompt_chars_total": 7672,
       "prompt_chars_max": 4329,
       "estimated_prompt_tokens": 1919,
@@ -1441,7 +1554,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 7158,
       "prompt_chars_max": 3924,
       "estimated_prompt_tokens": 1790,
@@ -1561,7 +1676,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7848,
       "prompt_chars_max": 4384,
       "estimated_prompt_tokens": 1962,
@@ -1681,7 +1799,11 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.orders", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.orders",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7767,
       "prompt_chars_max": 4429,
       "estimated_prompt_tokens": 1943,
@@ -1799,7 +1921,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 7012,
       "prompt_chars_max": 3782,
       "estimated_prompt_tokens": 1754,
@@ -1919,7 +2043,10 @@
         "nested_failures_in_ok_executions": 1,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7473,
       "prompt_chars_max": 4098,
       "estimated_prompt_tokens": 1869,
@@ -2209,7 +2336,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.orders"],
+      "composed_tools": [
+        "eval.orders"
+      ],
       "prompt_chars_total": 7467,
       "prompt_chars_max": 4269,
       "estimated_prompt_tokens": 1868,
@@ -2326,7 +2455,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7388,
       "prompt_chars_max": 4106,
       "estimated_prompt_tokens": 1848,
@@ -2444,7 +2576,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.traces"],
+      "composed_tools": [
+        "eval.traces"
+      ],
       "prompt_chars_total": 7681,
       "prompt_chars_max": 4337,
       "estimated_prompt_tokens": 1921,
@@ -2561,7 +2695,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 7160,
       "prompt_chars_max": 3926,
       "estimated_prompt_tokens": 1791,
@@ -2679,7 +2815,10 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7855,
       "prompt_chars_max": 4391,
       "estimated_prompt_tokens": 1964,
@@ -2799,7 +2938,11 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.orders", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.orders",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7776,
       "prompt_chars_max": 4438,
       "estimated_prompt_tokens": 1945,
@@ -2918,7 +3061,9 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 7015,
       "prompt_chars_max": 3785,
       "estimated_prompt_tokens": 1755,
@@ -3037,7 +3182,10 @@
         "nested_failures_in_ok_executions": 1,
         "episodes": []
       },
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7476,
       "prompt_chars_max": 4101,
       "estimated_prompt_tokens": 1870,

@@ -1,497 +1,542 @@
 {
-  "sandbox": "os-sandbox",
-  "rows": [
-    {
-      "scenario": "provider-timeout",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 2,
-        "latency_ms": 149
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 182
-      },
-      "C": {
-        "run_id": 1,
-        "execution_ids": [2],
-        "evidence_refs": ["codeact:2:1"],
-        "correct": true,
-        "cause": "provider_timeout",
-        "status": "PROBABLE",
-        "verification": {
-          "status": "incomplete",
-          "missing_sources": ["log"],
-          "root_cause_supported": false,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 3419
-      }
+ "sandbox": "os-sandbox",
+ "rows": [
+  {
+   "scenario": "provider-timeout",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
     },
-    {
-      "scenario": "retry-amplification",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 2,
-        "latency_ms": 109
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 145
-      },
-      "C": {
-        "run_id": 2,
-        "execution_ids": [4],
-        "evidence_refs": ["codeact:4:1", "codeact:4:2"],
-        "correct": true,
-        "cause": "retry_amplification",
-        "status": "CONFIRMED",
-        "verification": {
-          "status": "passed",
-          "missing_sources": [],
-          "root_cause_supported": true,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 600
-      }
+    "tool_calls": 2,
+    "latency_ms": 149
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
     },
-    {
-      "scenario": "db-pool-saturation",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 2,
-        "latency_ms": 99
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 184
-      },
-      "C": {
-        "run_id": 3,
-        "execution_ids": [6],
-        "evidence_refs": ["codeact:6:1"],
-        "correct": true,
-        "cause": "db_pool_saturation",
-        "status": "PROBABLE",
-        "verification": {
-          "status": "incomplete",
-          "missing_sources": ["log"],
-          "root_cause_supported": false,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 607
-      }
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 182
+   },
+   "C": {
+    "run_id": 1,
+    "execution_ids": [
+     2
+    ],
+    "evidence_refs": [
+     "codeact:2:1"
+    ],
+    "correct": true,
+    "cause": "provider_timeout",
+    "status": "PROBABLE",
+    "verification": {
+     "status": "incomplete",
+     "missing_sources": [
+      "log"
+     ],
+     "root_cause_supported": false,
+     "failures": 0
     },
-    {
-      "scenario": "kafka-consumer-lag",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 1,
-        "latency_ms": 60
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 160
-      },
-      "C": {
-        "run_id": 4,
-        "execution_ids": [8],
-        "evidence_refs": ["codeact:8:1"],
-        "correct": true,
-        "cause": "consumer_lag",
-        "status": "PROBABLE",
-        "verification": {
-          "status": "incomplete",
-          "missing_sources": ["trace"],
-          "root_cause_supported": false,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 610
-      }
+    "tool_calls": 5,
+    "latency_ms": 3419
+   }
+  },
+  {
+   "scenario": "retry-amplification",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
     },
-    {
-      "scenario": "idempotency-conflict",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 2,
-        "latency_ms": 87
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 183
-      },
-      "C": {
-        "run_id": 5,
-        "execution_ids": [10],
-        "evidence_refs": ["codeact:10:1", "codeact:10:2"],
-        "correct": true,
-        "cause": "idempotency_conflict",
-        "status": "CONFIRMED",
-        "verification": {
-          "status": "passed",
-          "missing_sources": [],
-          "root_cause_supported": true,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 581
-      }
+    "tool_calls": 2,
+    "latency_ms": 109
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
     },
-    {
-      "scenario": "missing-spans",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 2,
-        "latency_ms": 100
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 127
-      },
-      "C": {
-        "run_id": 6,
-        "execution_ids": [12],
-        "evidence_refs": ["codeact:12:1", "codeact:12:2"],
-        "correct": true,
-        "cause": "provider_timeout",
-        "status": "CONFIRMED",
-        "verification": {
-          "status": "passed",
-          "missing_sources": [],
-          "root_cause_supported": true,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 571
-      }
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 145
+   },
+   "C": {
+    "run_id": 2,
+    "execution_ids": [
+     4
+    ],
+    "evidence_refs": [
+     "codeact:4:1",
+     "codeact:4:2"
+    ],
+    "correct": true,
+    "cause": "retry_amplification",
+    "status": "CONFIRMED",
+    "verification": {
+     "status": "passed",
+     "missing_sources": [],
+     "root_cause_supported": true,
+     "failures": 0
     },
-    {
-      "scenario": "misleading-warnings",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 2,
-        "latency_ms": 89
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 157
-      },
-      "C": {
-        "run_id": 7,
-        "execution_ids": [14],
-        "evidence_refs": ["codeact:14:1"],
-        "correct": true,
-        "cause": "provider_timeout",
-        "status": "PROBABLE",
-        "verification": {
-          "status": "incomplete",
-          "missing_sources": ["log"],
-          "root_cause_supported": false,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 584
-      }
+    "tool_calls": 5,
+    "latency_ms": 600
+   }
+  },
+  {
+   "scenario": "db-pool-saturation",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
     },
-    {
-      "scenario": "partial-outage",
-      "A": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "tool_calls": 3,
-        "latency_ms": 126
-      },
-      "B": {
-        "correct": true,
-        "rca": {
-          "detection": true,
-          "service": true,
-          "operation": true,
-          "cause": true,
-          "fault_localized": true,
-          "correlation": true,
-          "symptom_as_cause": false,
-          "misleading_signal_taken": false,
-          "false_confirmation": false,
-          "uncertainty_reported": true,
-          "missing_sources_reported": true,
-          "unsafe_next_action": false
-        },
-        "codeact": 1,
-        "tool_calls": 1,
-        "latency_ms": 164
-      },
-      "C": {
-        "run_id": 8,
-        "execution_ids": [16],
-        "evidence_refs": ["codeact:16:1"],
-        "correct": true,
-        "cause": "provider_timeout",
-        "status": "PROBABLE",
-        "verification": {
-          "status": "incomplete",
-          "missing_sources": ["trace"],
-          "root_cause_supported": false,
-          "failures": 0
-        },
-        "tool_calls": 5,
-        "latency_ms": 609
-      }
-    }
-  ],
-  "workflow": {
-    "n": 8,
-    "completed_runs": 8,
-    "correct": 8,
-    "rca_dimensions": {
-      "detection": 8,
-      "service": 8,
-      "operation": 8,
-      "cause": 8,
-      "fault_localized": 8,
-      "correlation": 8,
-      "symptom_as_cause": 0,
-      "misleading_signal_taken": 0,
-      "false_confirmation": 0,
-      "uncertainty_reported": 8,
-      "missing_sources_reported": 8,
-      "unsafe_next_action": 0
+    "tool_calls": 2,
+    "latency_ms": 99
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
     },
-    "verdicts": {
-      "incomplete": 5,
-      "passed": 3
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 184
+   },
+   "C": {
+    "run_id": 3,
+    "execution_ids": [
+     6
+    ],
+    "evidence_refs": [
+     "codeact:6:1"
+    ],
+    "correct": true,
+    "cause": "db_pool_saturation",
+    "status": "PROBABLE",
+    "verification": {
+     "status": "incomplete",
+     "missing_sources": [
+      "log"
+     ],
+     "root_cause_supported": false,
+     "failures": 0
     },
-    "mean_latency_ms": 947.625,
-    "mean_tool_calls": 5,
-    "codeact_executions": 8,
-    "codeact_failed": 0,
-    "known_cost_usd": null
+    "tool_calls": 5,
+    "latency_ms": 607
+   }
+  },
+  {
+   "scenario": "kafka-consumer-lag",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "tool_calls": 1,
+    "latency_ms": 60
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 160
+   },
+   "C": {
+    "run_id": 4,
+    "execution_ids": [
+     8
+    ],
+    "evidence_refs": [
+     "codeact:8:1"
+    ],
+    "correct": true,
+    "cause": "consumer_lag",
+    "status": "PROBABLE",
+    "verification": {
+     "status": "incomplete",
+     "missing_sources": [
+      "trace"
+     ],
+     "root_cause_supported": false,
+     "failures": 0
+    },
+    "tool_calls": 5,
+    "latency_ms": 610
+   }
+  },
+  {
+   "scenario": "idempotency-conflict",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "tool_calls": 2,
+    "latency_ms": 87
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 183
+   },
+   "C": {
+    "run_id": 5,
+    "execution_ids": [
+     10
+    ],
+    "evidence_refs": [
+     "codeact:10:1",
+     "codeact:10:2"
+    ],
+    "correct": true,
+    "cause": "idempotency_conflict",
+    "status": "CONFIRMED",
+    "verification": {
+     "status": "passed",
+     "missing_sources": [],
+     "root_cause_supported": true,
+     "failures": 0
+    },
+    "tool_calls": 5,
+    "latency_ms": 581
+   }
+  },
+  {
+   "scenario": "missing-spans",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "tool_calls": 2,
+    "latency_ms": 100
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 127
+   },
+   "C": {
+    "run_id": 6,
+    "execution_ids": [
+     12
+    ],
+    "evidence_refs": [
+     "codeact:12:1",
+     "codeact:12:2"
+    ],
+    "correct": true,
+    "cause": "provider_timeout",
+    "status": "CONFIRMED",
+    "verification": {
+     "status": "passed",
+     "missing_sources": [],
+     "root_cause_supported": true,
+     "failures": 0
+    },
+    "tool_calls": 5,
+    "latency_ms": 571
+   }
+  },
+  {
+   "scenario": "misleading-warnings",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "tool_calls": 2,
+    "latency_ms": 89
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 157
+   },
+   "C": {
+    "run_id": 7,
+    "execution_ids": [
+     14
+    ],
+    "evidence_refs": [
+     "codeact:14:1"
+    ],
+    "correct": true,
+    "cause": "provider_timeout",
+    "status": "PROBABLE",
+    "verification": {
+     "status": "incomplete",
+     "missing_sources": [
+      "log"
+     ],
+     "root_cause_supported": false,
+     "failures": 0
+    },
+    "tool_calls": 5,
+    "latency_ms": 584
+   }
+  },
+  {
+   "scenario": "partial-outage",
+   "A": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "tool_calls": 3,
+    "latency_ms": 126
+   },
+   "B": {
+    "correct": true,
+    "rca": {
+     "detection": true,
+     "service": true,
+     "operation": true,
+     "cause": true,
+     "fault_localized": true,
+     "correlation": true,
+     "symptom_as_cause": false,
+     "misleading_signal_taken": false,
+     "false_confirmation": false,
+     "uncertainty_reported": true,
+     "missing_sources_reported": true,
+     "unsafe_next_action": false
+    },
+    "codeact": 1,
+    "tool_calls": 1,
+    "latency_ms": 164
+   },
+   "C": {
+    "run_id": 8,
+    "execution_ids": [
+     16
+    ],
+    "evidence_refs": [
+     "codeact:16:1"
+    ],
+    "correct": true,
+    "cause": "provider_timeout",
+    "status": "PROBABLE",
+    "verification": {
+     "status": "incomplete",
+     "missing_sources": [
+      "trace"
+     ],
+     "root_cause_supported": false,
+     "failures": 0
+    },
+    "tool_calls": 5,
+    "latency_ms": 609
+   }
   }
+ ],
+ "workflow": {
+  "n": 8,
+  "completed_runs": 8,
+  "correct": 8,
+  "rca_dimensions": {
+   "detection": 8,
+   "service": 8,
+   "operation": 8,
+   "cause": 8,
+   "fault_localized": 8,
+   "correlation": 8,
+   "symptom_as_cause": 0,
+   "misleading_signal_taken": 0,
+   "false_confirmation": 0,
+   "uncertainty_reported": 8,
+   "missing_sources_reported": 8,
+   "unsafe_next_action": 0
+  },
+  "verdicts": {
+   "incomplete": 5,
+   "passed": 3
+  },
+  "mean_latency_ms": 947.625,
+  "mean_tool_calls": 5,
+  "codeact_executions": 8,
+  "codeact_failed": 0,
+  "known_cost_usd": null
+ }
 }

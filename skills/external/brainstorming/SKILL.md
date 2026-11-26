@@ -44,10 +44,10 @@ recommendation) only where it helps the approval decision.
 
 ## Size the Work
 
-| Size                  | Then                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| A quick, clear change | describe it in the result and let the plan be short                                                                            |
-| A project             | a written design in the result, detailed enough that a talented builder could plan from it without going back to the developer |
+| Size | Then |
+|------|------|
+| A quick, clear change | describe it in the result and let the plan be short |
+| A project | a written design in the result, detailed enough that a talented builder could plan from it without going back to the developer |
 
 If it is really several independent pieces, say so and propose an order.
 
@@ -62,8 +62,8 @@ is that gate. Planning detail follows the writing-plans skill.
 
 ## Red Flags
 
-| Thought                          | Reality                                                                          |
-| -------------------------------- | -------------------------------------------------------------------------------- |
+| Thought | Reality |
+|---------|---------|
 | "I'll fill in sensible defaults" | Good. Say them out loud. A default they never heard is one they couldn't reject. |
-| "They approved the idea"         | Approval covers what you showed them.                                            |
-| "One approach is obvious"        | Check the codebase for an existing flow first.                                   |
+| "They approved the idea" | Approval covers what you showed them. |
+| "One approach is obvious" | Check the codebase for an existing flow first. |

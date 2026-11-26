@@ -279,8 +279,22 @@
   },
   "quality": {
     "identical_results": true,
-    "identical_per_query": [true, true, true, true, true, true],
-    "hits_per_query": [30, 30, 20, 0, 100, 8000]
+    "identical_per_query": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "hits_per_query": [
+      30,
+      30,
+      20,
+      0,
+      100,
+      8000
+    ]
   },
   "p50_improvement_pct": {
     "1": {

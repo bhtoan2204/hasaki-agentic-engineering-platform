@@ -14,29 +14,28 @@ recoverable.**
 ### Reconstruction from the fixture
 
 - `referenceAnswer(T03)` gives `{order_ids: [ORD-101, ORD-113, ORD-125, ORD-137, ORD-149, ORD-17, ORD-29, ORD-41,
-ORD-5, ORD-53, ORD-65, ORD-77, ORD-89], count: 13}`.
+  ORD-5, ORD-53, ORD-65, ORD-77, ORD-89], count: 13}`.
 - It is sorted with JavaScript's default `.sort()`, which is **lexicographic**.
 - The output contract said `"order_ids": [sorted ids]` without defining the order.
 
 Every plausible reading of the question was computed on the fixture, each giving 13 ids, **the same set as the
 reference**:
-
 - `>= 5000` vs `> 5000` ms;
 - spans from any service;
 - logs from any service;
 - logs containing only "timeout";
 - either source alone.
 
-| Possible cause                                 | Can it give count 13 with wrong `order_ids`?                                           |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Wrong membership from a misread filter         | No: every reading above gives the reference set                                        |
-| Missing ids                                    | No: the set would be smaller, but count was right                                      |
-| Extra ids                                      | No: the set would be larger, but count was right                                       |
-| Duplicates                                     | Only with a count inconsistent with the list, or a deduplicated count                  |
-| Pagination or truncation                       | No: CodeAct answers come from complete program results, and a cut list changes the set |
-| Wrong tool arguments                           | No: covered by the readings above                                                      |
-| **Ordering** (e.g. natural `ORD-5, ORD-17, …`) | **Yes**                                                                                |
-| Id formatting (e.g. numbers without `ORD-`)    | Yes                                                                                    |
+| Possible cause | Can it give count 13 with wrong `order_ids`? |
+| --- | --- |
+| Wrong membership from a misread filter | No: every reading above gives the reference set |
+| Missing ids | No: the set would be smaller, but count was right |
+| Extra ids | No: the set would be larger, but count was right |
+| Duplicates | Only with a count inconsistent with the list, or a deduplicated count |
+| Pagination or truncation | No: CodeAct answers come from complete program results, and a cut list changes the set |
+| Wrong tool arguments | No: covered by the readings above |
+| **Ordering** (e.g. natural `ORD-5, ORD-17, …`) | **Yes** |
+| Id formatting (e.g. numbers without `ORD-`) | Yes |
 
 **Root cause demonstrated (grader).** The old grader compared the whole list by exact JSON. It rejects the correct
 set, with the correct count, in natural numeric order:
@@ -73,7 +72,6 @@ discriminating incidents in P1, not by changing T03's reference.
 ### Tests
 
 `node --import ./test/env.ts --test test/codeact-grading.test.ts`, 8/8:
-
 - **Before:** the old rule rejects the natural order (kept as a regression record).
 - **After:**
   - Lexicographic, natural and reversed orders of the right set are correct.
@@ -86,7 +84,6 @@ discriminating incidents in P1, not by changing T03's reference.
   - Unanswered stays wrong, and unsupported non-null fields are still counted.
 
 `node test/run-integration.ts test/codeact-effect.integration.ts`, 13/13. Through the real Chat harness:
-
 - The T03 reference is rebuilt from the fixture.
 - A **paginated** CodeAct correlation (pages of 50 over every slow span and timeout log, natural order) is graded
   correct, with `order_differs: true` in the diagnosis and the answer kept.
@@ -110,16 +107,16 @@ cause could rest entirely on facts only the agent vouched for.
 
 Before the fix (the same tests run against the old code; status returned):
 
-| Case                                                         | Old verdict |
-| ------------------------------------------------------------ | ----------- |
-| zero claims, zero evidence                                   | **passed**  |
-| required source (log) without verified fact                  | **passed**  |
-| truncated record as only trace evidence                      | **passed**  |
-| verified DB-pool observation + unsupported causal conclusion | **passed**  |
-| partial outage (SigNoz call failed)                          | **passed**  |
-| CONFIRMED on agent-vouched facts only                        | **passed**  |
-| root cause PROBABLE                                          | **passed**  |
-| default objectives, `missing_evidence: []`                   | **passed**  |
+| Case | Old verdict |
+| --- | --- |
+| zero claims, zero evidence | **passed** |
+| required source (log) without verified fact | **passed** |
+| truncated record as only trace evidence | **passed** |
+| verified DB-pool observation + unsupported causal conclusion | **passed** |
+| partial outage (SigNoz call failed) | **passed** |
+| CONFIRMED on agent-vouched facts only | **passed** |
+| root cause PROBABLE | **passed** |
+| default objectives, `missing_evidence: []` | **passed** |
 
 ### What changed (existing provenance and normalization; no new engine)
 
@@ -146,7 +143,6 @@ Before the fix (the same tests run against the old code; status returned):
 ### Tests
 
 `node --import ./test/env.ts --test test/evidence-sufficiency.test.ts`, 14/14 (8 failed before the fix, as above):
-
 - zero claims → incomplete;
 - claims without references → not passed;
 - fabricated CodeAct ref → failed;
@@ -164,21 +160,20 @@ Before the fix (the same tests run against the old code; status returned):
 
 Integration (`incident-investigation`, `codeact-evidence`, `codeact-diagnostics`, `codeact-composition`,
 `codeact-pairing`, `codeact-effect`), 47/47:
-
 - The M4 end-to-end run 1 stays `incomplete` (SigNoz unavailable for refund-worker). Sufficiency now shows code, log
   and trace covered, with `root_cause_supported: true`.
 - The deliberately wrong diagnosis stays `failed`.
 
 ## Gate
 
-| Requirement                                                 | Status                                                                                                                                          |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| T03 root cause demonstrated                                 | Grader defect demonstrated. The pilot's exact answers are unrecoverable, so they are NOT VERIFIED until a fresh live run with recorded answers. |
-| Grading semantics correct, incorrect answers still rejected | yes (tests above)                                                                                                                               |
-| Deterministic correlation tests pass                        | yes                                                                                                                                             |
-| Evidence false PASS prevented                               | yes                                                                                                                                             |
-| CodeAct authorization and evidence integrity intact         | yes: evidence, composition, diagnostics and pairing suites unchanged and passing                                                                |
-| No regression                                               | `npm test` 1191/1191; tsc, lint, arch clean                                                                                                     |
+| Requirement | Status |
+| --- | --- |
+| T03 root cause demonstrated | Grader defect demonstrated. The pilot's exact answers are unrecoverable, so they are NOT VERIFIED until a fresh live run with recorded answers. |
+| Grading semantics correct, incorrect answers still rejected | yes (tests above) |
+| Deterministic correlation tests pass | yes |
+| Evidence false PASS prevented | yes |
+| CodeAct authorization and evidence integrity intact | yes: evidence, composition, diagnostics and pairing suites unchanged and passing |
+| No regression | `npm test` 1191/1191; tsc, lint, arch clean |
 
 ## Limitations
 

@@ -159,32 +159,50 @@
     "completions": {
       "n": 30,
       "mean": -0.6,
-      "ci95": [-0.8333333333333334, -0.36666666666666664]
+      "ci95": [
+        -0.8333333333333334,
+        -0.36666666666666664
+      ]
     },
     "tool_calls": {
       "n": 30,
       "mean": -1,
-      "ci95": [-1.4666666666666666, -0.5333333333333333]
+      "ci95": [
+        -1.4666666666666666,
+        -0.5333333333333333
+      ]
     },
     "prompt_chars_total": {
       "n": 30,
       "mean": -6608.233333333334,
-      "ci95": [-8226.866666666667, -4753.9]
+      "ci95": [
+        -8226.866666666667,
+        -4753.9
+      ]
     },
     "prompt_chars_max": {
       "n": 30,
       "mean": -3421.633333333333,
-      "ci95": [-4383.933333333333, -2449.3333333333335]
+      "ci95": [
+        -4383.933333333333,
+        -2449.3333333333335
+      ]
     },
     "tool_result_chars": {
       "n": 30,
       "mean": -3972.0666666666666,
-      "ci95": [-5084.4, -2734.2]
+      "ci95": [
+        -5084.4,
+        -2734.2
+      ]
     },
     "latency_ms": {
       "n": 30,
       "mean": 50.5,
-      "ci95": [35.96666666666667, 63.93333333333333]
+      "ci95": [
+        35.96666666666667,
+        63.93333333333333
+      ]
     },
     "input_tokens": {
       "n": 0,
@@ -559,7 +577,9 @@
       "codeact_failed": 0,
       "nested_calls": 4,
       "repairs": 0,
-      "composed_tools": ["eval.orders"],
+      "composed_tools": [
+        "eval.orders"
+      ],
       "prompt_chars_total": 7069,
       "prompt_chars_max": 3872,
       "estimated_prompt_tokens": 1768,
@@ -637,7 +657,10 @@
       "codeact_failed": 0,
       "nested_calls": 2,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7107,
       "prompt_chars_max": 3826,
       "estimated_prompt_tokens": 1778,
@@ -715,7 +738,9 @@
       "codeact_failed": 0,
       "nested_calls": 3,
       "repairs": 0,
-      "composed_tools": ["eval.traces"],
+      "composed_tools": [
+        "eval.traces"
+      ],
       "prompt_chars_total": 7337,
       "prompt_chars_max": 3994,
       "estimated_prompt_tokens": 1835,
@@ -791,7 +816,9 @@
       "codeact_failed": 0,
       "nested_calls": 1,
       "repairs": 0,
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 6945,
       "prompt_chars_max": 3711,
       "estimated_prompt_tokens": 1737,
@@ -871,7 +898,10 @@
       "codeact_failed": 0,
       "nested_calls": 3,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7513,
       "prompt_chars_max": 4049,
       "estimated_prompt_tokens": 1879,
@@ -951,7 +981,11 @@
       "codeact_failed": 0,
       "nested_calls": 4,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.orders", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.orders",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7371,
       "prompt_chars_max": 4033,
       "estimated_prompt_tokens": 1844,
@@ -1029,7 +1063,9 @@
       "codeact_failed": 0,
       "nested_calls": 1,
       "repairs": 0,
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 6799,
       "prompt_chars_max": 3569,
       "estimated_prompt_tokens": 1701,
@@ -1109,7 +1145,10 @@
       "codeact_failed": 0,
       "nested_calls": 2,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7199,
       "prompt_chars_max": 3824,
       "estimated_prompt_tokens": 1800,
@@ -1299,7 +1338,9 @@
       "codeact_failed": 0,
       "nested_calls": 4,
       "repairs": 0,
-      "composed_tools": ["eval.orders"],
+      "composed_tools": [
+        "eval.orders"
+      ],
       "prompt_chars_total": 7070,
       "prompt_chars_max": 3872,
       "estimated_prompt_tokens": 1768,
@@ -1376,7 +1417,10 @@
       "codeact_failed": 0,
       "nested_calls": 2,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7113,
       "prompt_chars_max": 3831,
       "estimated_prompt_tokens": 1779,
@@ -1454,7 +1498,9 @@
       "codeact_failed": 0,
       "nested_calls": 3,
       "repairs": 0,
-      "composed_tools": ["eval.traces"],
+      "composed_tools": [
+        "eval.traces"
+      ],
       "prompt_chars_total": 7345,
       "prompt_chars_max": 4001,
       "estimated_prompt_tokens": 1837,
@@ -1531,7 +1577,9 @@
       "codeact_failed": 0,
       "nested_calls": 1,
       "repairs": 0,
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 6947,
       "prompt_chars_max": 3713,
       "estimated_prompt_tokens": 1738,
@@ -1609,7 +1657,10 @@
       "codeact_failed": 0,
       "nested_calls": 3,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7519,
       "prompt_chars_max": 4055,
       "estimated_prompt_tokens": 1880,
@@ -1689,7 +1740,11 @@
       "codeact_failed": 0,
       "nested_calls": 4,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.orders", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.orders",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7379,
       "prompt_chars_max": 4041,
       "estimated_prompt_tokens": 1846,
@@ -1768,7 +1823,9 @@
       "codeact_failed": 0,
       "nested_calls": 1,
       "repairs": 0,
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 6801,
       "prompt_chars_max": 3571,
       "estimated_prompt_tokens": 1701,
@@ -1847,7 +1904,10 @@
       "codeact_failed": 0,
       "nested_calls": 2,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7200,
       "prompt_chars_max": 3825,
       "estimated_prompt_tokens": 1801,
@@ -2115,7 +2175,9 @@
       "codeact_failed": 0,
       "nested_calls": 4,
       "repairs": 0,
-      "composed_tools": ["eval.orders"],
+      "composed_tools": [
+        "eval.orders"
+      ],
       "prompt_chars_total": 7079,
       "prompt_chars_max": 3881,
       "estimated_prompt_tokens": 1771,
@@ -2193,7 +2255,10 @@
       "codeact_failed": 0,
       "nested_calls": 2,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7113,
       "prompt_chars_max": 3831,
       "estimated_prompt_tokens": 1779,
@@ -2271,7 +2336,9 @@
       "codeact_failed": 0,
       "nested_calls": 3,
       "repairs": 0,
-      "composed_tools": ["eval.traces"],
+      "composed_tools": [
+        "eval.traces"
+      ],
       "prompt_chars_total": 7345,
       "prompt_chars_max": 4001,
       "estimated_prompt_tokens": 1837,
@@ -2347,7 +2414,9 @@
       "codeact_failed": 0,
       "nested_calls": 1,
       "repairs": 0,
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 6947,
       "prompt_chars_max": 3713,
       "estimated_prompt_tokens": 1738,
@@ -2427,7 +2496,10 @@
       "codeact_failed": 0,
       "nested_calls": 3,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7518,
       "prompt_chars_max": 4054,
       "estimated_prompt_tokens": 1880,
@@ -2507,7 +2579,11 @@
       "codeact_failed": 0,
       "nested_calls": 4,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.orders", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.orders",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7378,
       "prompt_chars_max": 4040,
       "estimated_prompt_tokens": 1845,
@@ -2585,7 +2661,9 @@
       "codeact_failed": 0,
       "nested_calls": 1,
       "repairs": 0,
-      "composed_tools": ["eval.logs"],
+      "composed_tools": [
+        "eval.logs"
+      ],
       "prompt_chars_total": 6801,
       "prompt_chars_max": 3571,
       "estimated_prompt_tokens": 1701,
@@ -2665,7 +2743,10 @@
       "codeact_failed": 0,
       "nested_calls": 2,
       "repairs": 0,
-      "composed_tools": ["eval.logs", "eval.traces"],
+      "composed_tools": [
+        "eval.logs",
+        "eval.traces"
+      ],
       "prompt_chars_total": 7201,
       "prompt_chars_max": 3826,
       "estimated_prompt_tokens": 1801,
