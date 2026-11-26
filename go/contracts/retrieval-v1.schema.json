@@ -25,7 +25,15 @@
     "SearchHit": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_id", "key", "source_kind", "version", "content_hash", "similarity", "chunk"],
+      "required": [
+        "source_id",
+        "key",
+        "source_kind",
+        "version",
+        "content_hash",
+        "similarity",
+        "chunk"
+      ],
       "properties": {
         "source_id": { "type": "integer" },
         "key": { "type": "string" },
@@ -50,7 +58,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "source_ids": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "maxItems": 5000 },
+        "source_ids": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "maxItems": 5000
+        },
         "all": { "type": "boolean" }
       }
     },
@@ -63,7 +75,15 @@
     "Status": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["vector_extension", "model", "queue_depth", "indexed", "skipped_sensitive", "failed", "stale"],
+      "required": [
+        "vector_extension",
+        "model",
+        "queue_depth",
+        "indexed",
+        "skipped_sensitive",
+        "failed",
+        "stale"
+      ],
       "properties": {
         "vector_extension": { "type": "boolean" },
         "model": { "type": "string" },
@@ -71,7 +91,10 @@
         "indexed": { "type": "integer" },
         "skipped_sensitive": { "type": "integer" },
         "failed": { "type": "integer" },
-        "stale": { "type": "integer", "description": "eligible sources whose indexed version/hash/model is not current" }
+        "stale": {
+          "type": "integer",
+          "description": "eligible sources whose indexed version/hash/model is not current"
+        }
       }
     },
     "Error": {
@@ -80,13 +103,28 @@
       "required": ["error", "code"],
       "properties": {
         "error": { "type": "string" },
-        "code": { "enum": ["bad_request", "unauthorized", "vector_unavailable", "embedder_unavailable", "timeout", "internal"] }
+        "code": {
+          "enum": [
+            "bad_request",
+            "unauthorized",
+            "vector_unavailable",
+            "embedder_unavailable",
+            "timeout",
+            "internal"
+          ]
+        }
       }
     }
   },
   "x-endpoints": {
-    "POST /internal/v1/retrieval/search": { "request": "SearchRequest", "response": "SearchResponse" },
-    "POST /internal/v1/retrieval/reindex": { "request": "ReindexRequest", "response": "ReindexResponse" },
+    "POST /internal/v1/retrieval/search": {
+      "request": "SearchRequest",
+      "response": "SearchResponse"
+    },
+    "POST /internal/v1/retrieval/reindex": {
+      "request": "ReindexRequest",
+      "response": "ReindexResponse"
+    },
     "GET /internal/v1/retrieval/status": { "response": "Status" },
     "GET /healthz": {},
     "GET /readyz": {}

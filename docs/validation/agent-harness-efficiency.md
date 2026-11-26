@@ -7,15 +7,15 @@ evidence of model-level cost savings.
 
 ## 1. Baseline audit: confirmed defects vs hypotheses
 
-| Area | Finding | Status |
-| --- | --- | --- |
-| Verify-and-repair loop | After every repair the whole verification ran again, even when the repair changed **nothing**. Failed evidence is (correctly) never reused, so identical source was re-tested in full, and only then did the "same signature twice" rule stop the loop. | **Confirmed** (baseline measured below). Fixed. |
-| Rejected submissions | When `submit_result` was rejected by the output contract and the agent ended its turn, the harness reported "finished the turn without calling submit_result" (`INCOMPLETE_OUTPUT`). That is wrong and hides the reason. Observed in a real engine run (RCA workflow arm, `missing required field: hypotheses`), and encoded as expected behavior in `test/codex.integration.ts`. | **Confirmed.** Fixed (accuracy; no latency gain, see §3). |
-| Verification evidence reuse | The key binds workspace fingerprint (HEAD + uncommitted content, untracked files included), environment fingerprint, command and contract revision. Failed, stale or incomplete evidence is not reused (`verifyEvidence.ts`). Reuse is recorded in `execution_decisions` (`verification_reuse`). | Audited, correct. No change. |
-| Independent review reuse | The reuse key covers reviewer, test evidence, approved scope (including renewed-approval revision), review policy (rules version, step config, provider), and identical verified commits (`independentReview.ts`). | Audited, correct. No change. |
-| Failure policy | `AUTHENTICATION`, `QUOTA_EXHAUSTED`, `CONTEXT_LIMIT`, `NO_PROGRESS`, budget and security codes are never retried. Transient codes retry within `max_attempts`. | Audited. No pointless retries found. No change. |
-| Session loss during repair | The repair continues in the same provider session. When it is gone, it rebuilds from durable state (pack + workspace + diagnostics). When context is under pressure, it compacts to a fresh session reconstructed from platform state, not from an LLM summary. | Audited. No change. |
-| Prompt and context reconstruction, duplicate upstream outputs | Context pack is reused when inputs match. Delta resume (delivery manifest). Upstream outputs are summarized under a token budget. | No measurable waste found in fixtures. **Hypothesis only**: real-provider measurements would be needed. Not changed. |
+| Area                                                          | Finding                                                                                                                                                                                                                                                                                                                                                                           | Status                                                                                                               |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Verify-and-repair loop                                        | After every repair the whole verification ran again, even when the repair changed **nothing**. Failed evidence is (correctly) never reused, so identical source was re-tested in full, and only then did the "same signature twice" rule stop the loop.                                                                                                                           | **Confirmed** (baseline measured below). Fixed.                                                                      |
+| Rejected submissions                                          | When `submit_result` was rejected by the output contract and the agent ended its turn, the harness reported "finished the turn without calling submit_result" (`INCOMPLETE_OUTPUT`). That is wrong and hides the reason. Observed in a real engine run (RCA workflow arm, `missing required field: hypotheses`), and encoded as expected behavior in `test/codex.integration.ts`. | **Confirmed.** Fixed (accuracy; no latency gain, see §3).                                                            |
+| Verification evidence reuse                                   | The key binds workspace fingerprint (HEAD + uncommitted content, untracked files included), environment fingerprint, command and contract revision. Failed, stale or incomplete evidence is not reused (`verifyEvidence.ts`). Reuse is recorded in `execution_decisions` (`verification_reuse`).                                                                                  | Audited, correct. No change.                                                                                         |
+| Independent review reuse                                      | The reuse key covers reviewer, test evidence, approved scope (including renewed-approval revision), review policy (rules version, step config, provider), and identical verified commits (`independentReview.ts`).                                                                                                                                                                | Audited, correct. No change.                                                                                         |
+| Failure policy                                                | `AUTHENTICATION`, `QUOTA_EXHAUSTED`, `CONTEXT_LIMIT`, `NO_PROGRESS`, budget and security codes are never retried. Transient codes retry within `max_attempts`.                                                                                                                                                                                                                    | Audited. No pointless retries found. No change.                                                                      |
+| Session loss during repair                                    | The repair continues in the same provider session. When it is gone, it rebuilds from durable state (pack + workspace + diagnostics). When context is under pressure, it compacts to a fresh session reconstructed from platform state, not from an LLM summary.                                                                                                                   | Audited. No change.                                                                                                  |
+| Prompt and context reconstruction, duplicate upstream outputs | Context pack is reused when inputs match. Delta resume (delivery manifest). Upstream outputs are summarized under a token budget.                                                                                                                                                                                                                                                 | No measurable waste found in fixtures. **Hypothesis only**: real-provider measurements would be needed. Not changed. |
 
 ## 2. Change 1: a repair that changed nothing is not re-verified
 
@@ -37,11 +37,12 @@ evidence of model-level cost savings.
 
 ### Tests
 
-| Command | Result |
-| --- | --- |
+| Command                                                               | Result                                            |
+| --------------------------------------------------------------------- | ------------------------------------------------- |
 | `node test/run-integration.ts test/harness-efficiency.integration.ts` | 5/5 (real git worktrees, real `verifyWorkspaces`) |
 
 The 5 cases:
+
 - unchanged repair: **1** verification run, `no_progress` / `unchanged_source`;
 - baseline without the hook: **2** runs;
 - changed repair: re-verified (2 runs);
@@ -55,10 +56,10 @@ the verification metrics show `rounds 1, repairs 1, stop_reason unchanged_source
 
 ### Measured delta (same end-to-end scenario, 2 runs each; baseline = the hook removed)
 
-| | rounds | verification ms | coding step ms | provider turns |
-| --- | --- | --- | --- | --- |
-| baseline | 2, 2 | 4335, 4210 | 8880, 8899 | unchanged (the repair turn runs in both) |
-| optimized | 1, 1 | 3760, 3913 | 7601, 8549 | unchanged |
+|           | rounds | verification ms | coding step ms | provider turns                           |
+| --------- | ------ | --------------- | -------------- | ---------------------------------------- |
+| baseline  | 2, 2   | 4335, 4210      | 8880, 8899     | unchanged (the repair turn runs in both) |
+| optimized | 1, 1   | 3760, 3913      | 7601, 8549     | unchanged                                |
 
 The saving is one complete verification run per no-op repair. The fixture's `go test` of one function is cheap (about
 0.4 s here, with a warm build cache); with a real suite it is the suite's whole duration. Provider cost is unchanged:
@@ -87,6 +88,7 @@ the repair turn itself still happens.
 ## 4. Cross-provider semantics
 
 Both changes sit on shared paths:
+
 - the verification loop belongs to the harness `verify` stage, whatever the provider;
 - `submit_result` is the shared platform tool, in process for Claude and through the broker or bridge for the CLIs.
 
@@ -95,12 +97,12 @@ guarantee or policy changed. `GUARANTEES` and fail-closed preflight are untouche
 
 ## 5. Verification
 
-| Command | Exit | Result |
-| --- | --- | --- |
-| `npx tsc --noEmit -p .`, `npm run lint`, `npm run arch:check` | 0 | clean; 5 cycles / 6 violations (baseline) |
-| `npm test` | 0 | 1200/1200 |
-| affected integration suites (harness-efficiency, harness, execution-contract-runtime, codex, antigravity, step-agent, incident-investigation, rca-three-arm, codeact-evidence) | 0 after the codex assertion update | 141/141 |
-| `npm run test:integration` | 1 | 965/968, 0 skipped. The 3 failures are the known pre-existing local ones (`evaluation.integration.ts` ×2, reproduced on `f666c65`; `repository-remotes`, from the host `~/.gitconfig`). They pass on CI. |
+| Command                                                                                                                                                                        | Exit                               | Result                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx tsc --noEmit -p .`, `npm run lint`, `npm run arch:check`                                                                                                                  | 0                                  | clean; 5 cycles / 6 violations (baseline)                                                                                                                                                                |
+| `npm test`                                                                                                                                                                     | 0                                  | 1200/1200                                                                                                                                                                                                |
+| affected integration suites (harness-efficiency, harness, execution-contract-runtime, codex, antigravity, step-agent, incident-investigation, rca-three-arm, codeact-evidence) | 0 after the codex assertion update | 141/141                                                                                                                                                                                                  |
+| `npm run test:integration`                                                                                                                                                     | 1                                  | 965/968, 0 skipped. The 3 failures are the known pre-existing local ones (`evaluation.integration.ts` ×2, reproduced on `f666c65`; `repository-remotes`, from the host `~/.gitconfig`). They pass on CI. |
 
 ## 6. Not done and limitations
 

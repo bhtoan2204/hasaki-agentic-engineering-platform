@@ -279,6 +279,25 @@ export async function queue(
     ],
   );
 }
+/** Batched `queue` for plain messages (no actions, conversation, user or link); same dedupe keys, one statement. */
+export async function queueMany(
+  db: Db,
+  items: { key: string; method: string; payload: unknown }[],
+) {
+  if (!items.length) return;
+  await q(
+    db,
+    `INSERT INTO telegram_outbox(bot_key,dedupe_key,method,payload,action_ids,next_at)
+    SELECT $1,t.k,t.m,t.p::jsonb,'{}',now() FROM unnest($2::text[],$3::text[],$4::text[]) AS t(k,m,p)
+    ON CONFLICT DO NOTHING`,
+    [
+      botKey(),
+      items.map((i) => i.key),
+      items.map((i) => i.method),
+      items.map((i) => JSON.stringify(i.payload)),
+    ],
+  );
+}
 /** What a sent message is about: recorded in telegram_messages once Telegram returns its id (replies, edits). */
 export interface OutboxLink {
   kind: "turn_status" | "answer" | "operation" | "run_status" | "notice";

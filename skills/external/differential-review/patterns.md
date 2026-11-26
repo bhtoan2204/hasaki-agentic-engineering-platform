@@ -6,12 +6,14 @@ Quick reference for detecting common security issues in code changes.
 For specific contexts, reference these additional pattern databases:
 
 **Domain-Specific:**
+
 - `domain-specific-audits/defi-bridges/resources/` - 127 bridge-specific findings
 - `domain-specific-audits/tick-math/resources/` - 81 tick math findings
 - `domain-specific-audits/merkle-trees/resources/` - 67 merkle tree findings
 - [Check `domain-specific-audits/skills/` for additional domains]
 
 **Solidity-Specific:**
+
 - `not-so-smart-contracts` - Automated Solidity vulnerability detectors
 - `token-integration-analyzer` - Token integration safety patterns
 - `building-secure-contracts/development-guidelines` - Solidity best practices
@@ -25,17 +27,20 @@ These complement the generic patterns below.
 **Pattern:** Previously removed code is re-added
 
 **Detection:**
+
 ```bash
 # Code previously removed for security
 git log -S "pattern" --all --grep="security\|fix\|CVE"
 ```
 
 **Red flags:**
+
 - Commit message contains "security", "fix", "CVE", "vulnerability"
 - Code removed <6 months ago
 - No explanation in current PR for re-addition
 
 **Example:**
+
 ```solidity
 // Removed in commit abc123 "Fix reentrancy CVE-2024-1234"
 // Re-added in current PR
@@ -53,6 +58,7 @@ function emergencyWithdraw() {
 **Detection:** Look for two state updates in related functions for same logical action
 
 **Example:**
+
 ```solidity
 // Request exit
 function requestExit() {
@@ -74,6 +80,7 @@ function processExit() {
 **Pattern:** Removed `require`/`assert`/`check` without replacement
 
 **Detection:**
+
 ```bash
 git diff <range> | grep "^-.*require"
 git diff <range> | grep "^-.*assert"
@@ -81,11 +88,13 @@ git diff <range> | grep "^-.*revert"
 ```
 
 **Questions to ask:**
+
 - Was validation moved elsewhere?
 - Is it redundant (defensive programming)?
 - Does removal expose vulnerability?
 
 **Example:**
+
 ```diff
 function withdraw(uint256 amount) {
 -   require(amount > 0, "Zero amount");
@@ -103,11 +112,13 @@ function withdraw(uint256 amount) {
 **Pattern:** Arithmetic without SafeMath or checks
 
 **Detection:**
+
 - Look for `+`, `-`, `*`, `/` in Solidity <0.8.0
 - Check if SafeMath removed
 - Look for unchecked blocks in Solidity >=0.8.0
 
 **Example:**
+
 ```solidity
 // Solidity 0.7 without SafeMath
 balance[user] -= amount;  // Can underflow if amount > balance
@@ -129,6 +140,7 @@ unchecked {
 **Detection:** Look for CEI (Checks-Effects-Interactions) pattern violations
 
 **Example:**
+
 ```solidity
 // VULNERABLE: External call before state update
 function withdraw() {
@@ -156,6 +168,7 @@ function withdraw() {
 **Pattern:** Removed or relaxed permission checks
 
 **Detection:**
+
 ```bash
 git diff <range> | grep "^-.*onlyOwner"
 git diff <range> | grep "^-.*onlyAdmin"
@@ -163,11 +176,13 @@ git diff <range> | grep "^-.*require.*msg.sender"
 ```
 
 **Questions:**
+
 - Who can now call this function?
 - What's the new trust model?
 - Was check moved to caller?
 
 **Example:**
+
 ```diff
 - function setConfig(uint value) external onlyOwner {
 + function setConfig(uint value) external {
@@ -186,6 +201,7 @@ git diff <range> | grep "^-.*require.*msg.sender"
 **Detection:** Look for two-step processes without commit-reveal or timelocks
 
 **Example:**
+
 ```solidity
 // Step 1: Approve
 function approve(address spender, uint amount) {
@@ -206,12 +222,14 @@ function approve(address spender, uint amount) {
 **Pattern:** Security logic depending on `block.timestamp`
 
 **Detection:**
+
 ```bash
 grep -r "block.timestamp" --include="*.sol"
 grep -r "now\b" --include="*.sol"  # Solidity <0.7
 ```
 
 **Example:**
+
 ```solidity
 // VULNERABLE
 require(block.timestamp > deadline, "Too early");
@@ -231,11 +249,13 @@ require(block.number > deadlineBlock, "Too early");
 **Pattern:** External call without checking success
 
 **Detection:**
+
 ```bash
 git diff <range> | grep "\.call\|\.send\|\.transfer"
 ```
 
 **Example:**
+
 ```solidity
 // VULNERABLE
 token.transfer(user, amount);  // Ignores return value
@@ -254,11 +274,13 @@ require(token.transfer(user, amount), "Transfer failed");
 **Pattern:** Unbounded loops, external call reverts blocking execution
 
 **Detection:**
+
 - Arrays that grow without limit
 - Loops over user-controlled array
 - Critical function depends on external call success
 
 **Example:**
+
 ```solidity
 // DOS: Attacker adds many users, making loop too expensive
 function distributeRewards() {
@@ -275,21 +297,25 @@ function distributeRewards() {
 ## Quick Detection Commands
 
 **Find removed security checks:**
+
 ```bash
 git diff <range> | grep "^-" | grep -E "require|assert|revert"
 ```
 
 **Find new external calls:**
+
 ```bash
 git diff <range> | grep "^+" | grep -E "\.call|\.delegatecall|\.staticcall"
 ```
 
 **Find changed access modifiers:**
+
 ```bash
 git diff <range> | grep -E "onlyOwner|onlyAdmin|internal|private|public|external"
 ```
 
 **Find arithmetic changes:**
+
 ```bash
 git diff <range> | grep -E "\+|\-|\*|/"
 ```

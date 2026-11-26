@@ -9,6 +9,7 @@ Structured methodology for finding vulnerabilities through attacker modeling.
 ## 1. Define Specific Attacker Model
 
 **WHO is the attacker?**
+
 - Unauthenticated external user
 - Authenticated regular user
 - Malicious administrator
@@ -16,12 +17,14 @@ Structured methodology for finding vulnerabilities through attacker modeling.
 - Front-runner/MEV bot
 
 **WHAT access/privileges do they have?**
+
 - Public API access only
 - Authenticated user role
 - Specific permissions/tokens
 - Contract call capabilities
 
 **WHERE do they interact with the system?**
+
 - Specific HTTP endpoints
 - Smart contract functions
 - RPC interfaces
@@ -51,16 +54,19 @@ PROOF OF ACCESSIBILITY:
 ## 3. Rate Realistic Exploitability
 
 **EASY:** Exploitable via public APIs with no special privileges
+
 - Single transaction/call
 - Common user access level
 - No complex conditions required
 
 **MEDIUM:** Requires specific conditions or elevated privileges
+
 - Multiple steps or timing requirements
 - Elevated but obtainable privileges
 - Specific system state needed
 
 **HARD:** Requires privileged access or rare conditions
+
 - Admin/owner privileges needed
 - Rare edge case conditions
 - Significant resources required
@@ -100,6 +106,7 @@ CONCRETE IMPACT:
 ## 5. Cross-Reference with Baseline Context
 
 From baseline analysis (see [methodology.md](methodology.md#pre-analysis-baseline-context-building)), check:
+
 - Does this violate a system-wide invariant?
 - Does this break a trust boundary?
 - Does this bypass a validation pattern?
@@ -111,10 +118,11 @@ From baseline analysis (see [methodology.md](methodology.md#pre-analysis-baselin
 
 Generate this for each finding:
 
-```markdown
+````markdown
 ## [SEVERITY] Vulnerability Title
 
 **Attacker Model:**
+
 - WHO: [Specific attacker type]
 - ACCESS: [Exact privileges]
 - INTERFACE: [Specific entry point]
@@ -129,16 +137,19 @@ Generate this for each finding:
 [Specific, measurable harm - not theoretical]
 
 **Proof of Concept:**
+
 ```code
 // Exact code to reproduce
 ```
+````
 
 **Root Cause:**
 [Reference specific code change at file.sol:L123]
 
 **Blast Radius:** [N callers affected]
 **Baseline Violation:** [Which invariant/pattern broken]
-```
+
+````
 
 ---
 
@@ -186,14 +197,16 @@ Step 3: Accounting mismatch exploited
   - Total supply decremented
   - User balance not changed
   - System invariants broken
-```
+````
 
 **IMPACT:**
+
 - Protocol accounting corrupted
 - Can be used to manipulate LP calculations
 - Estimated $50K impact on pool prices
 
 ### 5. Baseline Violation
+
 - Violates invariant: "All withdrawals must transfer non-zero value"
 - Breaks validation pattern: Amount checks present in all other value transfers
 - Regression: Check added in commit abc123 "Fix zero-amount exploit"

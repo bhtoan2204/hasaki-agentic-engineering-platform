@@ -10,10 +10,10 @@ The report carried no category, phase or tool for the failure.
 
 ## Root causes (confirmed in source)
 
-| Problem | Why | Evidence |
-| --- | --- | --- |
-| `repairs` is always 0 for a failed program | The eval counted a repair only when the **chat** tool call's status was not `ok`. A failed program is returned as data (`ok: false` inside the answer) from a successful `code.execute` chat call, so the outer status is `ok`. | `src/eval/codeactEffect.ts` (before): `calls.findIndex(c => c.tool === "code.execute" && c.status !== "ok")`; `src/chat/tools.ts` `code.execute.run` throws only for `unsupported`. Pilot: `codeact_failed: 1`, 8 calls after it, `repairs: 0`. |
-| A failure is not diagnosable | The executor kept only a coarse `Category` (8 values). A syntax error, an uncaught runtime error and an uncaught nested-tool failure were all `internal`. There was no phase, no nested tool, and no execution id in the answer. | `src/codeact/execute.ts` (before): `m.t === "fail"` → `fail("internal", …)`; `runner.mjs` sent one undifferentiated `fail`. |
+| Problem                                    | Why                                                                                                                                                                                                                              | Evidence                                                                                                                                                                                                                                        |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repairs` is always 0 for a failed program | The eval counted a repair only when the **chat** tool call's status was not `ok`. A failed program is returned as data (`ok: false` inside the answer) from a successful `code.execute` chat call, so the outer status is `ok`.  | `src/eval/codeactEffect.ts` (before): `calls.findIndex(c => c.tool === "code.execute" && c.status !== "ok")`; `src/chat/tools.ts` `code.execute.run` throws only for `unsupported`. Pilot: `codeact_failed: 1`, 8 calls after it, `repairs: 0`. |
+| A failure is not diagnosable               | The executor kept only a coarse `Category` (8 values). A syntax error, an uncaught runtime error and an uncaught nested-tool failure were all `internal`. There was no phase, no nested tool, and no execution id in the answer. | `src/codeact/execute.ts` (before): `m.t === "fail"` → `fail("internal", …)`; `runner.mjs` sent one undifferentiated `fail`.                                                                                                                     |
 
 ## T06 investigation — cause NOT determinable
 
@@ -25,12 +25,12 @@ JSON has only counters.
 
 What is missing, and what future runs keep:
 
-| Needed | Before | Now |
-| --- | --- | --- |
-| Failure category and phase | – | `code_executions.diagnostics.failure` and the eval sample's `codeact_failures[]` |
-| Nested tool involved | – | `failure.last_nested_failure {seq, tool, category}` and `diagnostics.nested_failures[]` |
-| What the agent did next | – | `sample.recovery` (episodes: `recovered` / `recovery_failed` / `fallback_direct` / `abandoned` / `unknown`) |
-| Execution ↔ chat call link | order only | `execution_id` in the answer, so `chat_tool_calls.result->>'execution_id'` |
+| Needed                     | Before     | Now                                                                                                         |
+| -------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------- |
+| Failure category and phase | –          | `code_executions.diagnostics.failure` and the eval sample's `codeact_failures[]`                            |
+| Nested tool involved       | –          | `failure.last_nested_failure {seq, tool, category}` and `diagnostics.nested_failures[]`                     |
+| What the agent did next    | –          | `sample.recovery` (episodes: `recovered` / `recovery_failed` / `fallback_direct` / `abandoned` / `unknown`) |
+| Execution ↔ chat call link | order only | `execution_id` in the answer, so `chat_tool_calls.result->>'execution_id'`                                  |
 
 Candidate causes consistent with the task are an uncaught nested failure (refund-worker traces return 503 in the
 fixture) or invalid nested arguments. **Neither is confirmed.** The regression fixture below reproduces the first one
@@ -65,13 +65,13 @@ deterministically. It is a fixture, not a reconstruction of the pilot.
 
 ## Verification
 
-| Level | Command | Exit | Result |
-| --- | --- | --- | --- |
-| 1 | `node --test test/codeact-diagnostics.test.ts test/codeact-recovery.test.ts test/codeact.test.ts` | 0 | 26/26 |
-| 2 | `node test/run-integration.ts test/codeact-diagnostics.integration.ts` | 0 | 5/5 |
-| 2 | `node test/run-integration.ts test/codeact-effect.integration.ts` | 0 | 7/7 (2 new regression tests) |
-| 2 | evidence, composition, surfaces, incident-investigation suites | 0 | 34/34, 16/16 (unchanged) |
-| 3 | `node test/run-integration.ts test/codeact-sandbox.integration.ts` (real bubblewrap + cgroup) | 0 | 7/7 |
+| Level | Command                                                                                           | Exit | Result                       |
+| ----- | ------------------------------------------------------------------------------------------------- | ---- | ---------------------------- |
+| 1     | `node --test test/codeact-diagnostics.test.ts test/codeact-recovery.test.ts test/codeact.test.ts` | 0    | 26/26                        |
+| 2     | `node test/run-integration.ts test/codeact-diagnostics.integration.ts`                            | 0    | 5/5                          |
+| 2     | `node test/run-integration.ts test/codeact-effect.integration.ts`                                 | 0    | 7/7 (2 new regression tests) |
+| 2     | evidence, composition, surfaces, incident-investigation suites                                    | 0    | 34/34, 16/16 (unchanged)     |
+| 3     | `node test/run-integration.ts test/codeact-sandbox.integration.ts` (real bubblewrap + cgroup)     | 0    | 7/7                          |
 
 Representative records (private test cluster, sanitized):
 

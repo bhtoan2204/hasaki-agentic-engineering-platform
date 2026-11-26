@@ -12,10 +12,10 @@ deterministic agent. None of it shows a real model's reasoning quality.
 
 ## 1. CI
 
-| Run | Commit | Result |
-| --- | --- | --- |
-| 44967325799 | `d5d1c07` (main) | failure: job `test (1/3)`, integration shard |
-| 45007903843 | `5d449f7` (main, latest) | **success** (all jobs) |
+| Run         | Commit                   | Result                                       |
+| ----------- | ------------------------ | -------------------------------------------- |
+| 44967325799 | `d5d1c07` (main)         | failure: job `test (1/3)`, integration shard |
+| 45007903843 | `5d449f7` (main, latest) | **success** (all jobs)                       |
 
 The failing test was `server shutdown kills detached command process groups (no orphaned go test)`
 (`test/engine.integration.ts`). **Classification: timing-dependent and not reproducible. No lifecycle defect was
@@ -87,18 +87,19 @@ found.** Evidence:
 `node test/run-integration.ts test/rca-three-arm.integration.ts`: exit 0, 7/7, OS sandbox. Artifact:
 [codeact-final-three-arm-fixture.json](codeact-final-three-arm-fixture.json).
 
-| Incident | A Direct | B CodeAct | C workflow run | CodeAct execution | C verdict (missing) | C status | refs resolve |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| provider-timeout | ✔ | ✔ | 1 | 2 | incomplete (log) | PROBABLE | 1/1 |
-| retry-amplification | ✔ | ✔ | 2 | 4 | **passed** | CONFIRMED | 2/2 |
-| db-pool-saturation | ✔ | ✔ | 3 | 6 | incomplete (log) | PROBABLE | 1/1 |
-| kafka-consumer-lag | ✔ | ✔ | 4 | 8 | incomplete (trace) | PROBABLE | 1/1 |
-| idempotency-conflict | ✔ | ✔ | 5 | 10 | **passed** | CONFIRMED | 2/2 |
-| missing-spans | ✔ | ✔ | 6 | 12 | **passed** | CONFIRMED | 2/2 |
-| misleading-warnings | ✔ | ✔ | 7 | 14 | incomplete (log) | PROBABLE | 1/1 |
-| partial-outage | ✔ | ✔ | 8 | 16 | incomplete (trace, SigNoz 503) | PROBABLE | 1/1 |
+| Incident             | A Direct | B CodeAct | C workflow run | CodeAct execution | C verdict (missing)            | C status  | refs resolve |
+| -------------------- | -------- | --------- | -------------- | ----------------- | ------------------------------ | --------- | ------------ |
+| provider-timeout     | ✔        | ✔         | 1              | 2                 | incomplete (log)               | PROBABLE  | 1/1          |
+| retry-amplification  | ✔        | ✔         | 2              | 4                 | **passed**                     | CONFIRMED | 2/2          |
+| db-pool-saturation   | ✔        | ✔         | 3              | 6                 | incomplete (log)               | PROBABLE  | 1/1          |
+| kafka-consumer-lag   | ✔        | ✔         | 4              | 8                 | incomplete (trace)             | PROBABLE  | 1/1          |
+| idempotency-conflict | ✔        | ✔         | 5              | 10                | **passed**                     | CONFIRMED | 2/2          |
+| missing-spans        | ✔        | ✔         | 6              | 12                | **passed**                     | CONFIRMED | 2/2          |
+| misleading-warnings  | ✔        | ✔         | 7              | 14                | incomplete (log)               | PROBABLE  | 1/1          |
+| partial-outage       | ✔        | ✔         | 8              | 16                | incomplete (trace, SigNoz 503) | PROBABLE  | 1/1          |
 
 Arm C summary:
+
 - 8/8 runs COMPLETED; 8/8 diagnoses correct.
 - 0 false confirmations, 0 symptom-as-cause, 0 misleading signals taken, 0 unsafe actions.
 - Missing sources reported 8/8.
@@ -112,27 +113,27 @@ is correct, not a defect.
 
 ### Offline end-to-end checks (same file)
 
-| Check | Result |
-| --- | --- |
-| Scheduler, harness, tool dispatch, CodeAct composition, evidence persistence, provenance, sufficiency gate, report | all 8 runs COMPLETED with durable refs that resolve for the owner (`resolveCodeActEvidence`) |
-| Checkpoint/replay | re-executing `report` from the persisted investigation gives identical `verification` and `confirmed_facts` |
-| Cancellation | canceling during a nested `rca.slow` call: the run is CANCELED and its CodeAct execution ends `error` (canceled), never left running |
-| Fabricated evidence | verdict **failed**; graded status not CONFIRMED |
-| Incorrect causal conclusion (misleading pool warnings) | graded incorrect, `misleading_signal_taken` |
-| Empty evidence + CONFIRMED | verdict not passed; graded status not CONFIRMED; incorrect |
-| Unauthorized tool | `rca.mutate` refused both directly and inside a program; mutations = 0 |
-| Partial outage | verdict incomplete with `missing_sources: ["trace"]`; never passed |
+| Check                                                                                                              | Result                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Scheduler, harness, tool dispatch, CodeAct composition, evidence persistence, provenance, sufficiency gate, report | all 8 runs COMPLETED with durable refs that resolve for the owner (`resolveCodeActEvidence`)                                         |
+| Checkpoint/replay                                                                                                  | re-executing `report` from the persisted investigation gives identical `verification` and `confirmed_facts`                          |
+| Cancellation                                                                                                       | canceling during a nested `rca.slow` call: the run is CANCELED and its CodeAct execution ends `error` (canceled), never left running |
+| Fabricated evidence                                                                                                | verdict **failed**; graded status not CONFIRMED                                                                                      |
+| Incorrect causal conclusion (misleading pool warnings)                                                             | graded incorrect, `misleading_signal_taken`                                                                                          |
+| Empty evidence + CONFIRMED                                                                                         | verdict not passed; graded status not CONFIRMED; incorrect                                                                           |
+| Unauthorized tool                                                                                                  | `rca.mutate` refused both directly and inside a program; mutations = 0                                                               |
+| Partial outage                                                                                                     | verdict incomplete with `missing_sources: ["trace"]`; never passed                                                                   |
 
 ## 4. Other verification
 
-| Command | Exit | Result |
-| --- | --- | --- |
-| `npm test` | 0 | 1200/1200 |
-| `npx tsc --noEmit` (root, web), `npm run lint` | 0 | clean |
-| `npm run arch:check` | 0 | 5 cycles / 6 violations (unchanged baseline) |
-| `npm run test:integration` (first full run) | 1 | 956/962. The 3 new composition failures were fixed (see defect 2). The other 3 are the known pre-existing local failures (`evaluation.integration.ts` ×2, reproduced on `f666c65`; `repository-remotes`, from the host `~/.gitconfig`). |
-| affected suites after the fix (composition, three-arm, evidence, incident, pairing, effect, rca-benchmark, diagnostics, sandbox, surfaces, chat, codex) | 0 | 35/35 + 83/83 |
-| `npm run test:integration` (final full run, after the fixes) | 1 | **959/962, 0 skipped**. Only the 3 known pre-existing local failures remain; they pass on CI. |
+| Command                                                                                                                                                 | Exit | Result                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                                                                                                                                              | 0    | 1200/1200                                                                                                                                                                                                                               |
+| `npx tsc --noEmit` (root, web), `npm run lint`                                                                                                          | 0    | clean                                                                                                                                                                                                                                   |
+| `npm run arch:check`                                                                                                                                    | 0    | 5 cycles / 6 violations (unchanged baseline)                                                                                                                                                                                            |
+| `npm run test:integration` (first full run)                                                                                                             | 1    | 956/962. The 3 new composition failures were fixed (see defect 2). The other 3 are the known pre-existing local failures (`evaluation.integration.ts` ×2, reproduced on `f666c65`; `repository-remotes`, from the host `~/.gitconfig`). |
+| affected suites after the fix (composition, three-arm, evidence, incident, pairing, effect, rca-benchmark, diagnostics, sandbox, surfaces, chat, codex) | 0    | 35/35 + 83/83                                                                                                                                                                                                                           |
+| `npm run test:integration` (final full run, after the fixes)                                                                                            | 1    | **959/962, 0 skipped**. Only the 3 known pre-existing local failures remain; they pass on CI.                                                                                                                                           |
 
 ## 5. Proposed live evaluation (needs an approved budget)
 
@@ -152,13 +153,13 @@ npm run eval:codeact -- --live --provider claude --model claude-sonnet-5-5 --eff
 
 ## 6. Final status
 
-| Item | Status |
-| --- | --- |
-| Latest CI checked | `5d449f7` success. The `d5d1c07` failure is analyzed above (not reproducible, log not accessible). |
-| CI on this branch | **NOT VERIFIED**: CI runs on pushes to `main` and on pull requests. No PR could be opened (`gh` not authenticated). |
-| T03 and evidence-sufficiency regressions | pass |
-| Three-arm RCA evaluation | implemented; fixture run 8 incidents × 3 arms |
-| Offline end-to-end workflow, real OS sandbox, refs resolve, replay, cancellation | verified (§3) |
-| Incorrect diagnoses rejected; no production mutation | verified (§3) |
-| Real integrations | **NOT TESTED — VPN REQUIRED** |
-| Live provider | **NOT RUN — BUDGET NOT AUTHORIZED** |
+| Item                                                                             | Status                                                                                                              |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Latest CI checked                                                                | `5d449f7` success. The `d5d1c07` failure is analyzed above (not reproducible, log not accessible).                  |
+| CI on this branch                                                                | **NOT VERIFIED**: CI runs on pushes to `main` and on pull requests. No PR could be opened (`gh` not authenticated). |
+| T03 and evidence-sufficiency regressions                                         | pass                                                                                                                |
+| Three-arm RCA evaluation                                                         | implemented; fixture run 8 incidents × 3 arms                                                                       |
+| Offline end-to-end workflow, real OS sandbox, refs resolve, replay, cancellation | verified (§3)                                                                                                       |
+| Incorrect diagnoses rejected; no production mutation                             | verified (§3)                                                                                                       |
+| Real integrations                                                                | **NOT TESTED — VPN REQUIRED**                                                                                       |
+| Live provider                                                                    | **NOT RUN — BUDGET NOT AUTHORIZED**                                                                                 |

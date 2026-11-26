@@ -347,3 +347,48 @@ test("spike: 10k alert rows become a bounded set of incidents; no per-row run or
   assert.equal(sessions!.n, 0, "triage made no model call");
   assert.ok(r.started.length <= 2);
 });
+
+test("finished runs close their items in one pass: last_run and finish time", async () => {
+  await policy();
+  const items = [
+    await hasakiItem("Export A"),
+    await hasakiItem("Export B"),
+    await hasakiItem("Export C"),
+  ];
+  for (const it of items) await ingestWorkItem(it);
+  await dispatchIntake();
+  const runs = await intakeRuns();
+  assert.equal(runs.length, 3);
+  const [done, failed, live] = items.map((it) =>
+    runs.find((r) => Number(r.work_item_id) === it.id)!,
+  );
+  await policy({ paused: true });
+  await q(
+    pool,
+    "UPDATE workflow_runs SET status='COMPLETED', finished_at='2026-01-02T03:04:05Z' WHERE id=$1",
+    [done.id],
+  );
+  await q(pool, "UPDATE workflow_runs SET status='FAILED', finished_at=NULL WHERE id=$1", [
+    failed.id,
+  ]);
+  const before = Date.now();
+  await dispatchIntake();
+  const row = (runId: number) =>
+    one(
+      pool,
+      "SELECT state, decision->'last_run' AS last_run, last_run_finished_at FROM intake_items WHERE run_id=$1",
+      [runId],
+    );
+  const a = (await row(done.id))!;
+  assert.notEqual(a.state, "running");
+  assert.deepEqual(a.last_run, { run_id: Number(done.id), status: "COMPLETED" });
+  assert.equal(new Date(a.last_run_finished_at).toISOString(), "2026-01-02T03:04:05.000Z");
+  const b = (await row(failed.id))!;
+  assert.notEqual(b.state, "running");
+  assert.deepEqual(b.last_run, { run_id: Number(failed.id), status: "FAILED" });
+  assert.ok(
+    new Date(b.last_run_finished_at).getTime() >= before - 5000,
+    "no finish time falls back to now()",
+  );
+  assert.equal((await row(live.id))!.state, "running");
+});

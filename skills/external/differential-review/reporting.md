@@ -16,20 +16,22 @@ Generate markdown report with these mandatory sections:
 - Key metrics (test gaps, blast radius, red flags)
 
 **Template:**
+
 ```markdown
 # Executive Summary
 
-| Severity | Count |
-|----------|-------|
-| 🔴 CRITICAL | X |
-| 🟠 HIGH | Y |
-| 🟡 MEDIUM | Z |
-| 🟢 LOW | W |
+| Severity    | Count |
+| ----------- | ----- |
+| 🔴 CRITICAL | X     |
+| 🟠 HIGH     | Y     |
+| 🟡 MEDIUM   | Z     |
+| 🟢 LOW      | W     |
 
 **Overall Risk:** CRITICAL/HIGH/MEDIUM/LOW
 **Recommendation:** APPROVE/REJECT/CONDITIONAL
 
 **Key Metrics:**
+
 - Files analyzed: X/Y (Z%)
 - Test coverage gaps: N functions
 - High blast radius changes: M functions
@@ -45,6 +47,7 @@ Generate markdown report with these mandatory sections:
 - Lines changed stats
 
 **Template:**
+
 ```markdown
 ## What Changed
 
@@ -52,10 +55,10 @@ Generate markdown report with these mandatory sections:
 **Commits:** X
 **Timeline:** YYYY-MM-DD to YYYY-MM-DD
 
-| File | +Lines | -Lines | Risk | Blast Radius |
-|------|--------|--------|------|--------------|
-| file1.sol | +50 | -20 | HIGH | CRITICAL |
-| file2.sol | +10 | -5 | MEDIUM | LOW |
+| File      | +Lines | -Lines | Risk   | Blast Radius |
+| --------- | ------ | ------ | ------ | ------------ |
+| file1.sol | +50    | -20    | HIGH   | CRITICAL     |
+| file2.sol | +10    | -5     | MEDIUM | LOW          |
 
 **Total:** +N, -M lines across K files
 ```
@@ -77,6 +80,7 @@ For each HIGH/CRITICAL issue:
 **Description**: [clear explanation]
 
 **Historical Context**:
+
 - Git blame: Added in commit X (date)
 - Message: "[original commit message]"
 - [Why this code existed]
@@ -85,14 +89,15 @@ For each HIGH/CRITICAL issue:
 [Concrete exploitation steps from adversarial.md]
 
 **Proof of Concept**:
-```code demonstrating issue```
+`code demonstrating issue`
 
 **Recommendation**:
 [Specific fix with code]
 ```
 
 **Example:**
-```markdown
+
+````markdown
 ### 🔴 CRITICAL: Authorization Bypass in Withdraw
 
 **File**: TokenVault.sol:156
@@ -104,31 +109,37 @@ For each HIGH/CRITICAL issue:
 Removed `require(msg.sender == owner)` check allows any user to withdraw funds.
 
 **Historical Context**:
+
 - Git blame: Added 2024-06-15 (commit def456)
 - Message: "Add owner check per audit finding #45"
 - Code existed to prevent unauthorized withdrawals
 
 **Attack Scenario**:
+
 1. Attacker calls `withdraw(1000 ether)`
 2. No authorization check (removed)
 3. 1000 ETH transferred to attacker
 4. Protocol funds drained
 
 **Proof of Concept**:
+
 ```solidity
 // As any address
 vault.withdraw(vault.balance());
 // Success - funds stolen
 ```
+````
 
 **Recommendation**:
+
 ```solidity
 function withdraw(uint256 amount) external {
 +   require(msg.sender == owner, "Unauthorized");
     // ... rest of function
 }
 ```
-```
+
+````
 
 ---
 
@@ -152,7 +163,7 @@ function withdraw(uint256 amount) external {
 
 **Risk Assessment:**
 N HIGH-risk functions without tests → Recommend blocking merge
-```
+````
 
 ---
 
@@ -163,14 +174,16 @@ N HIGH-risk functions without tests → Recommend blocking merge
 - Impact quantification
 
 **Template:**
+
 ```markdown
 ## Blast Radius Analysis
 
 **High-Impact Changes:**
-| Function | Callers | Risk | Priority |
-|----------|---------|------|----------|
-| transfer() | 89 | HIGH | P0 |
-| validate() | 45 | MEDIUM | P1 |
+
+| Function   | Callers | Risk   | Priority |
+| ---------- | ------- | ------ | -------- |
+| transfer() | 89      | HIGH   | P0       |
+| validate() | 45      | MEDIUM | P1       |
 ```
 
 ---
@@ -182,14 +195,17 @@ N HIGH-risk functions without tests → Recommend blocking merge
 - Commit message red flags
 
 **Template:**
+
 ```markdown
 ## Historical Context
 
 **Security-Related Removals:**
+
 - Line 45: `require` removed (added 2024-03 for CVE-2024-1234)
 - Line 78: Validation removed (added 2023-12 "security hardening")
 
 **Regression Risks:**
+
 - Code pattern removed in commit X, re-added in commit Y
 ```
 
@@ -202,18 +218,22 @@ N HIGH-risk functions without tests → Recommend blocking merge
 - Technical debt (future)
 
 **Template:**
+
 ```markdown
 ## Recommendations
 
 ### Immediate (Blocking)
+
 - [ ] Fix CRITICAL issue in TokenVault.sol:156
 - [ ] Add tests for withdraw() function
 
 ### Before Production
+
 - [ ] Security audit of auth changes
 - [ ] Load test blast radius functions
 
 ### Technical Debt
+
 - [ ] Refactor validation pattern consistency
 ```
 
@@ -229,24 +249,28 @@ N HIGH-risk functions without tests → Recommend blocking merge
 - Confidence level
 
 **Template:**
+
 ```markdown
 ## Analysis Methodology
 
 **Strategy:** FOCUSED (80 files, medium codebase)
 
 **Analysis Scope:**
+
 - Files reviewed: 45/80 (56%)
 - HIGH RISK: 100% coverage
 - MEDIUM RISK: 60% coverage
 - LOW RISK: Excluded
 
 **Techniques:**
+
 - Git blame on all removals
 - Blast radius calculation
 - Test coverage analysis
 - Adversarial modeling for HIGH RISK
 
 **Limitations:**
+
 - Did not analyze external dependencies
 - Limited to 1-hop caller analysis
 
@@ -268,35 +292,44 @@ N HIGH-risk functions without tests → Recommend blocking merge
 **Tables:** Use markdown tables for structured data
 
 **Code blocks:** Always include syntax highlighting
+
 ```solidity
 // Solidity code
 ```
+
 ```rust
 // Rust code
 ```
 
 **Status indicators:**
+
 - ✅ Complete
 - ⚠️ Warning
 - ❌ Failed/Blocked
 
 **Severity:**
+
 - 🔴 CRITICAL
 - 🟠 HIGH
 - 🟡 MEDIUM
 - 🟢 LOW
 
 **Before/After comparisons:**
-```markdown
+
+````markdown
 **BEFORE:**
+
 ```code
 old code
 ```
+````
 
 **AFTER:**
+
 ```code
 new code
 ```
+
 ```
 
 **Line number references:** Always include
@@ -310,3 +343,4 @@ new code
 Return the report in your step result (`submit_result`), following the step's output contract — findings with
 severity, file:line, exploit scenario and fix. Do not write report files to the repository, the home directory or
 the Desktop; the platform stores the result with the run and shows it to the reviewer.
+```

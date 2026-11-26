@@ -21,9 +21,8 @@ function systemdExpandsDollar() {
     ["--user", "--scope", "-q", "--collect", "--", "/bin/sh", "-c", "printf %s '$$'"],
     { env: { PATH: config.system.path, ...scopeEnvironment() }, timeout: 5000, encoding: "utf8" },
   );
-  if (r.status !== 0) return true;
-  expandsDollar = r.stdout === "$";
-  return expandsDollar;
+  if (r.status !== 0) return (expandsDollar = true);
+  return (expandsDollar = r.stdout === "$");
 }
 
 /**

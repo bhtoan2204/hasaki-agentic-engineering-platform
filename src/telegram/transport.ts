@@ -5,7 +5,7 @@ import { config } from "../config.ts";
 import { pool, q, one, withTx } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { botKey, telegramCall, TelegramApiError, validWebhookSecret } from "./client.ts";
-import { advisoryKey, queue } from "./store.ts";
+import { advisoryKey, queue, queueMany } from "./store.ts";
 import { quietNow } from "./format.ts";
 import { gatewayBusy, gatewayTick } from "./sync.ts";
 import { ingestUpdate, processInbox, telegramUpdateId } from "./updates.ts";
@@ -261,32 +261,50 @@ export async function expireActions() {
       ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 100`,
       [botKey()],
     );
-    for (const a of stale) {
-      await q(db, "UPDATE telegram_actions SET status='expired' WHERE action_id=$1", [a.action_id]);
-      if (a.message_id)
-        await queue(db, `expired:${a.chat_id}:${a.message_id}`, "editMessageReplyMarkup", {
-          chat_id: a.chat_id,
-          message_id: a.message_id,
-          reply_markup: { inline_keyboard: [] },
-        });
+    if (stale.length) {
+      await q(db, "UPDATE telegram_actions SET status='expired' WHERE action_id = ANY($1)", [
+        stale.map((a) => a.action_id),
+      ]);
+      await queueMany(
+        db,
+        stale
+          .filter((a) => a.message_id)
+          .map((a) => ({
+            key: `expired:${a.chat_id}:${a.message_id}`,
+            method: "editMessageReplyMarkup",
+            payload: {
+              chat_id: a.chat_id,
+              message_id: a.message_id,
+              reply_markup: { inline_keyboard: [] },
+            },
+          })),
+      );
     }
     await q(
       db,
       "UPDATE telegram_conversations SET status='canceled' WHERE status='pending' AND expires_at<=now()",
     );
     // Chat-gateway buttons (operations/delegations) past their expiry lose their keyboard.
-    for (const a of await q(
+    const expiredChat = await q(
       db,
       `UPDATE telegram_chat_actions SET status='expired' WHERE bot_key=$1 AND status IN ('pending','armed') AND expires_at<=now()
       RETURNING action_id,chat_id,message_id,user_id`,
       [botKey()],
-    ))
-      if (a.message_id)
-        await queue(db, `chat_expired:${a.action_id}`, "editMessageReplyMarkup", {
-          chat_id: a.chat_id,
-          message_id: a.message_id,
-          reply_markup: { inline_keyboard: [] },
-        });
+    );
+    await queueMany(
+      db,
+      expiredChat
+        .filter((a) => a.message_id)
+        .map((a) => ({
+          key: `chat_expired:${a.action_id}`,
+          method: "editMessageReplyMarkup",
+          payload: {
+            chat_id: a.chat_id,
+            message_id: a.message_id,
+            reply_markup: { inline_keyboard: [] },
+          },
+        })),
+    );
     await q(db, "DELETE FROM telegram_notifications WHERE sent_at<now()-interval '7 days'");
     await q(db, "DELETE FROM telegram_messages WHERE created_at<now()-interval '30 days'");
     await q(

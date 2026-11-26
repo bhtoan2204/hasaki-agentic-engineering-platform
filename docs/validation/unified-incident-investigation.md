@@ -8,13 +8,14 @@ Working tree on `main` @ `11e3ac7` plus uncommitted changes, 2026-11-24.
 
 ## 1. What already existed (audit)
 
-| Workflow | Persisted result | Link to the incident before this change |
-| --- | --- | --- |
-| `production-bug-hunt` | `bug_hunts` + `bug_hunt_findings`. Bug verification (`CONFIRMED/SUSPECTED/REJECTED/BLOCKED`) is a separate column from incident causality (`CONFIRMED/PROBABLE/NOT_SUPPORTED/UNKNOWN/NOT_APPLICABLE`). A DB check prevents causality `CONFIRMED` without bug `CONFIRMED`. | `bug_hunts.fingerprint`, per requester |
-| `production-incident-investigation` (runtime RCA) | `investigation_report` step output: findings, plus `round` (RoundState: hypotheses with kind/status/refs/code location, outcome, deployed versions, impact, missing evidence) | none (free-text request) |
-| `bug-investigation` (fix) | its own run, with `inputs.bug_hunt_id`/`bug_hunt_finding_id` (from a hunt), `inputs.investigation_run_id` (from a runtime RCA), or the incident's `work_item_id` | indirect |
+| Workflow                                          | Persisted result                                                                                                                                                                                                                                                          | Link to the incident before this change |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `production-bug-hunt`                             | `bug_hunts` + `bug_hunt_findings`. Bug verification (`CONFIRMED/SUSPECTED/REJECTED/BLOCKED`) is a separate column from incident causality (`CONFIRMED/PROBABLE/NOT_SUPPORTED/UNKNOWN/NOT_APPLICABLE`). A DB check prevents causality `CONFIRMED` without bug `CONFIRMED`. | `bug_hunts.fingerprint`, per requester  |
+| `production-incident-investigation` (runtime RCA) | `investigation_report` step output: findings, plus `round` (RoundState: hypotheses with kind/status/refs/code location, outcome, deployed versions, impact, missing evidence)                                                                                             | none (free-text request)                |
+| `bug-investigation` (fix)                         | its own run, with `inputs.bug_hunt_id`/`bug_hunt_finding_id` (from a hunt), `inputs.investigation_run_id` (from a runtime RCA), or the incident's `work_item_id`                                                                                                          | indirect                                |
 
 Each workflow already had its own dedupe:
+
 - `startBugHunt`: one active hunt per user, incident and scope.
 - `createFixTask`: one fix per finding.
 - `startFixFromInvestigation`: one active follow-up per runtime run.
@@ -26,8 +27,9 @@ Nothing joined these results, and nothing stopped a runtime fix and a hunt fix f
 - **Workspace.** `incident_investigations` holds one row per (fingerprint, owner); the owner is the access scope. `incident_investigation_runs` links runs (`runtime | bug_hunt | fix`) with `link_source`:
   - `workbench` when the run was started from the workbench;
   - otherwise it is discovered from the runs' own records (`bug_hunts`, `inputs.fingerprint`, `inputs.bug_hunt_id`, `inputs.investigation_run_id`, the incident work item).
-  
+
   Only runs owned by the workspace owner are linked. On read, a run owned by someone else is excluded and reported (defense in depth).
+
 - **Evidence by reference** (`src/incidents/unified.ts`). Evidence is never copied into the workspace. It is read from `bug_hunt_findings` and the runtime report's `round`, and keeps its reference (`bug_hunt:<hunt>:finding:<id>`, `run:<run>:hypothesis:<id>`, `run:<run>:finding:<n>`), source run, owner and commit.
 - **Validity, checked on every read:**
   - **Ownership.**
@@ -51,13 +53,15 @@ Nothing joined these results, and nothing stopped a runtime fix and a hunt fix f
   - the owner;
   - every item's ref, commit, verdicts, validity and freshness;
   - run states.
-  
+
   Unrelated commits and permission changes that leave every item's validity unchanged mint no version (tested). The report records the base revisions it was checked against.
+
 - **Fix tasks.** `incident_fix_tasks` has `UNIQUE(investigation_id, cause_key)`, and the reservation is inserted before any run is started. The task is routed to the existing flows:
   - `createFixTask` for a hunt finding (preferred when one exists);
   - otherwise `startFixFromInvestigation`.
-  
+
   The fix needs `confirm: true`, and a cause that already has an active fix run reuses it.
+
 - **Actions are user-initiated only.**
   - `POST /api/prod-errors/:fp/workbench/{runtime|bug-hunt|both|fix}`.
   - `GET /workbench` and `GET /workbench/rca/:version`. An admin may read another owner's workspace in support mode (`?scope=all&owner=`), and that read is audited.
@@ -75,15 +79,15 @@ Nothing joined these results, and nothing stopped a runtime fix and a hunt fix f
 
 ## 3. Results
 
-| Suite | Command | Result |
-| --- | --- | --- |
-| Reconciliation unit tests | `node --import ./test/env.ts --test test/incident-reconcile.test.ts` | 10/10 |
-| Full unit suite | `npm test` | 1270/1270 |
-| Unified integration (engine + harness + PG) | `node test/run-integration.ts test/unified-incident.integration.ts` | 10/10 |
-| Full integration suite | `npm run test:integration` | 1043/1046; the 3 failures are the pre-existing baseline (identical on untouched `main`): evaluation.integration.ts ×2 (platform-go not running), repository-remotes.integration.ts ×1 (global git `insteadOf`) |
-| Browser (production bundle, mocked API) | `npm run smoke:incident-workbench` (needs `CHROMIUM_BIN` on this host; the Playwright Chromium lacks `libnss3`) | en @1280 px, vi @390 px PASS |
-| Existing incident list browser test | `npm run smoke:prod-errors-tabs` | PASS (workbench tolerates the mock's `[]`) |
-| Typecheck / lint | `npm run typecheck`, `npm run lint` | clean |
+| Suite                                       | Command                                                                                                         | Result                                                                                                                                                                                                         |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reconciliation unit tests                   | `node --import ./test/env.ts --test test/incident-reconcile.test.ts`                                            | 10/10                                                                                                                                                                                                          |
+| Full unit suite                             | `npm test`                                                                                                      | 1270/1270                                                                                                                                                                                                      |
+| Unified integration (engine + harness + PG) | `node test/run-integration.ts test/unified-incident.integration.ts`                                             | 10/10                                                                                                                                                                                                          |
+| Full integration suite                      | `npm run test:integration`                                                                                      | 1043/1046; the 3 failures are the pre-existing baseline (identical on untouched `main`): evaluation.integration.ts ×2 (platform-go not running), repository-remotes.integration.ts ×1 (global git `insteadOf`) |
+| Browser (production bundle, mocked API)     | `npm run smoke:incident-workbench` (needs `CHROMIUM_BIN` on this host; the Playwright Chromium lacks `libnss3`) | en @1280 px, vi @390 px PASS                                                                                                                                                                                   |
+| Existing incident list browser test         | `npm run smoke:prod-errors-tabs`                                                                                | PASS (workbench tolerates the mock's `[]`)                                                                                                                                                                     |
+| Typecheck / lint                            | `npm run typecheck`, `npm run lint`                                                                             | clean                                                                                                                                                                                                          |
 
 Integration scenarios (`test/unified-incident.integration.ts`):
 
@@ -120,12 +124,12 @@ The sandbox (`bwrap`) was available, so the hunt took the CONFIRMED-verification
 
 ## 4. Benchmark: standalone vs unified (offline)
 
-| Measure | Standalone runtime RCA | Unified, no prior evidence | Unified, with bug-hunt digest |
-| --- | --- | --- | --- |
-| Agent calls (provider attempts) | 3 | 3 | 3 |
-| Tokens (stubbed telemetry) | 3000 in / 600 out | 3000 in / 600 out | 3000 in / 600 out |
-| Request size | — | 1333 chars | 1703 chars (+370 chars, ≈ 100 tokens, bounded to 8 lines) |
-| Reconciliation | — | 0 LLM calls, 15.1 ms avg per workbench read (PG + git) | same |
+| Measure                         | Standalone runtime RCA | Unified, no prior evidence                             | Unified, with bug-hunt digest                             |
+| ------------------------------- | ---------------------- | ------------------------------------------------------ | --------------------------------------------------------- |
+| Agent calls (provider attempts) | 3                      | 3                                                      | 3                                                         |
+| Tokens (stubbed telemetry)      | 3000 in / 600 out      | 3000 in / 600 out                                      | 3000 in / 600 out                                         |
+| Request size                    | —                      | 1333 chars                                             | 1703 chars (+370 chars, ≈ 100 tokens, bounded to 8 lines) |
+| Reconciliation                  | —                      | 0 LLM calls, 15.1 ms avg per workbench read (PG + git) | same                                                      |
 
 - **Single-workflow investigations incur no extra LLM call.** Linking, reconciliation and versioning are SQL plus git only.
 - **The only added model input is the optional digest**, about 100 tokens, and only when the other workflow already has validated evidence.
@@ -133,6 +137,7 @@ The sandbox (`bwrap`) was available, so the hunt took the CONFIRMED-verification
 - **Cost per verified RCA** = the incident's reported cost ÷ the number of CONFIRMED RCA versions. The workbench shows it, but it is only meaningful with real provider telemetry.
 
 Remaining efficiency levers already enforced:
+
 - no automatic start of either workflow;
 - no implicit re-run of a completed one;
 - active-run dedupe;
@@ -147,11 +152,11 @@ Remaining efficiency levers already enforced:
 
 ## 6. What was real vs stubbed
 
-| Component | Real / stubbed |
-| --- | --- |
-| PostgreSQL schema (migration 104), Workflow Engine, scheduler, run lifecycle, cancel, reexecute | real |
-| Production Bug Hunt (all stages, Agent Harness, MCP bridge, sandboxed reproduction) | real; agents scripted through the fake `codex` CLI |
-| Runtime RCA agent steps and Splunk/SigNoz-backed integration steps | stubbed per step; the report step returns a scripted RoundState |
-| Fix routing (`createFixTask`, `startFixFromInvestigation`, `bug-investigation` start) | real; fix runs canceled immediately in tests |
-| Telemetry aggregation (`execution_attempt_telemetry`) | real view; runtime token and cost numbers recorded by the stub |
-| Browser test | production bundle; API mocked |
+| Component                                                                                       | Real / stubbed                                                  |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| PostgreSQL schema (migration 104), Workflow Engine, scheduler, run lifecycle, cancel, reexecute | real                                                            |
+| Production Bug Hunt (all stages, Agent Harness, MCP bridge, sandboxed reproduction)             | real; agents scripted through the fake `codex` CLI              |
+| Runtime RCA agent steps and Splunk/SigNoz-backed integration steps                              | stubbed per step; the report step returns a scripted RoundState |
+| Fix routing (`createFixTask`, `startFixFromInvestigation`, `bug-investigation` start)           | real; fix runs canceled immediately in tests                    |
+| Telemetry aggregation (`execution_attempt_telemetry`)                                           | real view; runtime token and cost numbers recorded by the stub  |
+| Browser test                                                                                    | production bundle; API mocked                                   |

@@ -15,6 +15,7 @@ git grep -n <symbol> <baseline_commit>    # callers / patterns in the baseline
 ```
 
 **Capture from baseline analysis:**
+
 - System-wide invariants (what must ALWAYS be true across all code)
 - Trust boundaries and privilege levels (who can do what)
 - Validation patterns (what gets checked where - defense-in-depth)
@@ -23,6 +24,7 @@ git grep -n <symbol> <baseline_commit>    # callers / patterns in the baseline
 - External dependencies and trust assumptions
 
 **Why this matters:**
+
 - Understand what the code was SUPPOSED to do before changes
 - Identify implicit security assumptions in baseline
 - Detect when changes violate baseline invariants
@@ -38,6 +40,7 @@ The working tree stays at the head commit throughout.
 ## Phase 0: Intake & Triage
 
 **Extract changes:**
+
 ```bash
 # For commit range
 git diff <base>..<head> --stat
@@ -48,16 +51,19 @@ git diff <base>..<head> --name-only
 ```
 
 **Assess codebase size:**
+
 ```bash
 find . -name "*.sol" -o -name "*.rs" -o -name "*.go" -o -name "*.ts" | wc -l
 ```
 
 **Classify complexity:**
+
 - **SMALL**: <20 files → Deep analysis (read all deps)
 - **MEDIUM**: 20-200 files → Focused analysis (1-hop deps)
 - **LARGE**: 200+ files → Surgical (critical paths only)
 
 **Risk score each file:**
+
 - **HIGH**: Auth, crypto, external calls, value transfer, validation removal
 - **MEDIUM**: Business logic, state changes, new public APIs
 - **LOW**: Comments, tests, UI, logging
@@ -71,6 +77,7 @@ For each changed file:
 1. **Read both versions** (baseline and changed)
 
 2. **Analyze each diff region:**
+
    ```
    BEFORE: [exact code]
    AFTER: [exact code]
@@ -79,6 +86,7 @@ For each changed file:
    ```
 
 3. **Git blame removed code:**
+
    ```bash
    # When was it added? Why?
    git log -S "removed_code" --all --oneline
@@ -90,6 +98,7 @@ For each changed file:
    - Recently added (<1 month) then removed → HIGH
 
 4. **Check for regressions (re-added code):**
+
    ```bash
    git log -S "added_code" --all -p
    ```
@@ -119,6 +128,7 @@ For each changed file:
 ## Phase 2: Test Coverage Analysis
 
 **Identify coverage gaps:**
+
 ```bash
 # Production code changes (exclude tests)
 git diff <range> --name-only | grep -v "test"
@@ -131,6 +141,7 @@ grep -r "test.*functionName" test/ --include="*.sol" --include="*.js"
 ```
 
 **Risk elevation rules:**
+
 - NEW function + NO tests → Elevate risk MEDIUM→HIGH
 - MODIFIED validation + UNCHANGED tests → HIGH RISK
 - Complex logic (>20 lines) + NO tests → HIGH RISK
@@ -140,12 +151,14 @@ grep -r "test.*functionName" test/ --include="*.sol" --include="*.js"
 ## Phase 3: Blast Radius Analysis
 
 **Calculate impact:**
+
 ```bash
 # Count callers for each modified function
 grep -r "functionName(" --include="*.sol" . | wc -l
 ```
 
 **Classify blast radius:**
+
 - 1-5 calls: LOW
 - 6-20 calls: MEDIUM
 - 21-50 calls: HIGH
@@ -153,12 +166,12 @@ grep -r "functionName(" --include="*.sol" . | wc -l
 
 **Priority matrix:**
 
-| Change Risk | Blast Radius | Priority | Analysis Depth |
-|-------------|--------------|----------|----------------|
-| HIGH | CRITICAL | P0 | Deep + all deps |
-| HIGH | HIGH/MEDIUM | P1 | Deep |
-| HIGH | LOW | P2 | Standard |
-| MEDIUM | CRITICAL/HIGH | P1 | Standard + callers |
+| Change Risk | Blast Radius  | Priority | Analysis Depth     |
+| ----------- | ------------- | -------- | ------------------ |
+| HIGH        | CRITICAL      | P0       | Deep + all deps    |
+| HIGH        | HIGH/MEDIUM   | P1       | Deep               |
+| HIGH        | LOW           | P2       | Standard           |
+| MEDIUM      | CRITICAL/HIGH | P1       | Standard + callers |
 
 ---
 
@@ -198,6 +211,7 @@ For each HIGH RISK changed function, answer:
 Perform the line-by-line analysis above using Read, Grep, and code tracing.
 
 **Cross-cutting pattern detection:**
+
 ```bash
 # Find repeated validation patterns
 grep -r "require.*amount > 0" --include="*.sol" .
@@ -212,5 +226,6 @@ git diff <range> | grep "^-.*require.*amount > 0"
 ---
 
 **Next steps:**
+
 - For HIGH RISK changes, proceed to [adversarial.md](adversarial.md)
 - For report generation, see [reporting.md](reporting.md)

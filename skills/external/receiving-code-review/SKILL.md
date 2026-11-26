@@ -37,11 +37,13 @@ WHY: Items may be related. Partial understanding = wrong implementation.
 ## Source-Specific Handling
 
 ### From the developer (feedback, developer decisions, approval comments)
+
 - **Trusted** - implement after understanding
 - **Still ask** if scope unclear
 - **Skip to action** or technical acknowledgment
 
 ### From reviewers (review step findings, automated checks)
+
 ```
 BEFORE implementing:
   1. Check: Technically correct for THIS codebase?
@@ -86,6 +88,7 @@ FOR multi-item feedback:
 ## When To Push Back
 
 Push back when:
+
 - Suggestion breaks existing functionality
 - Reviewer lacks full context
 - Violates YAGNI (unused feature)
@@ -102,12 +105,12 @@ expressions. If you pushed back and were wrong, state the correction factually a
 
 ## Common Mistakes
 
-| Mistake | Fix |
-|---------|-----|
-| Performative agreement | State requirement or just act |
-| Blind implementation | Verify against codebase first |
-| Batch without testing | One at a time, test each |
-| Assuming reviewer is right | Check if breaks things |
-| Avoiding pushback | Technical correctness > comfort |
-| Partial implementation | Clarify all items first |
+| Mistake                      | Fix                                 |
+| ---------------------------- | ----------------------------------- |
+| Performative agreement       | State requirement or just act       |
+| Blind implementation         | Verify against codebase first       |
+| Batch without testing        | One at a time, test each            |
+| Assuming reviewer is right   | Check if breaks things              |
+| Avoiding pushback            | Technical correctness > comfort     |
+| Partial implementation       | Clarify all items first             |
 | Can't verify, proceed anyway | State limitation, ask for direction |

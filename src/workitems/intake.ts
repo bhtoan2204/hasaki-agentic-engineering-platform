@@ -484,23 +484,15 @@ async function flagRunningChanges() {
 }
 
 async function finishRunningItems() {
-  const rows = await q<{ id: number; status: string; finished_at: Date | null; run_id: number }>(
+  await q(
     pool,
-    `SELECT i.id, r.status, r.finished_at, i.run_id FROM intake_items i JOIN workflow_runs r ON r.id = i.run_id
-      WHERE i.state = 'running' AND r.status IN ('COMPLETED','FAILED','CANCELED')`,
+    `UPDATE intake_items i SET state = 'triaged', last_run_finished_at = COALESCE(r.finished_at, now()),
+       reason = 'run #' || i.run_id || ' ' || r.status,
+       decision = i.decision || jsonb_build_object('last_run', jsonb_build_object('run_id', i.run_id, 'status', r.status)),
+       updated_at = now()
+      FROM workflow_runs r
+      WHERE r.id = i.run_id AND i.state = 'running' AND r.status IN ('COMPLETED','FAILED','CANCELED')`,
   );
-  for (const r of rows)
-    await q(
-      pool,
-      `UPDATE intake_items SET state = 'triaged', last_run_finished_at = COALESCE($2, now()), reason = $3,
-         decision = decision || jsonb_build_object('last_run', $4::jsonb), updated_at = now() WHERE id = $1 AND state = 'running'`,
-      [
-        r.id,
-        r.finished_at,
-        `run #${r.run_id} ${r.status}`,
-        json({ run_id: r.run_id, status: r.status }),
-      ],
-    );
 }
 
 export interface DispatchReport {

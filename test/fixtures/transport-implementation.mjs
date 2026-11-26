@@ -5,6 +5,7 @@ import { join } from "node:path";
 export function implementTransportFixture() {
   for (const path of JSON.parse(process.env.FAKE_TRANSPORT_WORKSPACES || "[]")) {
     const file = join(path, "implementation-evidence.txt");
-    if (existsSync(file)) appendFileSync(file, "Implementation performed during this provider turn\n");
+    if (existsSync(file))
+      appendFileSync(file, "Implementation performed during this provider turn\n");
   }
 }

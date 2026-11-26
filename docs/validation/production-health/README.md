@@ -26,10 +26,10 @@ Support-wide analytics continues to use the existing explicit `scope=all` admin 
 
 On an isolated PostgreSQL database populated with 25,009 hourly scan rows, `EXPLAIN (ANALYZE, BUFFERS)` for the selected-window overlap query measured:
 
-| Plan | Execution | Buffers | Rows |
-|---|---:|---:|---:|
-| Sequential scan | 1.621 ms | 309 hits | 48 |
-| Partial `window_end` index scan | 0.053 ms | 3 hits + 3 reads | 48 |
+| Plan                            | Execution |          Buffers | Rows |
+| ------------------------------- | --------: | ---------------: | ---: |
+| Sequential scan                 |  1.621 ms |         309 hits |   48 |
+| Partial `window_end` index scan |  0.053 ms | 3 hits + 3 reads |   48 |
 
 The partial index `prod_error_scans_window_end_ok` was added in migration 037. It supports the existing overlap predicates on successful scans; no observation/history rows were deleted or rewritten. The experiment used an ephemeral test database and the index was compared before and after on that same fixture.
 

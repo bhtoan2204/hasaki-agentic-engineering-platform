@@ -41,9 +41,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "pricing/discount.go#Apply"
-      ],
+      "reported": ["pricing/discount.go#Apply"],
       "attribution": "pricing/discount.go#Apply",
       "attribution_correct": true,
       "reproductions": {
@@ -66,9 +64,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "pricing/discount.go#Apply"
-      ],
+      "reported": ["pricing/discount.go#Apply"],
       "attribution": "pricing/discount.go#Apply",
       "attribution_correct": true,
       "reproductions": {
@@ -96,9 +92,7 @@
       "true_positives": 0,
       "false_positives": 1,
       "false_negatives": 1,
-      "reported": [
-        "orders/render.go#Format"
-      ],
+      "reported": ["orders/render.go#Format"],
       "attribution": "orders/render.go#Format",
       "attribution_correct": false,
       "reproductions": {
@@ -121,9 +115,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "orders/loader.go#Fill"
-      ],
+      "reported": ["orders/loader.go#Fill"],
       "attribution": "orders/loader.go#Fill",
       "attribution_correct": true,
       "reproductions": {
@@ -152,9 +144,7 @@
       "true_positives": 0,
       "false_positives": 1,
       "false_negatives": 0,
-      "reported": [
-        "partner/client.go#Parse"
-      ],
+      "reported": ["partner/client.go#Parse"],
       "attribution": "partner/client.go#Parse",
       "attribution_correct": false,
       "reproductions": {
@@ -205,9 +195,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "retry/retry.go#Do"
-      ],
+      "reported": ["retry/retry.go#Do"],
       "attribution": "retry/retry.go#Do",
       "attribution_correct": true,
       "reproductions": {
@@ -230,9 +218,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "retry/retry.go#Do"
-      ],
+      "reported": ["retry/retry.go#Do"],
       "attribution": "retry/retry.go#Do",
       "attribution_correct": true,
       "reproductions": {
@@ -260,9 +246,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "stock/store.go#Reserve"
-      ],
+      "reported": ["stock/store.go#Reserve"],
       "attribution": "stock/store.go#Reserve",
       "attribution_correct": true,
       "reproductions": {
@@ -285,9 +269,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "stock/store.go#Reserve"
-      ],
+      "reported": ["stock/store.go#Reserve"],
       "attribution": "stock/store.go#Reserve",
       "attribution_correct": true,
       "reproductions": {
@@ -316,9 +298,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "payments/processor.go#Charge"
-      ],
+      "reported": ["payments/processor.go#Charge"],
       "attribution": "payments/processor.go#Charge",
       "attribution_correct": true,
       "reproductions": {
@@ -341,9 +321,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "payments/processor.go#Charge"
-      ],
+      "reported": ["payments/processor.go#Charge"],
       "attribution": "payments/processor.go#Charge",
       "attribution_correct": true,
       "reproductions": {
@@ -371,9 +349,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "shipping/fee.go#Fee"
-      ],
+      "reported": ["shipping/fee.go#Fee"],
       "attribution": "shipping/fee.go#Fee",
       "attribution_correct": true,
       "reproductions": {
@@ -396,9 +372,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "shipping/fee.go#Fee"
-      ],
+      "reported": ["shipping/fee.go#Fee"],
       "attribution": "shipping/fee.go#Fee",
       "attribution_correct": true,
       "reproductions": {
@@ -426,9 +400,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "ledger/transfer.go#Transfer"
-      ],
+      "reported": ["ledger/transfer.go#Transfer"],
       "attribution": "ledger/transfer.go#Transfer",
       "attribution_correct": true,
       "reproductions": {
@@ -451,9 +423,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "ledger/transfer.go#Transfer"
-      ],
+      "reported": ["ledger/transfer.go#Transfer"],
       "attribution": "ledger/transfer.go#Transfer",
       "attribution_correct": true,
       "reproductions": {
@@ -481,9 +451,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "sync/poll.go#Poll"
-      ],
+      "reported": ["sync/poll.go#Poll"],
       "attribution": "sync/poll.go#Poll",
       "attribution_correct": true,
       "reproductions": {
@@ -506,9 +474,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "sync/poll.go#Poll"
-      ],
+      "reported": ["sync/poll.go#Poll"],
       "attribution": "sync/poll.go#Poll",
       "attribution_correct": true,
       "reproductions": {
@@ -536,9 +502,7 @@
       "true_positives": 1,
       "false_positives": 0,
       "false_negatives": 0,
-      "reported": [
-        "pricing/discount.go#Apply"
-      ],
+      "reported": ["pricing/discount.go#Apply"],
       "attribution": "pricing/discount.go#Apply",
       "attribution_correct": true,
       "reproductions": {

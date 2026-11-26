@@ -137,10 +137,7 @@
     "stale_fallback": "PASS",
     "base_unaffected": "PASS",
     "primary_checkout_unchanged": "PASS",
-    "snapshot_ids": [
-      5,
-      4
-    ]
+    "snapshot_ids": [5, 4]
   },
   "live_ai_tokens": "NOT VERIFIED: no paid provider invoked",
   "database": {

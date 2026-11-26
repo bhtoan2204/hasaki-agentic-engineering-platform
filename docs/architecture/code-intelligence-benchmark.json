@@ -1,12 +1,7 @@
 {
   "fixture": {
     "files": 400,
-    "languages": [
-      "go",
-      "typescript",
-      "proto",
-      "sql"
-    ],
+    "languages": ["go", "typescript", "proto", "sql"],
     "source_bytes": 42945,
     "node": "v22.23.2"
   },

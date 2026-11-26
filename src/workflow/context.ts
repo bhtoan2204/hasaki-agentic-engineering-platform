@@ -219,14 +219,9 @@ export async function buildStepInput(c: Db, run: RunRow, step: StepRow): Promise
   );
   const anc = ancestors(liveSteps, step.key);
   let upstream: StepInput["upstream"] = {};
-  if (anc.size) {
-    for (const s of await q<StepRow>(
-      c,
-      "SELECT key, status, current_attempt_id, output FROM workflow_steps WHERE run_id = $1 AND key = ANY($2)",
-      [run.id, [...anc]],
-    ))
+  for (const s of liveSteps)
+    if (anc.has(s.key))
       upstream[s.key] = { status: s.status, attempt_id: s.current_attempt_id, output: s.output };
-  }
   // Independent verification: the coding agent's own claims never reach the verifier (only platform evidence does).
   if (isIndependent(step.config)) upstream = independentUpstream(liveSteps, upstream);
   // A step that must judge another step's claims without its reasoning (Bug Hunter verifier) never receives it.

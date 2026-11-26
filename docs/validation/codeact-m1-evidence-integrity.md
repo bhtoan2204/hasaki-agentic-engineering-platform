@@ -13,12 +13,12 @@ answer cited a row that did not exist, and a hung INSERT hung the execution. Not
 
 ## Fix
 
-| Piece | Behavior |
-| --- | --- |
-| Executor (`execute.ts`) | Each recording's outcome is kept on its `CallRecord`: `persisted: true`, or `false` with `persist_error` (rejection, synchronous throw, or `persistTimeoutMs` exceeded). No recorder → `undefined` (unknown, never claimed). The result still waits for every in-flight recording. |
+| Piece                    | Behavior                                                                                                                                                                                                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Executor (`execute.ts`)  | Each recording's outcome is kept on its `CallRecord`: `persisted: true`, or `false` with `persist_error` (rejection, synchronous throw, or `persistTimeoutMs` exceeded). No recorder → `undefined` (unknown, never claimed). The result still waits for every in-flight recording.                        |
 | Surfaces (`surfaces.ts`) | A ref is emitted only when the call succeeded, its row was persisted, **and** this surface finalized the execution (`running → ok/error`). Otherwise the answer keeps the program value and reports `evidence_status` (`complete`/`partial`/`none`), `recorded: false` on the call and a `warnings` line. |
-| Resolver | `resolveCodeActEvidence(actor, ref, {support})`: successful call of a finalized execution, owner only; admin only in support mode (audited `support.access`); malformed/foreign/unknown → `null`. |
-| Duplicates | `UNIQUE (execution_id, seq)` (migration 089) refuses a second row; a refused write is an unpersisted call. |
+| Resolver                 | `resolveCodeActEvidence(actor, ref, {support})`: successful call of a finalized execution, owner only; admin only in support mode (audited `support.access`); malformed/foreign/unknown → `null`.                                                                                                         |
+| Duplicates               | `UNIQUE (execution_id, seq)` (migration 089) refuses a second row; a refused write is an unpersisted call.                                                                                                                                                                                                |
 
 **Degraded, not failed (option B).** The platform never treats a CodeAct value as evidence (`untrusted: true`); what is
 evidence is the cited rows. So a recording failure removes the citation and says so, rather than discarding a value
@@ -27,14 +27,14 @@ the M4 verification gate rejects any cited ref that does not resolve.
 
 ## Verification
 
-| Level | Command | Exit | Result |
-| --- | --- | --- | --- |
-| 1 Unit | `node --import ./test/env.ts --test test/codeact-evidence.test.ts` | 0 | 8/8 |
-| 2 Integration | `node test/run-integration.ts test/codeact-evidence.integration.ts` | 0 | 11/11 (0 skipped) |
-| 3 Runtime | same file, test "runtime: through the real OS sandbox…" (bubblewrap launcher) | 0 | pass |
-| Regression | `npm test` | 0 | 1128/1128 |
-| Regression | `node test/run-integration.ts test/codeact-surfaces.integration.ts test/codeact-sandbox.integration.ts test/codeact-evidence.integration.ts` | 0 | 27/27 (before the sandbox test was added) |
-| Static | `npx tsc --noEmit -p .`, `-p web`, `npm run lint`, `npm run arch:check` | 0 | 5 cycles / 6 violations (baseline) |
+| Level         | Command                                                                                                                                      | Exit | Result                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------- |
+| 1 Unit        | `node --import ./test/env.ts --test test/codeact-evidence.test.ts`                                                                           | 0    | 8/8                                       |
+| 2 Integration | `node test/run-integration.ts test/codeact-evidence.integration.ts`                                                                          | 0    | 11/11 (0 skipped)                         |
+| 3 Runtime     | same file, test "runtime: through the real OS sandbox…" (bubblewrap launcher)                                                                | 0    | pass                                      |
+| Regression    | `npm test`                                                                                                                                   | 0    | 1128/1128                                 |
+| Regression    | `node test/run-integration.ts test/codeact-surfaces.integration.ts test/codeact-sandbox.integration.ts test/codeact-evidence.integration.ts` | 0    | 27/27 (before the sandbox test was added) |
+| Static        | `npx tsc --noEmit -p .`, `-p web`, `npm run lint`, `npm run arch:check`                                                                      | 0    | 5 cycles / 6 violations (baseline)        |
 
 Failure injection is done in PostgreSQL (triggers on the private cluster): `RAISE EXCEPTION` for tool
 `evi.unrecordable`, `pg_sleep(0.8)` for `evi.slowrecord`, and a flag-guarded `RAISE` on finalizing `code_executions`.

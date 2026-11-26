@@ -1303,3 +1303,68 @@ test("an unreachable Telegram API is reported as a network failure with its syst
     /cannot reach .*\(ETIMEDOUT\)/,
   );
 });
+test("expireActions expires every stale action and queues one keyboard removal per message, idempotently", async () => {
+  const { run } = await gate();
+  const a = await action(run.id, "approve");
+  const tag = `batch${++sequence}`;
+  const ids = [`${tag}-a`, `${tag}-b`, `${tag}-c`];
+  for (const [i, id] of ids.entries())
+    await q(
+      pool,
+      `INSERT INTO telegram_actions (action_id,bot_key,user_id,telegram_user_id,chat_id,run_id,step_id,question_id,attempt_id,step_generation,
+         context_hash,action_type,locale,message_id,expires_at)
+       SELECT $2,bot_key,user_id,telegram_user_id,chat_id,run_id,step_id,question_id,attempt_id,step_generation,context_hash,
+         action_type,locale,$3,now()-interval '1 second' FROM telegram_actions WHERE action_id=$1`,
+      [a.action_id, id, i === 1 ? null : 7000 + sequence * 10 + i],
+    );
+  const conversation = (await one(
+    pool,
+    "INSERT INTO chat_conversations (owner_id) VALUES ($1) RETURNING id",
+    [owner.id],
+  ))!.id;
+  const chatIds = [`${tag}-x`, `${tag}-y`];
+  for (const [i, id] of chatIds.entries())
+    await q(
+      pool,
+      `INSERT INTO telegram_chat_actions (action_id,bot_key,user_id,telegram_user_id,chat_id,kind,conversation_id,locale,message_id,expires_at)
+       VALUES ($1,$2,$3,'101','101','operation',$4,'vi',$5,now()-interval '1 second')`,
+      [id, botKey(), owner.id, conversation, i === 0 ? null : 8000 + sequence],
+    );
+  await expireActions();
+  const status = async (table: string, list: string[]) =>
+    (
+      await q(
+        pool,
+        `SELECT action_id,status FROM ${table} WHERE action_id = ANY($1) ORDER BY action_id`,
+        [list],
+      )
+    ).map((r) => r.status);
+  assert.deepEqual(await status("telegram_actions", ids), ["expired", "expired", "expired"]);
+  assert.deepEqual(await status("telegram_chat_actions", chatIds), ["expired", "expired"]);
+  const keys = [
+    `expired:${a.chat_id}:${7000 + sequence * 10}`,
+    `expired:${a.chat_id}:${7000 + sequence * 10 + 2}`,
+    `chat_expired:${chatIds[1]}`,
+    `chat_expired:${chatIds[0]}`,
+  ];
+  const outbox = () =>
+    q(
+      pool,
+      "SELECT dedupe_key,method,payload,action_ids,status FROM telegram_outbox WHERE dedupe_key = ANY($1) ORDER BY dedupe_key",
+      [keys],
+    );
+  const rows = await outbox();
+  assert.deepEqual(
+    rows.map((r) => r.dedupe_key),
+    keys.slice(0, 3).sort(),
+    "a message-less action queues nothing",
+  );
+  for (const r of rows) {
+    assert.equal(r.method, "editMessageReplyMarkup");
+    assert.deepEqual(r.action_ids, []);
+    assert.deepEqual(r.payload.reply_markup, { inline_keyboard: [] });
+  }
+  assert.equal(rows.find((r) => r.dedupe_key === keys[2])!.payload.message_id, 8000 + sequence);
+  await expireActions();
+  assert.equal((await outbox()).length, 3, "re-running queues nothing twice");
+});

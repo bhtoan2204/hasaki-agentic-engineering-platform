@@ -8,47 +8,47 @@ sandbox, fixture data (no real SigNoz/Splunk).
 
 ## Validity
 
-| Check | Result |
-| --- | --- |
-| Pairs | 12/12 complete, 0 incomplete, not stopped |
-| Model check | **matched**: provider-reported `claude-sonnet-5-5` in all 24 samples, requested `claude-sonnet-5-5`, effort `medium`, 0 unresolved |
-| Capability check | valid: Direct offered `code.execute` 0×, CodeAct not offered 0× |
-| Budget | $3.380837 known spend of $5 limit, overshoot 0, unknown-cost samples 0 |
-| Coverage | tokens, cache tokens, cost and model turns known for 24/24 |
+| Check            | Result                                                                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Pairs            | 12/12 complete, 0 incomplete, not stopped                                                                                          |
+| Model check      | **matched**: provider-reported `claude-sonnet-5-5` in all 24 samples, requested `claude-sonnet-5-5`, effort `medium`, 0 unresolved |
+| Capability check | valid: Direct offered `code.execute` 0×, CodeAct not offered 0×                                                                    |
+| Budget           | $3.380837 known spend of $5 limit, overshoot 0, unknown-cost samples 0                                                             |
+| Coverage         | tokens, cache tokens, cost and model turns known for 24/24                                                                         |
 
 ## Intention-to-treat: CodeAct available vs not (paired, 12 pairs, bootstrap 95% CI)
 
-| Metric (mean per sample) | Direct | CodeAct | Paired Δ | 95% CI |
-| --- | --- | --- | --- | --- |
-| Verified correct | 10/12 | 10/12 | 0 | [−0.25, 0.25] |
-| Cost USD | 0.1613 | 0.1204 | −0.0409 | [−0.0954, −0.0011] |
-| Model turns (inside the one SDK call) | 8.50 | 6.08 | −2.42 | [−5.00, −0.25] |
-| Top-level tool calls | 7.42 | 5.08 | −2.33 | [−4.83, −0.25] |
-| Tool-result chars delivered | 18,313 | 6,243 | −12,070 | [−26,255, −1,403] |
-| Input tokens incl. cache | 132,704 | 111,829 | −20,875 | [−66,851, +13,516] |
-| Cache-creation tokens | 33,955 | 24,920 | −9,035 | [−19,861, −915] |
-| Output tokens | 1,539 | 1,178 | −361 | [−1,095, +193] |
-| Latency ms | 17,729 | 14,147 | −3,582 | [−9,647, +1,114] |
+| Metric (mean per sample)              | Direct  | CodeAct | Paired Δ | 95% CI             |
+| ------------------------------------- | ------- | ------- | -------- | ------------------ |
+| Verified correct                      | 10/12   | 10/12   | 0        | [−0.25, 0.25]      |
+| Cost USD                              | 0.1613  | 0.1204  | −0.0409  | [−0.0954, −0.0011] |
+| Model turns (inside the one SDK call) | 8.50    | 6.08    | −2.42    | [−5.00, −0.25]     |
+| Top-level tool calls                  | 7.42    | 5.08    | −2.33    | [−4.83, −0.25]     |
+| Tool-result chars delivered           | 18,313  | 6,243   | −12,070  | [−26,255, −1,403]  |
+| Input tokens incl. cache              | 132,704 | 111,829 | −20,875  | [−66,851, +13,516] |
+| Cache-creation tokens                 | 33,955  | 24,920  | −9,035   | [−19,861, −915]    |
+| Output tokens                         | 1,539   | 1,178   | −361     | [−1,095, +193]     |
+| Latency ms                            | 17,729  | 14,147  | −3,582   | [−9,647, +1,114]   |
 
 SDK calls are 1 per sample in both variants. The native tool loop runs inside one SDK call, so model turns are the
 meaningful count.
 
 ### Per task (2 repetitions each)
 
-| Task | Correct D / C | Model turns D→C | Cost D→C | CodeAct used |
-| --- | --- | --- | --- | --- |
-| T01 single lookup (ineligible) | 2/2 / 2/2 | 3→3 | 0.0996→0.1005 | 0/2 |
-| T03 trace/log correlation | 1/2 / **0/2** | 8→6 | 0.1392→0.1258 | 2/2 |
-| T06 refund timeout | 2/2 / 2/2 | 11→10.5 | 0.1698→0.1680 | 2/2 |
-| T08 large aggregation | 1/2 / 2/2 | 17.5→6 | **0.3417→0.1161** | 2/2 |
-| T09 partial failure | 2/2 / 2/2 | 8→8 | 0.1280→0.1229 | 2/2 |
-| T10 CodeAct unnecessary (ineligible) | 2/2 / 2/2 | 3.5→3 | 0.0897→0.0890 | 0/2 |
+| Task                                 | Correct D / C | Model turns D→C | Cost D→C          | CodeAct used |
+| ------------------------------------ | ------------- | --------------- | ----------------- | ------------ |
+| T01 single lookup (ineligible)       | 2/2 / 2/2     | 3→3             | 0.0996→0.1005     | 0/2          |
+| T03 trace/log correlation            | 1/2 / **0/2** | 8→6             | 0.1392→0.1258     | 2/2          |
+| T06 refund timeout                   | 2/2 / 2/2     | 11→10.5         | 0.1698→0.1680     | 2/2          |
+| T08 large aggregation                | 1/2 / 2/2     | 17.5→6          | **0.3417→0.1161** | 2/2          |
+| T09 partial failure                  | 2/2 / 2/2     | 8→8             | 0.1280→0.1229     | 2/2          |
+| T10 CodeAct unnecessary (ineligible) | 2/2 / 2/2     | 3.5→3           | 0.0897→0.0890     | 0/2          |
 
 ## Adoption and failures (CodeAct variant)
 
 - Adoption: 8/8 eligible turns used CodeAct (Wilson 95% [0.68, 1.00]). 0/4 ineligible turns (T01, T10) used it.
 - Executions: 15 in total, 2 failed. Both were in T06, both `program_runtime_error ← eval.traces /
-  tool_invocation_failed`, which is consistent with the fixture's refund-worker HTTP 503.
+tool_invocation_failed`, which is consistent with the fixture's refund-worker HTTP 503.
 - Both failures were followed by exactly one corrected program (`recovered`), and both turns ended correct. There were
   no fallbacks, no abandoned failures and no unknown sequences.
 - Nested failures handled inside successful programs: 6.
@@ -72,6 +72,7 @@ list would be graded wrong, and the direct sample that was graded correct may si
 reference.
 
 This cannot be checked: the report stores the graded field booleans, not the answer. Proposed fix, not applied:
+
 - Grade identifier lists as sets.
 - Keep the parsed (fixture-only) answer in each raw sample.
 

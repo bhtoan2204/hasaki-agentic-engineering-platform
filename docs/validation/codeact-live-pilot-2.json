@@ -21,15 +21,9 @@
   },
   "model_check": {
     "status": "matched",
-    "models": [
-      "claude-sonnet-5-5"
-    ],
-    "requested": [
-      "claude-sonnet-5-5"
-    ],
-    "efforts": [
-      "medium"
-    ],
+    "models": ["claude-sonnet-5-5"],
+    "requested": ["claude-sonnet-5-5"],
+    "efforts": ["medium"],
     "unresolved_samples": 0,
     "mismatched_pairs": []
   },
@@ -43,122 +37,77 @@
     "correct": {
       "n": 12,
       "mean": 0,
-      "ci95": [
-        -0.25,
-        0.25
-      ]
+      "ci95": [-0.25, 0.25]
     },
     "sdk_calls": {
       "n": 12,
       "mean": 0,
-      "ci95": [
-        0,
-        0
-      ]
+      "ci95": [0, 0]
     },
     "model_turns": {
       "n": 12,
       "mean": -2.4166666666666665,
-      "ci95": [
-        -5,
-        -0.25
-      ]
+      "ci95": [-5, -0.25]
     },
     "provider_tool_uses": {
       "n": 12,
       "mean": -2.4166666666666665,
-      "ci95": [
-        -5,
-        -0.25
-      ]
+      "ci95": [-5, -0.25]
     },
     "tool_calls": {
       "n": 12,
       "mean": -2.3333333333333335,
-      "ci95": [
-        -4.833333333333333,
-        -0.25
-      ]
+      "ci95": [-4.833333333333333, -0.25]
     },
     "prompt_chars_total": {
       "n": 12,
       "mean": 0.08333333333333333,
-      "ci95": [
-        0,
-        0.25
-      ]
+      "ci95": [0, 0.25]
     },
     "prompt_chars_max": {
       "n": 12,
       "mean": 0.08333333333333333,
-      "ci95": [
-        0,
-        0.25
-      ]
+      "ci95": [0, 0.25]
     },
     "tool_result_chars": {
       "n": 12,
       "mean": -12070.25,
-      "ci95": [
-        -26255.083333333332,
-        -1403.25
-      ]
+      "ci95": [-26255.083333333332, -1403.25]
     },
     "latency_ms": {
       "n": 12,
       "mean": -3581.8333333333335,
-      "ci95": [
-        -9646.916666666666,
-        1113.8333333333333
-      ]
+      "ci95": [-9646.916666666666, 1113.8333333333333]
     },
     "input_tokens": {
       "n": 12,
       "mean": -0.5,
-      "ci95": [
-        -2.1666666666666665,
-        0.8333333333333334
-      ]
+      "ci95": [-2.1666666666666665, 0.8333333333333334]
     },
     "output_tokens": {
       "n": 12,
       "mean": -361.0833333333333,
-      "ci95": [
-        -1095.25,
-        192.75
-      ]
+      "ci95": [-1095.25, 192.75]
     },
     "cache_read_tokens": {
       "n": 12,
       "mean": -11839.25,
-      "ci95": [
-        -48384.916666666664,
-        15325.75
-      ]
+      "ci95": [-48384.916666666664, 15325.75]
     },
     "cache_creation_tokens": {
       "n": 12,
       "mean": -9035.333333333334,
-      "ci95": [
-        -19860.5,
-        -914.9166666666666
-      ]
+      "ci95": [-19860.5, -914.9166666666666]
     },
     "input_tokens_total": {
       "n": 12,
       "mean": -20875.083333333332,
-      "ci95": [
-        -66851,
-        13515.5
-      ]
+      "ci95": [-66851, 13515.5]
     },
     "cost_usd": {
       "n": 12,
       "mean": -0.04093725,
-      "ci95": [
-        -0.09537616666666666,
-        -0.0010515833333333325
-      ]
+      "ci95": [-0.09537616666666666, -0.0010515833333333325]
     }
   },
   "usage_outcomes": {
@@ -392,122 +341,77 @@
     "correct": {
       "n": 12,
       "mean": 0,
-      "ci95": [
-        -0.25,
-        0.25
-      ]
+      "ci95": [-0.25, 0.25]
     },
     "sdk_calls": {
       "n": 12,
       "mean": 0,
-      "ci95": [
-        0,
-        0
-      ]
+      "ci95": [0, 0]
     },
     "model_turns": {
       "n": 12,
       "mean": -2.4166666666666665,
-      "ci95": [
-        -5,
-        -0.25
-      ]
+      "ci95": [-5, -0.25]
     },
     "provider_tool_uses": {
       "n": 12,
       "mean": -2.4166666666666665,
-      "ci95": [
-        -5,
-        -0.25
-      ]
+      "ci95": [-5, -0.25]
     },
     "tool_calls": {
       "n": 12,
       "mean": -2.3333333333333335,
-      "ci95": [
-        -4.833333333333333,
-        -0.25
-      ]
+      "ci95": [-4.833333333333333, -0.25]
     },
     "prompt_chars_total": {
       "n": 12,
       "mean": 0.08333333333333333,
-      "ci95": [
-        0,
-        0.25
-      ]
+      "ci95": [0, 0.25]
     },
     "prompt_chars_max": {
       "n": 12,
       "mean": 0.08333333333333333,
-      "ci95": [
-        0,
-        0.25
-      ]
+      "ci95": [0, 0.25]
     },
     "tool_result_chars": {
       "n": 12,
       "mean": -12070.25,
-      "ci95": [
-        -26255.083333333332,
-        -1403.25
-      ]
+      "ci95": [-26255.083333333332, -1403.25]
     },
     "latency_ms": {
       "n": 12,
       "mean": -3581.8333333333335,
-      "ci95": [
-        -9646.916666666666,
-        1113.8333333333333
-      ]
+      "ci95": [-9646.916666666666, 1113.8333333333333]
     },
     "input_tokens": {
       "n": 12,
       "mean": -0.5,
-      "ci95": [
-        -2.1666666666666665,
-        0.8333333333333334
-      ]
+      "ci95": [-2.1666666666666665, 0.8333333333333334]
     },
     "output_tokens": {
       "n": 12,
       "mean": -361.0833333333333,
-      "ci95": [
-        -1095.25,
-        192.75
-      ]
+      "ci95": [-1095.25, 192.75]
     },
     "cache_read_tokens": {
       "n": 12,
       "mean": -11839.25,
-      "ci95": [
-        -48384.916666666664,
-        15325.75
-      ]
+      "ci95": [-48384.916666666664, 15325.75]
     },
     "cache_creation_tokens": {
       "n": 12,
       "mean": -9035.333333333334,
-      "ci95": [
-        -19860.5,
-        -914.9166666666666
-      ]
+      "ci95": [-19860.5, -914.9166666666666]
     },
     "input_tokens_total": {
       "n": 12,
       "mean": -20875.083333333332,
-      "ci95": [
-        -66851,
-        13515.5
-      ]
+      "ci95": [-66851, 13515.5]
     },
     "cost_usd": {
       "n": 12,
       "mean": -0.04093725,
-      "ci95": [
-        -0.09537616666666666,
-        -0.0010515833333333325
-      ]
+      "ci95": [-0.09537616666666666, -0.0010515833333333325]
     }
   },
   "per_task": {
@@ -734,109 +638,73 @@
     {
       "task_id": "T01-single-lookup",
       "repetition": 0,
-      "variants": [
-        "direct",
-        "codeact"
-      ],
+      "variants": ["direct", "codeact"],
       "complete": true
     },
     {
       "task_id": "T03-trace-log-correlation",
       "repetition": 0,
-      "variants": [
-        "direct",
-        "codeact"
-      ],
+      "variants": ["direct", "codeact"],
       "complete": true
     },
     {
       "task_id": "T06-refund-timeout",
       "repetition": 0,
-      "variants": [
-        "direct",
-        "codeact"
-      ],
+      "variants": ["direct", "codeact"],
       "complete": true
     },
     {
       "task_id": "T08-large-aggregation",
       "repetition": 0,
-      "variants": [
-        "direct",
-        "codeact"
-      ],
+      "variants": ["direct", "codeact"],
       "complete": true
     },
     {
       "task_id": "T09-partial-failure",
       "repetition": 0,
-      "variants": [
-        "direct",
-        "codeact"
-      ],
+      "variants": ["direct", "codeact"],
       "complete": true
     },
     {
       "task_id": "T10-codeact-unnecessary",
       "repetition": 0,
-      "variants": [
-        "direct",
-        "codeact"
-      ],
+      "variants": ["direct", "codeact"],
       "complete": true
     },
     {
       "task_id": "T01-single-lookup",
       "repetition": 1,
-      "variants": [
-        "codeact",
-        "direct"
-      ],
+      "variants": ["codeact", "direct"],
       "complete": true
     },
     {
       "task_id": "T03-trace-log-correlation",
       "repetition": 1,
-      "variants": [
-        "codeact",
-        "direct"
-      ],
+      "variants": ["codeact", "direct"],
       "complete": true
     },
     {
       "task_id": "T06-refund-timeout",
       "repetition": 1,
-      "variants": [
-        "codeact",
-        "direct"
-      ],
+      "variants": ["codeact", "direct"],
       "complete": true
     },
     {
       "task_id": "T08-large-aggregation",
       "repetition": 1,
-      "variants": [
-        "codeact",
-        "direct"
-      ],
+      "variants": ["codeact", "direct"],
       "complete": true
     },
     {
       "task_id": "T09-partial-failure",
       "repetition": 1,
-      "variants": [
-        "codeact",
-        "direct"
-      ],
+      "variants": ["codeact", "direct"],
       "complete": true
     },
     {
       "task_id": "T10-codeact-unnecessary",
       "repetition": 1,
-      "variants": [
-        "codeact",
-        "direct"
-      ],
+      "variants": ["codeact", "direct"],
       "complete": true
     }
   ],
@@ -851,9 +719,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -911,9 +777,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -971,9 +835,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -1032,9 +894,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1066,10 +926,7 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": [
-        "eval.logs",
-        "eval.traces"
-      ],
+      "composed_tools": ["eval.logs", "eval.traces"],
       "prompt_chars_total": 3281,
       "prompt_chars_max": 3281,
       "estimated_prompt_tokens": 821,
@@ -1096,9 +953,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -1158,9 +1013,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1201,21 +1054,14 @@
         "nested_failures_in_ok_executions": 2,
         "episodes": [
           {
-            "execution_ids": [
-              3,
-              4
-            ],
-            "categories": [
-              "program_runtime_error"
-            ],
+            "execution_ids": [3, 4],
+            "categories": ["program_runtime_error"],
             "attempts": 1,
             "outcome": "recovered"
           }
         ]
       },
-      "composed_tools": [
-        "eval.traces"
-      ],
+      "composed_tools": ["eval.traces"],
       "prompt_chars_total": 3463,
       "prompt_chars_max": 3463,
       "estimated_prompt_tokens": 866,
@@ -1242,9 +1088,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -1303,9 +1147,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1337,9 +1179,7 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": [
-        "eval.logs"
-      ],
+      "composed_tools": ["eval.logs"],
       "prompt_chars_total": 3229,
       "prompt_chars_max": 3229,
       "estimated_prompt_tokens": 808,
@@ -1366,9 +1206,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -1428,9 +1266,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1463,10 +1299,7 @@
         "nested_failures_in_ok_executions": 1,
         "episodes": []
       },
-      "composed_tools": [
-        "eval.logs",
-        "eval.traces"
-      ],
+      "composed_tools": ["eval.logs", "eval.traces"],
       "prompt_chars_total": 3375,
       "prompt_chars_max": 3375,
       "estimated_prompt_tokens": 844,
@@ -1493,9 +1326,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -1553,9 +1384,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1613,9 +1442,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1673,9 +1500,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -1733,9 +1558,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1767,10 +1590,7 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": [
-        "eval.logs",
-        "eval.traces"
-      ],
+      "composed_tools": ["eval.logs", "eval.traces"],
       "prompt_chars_total": 3282,
       "prompt_chars_max": 3282,
       "estimated_prompt_tokens": 821,
@@ -1797,9 +1617,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -1858,9 +1676,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -1901,23 +1717,14 @@
         "nested_failures_in_ok_executions": 2,
         "episodes": [
           {
-            "execution_ids": [
-              10,
-              11
-            ],
-            "categories": [
-              "program_runtime_error"
-            ],
+            "execution_ids": [10, 11],
+            "categories": ["program_runtime_error"],
             "attempts": 1,
             "outcome": "recovered"
           }
         ]
       },
-      "composed_tools": [
-        "eval.logs",
-        "eval.services",
-        "eval.traces"
-      ],
+      "composed_tools": ["eval.logs", "eval.services", "eval.traces"],
       "prompt_chars_total": 3464,
       "prompt_chars_max": 3464,
       "estimated_prompt_tokens": 866,
@@ -1944,9 +1751,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -2006,9 +1811,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -2040,9 +1843,7 @@
         "nested_failures_in_ok_executions": 0,
         "episodes": []
       },
-      "composed_tools": [
-        "eval.logs"
-      ],
+      "composed_tools": ["eval.logs"],
       "prompt_chars_total": 3230,
       "prompt_chars_max": 3230,
       "estimated_prompt_tokens": 808,
@@ -2069,9 +1870,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -2130,9 +1929,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -2165,10 +1962,7 @@
         "nested_failures_in_ok_executions": 1,
         "episodes": []
       },
-      "composed_tools": [
-        "eval.logs",
-        "eval.traces"
-      ],
+      "composed_tools": ["eval.logs", "eval.traces"],
       "prompt_chars_total": 3375,
       "prompt_chars_max": 3375,
       "estimated_prompt_tokens": 844,
@@ -2195,9 +1989,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",
@@ -2257,9 +2049,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": true,
       "turn_status": "completed",
@@ -2317,9 +2107,7 @@
       "model": "claude-sonnet-5-5",
       "requested_model": "claude-sonnet-5-5",
       "effort": "medium",
-      "provider_models": [
-        "claude-sonnet-5-5"
-      ],
+      "provider_models": ["claude-sonnet-5-5"],
       "model_resolution": "provider_reported",
       "codeact_offered": false,
       "turn_status": "completed",

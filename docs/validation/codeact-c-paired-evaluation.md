@@ -5,11 +5,11 @@ simulated or scripted providers (no paid call).
 
 ## Root causes (confirmed in source)
 
-| Problem | Why | Evidence |
-| --- | --- | --- |
-| Pilot stopped with an incomplete pair (T08 Direct without T08 CodeAct) | Budget and sample checks ran **before every sample**, not every pair. Once a sample pushed known spend past the budget, the next sample, the second half of the pair, was refused. | `runEvaluation` (before): checks inside the per-variant loop; pilot `stopped: "budget 1 USD reached (known spend 1.0242)"` after 7 samples. |
-| Variants could contaminate each other and other conversations | `runSample` set the process-global `config.codeAct.enabled` and the global chat provider seam (`setChatProviders`). Any concurrent sample, or an ordinary conversation in the same process, saw the other variant's capability and runner. | `codeactEffect.ts` (before) `config.codeAct.enabled = variant === "codeact"`. The new isolation test fails on the old code: the flag flips while samples run. |
-| Availability, adoption and usage outcomes were mixed | The report had one paired Δ table and an adoption count. Nothing separated "CodeAct available" from "CodeAct used", and nothing marked usage outcomes as agent-selected. | Pilot T03: the CodeAct-enabled sample was correct without running CodeAct. |
+| Problem                                                                | Why                                                                                                                                                                                                                                        | Evidence                                                                                                                                                      |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pilot stopped with an incomplete pair (T08 Direct without T08 CodeAct) | Budget and sample checks ran **before every sample**, not every pair. Once a sample pushed known spend past the budget, the next sample, the second half of the pair, was refused.                                                         | `runEvaluation` (before): checks inside the per-variant loop; pilot `stopped: "budget 1 USD reached (known spend 1.0242)"` after 7 samples.                   |
+| Variants could contaminate each other and other conversations          | `runSample` set the process-global `config.codeAct.enabled` and the global chat provider seam (`setChatProviders`). Any concurrent sample, or an ordinary conversation in the same process, saw the other variant's capability and runner. | `codeactEffect.ts` (before) `config.codeAct.enabled = variant === "codeact"`. The new isolation test fails on the old code: the flag flips while samples run. |
+| Availability, adoption and usage outcomes were mixed                   | The report had one paired Δ table and an adoption count. Nothing separated "CodeAct available" from "CodeAct used", and nothing marked usage outcomes as agent-selected.                                                                   | Pilot T03: the CodeAct-enabled sample was correct without running CodeAct.                                                                                    |
 
 ## What changed
 
@@ -49,23 +49,23 @@ simulated or scripted providers (no paid call).
 
 ## Verification
 
-| Level | Command | Exit | Result |
-| --- | --- | --- | --- |
-| 1 | `node --import ./test/env.ts --test test/codeact-effect-report.test.ts` | 0 | 6/6: ITT/adoption/observational separation, capability leak → invalid, model checks |
-| 2 | `node test/run-integration.ts test/codeact-pairing.integration.ts` | 0 | 5/5: 4 concurrent samples plus an ordinary conversation, no leak and global flag never flips; pair not started when the estimate exceeds the remainder; first pair overshoot reported; allowance needs 2; incomplete pair kept and costed |
-| 2 | `node test/run-integration.ts test/codeact-effect.integration.ts` | 0 | 10/10 (paging fairness test added) |
-| 2 | chat, codex, CodeAct and incident suites (11 files) | 0 | 100/100 |
-| 3 | `npm run eval:codeact -- --repetitions 2 --out docs/validation/codeact-c-fixture-sandbox.json` (OS sandbox, simulated) | 0 | 20 complete pairs, `capability_check.valid`, no incomplete pair |
-| – | `npm test` | 0 | 1165/1165 |
+| Level | Command                                                                                                                | Exit | Result                                                                                                                                                                                                                                    |
+| ----- | ---------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `node --import ./test/env.ts --test test/codeact-effect-report.test.ts`                                                | 0    | 6/6: ITT/adoption/observational separation, capability leak → invalid, model checks                                                                                                                                                       |
+| 2     | `node test/run-integration.ts test/codeact-pairing.integration.ts`                                                     | 0    | 5/5: 4 concurrent samples plus an ordinary conversation, no leak and global flag never flips; pair not started when the estimate exceeds the remainder; first pair overshoot reported; allowance needs 2; incomplete pair kept and costed |
+| 2     | `node test/run-integration.ts test/codeact-effect.integration.ts`                                                      | 0    | 10/10 (paging fairness test added)                                                                                                                                                                                                        |
+| 2     | chat, codex, CodeAct and incident suites (11 files)                                                                    | 0    | 100/100                                                                                                                                                                                                                                   |
+| 3     | `npm run eval:codeact -- --repetitions 2 --out docs/validation/codeact-c-fixture-sandbox.json` (OS sandbox, simulated) | 0    | 20 complete pairs, `capability_check.valid`, no incomplete pair                                                                                                                                                                           |
+| –     | `npm test`                                                                                                             | 0    | 1165/1165                                                                                                                                                                                                                                 |
 
 ### Overhead: same fixture run at `main` (`56824d6`, temporary worktree) vs this branch
 
-| | base Direct | new Direct | base CodeAct | new CodeAct |
-| --- | --- | --- | --- | --- |
-| verified correct | 10/20 | 10/20 | 20/20 | 20/20 |
-| tool-result chars (mean) | 4445.8 | 4445.8 | 719.5 | 735.0 |
-| prompt chars total (mean) | 13658.6 | 13658.6 | 7279.8 | 7293.7 |
-| latency ms (mean) | 92.6 | 89.8 | 141.0 | 142.9 |
+|                           | base Direct | new Direct | base CodeAct | new CodeAct |
+| ------------------------- | ----------- | ---------- | ------------ | ----------- |
+| verified correct          | 10/20       | 10/20      | 20/20        | 20/20       |
+| tool-result chars (mean)  | 4445.8      | 4445.8     | 719.5        | 735.0       |
+| prompt chars total (mean) | 13658.6     | 13658.6    | 7279.8       | 7293.7      |
+| latency ms (mean)         | 92.6        | 89.8       | 141.0        | 142.9       |
 
 The +15.5 chars per CodeAct answer is the new `execution_id` field. The latency differences are within run-to-run
 noise. These are **fixture and simulated-provider numbers**, not model results.

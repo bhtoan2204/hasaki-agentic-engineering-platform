@@ -5,12 +5,12 @@ private PostgreSQL cluster, platform-go, real bubblewrap OS sandbox for CodeAct 
 
 ## Design (extension, not a new orchestrator)
 
-| Piece | Where | Reused |
-| --- | --- | --- |
-| Template `incident-investigation`: `discover` → `investigate` (read-only `agent`, `evidence: "root_cause"`) → `report` (`integration`, `action: evidence_report`) | `src/workflow/templates.ts` | engine, scheduler, checkpoints/replay, repository discovery, agent harness, providers, context pack |
-| Stages A–D in one agent step: collect (CodeAct when several lookups combine), correlate, code + knowledge correlation (M3 composition), root-cause assessment with supporting/contradicting evidence | `INCIDENT_INVESTIGATE` instructions/contract | evidence claim model (`src/agent/evidence.ts`), M1 refs, M3 composition |
-| Claim provenance for `codeact:<execution>:<seq>` + deterministic `observed: {pointer, equals \| count \| includes}` checks on the recorded result | `src/agent/provenance.ts` | harness output stage (already runs provenance then evidence normalization for evidence-role steps) |
-| Stage E–F: re-verify every claim at report time, re-normalize (only lowers certainty), report confirmed facts / hypotheses / unverified / contradicted / missing evidence / verdict | `src/agent/evidenceReport.ts`, `evidence_report` action in `src/workflow/executors/builtin.ts` | `withProvenance`, `normalizeInvestigationOutput` |
+| Piece                                                                                                                                                                                                | Where                                                                                          | Reused                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Template `incident-investigation`: `discover` → `investigate` (read-only `agent`, `evidence: "root_cause"`) → `report` (`integration`, `action: evidence_report`)                                    | `src/workflow/templates.ts`                                                                    | engine, scheduler, checkpoints/replay, repository discovery, agent harness, providers, context pack |
+| Stages A–D in one agent step: collect (CodeAct when several lookups combine), correlate, code + knowledge correlation (M3 composition), root-cause assessment with supporting/contradicting evidence | `INCIDENT_INVESTIGATE` instructions/contract                                                   | evidence claim model (`src/agent/evidence.ts`), M1 refs, M3 composition                             |
+| Claim provenance for `codeact:<execution>:<seq>` + deterministic `observed: {pointer, equals \| count \| includes}` checks on the recorded result                                                    | `src/agent/provenance.ts`                                                                      | harness output stage (already runs provenance then evidence normalization for evidence-role steps)  |
+| Stage E–F: re-verify every claim at report time, re-normalize (only lowers certainty), report confirmed facts / hypotheses / unverified / contradicted / missing evidence / verdict                  | `src/agent/evidenceReport.ts`, `evidence_report` action in `src/workflow/executors/builtin.ts` | `withProvenance`, `normalizeInvestigationOutput`                                                    |
 
 A CodeAct citation is VERIFIED only for an `ok`, recorded call of a finalized execution **of the same run**; a
 mismatching `observed` value is CONTRADICTED with what the record actually shows; a truncated record cannot confirm an
@@ -29,12 +29,12 @@ the worker had listed them in Codex's `enabled_tools`. The worker now passes `CO
 
 ## Verification
 
-| Level | Command | Exit | Result |
-| --- | --- | --- | --- |
-| 1 Unit | `node --import ./test/env.ts --test test/provenance-codeact.test.ts test/codex-args.test.ts` | 0 | 3/3, 4/4 |
-| 2–3 Integration + runtime | `node test/run-integration.ts test/incident-investigation.integration.ts` | 0 | 3/3 (OS sandbox) |
-| Regression | `npm test` | 0 | 1132/1132 |
-| Static | `tsc` (root, web), `npm run lint`, `npm run arch:check` | 0 | 5 cycles / 6 violations (baseline) |
+| Level                     | Command                                                                                      | Exit | Result                             |
+| ------------------------- | -------------------------------------------------------------------------------------------- | ---- | ---------------------------------- |
+| 1 Unit                    | `node --import ./test/env.ts --test test/provenance-codeact.test.ts test/codex-args.test.ts` | 0    | 3/3, 4/4                           |
+| 2–3 Integration + runtime | `node test/run-integration.ts test/incident-investigation.integration.ts`                    | 0    | 3/3 (OS sandbox)                   |
+| Regression                | `npm test`                                                                                   | 0    | 1132/1132                          |
+| Static                    | `tsc` (root, web), `npm run lint`, `npm run arch:check`                                      | 0    | 5 cycles / 6 violations (baseline) |
 
 The end-to-end test drives the real engine and scheduler with the Codex provider path: the fake `codex` CLI
 (`FAKE_CODEX_MODE=script`) scripts the agent's tool use, but every call goes through the platform's real MCP bridge,

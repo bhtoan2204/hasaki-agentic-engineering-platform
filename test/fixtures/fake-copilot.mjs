@@ -9,7 +9,8 @@ import { join } from "node:path";
 const argv = process.argv.slice(2);
 const mode = process.env.FAKE_COPILOT_MODE || "ok";
 const log = (o) =>
-  process.env.FAKE_COPILOT_LOG && appendFileSync(process.env.FAKE_COPILOT_LOG, JSON.stringify(o) + "\n");
+  process.env.FAKE_COPILOT_LOG &&
+  appendFileSync(process.env.FAKE_COPILOT_LOG, JSON.stringify(o) + "\n");
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -161,7 +162,8 @@ if (existsSync(hooksGithub)) {
 if (!hookCommand && existsSync(hooksLegacy)) {
   try {
     const hooksCfg = JSON.parse(readFileSync(hooksLegacy, "utf8"));
-    telemetryCommand = telemetryCommand || hooksCfg["platform-model"]?.PreInvocation?.[0]?.command || null;
+    telemetryCommand =
+      telemetryCommand || hooksCfg["platform-model"]?.PreInvocation?.[0]?.command || null;
     hookCommand =
       hooksCfg.PreToolUse?.[0]?.hooks?.[0]?.command ||
       hooksCfg["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command ||
