@@ -56,6 +56,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - id: lint
         run: npm run lint
+      - if: ${{ !cancelled() }}
+        run: npm run format:check
       - if: ${{ !cancelled() && (steps.lint.outcome == 'success' || steps.lint.outcome == 'failure') }}
         run: npm run build
 
