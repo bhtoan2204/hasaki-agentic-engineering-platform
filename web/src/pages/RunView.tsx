@@ -643,7 +643,8 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
           <Info size={15} />
           <span className="rv-inline-meta">
             <span>
-              {t("rv.assignedInstance")}: {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"}
+              {t("rv.assignedInstance")}:{" "}
+              {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"}
             </span>
             <span>{health?.health ?? run.worker.health}</span>
             <span>

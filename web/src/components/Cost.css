@@ -55,7 +55,9 @@
 .cost-budget-fill {
   height: 100%;
   background: var(--st-ok);
-  transition: transform 0.2s, opacity 0.2s;
+  transition:
+    transform 0.2s,
+    opacity 0.2s;
 }
 
 .cost-budget-warning .cost-budget-fill {

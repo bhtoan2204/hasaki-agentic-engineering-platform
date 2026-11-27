@@ -359,283 +359,291 @@ export function SettingsPage() {
           </nav>
 
           <div className="set-content">
-          <AgentSettings />
-          <AutonomyPolicies />
-          <AgentIsolation />
-          <IntakePolicies />
-          <IntakeQueue all />
+            <AgentSettings />
+            <AutonomyPolicies />
+            <AgentIsolation />
+            <IntakePolicies />
+            <IntakeQueue all />
 
-          {section(
-            "budget",
-            <div className="grid2">
-              <Field label={t("set.runUsd")}>
-                <span className="set-affix">
-                  <b aria-hidden>$</b>
-                  <input
-                    inputMode="decimal"
-                    placeholder={t("set.unlimited")}
-                    value={usd(form.costBudget.runUsd)}
-                    onChange={(e) =>
-                      set({ costBudget: { ...form.costBudget, runUsd: parseUsd(e.target.value) } })
-                    }
-                  />
-                </span>
-              </Field>
-              <Field label={t("set.workItemUsd")}>
-                <span className="set-affix">
-                  <b aria-hidden>$</b>
-                  <input
-                    inputMode="decimal"
-                    placeholder={t("set.unlimited")}
-                    value={usd(form.costBudget.workItemUsd)}
-                    onChange={(e) =>
-                      set({
-                        costBudget: { ...form.costBudget, workItemUsd: parseUsd(e.target.value) },
-                      })
-                    }
-                  />
-                </span>
-              </Field>
-              <Field label={t("set.warnPct")}>
-                <span className="set-range">
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    step={5}
-                    value={Math.round(form.costBudget.warnPct * 100)}
+            {section(
+              "budget",
+              <div className="grid2">
+                <Field label={t("set.runUsd")}>
+                  <span className="set-affix">
+                    <b aria-hidden>$</b>
+                    <input
+                      inputMode="decimal"
+                      placeholder={t("set.unlimited")}
+                      value={usd(form.costBudget.runUsd)}
+                      onChange={(e) =>
+                        set({
+                          costBudget: { ...form.costBudget, runUsd: parseUsd(e.target.value) },
+                        })
+                      }
+                    />
+                  </span>
+                </Field>
+                <Field label={t("set.workItemUsd")}>
+                  <span className="set-affix">
+                    <b aria-hidden>$</b>
+                    <input
+                      inputMode="decimal"
+                      placeholder={t("set.unlimited")}
+                      value={usd(form.costBudget.workItemUsd)}
+                      onChange={(e) =>
+                        set({
+                          costBudget: { ...form.costBudget, workItemUsd: parseUsd(e.target.value) },
+                        })
+                      }
+                    />
+                  </span>
+                </Field>
+                <Field label={t("set.warnPct")}>
+                  <span className="set-range">
+                    <input
+                      type="range"
+                      min={10}
+                      max={100}
+                      step={5}
+                      value={Math.round(form.costBudget.warnPct * 100)}
+                      onChange={(e) =>
+                        set({
+                          costBudget: {
+                            ...form.costBudget,
+                            warnPct: Math.min(1, Math.max(0.1, Number(e.target.value) / 100)),
+                          },
+                        })
+                      }
+                    />
+                    <output>{Math.round(form.costBudget.warnPct * 100)}%</output>
+                  </span>
+                </Field>
+                <Field label={t("set.action")}>
+                  <select
+                    value={form.costBudget.action}
                     onChange={(e) =>
                       set({
                         costBudget: {
                           ...form.costBudget,
-                          warnPct: Math.min(1, Math.max(0.1, Number(e.target.value) / 100)),
+                          action: e.target.value as Form["costBudget"]["action"],
                         },
                       })
                     }
-                  />
-                  <output>{Math.round(form.costBudget.warnPct * 100)}%</output>
-                </span>
-              </Field>
-              <Field label={t("set.action")}>
-                <select
-                  value={form.costBudget.action}
-                  onChange={(e) =>
-                    set({
-                      costBudget: {
-                        ...form.costBudget,
-                        action: e.target.value as Form["costBudget"]["action"],
-                      },
-                    })
-                  }
-                >
-                  <option value="pause">{t("set.actionPause")}</option>
-                  <option value="warn">{t("set.actionWarn")}</option>
-                </select>
-              </Field>
-              <Field label={t("set.unknown")}>
-                <select
-                  value={form.costBudget.unknownEstimate}
-                  onChange={(e) =>
-                    set({
-                      costBudget: {
-                        ...form.costBudget,
-                        unknownEstimate: e.target.value as Form["costBudget"]["unknownEstimate"],
-                      },
-                    })
-                  }
-                >
-                  <option value="warn">{t("set.unknownWarn")}</option>
-                  <option value="pause">{t("set.unknownPause")}</option>
-                </select>
-              </Field>
-            </div>,
-          )}
+                  >
+                    <option value="pause">{t("set.actionPause")}</option>
+                    <option value="warn">{t("set.actionWarn")}</option>
+                  </select>
+                </Field>
+                <Field label={t("set.unknown")}>
+                  <select
+                    value={form.costBudget.unknownEstimate}
+                    onChange={(e) =>
+                      set({
+                        costBudget: {
+                          ...form.costBudget,
+                          unknownEstimate: e.target.value as Form["costBudget"]["unknownEstimate"],
+                        },
+                      })
+                    }
+                  >
+                    <option value="warn">{t("set.unknownWarn")}</option>
+                    <option value="pause">{t("set.unknownPause")}</option>
+                  </select>
+                </Field>
+              </div>,
+            )}
 
-          {section(
-            "scheduler",
-            <div className="grid2">
-              <Field label={t("set.workers")}>
-                <input
-                  type="number"
-                  min={1}
-                  max={32}
-                  value={form.scheduler.workers}
-                  onChange={(e) =>
-                    set({ scheduler: { ...form.scheduler, workers: Number(e.target.value) } })
-                  }
-                />
-              </Field>
-              <Field label={t("set.lightWorkers")}>
-                <input
-                  type="number"
-                  min={0}
-                  max={16}
-                  value={form.scheduler.lightWorkers}
-                  onChange={(e) =>
-                    set({ scheduler: { ...form.scheduler, lightWorkers: Number(e.target.value) } })
-                  }
-                />
-              </Field>
-            </div>,
-            <span className="set-flag is-warn" title={t("set.restart")}>
-              {t("set.needsRestart")}
-            </span>,
-          )}
-
-          {section(
-            "routing",
-            <Field group label={t("set.sensitive")}>
-              <span className="set-chips" role="group">
-                {PROVIDERS.map((p) => {
-                  const on = form.routing.sensitiveProviders.includes(p);
-                  return (
-                    <label key={p} className={`set-chip${on ? " is-on" : ""}`}>
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        onChange={(e) => {
-                          const sensitiveProviders = e.target.checked
-                            ? on
-                              ? form.routing.sensitiveProviders
-                              : [...form.routing.sensitiveProviders, p]
-                            : form.routing.sensitiveProviders.filter((x) => x !== p);
-                          set({ routing: { sensitiveProviders } });
-                        }}
-                      />
-                      {p}
-                    </label>
-                  );
-                })}
-              </span>
-            </Field>,
-          )}
-
-          {section(
-            "integration",
-            <>
+            {section(
+              "scheduler",
               <div className="grid2">
-                <Field label={t("set.fileBaseUrl")} hint={t("set.fileBaseUrlHint")}>
+                <Field label={t("set.workers")}>
                   <input
-                    type="url"
-                    placeholder="https://"
-                    value={form.fileBaseUrl}
-                    onChange={(e) => set({ fileBaseUrl: e.target.value.trim() })}
+                    type="number"
+                    min={1}
+                    max={32}
+                    value={form.scheduler.workers}
+                    onChange={(e) =>
+                      set({ scheduler: { ...form.scheduler, workers: Number(e.target.value) } })
+                    }
+                  />
+                </Field>
+                <Field label={t("set.lightWorkers")}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={16}
+                    value={form.scheduler.lightWorkers}
+                    onChange={(e) =>
+                      set({
+                        scheduler: { ...form.scheduler, lightWorkers: Number(e.target.value) },
+                      })
+                    }
+                  />
+                </Field>
+              </div>,
+              <span className="set-flag is-warn" title={t("set.restart")}>
+                {t("set.needsRestart")}
+              </span>,
+            )}
+
+            {section(
+              "routing",
+              <Field group label={t("set.sensitive")}>
+                <span className="set-chips" role="group">
+                  {PROVIDERS.map((p) => {
+                    const on = form.routing.sensitiveProviders.includes(p);
+                    return (
+                      <label key={p} className={`set-chip${on ? " is-on" : ""}`}>
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={(e) => {
+                            const sensitiveProviders = e.target.checked
+                              ? on
+                                ? form.routing.sensitiveProviders
+                                : [...form.routing.sensitiveProviders, p]
+                              : form.routing.sensitiveProviders.filter((x) => x !== p);
+                            set({ routing: { sensitiveProviders } });
+                          }}
+                        />
+                        {p}
+                      </label>
+                    );
+                  })}
+                </span>
+              </Field>,
+            )}
+
+            {section(
+              "integration",
+              <>
+                <div className="grid2">
+                  <Field label={t("set.fileBaseUrl")} hint={t("set.fileBaseUrlHint")}>
+                    <input
+                      type="url"
+                      placeholder="https://"
+                      value={form.fileBaseUrl}
+                      onChange={(e) => set({ fileBaseUrl: e.target.value.trim() })}
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field
+                    label={t("set.bitbucketAccess")}
+                    hint={t(`set.access.${form.bitbucketAccess}Hint`)}
+                  >
+                    <select
+                      value={form.bitbucketAccess}
+                      onChange={(e) =>
+                        set({ bitbucketAccess: e.target.value as Form["bitbucketAccess"] })
+                      }
+                    >
+                      {(["strict", "personal", "trusted"] as const).map((level) => (
+                        <option key={level} value={level}>
+                          {t(`set.access.${level}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <Field label={t("set.signozHosts")} hint={t("set.signozHostsHint")}>
+                  <textarea
+                    rows={2}
+                    placeholder="signoz.internal.example"
+                    value={form.signozAllowedHosts.join("\n")}
+                    onChange={(e) => set({ signozAllowedHosts: e.target.value.split("\n") })}
+                  />
+                </Field>
+                <div className="field">
+                  <span>{t("set.related")}</span>
+                  <small className="muted">{t("set.relatedHint")}</small>
+                  <div className="set-related">
+                    {related.map((row, i) => (
+                      <div key={i} className="set-related-row">
+                        <input
+                          aria-label={t("set.relatedProject")}
+                          placeholder={t("set.relatedProject")}
+                          value={row.project}
+                          onChange={(e) =>
+                            editRelated(
+                              related.map((r, j) =>
+                                j === i ? { ...r, project: e.target.value } : r,
+                              ),
+                            )
+                          }
+                        />
+                        <span aria-hidden className="muted">
+                          →
+                        </span>
+                        <input
+                          aria-label={t("set.relatedLinks")}
+                          placeholder={t("set.relatedLinks")}
+                          value={row.links}
+                          onChange={(e) =>
+                            editRelated(
+                              related.map((r, j) =>
+                                j === i ? { ...r, links: e.target.value } : r,
+                              ),
+                            )
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="ghost icon"
+                          aria-label={t("set.relatedRemove")}
+                          onClick={() => editRelated(related.filter((_, j) => j !== i))}
+                        >
+                          <Trash2 size={14} aria-hidden />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="ghost sm"
+                      onClick={() => editRelated([...related, { project: "", links: "" }])}
+                    >
+                      <Plus size={14} aria-hidden /> {t("set.relatedAdd")}
+                    </button>
+                  </div>
+                </div>
+              </>,
+            )}
+
+            {section(
+              "work",
+              <div className="grid3 set-grid">
+                <Field label={t("set.poll")}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1440}
+                    value={form.hasakiWork.pollMinutes}
+                    onChange={(e) =>
+                      set({
+                        hasakiWork: { ...form.hasakiWork, pollMinutes: Number(e.target.value) },
+                      })
+                    }
+                  />
+                </Field>
+                <Field label={t("set.autoWorkflow")}>
+                  <input
+                    value={form.hasakiWork.autoWorkflow}
+                    onChange={(e) =>
+                      set({ hasakiWork: { ...form.hasakiWork, autoWorkflow: e.target.value } })
+                    }
                     autoComplete="off"
                   />
                 </Field>
-                <Field
-                  label={t("set.bitbucketAccess")}
-                  hint={t(`set.access.${form.bitbucketAccess}Hint`)}
-                >
-                  <select
-                    value={form.bitbucketAccess}
-                    onChange={(e) =>
-                      set({ bitbucketAccess: e.target.value as Form["bitbucketAccess"] })
-                    }
-                  >
-                    {(["strict", "personal", "trusted"] as const).map((level) => (
-                      <option key={level} value={level}>
-                        {t(`set.access.${level}`)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-              <Field label={t("set.signozHosts")} hint={t("set.signozHostsHint")}>
-                <textarea
-                  rows={2}
-                  placeholder="signoz.internal.example"
-                  value={form.signozAllowedHosts.join("\n")}
-                  onChange={(e) => set({ signozAllowedHosts: e.target.value.split("\n") })}
-                />
-              </Field>
-              <div className="field">
-                <span>{t("set.related")}</span>
-                <small className="muted">{t("set.relatedHint")}</small>
-                <div className="set-related">
-                  {related.map((row, i) => (
-                    <div key={i} className="set-related-row">
-                      <input
-                        aria-label={t("set.relatedProject")}
-                        placeholder={t("set.relatedProject")}
-                        value={row.project}
-                        onChange={(e) =>
-                          editRelated(
-                            related.map((r, j) =>
-                              j === i ? { ...r, project: e.target.value } : r,
-                            ),
-                          )
-                        }
-                      />
-                      <span aria-hidden className="muted">
-                        →
-                      </span>
-                      <input
-                        aria-label={t("set.relatedLinks")}
-                        placeholder={t("set.relatedLinks")}
-                        value={row.links}
-                        onChange={(e) =>
-                          editRelated(
-                            related.map((r, j) => (j === i ? { ...r, links: e.target.value } : r)),
-                          )
-                        }
-                      />
-                      <button
-                        type="button"
-                        className="ghost icon"
-                        aria-label={t("set.relatedRemove")}
-                        onClick={() => editRelated(related.filter((_, j) => j !== i))}
-                      >
-                        <Trash2 size={14} aria-hidden />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="ghost sm"
-                    onClick={() => editRelated([...related, { project: "", links: "" }])}
-                  >
-                    <Plus size={14} aria-hidden /> {t("set.relatedAdd")}
-                  </button>
-                </div>
-              </div>
-            </>,
-          )}
-
-          {section(
-            "work",
-            <div className="grid3 set-grid">
-              <Field label={t("set.poll")}>
-                <input
-                  type="number"
-                  min={0}
-                  max={1440}
-                  value={form.hasakiWork.pollMinutes}
-                  onChange={(e) =>
-                    set({ hasakiWork: { ...form.hasakiWork, pollMinutes: Number(e.target.value) } })
-                  }
-                />
-              </Field>
-              <Field label={t("set.autoWorkflow")}>
-                <input
-                  value={form.hasakiWork.autoWorkflow}
-                  onChange={(e) =>
-                    set({ hasakiWork: { ...form.hasakiWork, autoWorkflow: e.target.value } })
-                  }
-                  autoComplete="off"
-                />
-              </Field>
-              <label className="field">
-                <span>{t("set.autoPick")}</span>
-                {toggle(
-                  form.hasakiWork.autoPick,
-                  (autoPick) => set({ hasakiWork: { ...form.hasakiWork, autoPick } }),
-                  form.hasakiWork.autoPick ? t("set.on") : t("set.off"),
-                )}
-              </label>
-            </div>,
-          )}
-        </div>
+                <label className="field">
+                  <span>{t("set.autoPick")}</span>
+                  {toggle(
+                    form.hasakiWork.autoPick,
+                    (autoPick) => set({ hasakiWork: { ...form.hasakiWork, autoPick } }),
+                    form.hasakiWork.autoPick ? t("set.on") : t("set.off"),
+                  )}
+                </label>
+              </div>,
+            )}
+          </div>
         </div>
       </div>
 

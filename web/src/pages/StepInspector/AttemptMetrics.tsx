@@ -9,8 +9,7 @@ export function AttemptMetrics({ m }: { m: AttemptMetricsData }) {
   const tools = Object.entries<number>(m.tool_calls ?? {}).sort((a, b) => b[1] - a[1]);
   const modelMeta = [
     m.provider ? t(agentKey(m.provider, true)) : null,
-    m.model ||
-      (m.provider && defaultModelKey(m.provider) ? t(defaultModelKey(m.provider)!) : null),
+    m.model || (m.provider && defaultModelKey(m.provider) ? t(defaultModelKey(m.provider)!) : null),
     m.reasoning_effort,
   ].filter(Boolean);
   return (

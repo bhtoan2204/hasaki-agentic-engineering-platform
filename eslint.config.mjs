@@ -15,6 +15,7 @@ export default tseslint.config(
       "coverage/**",
       ".next/**",
       ".claude/**",
+      ".agents/**",
       ".req94-baseline/**",
     ],
   },
