@@ -13,6 +13,7 @@ import {
   Plus,
   Trash2,
   Wallet,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../api.ts";
@@ -326,37 +327,38 @@ export function SettingsPage() {
       <p className="muted small">{t("set.dbNote")}</p>
       {error && <ErrorBox error={error} />}
 
-      <div className="set-layout">
-        <nav className="set-nav" aria-label={t("set.title")}>
-          {SECTIONS.map((s) => {
-            const changed = s.keys.some((k) => dirtyKeys.has(k));
-            return (
-              <a
-                key={s.id}
-                href={`#set-${s.id}`}
-                aria-current={active === s.id ? "true" : undefined}
-                className={active === s.id ? "is-active" : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  setActive(s.id);
-                  document
-                    .getElementById(`set-${s.id}`)
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              >
-                <s.icon size={15} aria-hidden />
-                <span>{t(`set.nav.${s.id}`)}</span>
-                {changed ? (
-                  <i className="set-dot is-dirty" title={t("set.flagUnsaved")} />
-                ) : overridden(s.keys) ? (
-                  <i className="set-dot is-saved" title={t("set.flagSaved")} />
-                ) : null}
-              </a>
-            );
-          })}
-        </nav>
+      <div className="set-container">
+        <div className="set-layout">
+          <nav className="set-nav" aria-label={t("set.title")}>
+            {SECTIONS.map((s) => {
+              const changed = s.keys.some((k) => dirtyKeys.has(k));
+              return (
+                <a
+                  key={s.id}
+                  href={`#set-${s.id}`}
+                  aria-current={active === s.id ? "true" : undefined}
+                  className={active === s.id ? "is-active" : undefined}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setActive(s.id);
+                    document
+                      .getElementById(`set-${s.id}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >
+                  <s.icon size={15} aria-hidden />
+                  <span>{t(`set.nav.${s.id}`)}</span>
+                  {changed ? (
+                    <i className="set-dot is-dirty" title={t("set.flagUnsaved")} />
+                  ) : overridden(s.keys) ? (
+                    <i className="set-dot is-saved" title={t("set.flagSaved")} />
+                  ) : null}
+                </a>
+              );
+            })}
+          </nav>
 
-        <div className="set-content">
+          <div className="set-content">
           <AgentSettings />
           <AutonomyPolicies />
           <AgentIsolation />
@@ -634,6 +636,7 @@ export function SettingsPage() {
             </div>,
           )}
         </div>
+        </div>
       </div>
 
       <div
@@ -677,7 +680,7 @@ export function SettingsPage() {
             onClick={() => setNote(null)}
             aria-label={t("set.dismiss")}
           >
-            ×
+            <X size={14} aria-hidden />
           </button>
         )}
       </div>

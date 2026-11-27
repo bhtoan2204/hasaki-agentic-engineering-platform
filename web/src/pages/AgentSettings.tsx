@@ -415,10 +415,14 @@ export function AgentSettings() {
             <span>{t("set.enableProvider", { provider })}</span>
           </label>
           <p className="small muted agent-discovery-meta">
-            {t("set.modelDiscovery")} <b>{currentCatalog?.discovery ?? "loading"}</b> ·{" "}
-            {currentCatalog?.cache ?? "no cache"}
-            {currentCatalog?.discovered_at ? ` · ${currentCatalog.discovered_at}` : ""}. Saved
-            selections remain available when discovery fails.
+            <span>
+              {t("set.modelDiscovery")} <strong>{currentCatalog?.discovery ?? "loading"}</strong>
+            </span>
+            <span className="tabular">{currentCatalog?.cache ?? "no cache"}</span>
+            {currentCatalog?.discovered_at && (
+              <span className="tabular">{currentCatalog.discovered_at}</span>
+            )}
+            <span>Saved selections remain available when discovery fails.</span>
           </p>
         </div>
 
@@ -520,7 +524,7 @@ export function AgentSettings() {
                             : effective.values[key as keyof AgentValues];
                           return `${key}: ${String(val ?? "account/CLI default")} (${source})`;
                         })
-                        .join(" · ")
+                        .join(", ")
                     : "";
                   const efforts = resolveSupportedEfforts(
                     controls,
