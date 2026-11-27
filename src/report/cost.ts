@@ -71,8 +71,8 @@ const emptyBucket = (): CostBucket => ({
   attempts_without_cost: 0,
   tokens: { input: 0, output: 0, cache_read: 0, cache_creation: 0, reasoning: 0 },
 });
-const usedAgent = (r: AttemptCostRow) =>
-  r.cost != null || r.provider != null || (r.input_tokens ?? 0) + (r.output_tokens ?? 0) > 0;
+const spentTokens = (r: AttemptCostRow) => (r.input_tokens ?? 0) + (r.output_tokens ?? 0) > 0;
+const usedAgent = (r: AttemptCostRow) => r.cost != null || r.provider != null || spentTokens(r);
 
 function add(b: CostBucket, r: AttemptCostRow) {
   b.attempts++;
@@ -124,7 +124,7 @@ export function summarize(
     };
     add(s, r);
     steps.set(r.step_key, s);
-    if (r.cost != null || (r.input_tokens ?? 0) + (r.output_tokens ?? 0) > 0) {
+    if (usedAgent(r) && !(r.status === "CANCELED" && r.cost == null && !spentTokens(r))) {
       const key = `${r.provider ?? "?"}|${r.model ?? "?"}`;
       const m = models.get(key) ?? {
         ...emptyBucket(),
