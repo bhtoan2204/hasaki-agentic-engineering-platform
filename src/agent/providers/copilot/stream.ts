@@ -22,7 +22,10 @@ export interface CopilotEvent {
   /** Terminal result.usage is cumulative for the whole CLI session. */
   cumulativeUsage?: boolean;
   status?: string;
+  /** Model requests the CLI counted for the session (from its usage accounting), not a guess. */
   turns?: number;
+  /** Time the CLI spent in model API calls, when it reports it. */
+  durationMs?: number;
   error?: string;
   raw: unknown;
 }
@@ -163,6 +166,7 @@ function parseModernEvent(rawObj: RawRecord): CopilotEvent {
   let error: string | undefined;
   let status: string | undefined;
   let cumulativeUsage = false;
+  let reasoningTokens: number | null = null;
 
   if (type === "session.start") {
     conversationId = str(data.sessionId);
@@ -191,6 +195,13 @@ function parseModernEvent(rawObj: RawRecord): CopilotEvent {
     cumulativeUsage = true;
     const snap = data.accountingSnapshot as RawRecord | undefined;
     if (snap) {
+      const byModel = Object.values((snap.modelMetrics ?? {}) as Record<string, RawRecord>);
+      const sum = (pick: (m: RawRecord) => unknown) => {
+        const values = byModel.map((m) => num(pick(m))).filter((v): v is number => v !== null);
+        return values.length ? values.reduce((a, b) => a + b, 0) : null;
+      };
+      turns = sum((m) => (m.requests as RawRecord | undefined)?.count) ?? undefined;
+      reasoningTokens = sum((m) => (m.usage as RawRecord | undefined)?.reasoningTokens);
       const td = snap.tokenDetails as RawRecord | undefined;
       if (td) {
         tokens = {
@@ -198,7 +209,7 @@ function parseModernEvent(rawObj: RawRecord): CopilotEvent {
           output: num((td.output as RawRecord | undefined)?.tokenCount),
           cache_read: num((td.cache_read as RawRecord | undefined)?.tokenCount),
           cache_creation: num((td.cache_write as RawRecord | undefined)?.tokenCount),
-          reasoning: null,
+          reasoning: reasoningTokens,
         };
       }
       model = str(snap.currentModel) ?? model;
@@ -228,17 +239,9 @@ function parseModernResult(rawObj: RawRecord): CopilotEvent {
     type: "result",
     conversationId: str(rawObj.sessionId),
     status: rawObj.exitCode === 0 ? "SUCCESS" : "ERROR",
-    turns: 1,
     cumulativeUsage: true,
-    tokens: usage
-      ? {
-          input: null,
-          output: null,
-          reasoning: null,
-          cache_read: null,
-          cache_creation: null,
-        }
-      : undefined,
+    durationMs: num(usage?.totalApiDurationMs) ?? undefined,
+    tokens: usage ? tokensFromUsage({ usage }) : undefined,
     error: rawObj.exitCode === 0 ? undefined : `copilot exited with code ${rawObj.exitCode}`,
     raw: rawObj,
   };
@@ -375,13 +378,14 @@ function parseLegacyEvent(rawObj: RawRecord): CopilotEvent {
 function tokensFromUsage(data: RawRecord): CopilotTokens | undefined {
   const usage = data.usage as RawRecord | undefined;
   if (!usage) return undefined;
-  return {
+  const tokens = {
     input: num(usage.input_tokens ?? usage.input),
     output: num(usage.output_tokens ?? usage.output),
     reasoning: num(usage.reasoning_tokens ?? usage.reasoning),
     cache_read: num(usage.cache_read_tokens ?? usage.cache_read),
     cache_creation: num(usage.cache_write_tokens ?? usage.cache_creation),
   };
+  return Object.values(tokens).some((v) => v !== null) ? tokens : undefined;
 }
 
 const num = (v: unknown): number | null =>

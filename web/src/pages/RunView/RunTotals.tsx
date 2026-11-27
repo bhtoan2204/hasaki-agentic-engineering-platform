@@ -1,11 +1,12 @@
 import { useEffect } from "react";
+import { agentMs, agentSessions } from "../../agentMetrics.ts";
 import { agentKey } from "../../agentProvider.tsx";
 import { Timer } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { useI18n } from "../../i18n/index.tsx";
 import { type RunMetrics, fmtS } from "./shared.tsx";
 
-/** Latency breakdown: measured queue / machine / human time per step (+ Claude, tools, commands), cost as an estimate. */
+/** Latency breakdown: measured queue / machine / human time per step (+ agent, tools, commands), cost as an estimate. */
 export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   const { t, locale } = useI18n();
   const { data, reload } = useApi<RunMetrics>(`/api/metrics/runs/${runId}`);
@@ -15,10 +16,11 @@ export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
   const num = (n: number | null | undefined) =>
     n == null ? "—" : n.toLocaleString(locale === "vi" ? "vi-VN" : "en-GB");
   const steps = Object.entries(data.per_step);
+  const agentName = t(agentKey(data.agent_provider, true));
   const max = Math.max(1, ...steps.map(([, s]) => s.queue_ms + s.exec_ms + s.human_ms));
   const C = {
     queue: "var(--st-idle)",
-    claude: "var(--brand)",
+    agent: "var(--brand)",
     command: "var(--st-wait)",
     other: "var(--st-ok)",
     human: "color-mix(in srgb, var(--st-wait) 40%, transparent)",
@@ -54,13 +56,13 @@ export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
         <span>
           {totals.cost_unknown || totals.cost_usd == null
             ? t("rv.agentLineNoCost", {
-                sessions: totals.claude_sessions,
-                time: fmtS(totals.claude_ms),
+                sessions: agentSessions(totals),
+                time: fmtS(agentMs(totals)),
                 turns: totals.turns,
               })
             : t("rv.claudeLine", {
-                sessions: totals.claude_sessions,
-                time: fmtS(totals.claude_ms),
+                sessions: agentSessions(totals),
+                time: fmtS(agentMs(totals)),
                 turns: totals.turns,
                 cost: totals.cost_usd.toFixed(3),
               })}
@@ -124,7 +126,7 @@ export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
             <span
               className="progress"
               style={{ height: 8 }}
-              title={`${t("rv.barTip", { queue: fmtS(s.queue_ms), exec: fmtS(s.exec_ms), human: fmtS(s.human_ms) })}${s.claude_ms ? t("rv.barClaude", { time: fmtS(s.claude_ms), turns: s.turns }) : ""}`}
+              title={`${t("rv.barTip", { queue: fmtS(s.queue_ms), exec: fmtS(s.exec_ms), human: fmtS(s.human_ms) })}${agentMs(s) ? t("rv.barAgent", { name: agentName, time: fmtS(agentMs(s)), turns: s.turns }) : ""}`}
             >
               <span
                 style={{
@@ -135,7 +137,7 @@ export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
               <span
                 style={{
                   width: `${(s.exec_ms / max) * 100}%`,
-                  background: s.type === "command" ? C.command : s.claude_ms ? C.claude : C.other,
+                  background: s.type === "command" ? C.command : agentMs(s) ? C.agent : C.other,
                 }}
               />
               <span
@@ -151,7 +153,7 @@ export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
           </div>
         ))}
         <div className="rv-chipline muted small" style={{ marginTop: 8, gap: 12 }}>
-          {(["queue", "claude", "command", "other", "human"] as const).map((k) => (
+          {(["queue", "agent", "command", "other", "human"] as const).map((k) => (
             <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               <i
                 style={{
@@ -162,7 +164,7 @@ export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
                   display: "inline-block",
                 }}
               />
-              {k === "claude" ? "Claude" : t(`rv.legend.${k}`)}
+              {k === "agent" ? agentName : t(`rv.legend.${k}`)}
             </span>
           ))}
         </div>

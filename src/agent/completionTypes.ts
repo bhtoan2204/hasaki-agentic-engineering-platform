@@ -18,6 +18,11 @@ export interface Completion {
     tokens: Record<string, number | null | undefined> | null;
     /** What the provider reported about the work inside this completion; null when it reports nothing. */
     telemetry: ProviderTelemetry | null;
+    /**
+     * How tools were served when the caller offered native tools: "native" (the provider runs the loop) or "chat-tool"
+     * (it cannot, so the caller's prompt-block protocol applies). Absent when no tools were offered.
+     */
+    tool_protocol?: "native" | "chat-tool";
   };
 }
 

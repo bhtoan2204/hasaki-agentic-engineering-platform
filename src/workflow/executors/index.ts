@@ -17,11 +17,11 @@ import { registerExecutor } from "./registry.ts";
 import { setMergeModel } from "./branchMerge.ts";
 import { registerBuiltinTools } from "../../agent/toolRegistry.ts";
 import {
-  claudeReportReasoner,
   setReportReasoner,
   taskResultReportExecutor,
+  workflowReportReasoner,
 } from "../../report/executor.ts";
-import { claudeTestFailureAdvisor, setTestFailureAdvisor } from "./testFailure.ts";
+import { providerTestFailureAdvisor, setTestFailureAdvisor } from "./testFailure.ts";
 import { setKnowledgeChangeAnalyzer, setSkillDrafter } from "../../knowledge/learning.ts";
 import { modelChangeAnalyzer, modelSkillDrafter } from "../../agent/learningModel.ts";
 import { completeForRun } from "../../agent/complete.ts";
@@ -42,8 +42,8 @@ export function registerDefaultExecutors() {
   registerBuiltinTools();
   registerPlatformOps();
   registerExecutor("task_result_report", taskResultReportExecutor);
-  setReportReasoner(claudeReportReasoner);
-  setTestFailureAdvisor(claudeTestFailureAdvisor);
+  setReportReasoner(workflowReportReasoner);
+  setTestFailureAdvisor(providerTestFailureAdvisor);
   // Continuous learning (knowledge/learning.ts): change detection and skill drafting through the run's provider.
   setKnowledgeChangeAnalyzer(modelChangeAnalyzer);
   setSkillDrafter(modelSkillDrafter);

@@ -35,6 +35,9 @@ export interface RequirementResult {
   rule: string;
 }
 
+/** "rules+claude" is what reports stored before the value became provider-neutral carry; it is still read. */
+export type ReportGeneratedBy = "rules" | "rules+ai" | "rules+claude";
+
 export interface TaskReport {
   task: { code: string | null; title: string | null; id: number | string | null };
   object: string | null;
@@ -48,7 +51,7 @@ export interface TaskReport {
   counts: Record<Status, number>;
   related: { commits: string[]; files: string[]; tests: string[]; pull_requests: string[] };
   limitations: string[];
-  generated_by: "rules" | "rules+claude";
+  generated_by: ReportGeneratedBy;
   generated_at: string;
 }
 
@@ -149,8 +152,8 @@ export function buildReport(
       ? []
       : [
           vi
-            ? "Không có phân tích của Claude: trạng thái dựa hoàn toàn trên luật kiểm định."
-            : "No Claude analysis: statuses are rule-based only.",
+            ? "Không có phân tích của AI: trạng thái dựa hoàn toàn trên luật kiểm định."
+            : "No AI analysis: statuses are rule-based only.",
         ]),
   ];
   return {
@@ -171,7 +174,7 @@ export function buildReport(
       pull_requests: evidence.filter((e) => e.kind === "pr").map((e) => `${e.title}: ${e.ref.url}`),
     },
     limitations,
-    generated_by: proposal ? "rules+claude" : "rules",
+    generated_by: proposal ? "rules+ai" : "rules",
     generated_at: new Date().toISOString(),
   };
 }

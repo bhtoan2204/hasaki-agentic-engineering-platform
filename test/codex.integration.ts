@@ -50,7 +50,7 @@ import {
 import { npmCacheDir } from "../src/git/provider.ts";
 import { completeForRun } from "../src/agent/complete.ts";
 import { contractKeys, missingContractKeys } from "../src/agent/contract.ts";
-import { claudeTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
+import { providerTestFailureAdvisor } from "../src/workflow/executors/testFailure.ts";
 import { newMetrics } from "../src/agent/metrics.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
 import type { ExecutionContext } from "../src/workflow/executors/registry.ts";
@@ -1073,7 +1073,7 @@ test("auxiliary calls of a Codex run go to Codex, not Claude (ranking, test-fail
   assert.equal(recorded[0].ranking.provider, "codex");
   assert.equal(recorded[0].ranking.cost_usd, null);
   process.env.FAKE_CODEX_TEXT = '{"text":"build failed","suggestion":"fix import"}';
-  const ex = await claudeTestFailureAdvisor.explain(
+  const ex = await providerTestFailureAdvisor.explain(
     {
       command: "go test",
       base_sha: "",

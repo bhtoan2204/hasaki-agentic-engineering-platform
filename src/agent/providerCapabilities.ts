@@ -132,7 +132,7 @@ export const PROVIDER_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> 
       streamingPartials: true,
       reportedCost: false,
       reportedUsage: "tokens_no_cache_creation",
-      providerTelemetry: false,
+      providerTelemetry: true,
     },
   },
   copilot: {
@@ -173,7 +173,7 @@ export const PROVIDER_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> 
       streamingPartials: true,
       reportedCost: false,
       reportedUsage: "tokens_partial",
-      providerTelemetry: false,
+      providerTelemetry: true,
     },
   },
   antigravity: {
@@ -212,7 +212,7 @@ export const PROVIDER_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> 
       streamingPartials: true,
       reportedCost: false,
       reportedUsage: "tokens_partial",
-      providerTelemetry: false,
+      providerTelemetry: true,
     },
   },
   cursor: {

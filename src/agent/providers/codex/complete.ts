@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { codexConfig } from "../../../config.ts";
 import type { CompletionStreamListener } from "../../completionStream.ts";
 import { addUsage, newMetrics, type AgentMetrics } from "../../metrics.ts";
+import { reportedTelemetry, type ProviderTelemetry } from "../../reportedTelemetry.ts";
 import { superviseSpawn } from "../../process/supervisor.ts";
 import { DISABLED_FEATURES, toml } from "./args.ts";
 import { codexCapabilities, codexEnv } from "./capabilities.ts";
@@ -41,7 +42,12 @@ export async function codexComplete(
     timeoutMs?: number;
     onStream?: CompletionStreamListener;
   } = {},
-): Promise<{ text: string; tokens: AgentMetrics["tokens"]; model: string }> {
+): Promise<{
+  text: string;
+  tokens: AgentMetrics["tokens"];
+  model: string;
+  telemetry: ProviderTelemetry;
+}> {
   const cfg = codexConfig();
   const cap = await codexCapabilities(false, {
     model: opts.model ?? cfg.model,
@@ -114,7 +120,16 @@ export async function codexComplete(
   let fail = "";
   let lastError = "";
   const usageMetrics = newMetrics(model || "");
+  let turns = 0;
+  let toolUses = 0;
   for (const ev of events) {
+    if (ev.type === "turn.completed") turns++;
+    if (
+      ev.type === "item.completed" &&
+      ev.item.type !== "agent_message" &&
+      ev.item.type !== "reasoning"
+    )
+      toolUses++;
     if (ev.type === "item.completed" && ev.item.type === "agent_message" && ev.item.text)
       text = ev.item.text;
     else if (ev.type === "turn.completed") {
@@ -134,5 +149,15 @@ export async function codexComplete(
     throw new Error(failureMessage(classifyCodexError(`${detail}\n${stderr}`), detail));
   }
   if (!text.trim()) throw new Error("Codex text completion returned no message");
-  return { text, tokens: usageMetrics.tokens, model: model || "" };
+  // Codex's JSON stream names no model, so none is reported; the requested one is never substituted.
+  return {
+    text,
+    tokens: usageMetrics.tokens,
+    model: model || "",
+    telemetry: reportedTelemetry({
+      model_turns: turns,
+      provider_tool_uses: toolUses,
+      reasoning_tokens: usageMetrics.tokens?.reasoning_output ?? null,
+    }),
+  };
 }

@@ -22,6 +22,8 @@ import {
 import { approvedScopeFrom } from "../../agent/evidence.ts";
 import { buildEvidenceReport, type EvidenceObjectives } from "../../agent/evidenceReport.ts";
 import { runProvenanceEnv } from "../../agent/provenance.ts";
+import type { AgentProvider } from "../../agent/provider.ts";
+import { providerAttribution, runProvider } from "../../agent/providerAttribution.ts";
 import { requiredTestTargets } from "../../agent/verify.ts";
 import { repoPath } from "../../repos/service.ts";
 import { environmentUnavailable, testEvidence } from "../../agent/verify.ts";
@@ -1369,7 +1371,10 @@ export function prDescription(x: {
   commits: string;
   testExceptions?: Array<{ step: string; exception: AcceptedTestException }>;
   verificationNotes?: Array<{ step: string; status: string; lines: string[] }>;
+  /** The provider that did the work; the footer credits it. Absent: the footer PRs always had. */
+  provider?: AgentProvider;
 }) {
+  const credit = providerAttribution(x.provider ?? "claude");
   const exc = x.testExceptions ?? [];
   const vn = (x.verificationNotes ?? []).filter((n) => n.lines.length);
   return [
@@ -1402,7 +1407,7 @@ export function prDescription(x: {
           "",
         ]
       : []),
-    "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+    `🤖 Generated with [${credit.name}](${credit.url})`,
   ].join("\n");
 }
 
@@ -1724,6 +1729,7 @@ export const pullRequestExecutor: StepExecutor = {
         commits,
         testExceptions: await testExceptionsOf(ctx.run.id),
         verificationNotes: await verificationNotesOf(ctx.run.id),
+        provider: runProvider(ctx.run),
       });
       const slug = registry ? repositoryReference(registry) : w.repo;
       const destination = bases[w.repo]?.target || registry?.default_branch || config.baseBranch;

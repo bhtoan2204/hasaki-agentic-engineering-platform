@@ -1446,7 +1446,13 @@ test("context snapshot records the prompt plan; big upstream outputs are summari
     },
   });
   scripts.fix = async (ctx) => {
-    await ctx.recordMetrics({ cost_usd: 0.42, turns: 7, tool_calls: { Read: 3 } });
+    await ctx.recordMetrics({
+      cost_usd: 0.42,
+      turns: 7,
+      tool_calls: { Read: 3 },
+      duration_ms: 1500,
+      sessions: 2,
+    });
     return { kind: "completed", output: { ok: true } };
   };
   const run = await startRun({ definitionKey: key });
@@ -1463,8 +1469,19 @@ test("context snapshot records the prompt plan; big upstream outputs are summari
   const a = (await attemptsOf(run.id, "fix"))[0];
   assert.equal(a.metrics.cost_usd, 0.42);
   const { runMetrics, metricsSummary } = await import("../src/api/metrics.ts");
-  assert.equal((await runMetrics(run.id)).totals.cost_usd, 0.42);
+  const metrics = await runMetrics(run.id);
+  assert.equal(metrics.totals.cost_usd, 0.42);
+  // Provider-neutral names are emitted next to the legacy claude_* ones, with the same value.
+  assert.equal(metrics.totals.agent_ms, 1500);
+  assert.equal(metrics.totals.agent_ms, metrics.totals.claude_ms);
+  assert.equal(metrics.totals.agent_sessions, 2);
+  assert.equal(metrics.totals.agent_sessions, metrics.totals.claude_sessions);
+  assert.equal(metrics.per_step.fix.agent_ms, 1500);
+  assert.equal(metrics.per_step.fix.agent_ms, metrics.per_step.fix.claude_ms);
   const summary = await metricsSummary(1);
+  for (const row of summary.by_profile)
+    assert.equal(row.agent_attempts_per_run, row.claude_attempts_per_run);
+  assert.ok(summary.by_profile.length > 0);
   assert.ok(summary.tools.some((t: { tool: string }) => t.tool === "Read"));
 });
 

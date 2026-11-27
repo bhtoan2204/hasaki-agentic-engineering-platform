@@ -154,8 +154,11 @@ export interface RunMetrics {
     human_ms: number;
     cost_unknown?: boolean;
     cost_usd: number | null;
-    claude_sessions: number;
-    claude_ms: number;
+    agent_sessions?: number;
+    agent_ms?: number;
+    /** Legacy names of agent_sessions / agent_ms. */
+    claude_sessions?: number;
+    claude_ms?: number;
     turns: number;
     input_tokens: number | null;
     output_tokens: number | null;
@@ -176,7 +179,8 @@ export interface RunMetrics {
       queue_ms: number;
       exec_ms: number;
       human_ms: number;
-      claude_ms: number;
+      agent_ms?: number;
+      claude_ms?: number;
       turns: number;
     }
   >;

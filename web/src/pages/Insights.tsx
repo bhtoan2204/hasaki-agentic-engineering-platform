@@ -26,6 +26,7 @@ import {
   Recycle,
   type LucideIcon,
 } from "lucide-react";
+import { agentAttemptsPerRun } from "../agentMetrics.ts";
 import { useApi, useLive } from "../api.ts";
 import {
   Badge,
@@ -92,7 +93,9 @@ type ProfileMetric = {
   runs: Numeric;
   completed: Numeric;
   avg_wall_min: Numeric;
-  claude_attempts_per_run: Numeric;
+  agent_attempts_per_run?: Numeric;
+  /** Legacy name of agent_attempts_per_run. */
+  claude_attempts_per_run?: Numeric;
   turns_per_run: Numeric;
   cost_per_run: Numeric;
 };
@@ -715,7 +718,11 @@ function LegacyInsightsPage({ tab: tabParam }: { tab?: string }) {
                 ["runs", t("ins.col.runs")],
                 ["completed", t("ins.col.completed")],
                 ["avg_wall_min", t("ins.col.wall")],
-                ["claude_attempts_per_run", t("ins.col.claude")],
+                [
+                  "agent_attempts_per_run",
+                  t("ins.col.agent"),
+                  (r) => String(agentAttemptsPerRun(r) ?? ""),
+                ],
                 ["turns_per_run", t("ins.col.turns")],
                 ["cost_per_run", t("ins.col.cost")],
               ]}

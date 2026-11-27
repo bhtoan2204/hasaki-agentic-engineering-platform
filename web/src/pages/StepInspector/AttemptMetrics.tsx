@@ -1,3 +1,4 @@
+import { defaultModelKey } from "../../agentMetrics.ts";
 import { agentKey } from "../../agentProvider.tsx";
 import { Cpu } from "lucide-react";
 import { useI18n } from "../../i18n/index.tsx";
@@ -16,15 +17,7 @@ export function AttemptMetrics({ m }: { m: AttemptMetricsData }) {
           {[
             m.provider ? t(agentKey(m.provider, true)) : null,
             m.model ||
-              (m.provider && m.provider !== "claude"
-                ? t(
-                    m.provider === "antigravity"
-                      ? "run.antigravity.defaultModel"
-                      : m.provider === "copilot"
-                        ? "run.copilot.defaultModel"
-                        : "run.codex.defaultModel",
-                  )
-                : null),
+              (m.provider && defaultModelKey(m.provider) ? t(defaultModelKey(m.provider)!) : null),
             m.reasoning_effort,
           ]
             .filter(Boolean)

@@ -1,6 +1,6 @@
 # Provider Compatibility Standardization Progress
 
-> **Trạng thái hiện tại:** Đã hoàn tất **Phase 2 (Bước 5–6)** — **DỪNG** chờ duyệt để chuyển sang **Phase 3 (Bước 7–9)**. Toàn bộ thay đổi vẫn ở trạng thái uncommitted trong working tree.
+> **Trạng thái hiện tại:** Đã hoàn tất **cả 9 bước (Phase 1–3)**. Phase 3 đang ở trạng thái uncommitted trong working tree (Phase 1–2 đã được commit), chờ xác nhận cách tách commit.
 
 ## Checklist
 
@@ -30,9 +30,18 @@
   - Efforts: `PROVIDER_CAPABILITIES` là nguồn duy nhất cho validate cấu hình và adapter (Copilot thêm `none`/`minimal` theo `copilot --help`).
   - External skills: `copilot: "supported"` trong manifest, doc/audit cập nhật.
   - Claude: `claudeCapabilities()` chuẩn hóa lỗi binary/auth, nối vào `providerProbes` (preflight + readiness).
-- [ ] **Bước 7 — Telemetry & Chat Completion parity** _(Phase 3)_
-- [ ] **Bước 8 — Dọn Claude-isms (`metrics`, `report`, `builtin.ts` PR footer, `testFailure`, `web/` UI)** _(Phase 3)_
-- [ ] **Bước 9 — Kiểm thử toàn diện cuối** _(Phase 3)_
+- [x] **Bước 7 — Telemetry & Chat Completion parity** _(Phase 3)_
+  - `codex/copilot/antigravityComplete` trả `telemetry` (`reportedTelemetry`: null cho thứ CLI không báo, không bịa 0) và `session_id` (Copilot, Antigravity, khi `session.keep`; resume qua `--resume`/`--conversation`). Codex chỉ có turns/tool uses vì `codex exec --json` **không báo model** (đã kiểm chứng) ⇒ Chat với Codex vẫn `model_resolution: "unresolved"` — hạn chế của CLI, không phải bug.
+  - Copilot: usage không còn bị `result` event (không có token) ghi đè thành null; `reasoning` lấy từ `modelMetrics`; `turns` = số model request của CLI (không còn `turns: 1` bịa); thêm `durationMs`.
+  - `completeForRun` ghi `metrics.tool_protocol` ("native" | "chat-tool") và log `completion.native_tools_unavailable`; `chat/runtime.ts` ghi `tool_protocol` vào từng step và log `chat.tool_protocol` khi dùng prompt-block.
+  - `PROVIDER_CAPABILITIES.*.completion.providerTelemetry`: `codex`, `copilot`, `antigravity` → `true` (cursor vẫn `false`); `runtime.sessionResume` không đổi (nó là của agent turn, không phải completion).
+- [x] **Bước 8 — Dọn Claude-isms (`metrics`, `report`, `builtin.ts` PR footer, `testFailure`, `web/` UI)** _(Phase 3)_
+  - Đổi tên `workflowReportReasoner`, `providerTestFailureAdvisor`, `askProvider` (giữ alias `@deprecated` `claudeReportReasoner`, `claudeTestFailureAdvisor`).
+  - `TaskReport.generated_by`: ghi `"rules+ai"`, vẫn đọc `"rules+claude"` (`ReportGeneratedBy`); thông điệp rules-only trung tính (vi/en).
+  - PR footer: `providerAttribution(provider)` (+ `runProvider(run)`), áp dụng cho `prDescription` (PR thật và preview ở `git/changes.ts`).
+  - `src/api/metrics.ts` dual-emit: `agent_ms`, `agent_sessions`, `agent_attempts_per_run` song song `claude_*`.
+  - Web: `web/src/agentMetrics.ts`; `TestFailurePanel` (`!!by && by !== "rules"`), `AttemptMetrics` (thêm `run.cursor.defaultModel`, cursor không còn rơi sang nhãn Codex), `RunTotals`/`shared.tsx`/`Insights` đọc `agent_* ?? claude_*`, nhãn `rv.barAgent`/`ins.col.agent` trung tính (vi/en). CSS `.msg.claude` giữ nguyên.
+- [x] **Bước 9 — Kiểm thử toàn diện cuối** _(Phase 3)_ — xem "Kết quả kiểm thử cuối cùng".
 
 ## Kết quả kiểm thử kết thúc Phase 1
 
@@ -87,3 +96,55 @@
 - `npm test`: 1542/1542 pass
 - Integration liên quan (33 suite: codex, antigravity, provider, provider-handoff, step-agent, agent-arch, agent-configuration, harness, shared-*, external-skills, ponytail, context-native, execution-contract-runtime, …): 430 pass, 0 fail, 2 skip
 - `npm run build`: pass
+
+## Quyết định sau Phase 2
+
+1. Copilot `--trust-folder`: bật (giả định tin cậy repo nội bộ — PLAN.md §5 Rủi ro #6).
+2. Claude `preflightProbe`: giữ `false`; `claudeCapabilities()` chỉ cho status/readiness.
+3. Option `sandbox` của Copilot: giữ trong config/schema (tương thích ngược), `writeSandbox: false`.
+4. Phase 3: red → green rõ ràng cho từng bug mới.
+5. **Manual verification còn lại (sau khi worker đăng nhập `agy`):** `agy` thật có phát `result` event ở cuối stream-json không; MCP server của `agy` có kế thừa env `PLATFORM_BROKER_*` không (để có thể bỏ token khỏi `.agents/mcp_config.json`).
+
+## Phase 3 (Bước 7–9): kết quả
+
+### TDD (red → green)
+
+Mỗi bug dưới đây có test đỏ trước khi sửa (xác nhận bằng lần chạy thất bại đúng lý do):
+
+| Bug                                                                           | Test                                                                   | Đỏ vì                                    |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------- |
+| Copilot null hóa usage (checkpoint bị `result` ghi đè)                        | `provider-completion-telemetry.test.ts`                                | tokens toàn null                         |
+| Complete của 3 CLI không có telemetry / session_id                            | cùng file                                                              | `telemetry` undefined                    |
+| Tool offered cho provider không có native tools bị bỏ im lặng                 | `completion-tool-protocol.test.ts`                                     | `tool_protocol` undefined                |
+| `generated_by` / thông điệp rules-only gắn "Claude"                           | `report.test.ts`                                                       | giá trị `rules+claude`, còn chữ "Claude" |
+| Tên helper trung tính                                                         | `neutral-helper-names.test.ts` (+ `codex.integration.ts` dùng tên mới) | import không tồn tại                     |
+| PR footer cứng "Claude Code"                                                  | `pr-footer.test.ts`                                                    | module `providerAttribution` chưa có     |
+| Metrics chỉ có `claude_*`                                                     | `engine.integration.ts` (mở rộng test metrics có sẵn)                  | `agent_ms` undefined                     |
+| UI: `by === "claude"`, label model của Cursor, field `agent_*`, nhãn "Claude" | `agent-metrics-view.test.ts`                                           | module `agentMetrics` chưa có            |
+
+Phần chỉ là ghi nhận/log (`tool_protocol` trong step của `chat/runtime.ts`) không có test riêng; được phủ gián tiếp bởi các suite chat.
+
+### Cái chưa làm / hạn chế
+
+- **Codex không báo model** trong `exec --json` ⇒ `session_model`/`api_models` luôn rỗng; `modelUnresolved` của Chat/CodeAct với Codex không thể hết. Muốn khác phải đọc từ nguồn khác (ngoài phạm vi).
+- Codex complete vẫn `--ephemeral`: không có `session_id` (không hỗ trợ resume trong completion).
+- Copilot lưu session trên đĩa kể cả khi `session.keep=false` (CLI không có cờ ephemeral đã kiểm chứng); hành vi có từ trước, không đổi.
+- Đọc cũ: DB cũ có `generated_by = "rules+claude"` và API cũ có `claude_*` vẫn hoạt động (type + dual-emit); chưa có migration/backfill (không cần).
+- `providerAttribution`: URL của Codex/Copilot/Antigravity/Cursor là trang sản phẩm công khai, chưa xác minh bằng request.
+
+### Kết quả kiểm thử cuối cùng
+
+- `npm run typecheck` (root + web): pass; `npm run lint`: pass; `npx prettier --check .`: pass
+- `npm run arch:check`: `{"files":526,"edges":3005,"cycles":5,"violations":5}` (không tăng; trong quá trình làm có lúc `complete.ts` của Copilot/Antigravity bị kéo vào cycle lớn, đã tránh bằng module lá `reportedTelemetry.ts`)
+- `npm test`: 1561/1561 pass
+- Toàn bộ `test/*.integration.ts` (gồm provider*, codex, antigravity, step-agent, agent-arch, agent-configuration, harness, chat-_, codeact-_, shared-*, report/metrics/engine): 1284 tests, 1282 pass, 0 fail, 2 skip
+- `npm run build`: pass
+- Gitleaks 8.30.1 (cùng bản và checksum với CI) quét toàn bộ file đã đổi/mới: 0 finding.
+
+### Cần xác minh trên CI / worker thật
+
+1. **Gitleaks trên CI** (quét theo commit): bản local chỉ quét nội dung file, chưa quét lịch sử commit mới.
+2. **Browser smoke / SPA** (`test/*.browser.ts`, `*.smoke.ts` — không chạy ở đây): các trang Run view, Insights, Step inspector đổi cách đọc `agent_* ?? claude_*`; kiểm bằng mắt hoặc smoke trên bản build.
+3. **`agy` live check** (đã chốt): `result` event ở cuối stream-json và MCP env inheritance của `agy` thật, sau khi worker đăng nhập `agy`.
+4. Copilot live (`test/copilot.live.ts`): hook `preToolUse` + `--trust-folder` và telemetry/usage từ Copilot thật trên worker (đã kiểm tay ở Phase 2/3 trên máy này).
+5. Codex live (`test/codex.live.ts`): `codexComplete` telemetry với CLI thật.

@@ -1,4 +1,5 @@
 import { liveRuntime, observeLiveUsage } from "../eval/liveRuntime.ts";
+import type { ProviderTelemetry } from "./reportedTelemetry.ts";
 import type { SkillTrace } from "./skillTracing.ts";
 /** Per-attempt metrics, accumulated across provider messages and session resume, without orchestration dependencies. */
 export interface AgentMetrics {
@@ -119,7 +120,10 @@ const stateOf = (m: AgentMetrics) => {
  * announced and the models its API messages carried (an alias resolves there). Null when not reported — the requested
  * model is never substituted, and a completion that ended without a result has unknown turns and duration.
  */
-export function providerTelemetry(m: AgentMetrics, o: { completed?: boolean } = {}) {
+export function providerTelemetry(
+  m: AgentMetrics,
+  o: { completed?: boolean } = {},
+): ProviderTelemetry {
   const st = stateOf(m);
   const finished = st.resultSeen && o.completed !== false;
   return {
@@ -133,7 +137,7 @@ export function providerTelemetry(m: AgentMetrics, o: { completed?: boolean } = 
     reasoning_tokens: m.tokens?.reasoning_output ?? null,
   };
 }
-export type ProviderTelemetry = ReturnType<typeof providerTelemetry>;
+export type { ProviderTelemetry };
 const seenMessages = new WeakMap<AgentMetrics, Set<string>>();
 /** Side state for repetition / first-touch measurement (not persisted itself). */
 const toolState = new WeakMap<

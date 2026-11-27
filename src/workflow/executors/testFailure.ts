@@ -326,8 +326,8 @@ export function setTestFailureAdvisor(a: TestFailureAdvisor | null) {
   advisor = a;
 }
 
-/** The run's provider answers (completeForRun): a Codex or Cursor run never asks Claude here. */
-async function askClaude<T>(
+/** The run's provider answers (completeForRun): no run asks Claude when its own provider is another one. */
+async function askProvider<T>(
   prompt: string,
   ctx?: ExecutionContext,
   provider: AgentProvider = "claude",
@@ -366,9 +366,9 @@ const compact = (d: Diagnosis) =>
     1,
   ).slice(0, 40_000);
 
-export const claudeTestFailureAdvisor: TestFailureAdvisor = {
+export const providerTestFailureAdvisor: TestFailureAdvisor = {
   async explain(d, locale = "vi", provider: AgentProvider = "claude") {
-    return askClaude(
+    return askProvider(
       [
         languagePolicy(locale),
         "Explain this test failure to a developer briefly (max 5 sentences): what failed, based on which evidence",
@@ -392,7 +392,7 @@ export const claudeTestFailureAdvisor: TestFailureAdvisor = {
     );
   },
   async interpret(d, history, answer, locale = "vi", provider: AgentProvider = "claude") {
-    return askClaude(
+    return askProvider(
       [
         languagePolicy(locale),
         "A developer answered how to proceed with a failed test step. Map the answer to ONE decision:",
@@ -691,3 +691,6 @@ export async function handleDecision(
       return p.question ? reask(p.question, true) : reask("Chưa rõ hướng xử lý. ");
   }
 }
+
+/** @deprecated Use providerTestFailureAdvisor. */
+export const claudeTestFailureAdvisor = providerTestFailureAdvisor;

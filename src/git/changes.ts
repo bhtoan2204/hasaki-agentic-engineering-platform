@@ -10,6 +10,7 @@ import {
   testExceptionsOf,
   verificationNotesOf,
 } from "../workflow/executors/builtin.ts";
+import { runProvider } from "../agent/providerAttribution.ts";
 import { workspacesOf } from "./provider.ts";
 
 const exec = promisify(execFile);
@@ -136,6 +137,7 @@ export async function runChanges(runId: number, viewerId?: number) {
           commits: commitList.map((c) => `${c.hash} ${c.subject}`).join("\n"),
           testExceptions,
           verificationNotes,
+          provider: runProvider(run),
         }),
         will_open:
           run.selected_repositories.includes(w.repo) && commitList.length > 0 && !status.trim(),

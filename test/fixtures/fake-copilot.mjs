@@ -124,6 +124,46 @@ if (mode === "quota") {
   process.exit(1);
 }
 
+if (mode === "aux_real" || mode === "aux_real_tools") {
+  // The event sequence Copilot CLI 1.0.113 prints for a one-shot prompt (trimmed): the result event carries no tokens.
+  out({ type: "session.start", data: { sessionId } });
+  out({ type: "session.model_change", data: { source: "startup", newModel: "auto" } });
+  out({ type: "session.auto_mode_resolved", data: { chosenModel: "gpt-fake-1" } });
+  out({ type: "assistant.turn_start", data: { turnId: "0" } });
+  out({ type: "model.call_start", data: { model: "gpt-fake-1" } });
+  if (mode === "aux_real_tools") {
+    for (const id of ["t1", "t2"]) {
+      out({ type: "tool.execution_start", data: { toolCallId: id, toolName: "bash", arguments: { command: "ls" } } });
+      out({ type: "tool.execution_complete", data: { toolCallId: id, success: true } });
+    }
+  }
+  out({ type: "assistant.message", data: { content: "ok", model: "gpt-fake-1", toolRequests: [] } });
+  out({
+    type: "session.usage_checkpoint",
+    data: {
+      totalPremiumRequests: 1,
+      accountingSnapshot: {
+        tokenDetails: {
+          input: { tokenCount: 3 },
+          cache_read: { tokenCount: 10175 },
+          cache_write: { tokenCount: 7099 },
+          output: { tokenCount: 5 },
+        },
+        currentModel: "gpt-fake-1",
+        modelMetrics: {
+          "gpt-fake-1": {
+            requests: { count: 1, cost: 1 },
+            usage: { inputTokens: 17277, outputTokens: 5, cacheReadTokens: 10175, cacheWriteTokens: 7099, reasoningTokens: 0 },
+          },
+        },
+      },
+    },
+  });
+  out({ type: "assistant.idle", data: {} });
+  out({ type: "result", sessionId, exitCode: 0, usage: { premiumRequests: 1, totalApiDurationMs: 2451, sessionDurationMs: 8602 } });
+  process.exit(0);
+}
+
 if (mode === "aux_complete") {
   out({ type: "session.start", data: { sessionId } });
   out({

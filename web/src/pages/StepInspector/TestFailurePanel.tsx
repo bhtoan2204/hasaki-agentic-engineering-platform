@@ -5,6 +5,7 @@ import {
   MessageCircleQuestion,
   MessagesSquare,
 } from "lucide-react";
+import { explainedByAi } from "../../agentMetrics.ts";
 import { Badge } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { type AttemptRow, CAT_STATUS, type QuestionRow, type StepRow } from "./shared.tsx";
@@ -77,7 +78,7 @@ export function TestFailurePanel({
           {d.explanation && (
             <div className="rv-card soft" style={{ padding: "10px 12px" }}>
               <div className="small">
-                <b>{d.explanation.by === "claude" ? t("si.ai") : t("si.brief")}:</b>{" "}
+                <b>{explainedByAi(d.explanation.by) ? t("si.ai") : t("si.brief")}:</b>{" "}
                 {d.explanation.text}
               </div>
               <div className="small" style={{ marginTop: 4 }}>

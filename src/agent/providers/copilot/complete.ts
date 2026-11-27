@@ -2,6 +2,11 @@ import { copilotConfig } from "../../../config.ts";
 import { redactSecrets } from "../../../integrations/redact.ts";
 import { activityLabel, type CompletionStreamListener } from "../../completionStream.ts";
 import { completionFailure } from "../../completionFailure.ts";
+import {
+  mergeReportedTokens,
+  reportedTelemetry,
+  type ProviderTelemetry,
+} from "../../reportedTelemetry.ts";
 import { superviseSpawn } from "../../process/supervisor.ts";
 import {
   buildCopilotArgs,
@@ -10,7 +15,7 @@ import {
   writeCopilotStdinPrompt,
 } from "./args.ts";
 import { copilotCapabilities, copilotEnv } from "./capabilities.ts";
-import { CopilotStream, classifyCopilotError } from "./stream.ts";
+import { CopilotStream, classifyCopilotError, type CopilotEvent } from "./stream.ts";
 
 /** One-shot headless auxiliary completion (Phase 10). */
 export async function copilotComplete(
@@ -21,11 +26,14 @@ export async function copilotComplete(
     effort?: string;
     timeoutMs?: number;
     onStream?: CompletionStreamListener;
+    session?: { keep: boolean; resume?: string | null };
   },
 ): Promise<{
   text: string;
   model?: string;
   tokens: Record<string, number | null> | null;
+  session_id?: string | null;
+  telemetry: ProviderTelemetry;
 }> {
   const cfg = copilotConfig();
   if (opts?.signal?.aborted) throw new Error("Copilot auxiliary completion canceled");
@@ -45,6 +53,7 @@ export async function copilotComplete(
     useStdinPrompt: useStdin,
     model: (opts?.model ?? cfg.model) || undefined,
     effort: (opts?.effort ?? cfg.effort) || undefined,
+    conversationId: (opts?.session?.keep && opts.session.resume) || undefined,
     allowTools: false,
   });
 
@@ -71,37 +80,54 @@ export async function copilotComplete(
   let stderr = "";
   let lastError: string | undefined;
   let tokens: Record<string, number | null> | null = null;
+  let conversationId: string | undefined;
+  let sessionModel: string | null = null;
+  const apiModels = new Set<string>();
+  let toolUses = 0;
+  let modelTurns: number | null = null;
+  let apiDurationMs: number | null = null;
   const parser = new CopilotStream();
 
-  child.stdout?.on("data", (chunk: Buffer) => {
-    const { events } = parser.push(chunk);
-    for (const ev of events) {
-      const before = text;
-      if (ev.model) model = ev.model;
-      if (ev.error) lastError = ev.error;
-      if (ev.type === "result") {
-        if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
-      } else if (ev.type === "assistant.message" && ev.text) {
-        text = ev.text.slice(0, MAX_RESPONSE_CHARS);
-      } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
-        text += ev.text.slice(0, MAX_RESPONSE_CHARS - text.length);
-      if (ev.tokens) {
-        tokens = {
-          input: ev.tokens.input ?? null,
-          output: ev.tokens.output ?? null,
-          reasoning_output: ev.tokens.reasoning ?? null,
-          cache_read: ev.tokens.cache_read ?? null,
-        };
-      }
-      const stream = opts?.onStream;
-      if (stream) {
-        if (!started) stream({ type: "started" });
-        if (ev.thinking) stream({ type: "reasoning", delta: ev.thinking });
-        if (ev.tool) stream({ type: "activity", label: activityLabel("tool", ev.tool) });
-        if (text !== before) stream({ type: "text", text });
-      }
-      started = true;
+  const observe = (ev: CopilotEvent) => {
+    const before = text;
+    if (ev.model) model = ev.model;
+    if (ev.error) lastError = ev.error;
+    if (ev.conversationId) conversationId = ev.conversationId;
+    if (ev.type === "session.auto_mode_resolved" && ev.model) sessionModel = ev.model;
+    else if (ev.type === "session.model_change" && ev.model && ev.model !== "auto")
+      sessionModel ??= ev.model;
+    if ((ev.type === "assistant.message" || ev.type === "model.call_start") && ev.model)
+      apiModels.add(ev.model);
+    if (ev.tool) toolUses++;
+    if (ev.turns != null) modelTurns = ev.turns;
+    if (ev.durationMs != null) apiDurationMs = ev.durationMs;
+    if (ev.type === "result") {
+      if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
+    } else if (ev.type === "assistant.message" && ev.text) {
+      text = ev.text.slice(0, MAX_RESPONSE_CHARS);
+    } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
+      text += ev.text.slice(0, MAX_RESPONSE_CHARS - text.length);
+    if (ev.tokens) {
+      tokens = mergeReportedTokens(tokens, {
+        input: ev.tokens.input,
+        output: ev.tokens.output,
+        reasoning_output: ev.tokens.reasoning,
+        cache_read: ev.tokens.cache_read,
+        cache_creation: ev.tokens.cache_creation,
+      });
     }
+    const stream = opts?.onStream;
+    if (stream) {
+      if (!started) stream({ type: "started" });
+      if (ev.thinking) stream({ type: "reasoning", delta: ev.thinking });
+      if (ev.tool) stream({ type: "activity", label: activityLabel("tool", ev.tool) });
+      if (text !== before) stream({ type: "text", text });
+    }
+    started = true;
+  };
+
+  child.stdout?.on("data", (chunk: Buffer) => {
+    for (const ev of parser.push(chunk).events) observe(ev);
   });
 
   child.stderr?.on("data", (chunk: Buffer) => {
@@ -124,17 +150,7 @@ export async function copilotComplete(
   opts?.signal?.removeEventListener("abort", onAbort);
   const timedOut = (await proc.done).outcome === "timeout";
 
-  const tail = parser.flush();
-  for (const ev of tail.events) {
-    if (ev.model) model = ev.model;
-    if (ev.error) lastError = ev.error;
-    if (ev.type === "result") {
-      if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
-    } else if (ev.type === "assistant.message" && ev.text) {
-      text = ev.text.slice(0, MAX_RESPONSE_CHARS);
-    } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
-      text += ev.text.slice(0, MAX_RESPONSE_CHARS - text.length);
-  }
+  for (const ev of parser.flush().events) observe(ev);
 
   if (opts?.signal?.aborted) throw new Error("Copilot auxiliary completion canceled");
   if (timedOut)
@@ -151,5 +167,18 @@ export async function copilotComplete(
     throw completionFailure(detail, classifyCopilotError(detail));
   }
 
-  return { text: text.trim(), model: model || undefined, tokens };
+  return {
+    text: text.trim(),
+    model: model || undefined,
+    tokens,
+    ...(opts?.session?.keep ? { session_id: conversationId ?? null } : {}),
+    telemetry: reportedTelemetry({
+      session_model: sessionModel,
+      api_models: [...apiModels].sort(),
+      model_turns: modelTurns,
+      provider_tool_uses: toolUses,
+      provider_duration_ms: apiDurationMs,
+      reasoning_tokens: (tokens as Record<string, number | null> | null)?.reasoning_output ?? null,
+    }),
+  };
 }

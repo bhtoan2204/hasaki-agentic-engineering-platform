@@ -951,7 +951,11 @@ async function executeTurn(
             : [];
         if (!reported.length) modelUnresolved = true;
         for (const m of reported) providerModels.add(m);
+        const toolProtocol = native ? "native" : catalog ? "chat-tool" : null;
+        if (toolProtocol === "chat-tool" && step === 0 && attempt === 0)
+          log.info("chat.tool_protocol", { provider: admission.provider, protocol: toolProtocol });
         steps.push({
+          tool_protocol: toolProtocol,
           provider_models: reported,
           model_turns: tel?.model_turns ?? null,
           provider_tool_uses: tel?.provider_tool_uses ?? null,

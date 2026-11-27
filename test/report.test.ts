@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { analyzeRequirement, parseAiSuggest } from "../src/report/aiSuggest.ts";
-import { buildReport, renderMarkdown } from "../src/report/build.ts";
+import { buildReport, renderMarkdown, type ReportGeneratedBy } from "../src/report/build.ts";
 import type { Evidence } from "../src/report/evidence.ts";
 
 const PAYLOAD = {
@@ -218,6 +218,21 @@ test("verified: a screenshot the user attached to the requirement verifies it (w
     "without reasoning nothing is auto-verified",
   );
   assert.equal(rulesOnly.generated_by, "rules");
+  assert.equal(buildReport(spec, EV, allVerified, meta).generated_by, "rules+ai");
+});
+
+test("the rules-only note does not name a provider, in either language", () => {
+  const limitations = (language: "vi" | "en") =>
+    buildReport({ ...spec, language }, EV, null, meta).limitations.join("\n");
+  assert.doesNotMatch(limitations("en"), /Claude/);
+  assert.doesNotMatch(limitations("vi"), /Claude/);
+  assert.match(limitations("en"), /No AI analysis/);
+  assert.match(limitations("vi"), /Không có phân tích của AI/);
+});
+
+test("a report stored with the old generated_by value is still read", () => {
+  const stored: ReportGeneratedBy = "rules+claude";
+  assert.equal(stored, "rules+claude");
 });
 
 test("markdown follows the requested sections in Vietnamese and states missing evidence", () => {

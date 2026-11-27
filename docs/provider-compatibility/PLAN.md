@@ -291,6 +291,8 @@ _Mục tiêu: Minh bạch dữ liệu vận hành cho mọi provider và dọn s
 3. **Backward compatibility của API metrics & báo cáo cũ:** `src/api/metrics.ts`, DB artifacts (`TaskReport`), và frontend có thể đang có consumer hoặc test dựa vào `claude_ms`, `claude_sessions`, `generated_by: "rules+claude"`.
 4. **Hợp đồng Shared Results:** Đổi tên model placeholder hay normalization ở `stepAgent.ts` / `configuration.ts` cần giữ ổn định hàm `analysisContext()` (`src/sharing/context.ts`) để không vô hiệu hóa cache không cần thiết.
 
+5. **Giả định tin cậy khi bật `--trust-folder` cho Copilot (chốt sau Phase 2):** Copilot CLI 1.0.113 chỉ nạp `.github/hooks` ở prompt mode khi folder được trust cho phiên đó, nên nền tảng truyền `--trust-folder`. Cờ này cũng nạp cấu hình do chính repo cung cấp (`.github/hooks/*`, `.github/copilot/settings.json`, plugin/MCP của repo). Giả định: **chỉ các repo nội bộ đã đăng ký trong nền tảng được chạy bằng Copilot** (cùng mức tin cậy với việc chạy test/build của repo trên worker). Repo không tin cậy không được chạy bằng Copilot; `.github/hooks` và `.agents` được bảo vệ chỉ-đọc khi chạy trong sandbox.
+
 ### Open Questions & Quyết định đã chốt
 
 1. **Phân tầng ưu tiên (Tier) cho 4 non-Claude providers — ĐÃ CHỐT:**
@@ -311,3 +313,27 @@ _Mục tiêu: Minh bạch dữ liệu vận hành cho mọi provider và dọn s
 
 5. **Chữ ký PR tự động (`src/workflow/executors/builtin.ts:1405`) — ĐÃ CHỐT:**
    - Đổi sang hiển thị tên provider thực tế của run (ví dụ: `Claude Code` / `OpenAI Codex` / `GitHub Copilot` / `Google Antigravity` / `Cursor`) thay vì gắn cứng `Claude Code`.
+
+### Các điểm mở sau Phase 2 — ĐÃ CHỐT
+
+1. Copilot `--trust-folder`: **bật** để `preToolUse` hook hoạt động (giả định tin cậy ở Rủi ro #6).
+2. Claude `preflightProbe`: **giữ `false`**. `claudeCapabilities()` chỉ dùng cho status/readiness probe, tránh chặn nhầm CI / OAuth token / binary bundle.
+3. Option `sandbox` của Copilot: **giữ** trong config/schema để tương thích ngược cấu hình đã lưu; `writeSandbox: false` trong `PROVIDER_CAPABILITIES`.
+4. TDD ở Phase 3: red → green rõ ràng cho các bug logic/telemetry/UI mới sửa.
+5. Antigravity live check (`result` event và MCP env inheritance của `agy` thật): giữ trong danh sách manual verification, chạy sau khi worker đăng nhập `agy`.
+
+---
+
+## Trạng thái triển khai
+
+| Bước | Nội dung                                                  | Trạng thái                       |
+| ---- | --------------------------------------------------------- | -------------------------------- |
+| 1    | Khảo sát & lập kế hoạch                                   | Xong                             |
+| 2    | Tách shared helpers khỏi `claude.ts`                      | Xong (Phase 1)                   |
+| 3    | Chuẩn hóa `src/agent/providers/<name>/` & `arch:check`    | Xong (Phase 1)                   |
+| 4    | Hợp nhất `ProviderCapabilities`                           | Xong (Phase 1)                   |
+| 5    | Vá Security & Policy non-Claude                           | Xong (Phase 2)                   |
+| 6    | Reliability, Bridge timeout, Validation & External Skills | Xong (Phase 2)                   |
+| 7    | Telemetry & Chat Completion parity                        | Xong (Phase 3)                   |
+| 8    | Dọn Claude-isms ngoài `src/agent/`                        | Xong (Phase 3)                   |
+| 9    | Kiểm thử toàn diện & chốt hồ sơ                           | Xong (Phase 3) — xem PROGRESS.md |

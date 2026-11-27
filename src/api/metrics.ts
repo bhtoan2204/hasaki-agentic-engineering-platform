@@ -10,7 +10,7 @@ import { VERIFICATION_SUMMARY } from "../workflow/runRepository.ts";
  *   queue_ms  job available → attempt started (worker contention, retry backoff excluded)
  *   exec_ms   attempt started → attempt finished or started waiting (machine time)
  *   human_ms  waiting for an answer/approval (finished → resolved)
- *   claude_ms SDK-reported session duration; tool_ms paired tool_use → tool_result event timestamps
+ *   agent_ms  provider-reported session duration (claude_ms is the same value under its legacy name); tool_ms paired tool_use → tool_result event timestamps
  *   cost_usd  SDK estimate (not a bill)
  */
 export async function runMetrics(runId: number) {
@@ -71,6 +71,7 @@ export async function runMetrics(runId: number) {
     exec_ms: 0,
     queue_ms: 0,
     human_ms: 0,
+    agent_ms: 0,
     claude_ms: 0,
     tool_ms: 0,
     command_ms: 0,
@@ -87,6 +88,7 @@ export async function runMetrics(runId: number) {
     },
     subagents: 0,
     denied: 0,
+    agent_sessions: 0,
     claude_sessions: 0,
     cost_unknown: 0,
     // Measured from tool events / platform tool calls (null = no attempt reported it — never invented).
@@ -109,6 +111,8 @@ export async function runMetrics(runId: number) {
       exec_ms: number;
       queue_ms: number;
       human_ms: number;
+      agent_ms: number;
+      /** Legacy name of agent_ms, emitted for existing consumers. */
       claude_ms: number;
       turns: number;
     }
@@ -120,7 +124,8 @@ export async function runMetrics(runId: number) {
     totals.exec_ms += Number(a.exec_ms);
     totals.queue_ms += Number(a.queue_ms ?? 0);
     totals.human_ms += Number(a.human_ms ?? 0);
-    totals.claude_ms += m.duration_ms ?? 0;
+    totals.agent_ms += m.duration_ms ?? 0;
+    totals.claude_ms = totals.agent_ms;
     totals.tool_ms += a.tool_ms;
     if (a.step_type === "command") totals.command_ms += Number(a.exec_ms);
     if (m.cost_usd != null) totals.cost_usd = (totals.cost_usd ?? 0) + m.cost_usd;
@@ -132,7 +137,8 @@ export async function runMetrics(runId: number) {
     if (m.tokens?.cache_read != null)
       totals.cache_read_tokens = (totals.cache_read_tokens ?? 0) + m.tokens.cache_read;
     totals.turns += m.turns ?? 0;
-    totals.claude_sessions += m.sessions ?? 0;
+    totals.agent_sessions += m.sessions ?? 0;
+    totals.claude_sessions = totals.agent_sessions;
     totals.tool_calls += Object.values<number>(m.tool_calls ?? {}).reduce((x, y) => x + y, 0);
     totals.integration_calls += (m.integration_calls ?? []).length;
     totals.skills_loaded += (m.skills_loaded ?? []).length;
@@ -173,6 +179,7 @@ export async function runMetrics(runId: number) {
       exec_ms: 0,
       queue_ms: 0,
       human_ms: 0,
+      agent_ms: 0,
       claude_ms: 0,
       turns: 0,
     });
@@ -180,7 +187,8 @@ export async function runMetrics(runId: number) {
     ps.exec_ms += Number(a.exec_ms);
     ps.queue_ms += Number(a.queue_ms ?? 0);
     ps.human_ms += Number(a.human_ms ?? 0);
-    ps.claude_ms += m.duration_ms ?? 0;
+    ps.agent_ms += m.duration_ms ?? 0;
+    ps.claude_ms = ps.agent_ms;
     ps.turns += m.turns ?? 0;
   }
   totals.retries = Object.values(perStep).reduce((n, s) => n + Math.max(0, s.attempts - 1), 0);
@@ -279,6 +287,7 @@ export async function metricsSummary(days = 30, scope?: { ownerId?: number; all?
             round(avg(extract(epoch FROM (r.finished_at - r.started_at))) FILTER (WHERE r.finished_at IS NOT NULL)::numeric / 60, 1) AS avg_wall_min,
             round(COALESCE(sum((a.metrics->>'turns')::numeric), 0) / NULLIF(count(DISTINCT r.id), 0), 1) AS turns_per_run,
             round(sum((a.metrics->>'cost_usd')::numeric) / NULLIF(count(DISTINCT r.id), 0), 3) AS cost_per_run,
+            round(count(a.id) FILTER (WHERE a.metrics ? 'turns')::numeric / NULLIF(count(DISTINCT r.id), 0), 1) AS agent_attempts_per_run,
             round(count(a.id) FILTER (WHERE a.metrics ? 'turns')::numeric / NULLIF(count(DISTINCT r.id), 0), 1) AS claude_attempts_per_run
        FROM workflow_runs r LEFT JOIN workflow_step_attempts a ON a.run_id = r.id
       WHERE r.created_at > ${since} ${own} GROUP BY 1 ORDER BY 1`,

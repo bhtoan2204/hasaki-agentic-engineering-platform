@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { log } from "../logging.ts";
 import { assertModelAllowed } from "./modelPolicy.ts";
 import {
   type Completion,
@@ -86,6 +87,16 @@ export async function completeForRun(
     throw new ProviderCapabilityError(
       `${resolved.provider} cannot read images in chat; choose a vision-capable provider (${VISION_PROVIDERS.join(", ")}) or AUTO`,
     );
+  const toolProtocol = extras.nativeTools
+    ? caps.completion.chatNativeTools
+      ? "native"
+      : "chat-tool"
+    : undefined;
+  if (toolProtocol === "chat-tool")
+    log.info("completion.native_tools_unavailable", {
+      provider: resolved.provider,
+      protocol: toolProtocol,
+    });
   const timeoutMs = Math.min(resolved.timeout_ms ?? 600_000, 600_000);
   const deadline = AbortSignal.timeout(timeoutMs);
   const started = Date.now();
@@ -116,6 +127,7 @@ export async function completeForRun(
       cost_usd: result.cost_usd ?? null,
       tokens: result.tokens,
       telemetry: result.telemetry ?? null,
+      ...(toolProtocol ? { tool_protocol: toolProtocol } : {}),
     },
   };
 }

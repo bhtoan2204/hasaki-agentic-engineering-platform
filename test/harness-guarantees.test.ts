@@ -98,6 +98,12 @@ test("every provider bridge waits as long as its declared RPC timeout", () => {
   }
 });
 
+test("providerTelemetry is declared exactly for the providers whose completion reports it", () => {
+  for (const p of ["claude", "codex", "copilot", "antigravity"] as const)
+    assert.equal(providerCapabilities(p).completion.providerTelemetry, true, p);
+  assert.equal(providerCapabilities("cursor").completion.providerTelemetry, false);
+});
+
 test("Copilot does not promise an OS write sandbox it cannot enforce", () => {
   assert.equal(providerCapabilities("copilot").guarantees.writeSandbox, false);
   assert.ok(!GUARANTEES.copilot.includes("write_sandbox"));

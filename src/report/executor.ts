@@ -26,12 +26,12 @@ export type ReportReasoner = (
   evidence: Evidence[],
 ) => Promise<Proposal>;
 let reasoner: ReportReasoner | null = null;
-/** Default: Claude (set at startup). Tests inject a deterministic reasoner or null (rules only). */
+/** Default: the workflow reasoner (set at startup). Tests inject a deterministic reasoner or null (rules only). */
 export function setReportReasoner(r: ReportReasoner | null) {
   reasoner = r;
 }
 
-export const claudeReportReasoner: ReportReasoner = async (ctx, spec, evidence) => {
+export const workflowReportReasoner: ReportReasoner = async (ctx, spec, evidence) => {
   const vi = spec.language === "vi";
   const prompt = [
     "You write the evidence mapping for a task result report. Use ONLY the evidence catalogue below; never invent evidence,",
@@ -275,3 +275,6 @@ export const taskResultReportExecutor: StepExecutor = {
     };
   },
 };
+
+/** @deprecated Use workflowReportReasoner: the run's own provider answers, not necessarily Claude. */
+export const claudeReportReasoner = workflowReportReasoner;
