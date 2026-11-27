@@ -8,7 +8,7 @@ import { observeLiveUsage } from "../../../eval/liveRuntime.ts";
 import { workspacesOf } from "../../../git/provider.ts";
 import { redactSecrets } from "../../../integrations/redact.ts";
 import type { ExecutionContext } from "../../../workflow/executors/registry.ts";
-import { startBroker, type Broker } from "../../broker/server.ts";
+import { hookRan, startBroker, type Broker } from "../../broker/server.ts";
 import {
   checkpointMark,
   readSubmitted,
@@ -91,15 +91,6 @@ function releaseSlot(max: number) {
     const next = waitingQueue.shift();
     if (next) next();
   }
-}
-
-/** The hook process starts as the tool event is emitted, so give it a moment to reach the broker. */
-async function hookRan(broker: Broker | null): Promise<boolean> {
-  for (let waited = 0; waited <= 3000; waited += 50) {
-    if ((broker?.preToolUseCalls ?? 0) > 0) return true;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  return false;
 }
 
 export async function copilotAgentTurn(input: CopilotTurnInput): Promise<CopilotTurnResult> {

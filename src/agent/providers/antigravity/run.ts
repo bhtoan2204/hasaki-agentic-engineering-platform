@@ -8,7 +8,7 @@ import { liveRuntime, observeLiveUsage } from "../../../eval/liveRuntime.ts";
 import { workspacesOf } from "../../../git/provider.ts";
 import { redactSecrets } from "../../../integrations/redact.ts";
 import type { ExecutionContext } from "../../../workflow/executors/registry.ts";
-import { startBroker, type Broker } from "../../broker/server.ts";
+import { hookRan, startBroker, type Broker } from "../../broker/server.ts";
 import {
   checkpointMark,
   readSubmitted,
@@ -330,7 +330,7 @@ export async function antigravityAgentTurn(
 
       if (ev.tool || ev.type === "result") await flushSpeech();
 
-      if (ev.tool && (broker?.preToolUseCalls ?? 0) === 0 && !violation) {
+      if (ev.tool && !violation && !(await hookRan(broker))) {
         violation =
           "Antigravity started a tool without running the platform's pre-execution hook; the run was stopped";
         input.metrics?.denied.push({ tool: ev.tool, reason: violation });

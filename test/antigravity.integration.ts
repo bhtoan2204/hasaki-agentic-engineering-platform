@@ -672,6 +672,21 @@ test("a stream cut off after a partial reply, without a result event, is INCOMPL
   assert.match(result.text, /partial reply was discarded/);
 });
 
+test("a tool event that arrives as its hook starts is not a hook bypass", async () => {
+  process.env.FAKE_AGY_MODE = "late-hook";
+  const r = await turn("analysis").run();
+  assert.notEqual(r.failure, "UNSAFE_SIDE_EFFECT", JSON.stringify(r));
+  assert.equal(r.isError, false, JSON.stringify(r));
+});
+
+test("a tool that never reaches the platform hook still stops the turn", async () => {
+  process.env.FAKE_AGY_MODE = "no-hook";
+  const r = await turn("analysis").run();
+  assert.equal(r.isError, true);
+  assert.equal(r.failure, "UNSAFE_SIDE_EFFECT");
+  assert.match(r.text, /without running the platform's pre-execution hook/);
+});
+
 test("Antigravity sends small and Unicode prompts through stdin only", async () => {
   process.env.FAKE_AGY_MODE = "ok";
   const prompt = "Tạo PR\n" + JSON.stringify({ escaped: '"\\', emoji: "🧪" });

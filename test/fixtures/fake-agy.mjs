@@ -222,6 +222,23 @@ async function tool(mcp, name, args) {
   return r.result;
 }
 
+if (mode === "late-hook") {
+  // The tool event is printed as the hook starts, like the real CLI: the hook reaches the broker a moment later.
+  out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
+  out({ event: "step_update", step_update: { step_type: "MCP_TOOL", tool_info: { name: "call_mcp_tool", parameters: { ToolName: "describe_tool", ServerName: "platform" } } } });
+  const r = callHook({ hook_event_name: "PreToolUse", tool_name: "call_mcp_tool", tool_input: {} });
+  log({ lateHook: r.status });
+  out({ event: "result", result: { status: "SUCCESS", response: "done", num_turns: 1 } });
+  process.exit(0);
+}
+
+if (mode === "no-hook") {
+  out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
+  out({ event: "step_update", step_update: { step_type: "MCP_TOOL", tool_info: { name: "call_mcp_tool", parameters: { ToolName: "describe_tool", ServerName: "platform" } } } });
+  await sleep(30_000);
+  process.exit(0);
+}
+
 if (mode === "truncated") {
   out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
   out({ type: "message", role: "assistant", content: "half an ans" });

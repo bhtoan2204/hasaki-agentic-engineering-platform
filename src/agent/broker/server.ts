@@ -62,6 +62,15 @@ export interface Broker {
 
 const CODING_ONLY = new Set(["prepare_branch", "commit_changes"]);
 
+/** The hook process starts as the tool event is emitted, so give it a moment to reach the broker. */
+export async function hookRan(broker: Broker | null): Promise<boolean> {
+  for (let waited = 0; waited <= 3000; waited += 50) {
+    if ((broker?.preToolUseCalls ?? 0) > 0) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
 export async function startBroker<P extends BrokerPolicy>(deps: BrokerDeps<P>): Promise<Broker> {
   const dir = mkdtempSync(join(tmpdir(), "ctp-codex-"));
   chmodSync(dir, 0o700);
