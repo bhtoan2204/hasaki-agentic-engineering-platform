@@ -82,8 +82,7 @@ const sessionId = resumeId || process.env.FAKE_COPILOT_SESSION || "copilot-sess-
 
 function mcpConfigPathFromArgv() {
   const raw = flagValue("--additional-mcp-config");
-  if (!raw) return join(process.cwd(), ".agents", "mcp_config.json");
-  if (raw.startsWith("@")) return raw.slice(1);
+  if (raw?.startsWith("@")) return raw.slice(1);
   return join(process.cwd(), ".agents", "mcp_config.json");
 }
 
@@ -143,30 +142,17 @@ if (mode === "aux_complete") {
   process.exit(0);
 }
 
-const hooksLegacy = join(process.cwd(), ".agents", "hooks.json");
 const hooksGithub = join(process.cwd(), ".github", "hooks", "ctp-platform.json");
 const mcpFile = mcpConfigPathFromArgv();
 
+// Like the real CLI (1.0.113): prompt mode loads .github/hooks only for a trusted folder, in the native schema.
 let hookCommand = null;
 let telemetryCommand = null;
-if (existsSync(hooksGithub)) {
+if (process.argv.includes("--trust-folder") && existsSync(hooksGithub)) {
   try {
     const hooksCfg = JSON.parse(readFileSync(hooksGithub, "utf8"));
-    telemetryCommand = hooksCfg.SessionStart?.[0]?.command ?? null;
-    hookCommand = hooksCfg.PreToolUse?.[0]?.hooks?.[0]?.command ?? null;
-  } catch {
-    /* ignore */
-  }
-}
-if (!hookCommand && existsSync(hooksLegacy)) {
-  try {
-    const hooksCfg = JSON.parse(readFileSync(hooksLegacy, "utf8"));
-    telemetryCommand = telemetryCommand || hooksCfg["platform-model"]?.PreInvocation?.[0]?.command || null;
-    hookCommand =
-      hooksCfg.PreToolUse?.[0]?.hooks?.[0]?.command ||
-      hooksCfg["platform-security"]?.PreToolUse?.[0]?.hooks?.[0]?.command ||
-      hooksCfg.PreToolUse?.command ||
-      null;
+    telemetryCommand = hooksCfg.hooks?.sessionStart?.[0]?.bash ?? null;
+    hookCommand = hooksCfg.hooks?.preToolUse?.[0]?.bash ?? null;
   } catch {
     /* ignore */
   }
@@ -233,8 +219,8 @@ function startMcp() {
 async function tool(mcp, name, args) {
   const pre = callHook({
     hook_event_name: "PreToolUse",
-    tool_name: `mcp__platform__${name}`,
-    tool_input: args,
+    toolName: `mcp__platform__${name}`,
+    toolArgs: args,
   });
   if (pre.status === 2) {
     out({
@@ -257,6 +243,21 @@ async function tool(mcp, name, args) {
     data: { toolName: `mcp__platform__${name}`, result: r.result },
   });
   return r.result;
+}
+
+if (mode === "truncated") {
+  // A stream cut off mid-reply: text, but neither a result nor the idle marker.
+  out({ type: "session.start", data: { sessionId } });
+  out({ type: "assistant.message_delta", data: { deltaContent: "half an ans" } });
+  process.exit(0);
+}
+
+if (mode === "idle-only") {
+  // What the real CLI sends: a final message and assistant.idle, no result event.
+  out({ type: "session.start", data: { sessionId } });
+  out({ type: "assistant.message", data: { content: "all done", model: "gpt-4o" } });
+  out({ type: "assistant.idle", data: {} });
+  process.exit(0);
 }
 
 if (mode === "native-model") {
@@ -304,11 +305,25 @@ if (mode === "nohook") {
   process.exit(0);
 }
 
+if (mode === "nohook-native") {
+  // A native tool that starts although the platform hook never ran.
+  out({ type: "tool.execution_start", data: { toolName: "bash", arguments: { command: "ls ." } } });
+  await new Promise((r) => setTimeout(r, 30_000));
+  process.exit(0);
+}
+
+if (mode === "hooked-native") {
+  // The tool event is emitted as the hook starts, like the real CLI.
+  out({ type: "tool.execution_start", data: { toolName: "bash", arguments: { command: "ls ." } } });
+  const r = callHook({ hook_event_name: "PreToolUse", toolName: "bash", toolArgs: { command: "ls ." } });
+  log({ hooked: r.status });
+}
+
 if (mode === "push") {
   const r = callHook({
     hook_event_name: "PreToolUse",
-    tool_name: "Bash",
-    tool_input: { command: "git push origin HEAD" },
+    toolName: "bash",
+    toolArgs: { command: "git push origin HEAD" },
   });
   log({ push: r.status, stdout: r.stdout });
 }
@@ -316,8 +331,8 @@ if (mode === "push") {
 if (mode === "denied_tool") {
   const r = callHook({
     hook_event_name: "PreToolUse",
-    tool_name: "write_file",
-    tool_input: { path: "hello.txt", content: "foo" },
+    toolName: "create",
+    toolArgs: { path: "hello.txt", file_text: "foo" },
   });
   log({ write: r.status, stdout: r.stdout });
 }

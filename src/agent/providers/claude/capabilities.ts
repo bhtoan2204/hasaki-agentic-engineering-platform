@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "../../../config.ts";
+import { redactSecrets } from "../../../integrations/redact.ts";
 import { agentEnvironment } from "../../environment.ts";
 
 const exec = promisify(execFile);
@@ -88,4 +89,36 @@ export async function claudeReadiness(): Promise<{
     quota: "unknown",
     cost: "unknown",
   };
+}
+
+export interface ClaudeCapabilityCheck {
+  ok: boolean;
+  /** Why it is not usable: the CLI cannot be started, it is not signed in, or the check itself failed. */
+  kind?: "binary" | "auth" | "error";
+  error?: string;
+  quota: string;
+  cost: string;
+}
+
+/** Readiness as the other providers report it: a result for a missing binary or a failed login, never a throw. */
+export async function claudeCapabilities(): Promise<ClaudeCapabilityCheck> {
+  try {
+    const r = await claudeReadiness();
+    return r.ok
+      ? { ok: true, quota: r.quota, cost: r.cost }
+      : { ok: false, kind: "auth", error: r.error, quota: r.quota, cost: r.cost };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    const bin = config.agent.claudeBin || "claude";
+    return {
+      ok: false,
+      kind: code === "ENOENT" || code === "EACCES" ? "binary" : "error",
+      error:
+        code === "ENOENT" || code === "EACCES"
+          ? `Claude CLI "${bin}" cannot be started (${code}); install it or set CLAUDE_CODE_EXECUTABLE`
+          : `Claude readiness check failed: ${redactSecrets(String((e as Error).message)).slice(0, 300)}`,
+      quota: "unknown",
+      cost: "unknown",
+    };
+  }
 }

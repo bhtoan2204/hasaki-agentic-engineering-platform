@@ -45,6 +45,7 @@ const ext = (over: Record<string, unknown> = {}) => ({
     codex: "supported",
     cursor: "supported",
     antigravity: "supported",
+    copilot: "supported",
   },
   ...over,
 });
@@ -55,6 +56,7 @@ test("availability: non-external always; blocked, scripts, network, missing bina
   assert.deepEqual(skillAvailability({ load: "on_demand" }, "codex"), { available: true });
   assert.deepEqual(skillAvailability(ext(), "cursor"), { available: true });
   assert.deepEqual(skillAvailability(ext(), "antigravity"), { available: true });
+  assert.deepEqual(skillAvailability(ext(), "copilot"), { available: true });
   const no = (m: unknown, p: string | null, has = (_: string) => true) => {
     const a = skillAvailability(m, p, has);
     assert.equal(a.available, false);
@@ -71,6 +73,10 @@ test("availability: non-external always; blocked, scripts, network, missing bina
     /not installed: playwright-cli/,
   );
   assert.match(no(ext({ providers: { claude: "supported" } }), "codex"), /provider codex/);
+  assert.match(
+    no(ext({ providers: { claude: "supported" } }), "copilot"),
+    /not supported on provider copilot/,
+  );
   // Non-agent steps (no provider) still respect runtime gates but not provider support.
   assert.deepEqual(skillAvailability(ext({ providers: {} }), null), { available: true });
 });
@@ -102,6 +108,7 @@ test("plan: every active skill passes hash and scan checks; adapted text has no 
     const m = c.metadata as ExternalSkillMeta;
     assert.equal(m.origin?.type, "external");
     assert.equal(m.providers?.antigravity, "supported", c.key);
+    assert.equal(m.providers?.copilot, "supported", c.key);
     assert.ok(m.origin?.repo && m.origin.commit && m.origin.license, c.key);
     assert.equal(c.scope_type, "GLOBAL");
     assert.doesNotMatch(c.content, /^allowed-tools:/m, c.key);

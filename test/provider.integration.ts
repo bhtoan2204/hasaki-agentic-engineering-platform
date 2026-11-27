@@ -1,8 +1,15 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { pool } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
 import { seedTemplates } from "../src/workflow/definitions.ts";
@@ -10,6 +17,7 @@ import { getRun, startRun } from "../src/workflow/engine.ts";
 import { resolveAgentProvider } from "../src/agent/provider.ts";
 import { isDuplicateAssistant, NdjsonStream } from "../src/agent/providers/cursor/stream.ts";
 import { cursorToolDecision } from "../src/agent/providers/cursor/policyWatch.ts";
+import { cursorComplete } from "../src/agent/providers/cursor/complete.ts";
 import { cursorAgentTurn, cursorCapabilities } from "../src/agent/providers/cursor/run.ts";
 import { attemptIsLive, dispatchPlatformTool } from "../src/agent/platformTools.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
@@ -155,6 +163,16 @@ if (args[0] === "--help" || args.includes("--help")) {
 if (args[0] === "status") { process.stdout.write("Logged in as test\\n"); process.exit(0); }
 if (mode === "no-result") { process.stdout.write('{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}\\n'); process.exit(0); }
 if (mode === "fail") { process.stderr.write("boom\\n"); process.exit(3); }
+if (mode === "inspect") {
+  const fs = require("node:fs");
+  const file = ".cursor/mcp.json";
+  fs.writeFileSync(process.env.FAKE_SNAPSHOT, JSON.stringify({
+    file: fs.readFileSync(file, "utf8"),
+    mode: fs.statSync(file).mode & 0o777,
+    token: process.env.PLATFORM_BROKER_TOKEN,
+    socket: process.env.PLATFORM_BROKER_SOCKET,
+  }));
+}
 if (mode === "hang") { setInterval(() => {}, 1000); }
 else if (mode === "partial") {
   process.stdout.write('{"type":"system","subtype":"init","session_id":"sid-1","model":"Auto"}\\n');
@@ -201,6 +219,55 @@ test("missing CLI capability is reported and does not pretend to be Claude", asy
   assert.equal(cap.ok, false);
   assert.match(cap.error || "", /does not advertise --output-format/);
   assert.match(cap.error || "", /will not fall back to Claude/);
+});
+
+test("the Cursor MCP config in the worktree holds no broker credentials and is removed after the turn", async () => {
+  config.agent.cursorBin = fakeAgent("inspect");
+  const dir = mkdtempSync(join(tmpdir(), "cursor-turn-"));
+  const snapshot = join(dir, "..", `snapshot-${basename(dir)}.json`);
+  const previous = process.env.FAKE_SNAPSHOT;
+  process.env.FAKE_SNAPSHOT = snapshot;
+  try {
+    const result = await cursorAgentTurn({
+      ctx: fakeCtx(new AbortController().signal).ctx,
+      mode: "analysis",
+      policy: {
+        mode: "analysis",
+        workspaces: [dir],
+        baseBranch: "release/prod",
+        protectedRoots: [],
+      },
+      cwd: dir,
+      prompt: "hi",
+    });
+    assert.equal(result.isError, false, JSON.stringify(result));
+    const seen = JSON.parse(readFileSync(snapshot, "utf8"));
+    assert.ok(seen.token && seen.socket, "the CLI process gets the credentials in its environment");
+    assert.ok(!seen.file.includes(seen.token) && !seen.file.includes(seen.socket));
+    assert.ok(seen.file.includes("${env:PLATFORM_BROKER_TOKEN}"));
+    assert.equal(seen.mode, 0o600);
+    assert.ok(!existsSync(join(dir, ".cursor")), "an empty .cursor directory is removed");
+  } finally {
+    if (previous === undefined) delete process.env.FAKE_SNAPSHOT;
+    else process.env.FAKE_SNAPSHOT = previous;
+  }
+});
+
+test("cursorComplete has a deadline and reports it, and a failing exit carries a category", async () => {
+  config.agent.cursorBin = fakeAgent("hang");
+  await assert.rejects(
+    cursorComplete("hi", undefined, { timeoutMs: 300 }),
+    (error: Error & { failure?: string }) => {
+      assert.equal(error.failure, "EXECUTION_TIMEOUT");
+      return true;
+    },
+  );
+  config.agent.cursorBin = fakeAgent("fail");
+  await assert.rejects(cursorComplete("hi"), (error: Error & { failure?: string }) => {
+    assert.ok(error.failure, "the error names a failure category");
+    assert.match(error.message, /boom/);
+    return true;
+  });
 });
 
 test("zero exit without a result event fails the turn", async () => {

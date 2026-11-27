@@ -23,7 +23,12 @@ import { superviseSpawn, supervisionNote } from "../../process/supervisor.ts";
 import { normalizeProviderFailure } from "../../telemetry.ts";
 import type { PolicyContext, ToolMode } from "../../toolPolicy.ts";
 import { cursorCapabilities, cursorEnv } from "./capabilities.ts";
-import { excludeFromGit, writeCursorPolicy, writeMcpConfig } from "./permissions.ts";
+import {
+  excludeFromGit,
+  removeEmptyCursorDir,
+  writeCursorPolicy,
+  writeMcpConfig,
+} from "./permissions.ts";
 import { cursorToolDecision, writeOutsideWorktrees } from "./policyWatch.ts";
 import {
   cursorUsage,
@@ -105,9 +110,10 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       protectedRoots: input.policy.protectedRoots,
       workspaces: [...input.policy.workspaces],
     });
+    // The file only references the broker credentials: Cursor resolves ${env:NAME} from its own process environment.
     writeMcpConfig(input.cwd, process.execPath, [join(import.meta.dirname, "bridge.ts")], {
-      PLATFORM_BROKER_SOCKET: broker.socketPath,
-      PLATFORM_BROKER_TOKEN: broker.token,
+      PLATFORM_BROKER_SOCKET: "${env:PLATFORM_BROKER_SOCKET}",
+      PLATFORM_BROKER_TOKEN: "${env:PLATFORM_BROKER_TOKEN}",
       PLATFORM_MODE: input.mode,
       ...bridgeCapabilityEnv(),
     });
@@ -147,7 +153,11 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
       command: cap.bin,
       args,
       cwd: input.cwd,
-      env: scrubEnv(process.env),
+      env: {
+        ...scrubEnv(process.env),
+        PLATFORM_BROKER_SOCKET: broker.socketPath,
+        PLATFORM_BROKER_TOKEN: broker.token,
+      },
       stdin: "ignore",
       class: "agent",
       graceMs: 0,
@@ -351,6 +361,7 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
     rmSync(join(input.cwd, ".cursor", "mcp.json"), { force: true });
     rmSync(promptFile, { force: true });
     rmSync(join(input.cwd, ".cursor", "cli.json"), { force: true });
+    removeEmptyCursorDir(input.cwd);
 
     const submitted = await readSubmitted(input.ctx.attempt.id, turnMark);
 
@@ -417,6 +428,9 @@ export async function cursorAgentTurn(input: CursorTurnInput): Promise<CursorTur
   } finally {
     await broker.close();
     rmSync(join(input.cwd, ".cursor", "mcp.json"), { force: true });
+    rmSync(join(input.cwd, ".cursor", "task-prompt.txt"), { force: true });
+    rmSync(join(input.cwd, ".cursor", "cli.json"), { force: true });
+    removeEmptyCursorDir(input.cwd);
   }
 }
 

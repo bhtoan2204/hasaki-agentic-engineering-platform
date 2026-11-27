@@ -25,7 +25,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -76,7 +77,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -142,7 +144,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -200,7 +203,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -248,7 +252,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -314,7 +319,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -365,7 +371,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -409,7 +416,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -455,7 +463,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -501,7 +510,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -542,7 +552,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [
@@ -589,7 +600,8 @@
         "claude": "supported",
         "codex": "supported",
         "cursor": "supported",
-        "antigravity": "supported"
+        "antigravity": "supported",
+        "copilot": "supported"
       },
       "applicability": {
         "step_keys": [

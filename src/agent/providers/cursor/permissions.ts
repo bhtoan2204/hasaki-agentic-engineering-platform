@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /**
@@ -75,8 +75,18 @@ export function writeMcpConfig(
       null,
       2,
     ),
+    { mode: 0o600 },
   );
   return file;
+}
+
+/** Removes the `.cursor` directory a turn created once its files are gone; a repository's own `.cursor` stays. */
+export function removeEmptyCursorDir(workspace: string) {
+  try {
+    rmdirSync(join(workspace, ".cursor"));
+  } catch {
+    /* ignore: not empty or already gone */
+  }
 }
 
 export function excludeFromGit(gitDir: string) {

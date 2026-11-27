@@ -9,7 +9,7 @@ import { config } from "../config.ts";
  * metadata.origin    — { type: "external", repo, commit, path, path_commit, license, attribution, adapted, ... }
  * metadata.status    — "active" | "blocked" (blocked items carry block_reason and never reach an agent)
  * metadata.runtime   — { binaries: string[], network: boolean, scripts: boolean }
- * metadata.providers — { claude|codex|cursor|antigravity: "supported" | "unsupported" }; a missing provider is unsupported
+ * metadata.providers — { claude|codex|cursor|antigravity|copilot: "supported" | "unsupported" }; a missing provider is unsupported
  */
 
 export interface ExternalSkillMeta {

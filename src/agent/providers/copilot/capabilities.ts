@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { copilotConfig } from "../../../config.ts";
 import { agentEnvironment } from "../../environment.ts";
+import { providerCapabilities } from "../../providerCapabilities.ts";
 import { execution } from "../../../auth/execution.ts";
 
 const exec = promisify(execFile);
@@ -29,7 +30,7 @@ export interface CopilotCapability {
 /** Flags required by Copilot CLI ≥ 1.0 (stream-json / --input-format were removed). */
 const REQUIRED_HELP = ["--output-format", "--prompt", "--model", "--silent", "--reasoning-effort"];
 const NO_FALLBACK = "The platform will not fall back to Claude or another provider.";
-const DEFAULT_EFFORTS = ["low", "medium", "high", "xhigh"];
+const DEFAULT_EFFORTS = [...providerCapabilities("copilot").controls.efforts];
 
 const FALLBACK_MODELS: CopilotModel[] = [
   { slug: "auto", name: "Auto", efforts: DEFAULT_EFFORTS, default_effort: "medium" },
@@ -265,7 +266,7 @@ export function checkModel(models: CopilotModel[], model: string, effort: string
       return `Copilot model "${model}" is not available to the worker's account (available: ${models.map((x) => x.slug).join(", ")}).`;
     }
   }
-  const supportedEfforts = ["low", "medium", "high", "xhigh", "none", "minimal", "max"];
+  const supportedEfforts = providerCapabilities("copilot").controls.efforts;
   if (effort && !supportedEfforts.includes(effort)) {
     return `Copilot does not support reasoning effort "${effort}" (supported: ${supportedEfforts.join(", ")}).`;
   }

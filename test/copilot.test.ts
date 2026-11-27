@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -30,10 +30,11 @@ import {
 import {
   copilotHookDecision,
   writeCopilotWorkspaceConfig,
+  removeCopilotWorkspaceConfig,
   excludeFromGit,
-  copilotHeadlessSettings,
 } from "../src/agent/providers/copilot/policy.ts";
 import { buildCopilotArgs } from "../src/agent/providers/copilot/run.ts";
+import { copilotComplete } from "../src/agent/providers/copilot/complete.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
 import { ResumeHandoff } from "../src/workflow/engine.ts";
 
@@ -171,13 +172,16 @@ test("validateAgentOptions validates reasoning effort for copilot", () => {
   assert.doesNotThrow(() =>
     validateAgentOptions({ provider: "copilot", reasoning_effort: "high" }),
   );
-  assert.throws(
-    () => validateAgentOptions({ provider: "copilot", reasoning_effort: "none" }),
-    /Unsupported Copilot reasoning_effort/,
+  // The CLI's own --reasoning-effort accepts none and minimal, and the adapter check already did.
+  assert.doesNotThrow(() =>
+    validateAgentOptions({ provider: "copilot", reasoning_effort: "none" }),
+  );
+  assert.doesNotThrow(() =>
+    validateAgentOptions({ provider: "copilot", reasoning_effort: "minimal" }),
   );
   assert.throws(
-    () => validateAgentOptions({ provider: "copilot", reasoning_effort: "minimal" }),
-    /Unsupported Copilot reasoning_effort/,
+    () => validateAgentOptions({ provider: "copilot", reasoning_effort: "ultra" as never }),
+    /Unsupported Copilot reasoning_effort|Invalid/,
   );
 });
 
@@ -409,6 +413,7 @@ test("buildCopilotArgs builds correct argument vector for CLI ≥ 1.0", () => {
     additionalDirs: ["/repo2"],
     mcpConfigPath: "/ws/.agents/mcp_config.json",
     allowTools: true,
+    trustFolder: true,
   });
   assert.deepEqual(args, [
     "--silent",
@@ -427,6 +432,7 @@ test("buildCopilotArgs builds correct argument vector for CLI ≥ 1.0", () => {
     "--additional-mcp-config",
     "@/ws/.agents/mcp_config.json",
     "--allow-all-tools",
+    "--trust-folder",
   ]);
 
   const stdinArgs = buildCopilotArgs({
@@ -437,39 +443,57 @@ test("buildCopilotArgs builds correct argument vector for CLI ≥ 1.0", () => {
 });
 
 test("writeCopilotWorkspaceConfig generates .agents mcp + .github hooks", () => {
-  const { hookConfigPath, mcpConfigPath, githubHookPath } = writeCopilotWorkspaceConfig(tempDir, {
-    brokerSocket: "/tmp/mock.sock",
-    brokerToken: "mock-token",
+  const scratch = mkdtempSync(join(tmpdir(), "copilot-mcp-"));
+  const { mcpConfigPath, githubHookPath } = writeCopilotWorkspaceConfig(tempDir, {
+    mcpDir: scratch,
     mode: "coding",
   });
 
-  assert.ok(existsSync(hookConfigPath));
   assert.ok(existsSync(mcpConfigPath));
   assert.ok(existsSync(githubHookPath));
 
-  const hooks = JSON.parse(readFileSync(hookConfigPath, "utf8"));
-  assert.ok(hooks["platform-security"]?.PreToolUse);
-
   const github = JSON.parse(readFileSync(githubHookPath, "utf8"));
-  assert.ok(github.PreToolUse?.[0]?.hooks?.[0]?.command);
+  assert.equal(github.version, 1);
+  assert.ok(github.hooks.preToolUse?.[0]?.bash);
 
   const mcp = JSON.parse(readFileSync(mcpConfigPath, "utf8"));
   assert.ok(mcp.mcpServers?.platform);
-  const tokenKey = ["PLATFORM_", "BROKER_", "TOKEN"].join("");
-  assert.equal(mcp.mcpServers.platform.env[tokenKey], "mock-token");
+  assert.deepEqual(mcp.mcpServers.platform.env, { PLATFORM_MODE: "coding" });
+  assert.equal(statSync(mcpConfigPath).mode & 0o777, 0o600);
+  assert.ok(!mcpConfigPath.startsWith(tempDir), "the MCP config stays outside the worktree");
+  assert.ok(!existsSync(join(tempDir, ".agents")));
+
+  removeCopilotWorkspaceConfig(tempDir);
+  assert.ok(!existsSync(join(tempDir, ".github")), "the directories this turn created are removed");
+  rmSync(scratch, { recursive: true, force: true });
 });
 
-test("copilotHeadlessSettings and excludeFromGit configure repository and tool permissions", () => {
-  const settings = copilotHeadlessSettings(["read_file", "write_file"]);
-  assert.equal(settings.toolPermission, "always-proceed");
-  assert.ok(settings.permissions.allow.includes("mcp(platform/*)"));
-  assert.ok(settings.permissions.allow.includes("mcp(platform/read_file)"));
+test("copilotComplete passes its timeout to the supervisor and reports a timeout and a logged-out CLI by category", async () => {
+  process.env.FAKE_COPILOT_MODE = "hang";
+  await assert.rejects(
+    copilotComplete("hi", { timeoutMs: 300 }),
+    (error: Error & { failure?: string }) => {
+      assert.equal(error.failure, "EXECUTION_TIMEOUT");
+      assert.match(error.message, /timed out/);
+      return true;
+    },
+  );
 
+  process.env.FAKE_COPILOT_MODE = "logged-out";
+  resetCapabilitiesCache();
+  await assert.rejects(
+    copilotComplete("hi", { timeoutMs: 20_000 }),
+    (error: Error & { failure?: string }) => {
+      assert.equal(error.failure, "AUTHENTICATION");
+      return true;
+    },
+  );
+});
+
+test("excludeFromGit keeps the generated hook file out of the repository", () => {
   const gitDir = join(tempDir, ".git");
   excludeFromGit(gitDir);
   const excludeContent = readFileSync(join(gitDir, "info", "exclude"), "utf8");
-  assert.ok(excludeContent.includes(".agents/hooks.json"));
-  assert.ok(excludeContent.includes(".agents/mcp_config.json"));
   assert.ok(excludeContent.includes(".github/hooks/ctp-platform.json"));
 
   const env = copilotEnv({ PATH: "/bin" });

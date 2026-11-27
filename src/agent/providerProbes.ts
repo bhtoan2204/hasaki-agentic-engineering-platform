@@ -2,7 +2,7 @@ import { antigravityConfig, codexConfig, config, copilotConfig } from "../config
 import type { AgentProvider } from "./provider.ts";
 import type { DiscoveryProbe } from "./providerDiscovery.ts";
 import { antigravityCapabilities } from "./providers/antigravity/capabilities.ts";
-import { claudeDiscovery, claudeReadiness } from "./providers/claude/capabilities.ts";
+import { claudeCapabilities, claudeDiscovery } from "./providers/claude/capabilities.ts";
 import { codexCapabilities } from "./providers/codex/capabilities.ts";
 import { copilotCapabilities } from "./providers/copilot/capabilities.ts";
 import { cursorBinary, cursorCapabilities } from "./providers/cursor/capabilities.ts";
@@ -29,8 +29,8 @@ const ADAPTERS: Record<AgentProvider, ProviderProbeAdapter> = {
       bin: config.agent.claudeBin ?? "sdk",
       probe: claudeDiscovery,
     }),
-    preflight: async () => claudeReadiness(),
-    readiness: async () => claudeReadiness(),
+    preflight: () => claudeCapabilities(),
+    readiness: () => claudeCapabilities(),
   },
   codex: {
     discovery: (refresh) => ({

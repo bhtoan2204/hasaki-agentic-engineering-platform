@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { config } from "../../../config.ts";
 import { activityLabel, type CompletionStreamListener } from "../../completionStream.ts";
 import type { CompletionRunner } from "../../completionTypes.ts";
+import { completionFailure } from "../../completionFailure.ts";
 import { superviseSpawn } from "../../process/supervisor.ts";
+import { normalizeProviderFailure } from "../../telemetry.ts";
 import { cursorCapabilities, cursorEnv } from "./capabilities.ts";
 import { writeCursorPolicy } from "./permissions.ts";
 import { isDuplicateAssistant, NdjsonStream, toolCallShape } from "./stream.ts";
@@ -14,11 +16,15 @@ import { isDuplicateAssistant, NdjsonStream, toolCallShape } from "./stream.ts";
 export async function cursorComplete(
   prompt: string,
   signal?: AbortSignal,
-  options?: { model?: string; onStream?: CompletionStreamListener },
+  options?: { model?: string; timeoutMs?: number; onStream?: CompletionStreamListener },
 ): Promise<string> {
   signal?.throwIfAborted();
   const cap = await cursorCapabilities();
-  if (!cap.ok) throw new Error(cap.error);
+  if (!cap.ok)
+    throw completionFailure(
+      cap.error ?? "Cursor CLI is not available",
+      normalizeProviderFailure({ message: cap.error }),
+    );
   signal?.throwIfAborted();
   const dir = join(tmpdir(), `cursor-complete-${randomBytes(4).toString("hex")}`);
   mkdirSync(dir, { recursive: true });
@@ -42,6 +48,10 @@ export async function cursorComplete(
     if (!cap.supportsModel) throw new Error("Cursor CLI does not support model selection");
     args.push("--model", options.model);
   }
+  const timeoutMs = Math.min(
+    options?.timeoutMs ?? config.agent.cursorTimeoutMs ?? 10 * 60_000,
+    10 * 60_000,
+  );
   const proc = await superviseSpawn({
     command: cap.bin,
     args,
@@ -50,6 +60,7 @@ export async function cursorComplete(
     stdin: "ignore",
     class: "agent",
     graceMs: 0,
+    timeoutMs,
   });
   const child = proc.child;
   const kill = () => proc.stop();
@@ -82,11 +93,18 @@ export async function cursorComplete(
     child.on("close", (c) => resolve(c));
   });
   signal?.removeEventListener("abort", kill);
-  await proc.done;
+  const timedOut = (await proc.done).outcome === "timeout";
   rmSync(dir, { recursive: true, force: true });
   if (signal?.aborted) throw new Error("canceled");
-  if (code !== 0)
-    throw new Error(`Cursor text completion failed (${code}): ${stderr.slice(0, 300)}`);
+  if (timedOut)
+    throw completionFailure(
+      `Cursor text completion timed out after ${Math.round(timeoutMs / 1000)}s`,
+      "EXECUTION_TIMEOUT",
+    );
+  if (code !== 0) {
+    const detail = `Cursor text completion failed (${code}): ${stderr.slice(0, 300)}`;
+    throw completionFailure(detail, normalizeProviderFailure({ message: detail }));
+  }
   try {
     const msg = JSON.parse(stdout.trim().split("\n").filter(Boolean).at(-1) || "{}");
     if (typeof msg.result === "string") return msg.result;

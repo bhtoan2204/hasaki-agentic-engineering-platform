@@ -28,6 +28,7 @@ import {
   antigravityHeadlessSettings,
   antigravityHookDecision,
   excludeFromGit,
+  removeAntigravityWorkspaceConfig,
   writeAntigravityWorkspaceConfig,
 } from "./policy.ts";
 import {
@@ -97,6 +98,13 @@ function releaseSlot(max: number) {
 export async function antigravityAgentTurn(
   input: AntigravityTurnInput,
 ): Promise<AntigravityTurnResult> {
+  if (input.policy.delegation)
+    return {
+      isError: true,
+      text: "Antigravity runs cannot enforce the platform's read-only subagent policy. Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.",
+      assistantTurns: 0,
+      failure: "POLICY_VIOLATION",
+    };
   const turnMark = await checkpointMark(input.ctx.attempt.id);
   const usageBase = { ...input.metrics?.tokens };
   const cap = await antigravityCapabilities(false, {
@@ -523,10 +531,12 @@ export async function antigravityAgentTurn(
       };
     }
 
-    if (!sawResult && !fullText && !submitted)
+    if (!sawResult && !submitted)
       return {
         isError: true,
-        text: "Antigravity exited without a result, a reply or a submitted output",
+        text: fullText
+          ? "Antigravity's output ended before the CLI reported a result; the partial reply was discarded"
+          : "Antigravity exited without a result, a reply or a submitted output",
         assistantTurns,
         failure: "INCOMPLETE_OUTPUT",
         submitted,
@@ -542,7 +552,6 @@ export async function antigravityAgentTurn(
     release();
     if (broker) await broker.close();
     rmSync(scratchDir, { recursive: true, force: true });
-    rmSync(join(input.cwd, ".agents", "hooks.json"), { force: true });
-    rmSync(join(input.cwd, ".agents", "mcp_config.json"), { force: true });
+    removeAntigravityWorkspaceConfig(input.cwd);
   }
 }

@@ -1,6 +1,7 @@
 import { isAbsolute, resolve, join } from "node:path";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, rmSync, rmdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { decideNativeInspection } from "../../nativeInspection.ts";
 import { decide, type Decision, type PolicyContext } from "../../toolPolicy.ts";
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
@@ -115,7 +116,12 @@ export function antigravityHookDecision(
     // Ensure path doesn't escape into sensitive roots
     if (resolved.includes("/.git/"))
       return deny("modifying .git internal files directly is forbidden; use commit_changes");
-    return decide(toolName, { path: resolved }, policy, sessionCwd);
+    return decide(
+      lower === "edit_file" ? "Edit" : "Write",
+      { file_path: resolved },
+      policy,
+      sessionCwd,
+    );
   }
 
   // 6. File reading (read_file, view_file)
@@ -127,9 +133,8 @@ export function antigravityHookDecision(
   }
 
   // 7. Harmless read-only inspection tools
-  if (["list_dir", "glob", "grep", "search_files"].includes(lower)) {
-    return { allow: true };
-  }
+  const inspection = decideNativeInspection(lower, args, policy, sessionCwd, secretDenial);
+  if (inspection) return inspection;
 
   return decide(toolName, args, policy, sessionCwd);
 }
@@ -174,7 +179,7 @@ export function writeAntigravityWorkspaceConfig(
     },
   };
   const hookConfigPath = join(agentsDir, "hooks.json");
-  writeFileSync(hookConfigPath, JSON.stringify(hooksConfig, null, 2));
+  writeFileSync(hookConfigPath, JSON.stringify(hooksConfig, null, 2), { mode: 0o600 });
 
   const mcpConfig = {
     mcpServers: {
@@ -190,9 +195,20 @@ export function writeAntigravityWorkspaceConfig(
     },
   };
   const mcpConfigPath = join(agentsDir, "mcp_config.json");
-  writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
+  writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2), { mode: 0o600 });
 
   return { hookConfigPath, mcpConfigPath };
+}
+
+/** Removes what writeAntigravityWorkspaceConfig put in the worktree, and `.agents` if that leaves it empty. */
+export function removeAntigravityWorkspaceConfig(workspace: string) {
+  rmSync(join(workspace, ".agents", "hooks.json"), { force: true });
+  rmSync(join(workspace, ".agents", "mcp_config.json"), { force: true });
+  try {
+    rmdirSync(join(workspace, ".agents"));
+  } catch {
+    /* ignore: not empty or already gone */
+  }
 }
 
 /** Session-only settings for headless print mode.

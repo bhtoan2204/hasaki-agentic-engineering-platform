@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -10,6 +12,9 @@ import {
   providerControls,
   VISION_PROVIDERS,
 } from "../src/agent/providerCapabilities.ts";
+import { validateConfigurationValues, type AgentValues } from "../src/agent/configuration.ts";
+import { checkModel as agyCheckModel } from "../src/agent/providers/antigravity/capabilities.ts";
+import { checkModel as copilotCheckModel } from "../src/agent/providers/copilot/capabilities.ts";
 import { discoverProviderAdapter } from "../src/agent/providerProbes.ts";
 import { decide, type PolicyContext } from "../src/agent/toolPolicy.ts";
 
@@ -36,11 +41,68 @@ test("read-only steps run degraded instead of failing, and say what is missing",
 });
 
 test("a sandbox the step turned off is a missing write guarantee", () => {
-  assert.deepEqual(guaranteeCheck("copilot", "coding", { sandbox: false }).unmet, [
+  assert.deepEqual(guaranteeCheck("antigravity", "coding", { sandbox: false }).unmet, [
     "write_sandbox",
   ]);
   assert.deepEqual(guaranteeCheck("antigravity", "analysis", { sandbox: false }).unmet, []);
   assert.deepEqual(guaranteeCheck("claude", "coding", { sandbox: false }).unmet, []);
+});
+
+test("effort validation of the adapters and of the saved configuration come from one list", () => {
+  assert.equal(copilotCheckModel([], "", "none"), null);
+  assert.equal(
+    copilotCheckModel([{ slug: "auto", name: "Auto", efforts: [] }], "", "minimal"),
+    null,
+  );
+  assert.match(
+    copilotCheckModel([{ slug: "auto", name: "Auto", efforts: [] }], "", "ultra") ?? "",
+    /ultra/,
+  );
+  for (const effort of providerCapabilities("copilot").controls.efforts) {
+    assert.doesNotThrow(
+      () =>
+        validateConfigurationValues("copilot", {
+          reasoning_effort: effort as AgentValues["reasoning_effort"],
+        }),
+      effort,
+    );
+    assert.equal(
+      copilotCheckModel([{ slug: "auto", name: "Auto", efforts: [] }], "", effort),
+      null,
+      effort,
+    );
+  }
+  for (const effort of providerCapabilities("antigravity").controls.efforts) {
+    assert.doesNotThrow(
+      () =>
+        validateConfigurationValues("antigravity", {
+          reasoning_effort: effort as AgentValues["reasoning_effort"],
+        }),
+      effort,
+    );
+    assert.equal(agyCheckModel([{ slug: "m", name: "m", efforts: [] }], "m", effort), null, effort);
+  }
+  assert.throws(() => validateConfigurationValues("antigravity", { reasoning_effort: "none" }));
+  assert.match(agyCheckModel([{ slug: "m", name: "m", efforts: [] }], "m", "none") ?? "", /none/);
+});
+
+test("every provider bridge waits as long as its declared RPC timeout", () => {
+  for (const p of ["codex", "cursor", "copilot", "antigravity"] as const) {
+    const declared = providerCapabilities(p).runtime.bridgeRpcTimeoutMs;
+    assert.equal(declared, 30 * 60_000, p);
+    const source = readFileSync(
+      join(import.meta.dirname, "..", "src", "agent", "providers", p, "bridge.ts"),
+      "utf8",
+    );
+    assert.match(source, /name, args \}, 30 \* 60 \* 1000\)/, `${p} bridge timeout`);
+  }
+});
+
+test("Copilot does not promise an OS write sandbox it cannot enforce", () => {
+  assert.equal(providerCapabilities("copilot").guarantees.writeSandbox, false);
+  assert.ok(!GUARANTEES.copilot.includes("write_sandbox"));
+  assert.ok(GUARANTEES.copilot.includes("pre_tool_policy"));
+  assert.deepEqual(guaranteeCheck("copilot", "coding").unmet, []);
 });
 
 test("web tools are denied while a step can write, unless the step allows network", () => {

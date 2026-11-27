@@ -38,6 +38,7 @@ import { decide } from "../src/agent/toolPolicy.ts";
 import { runWorkingDirectory } from "../src/repos/workspaces.ts";
 import { resumableSession } from "../src/agent/sessions.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
+import { antigravityAgentTurn } from "../src/agent/providers/antigravity/run.ts";
 import { copilotAgentTurn } from "../src/agent/providers/copilot/run.ts";
 import { decisionsOf } from "../src/workflow/decisions.ts";
 import type { HarnessEvidence } from "../src/agent/harness/evidence.ts";
@@ -810,6 +811,105 @@ test("a Copilot tool that skipped the PreToolUse hook stops the turn even after 
     assert.equal(result.isError, true, JSON.stringify(result));
     assert.equal(result.failure, "UNSAFE_SIDE_EFFECT");
     assert.ok(Date.now() - started < 25_000);
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("a native Copilot tool that skipped the PreToolUse hook stops the turn", async () => {
+  const { ctx, restore } = await lifecycleAttempt("codex", "agent", {
+    COPILOT_BIN: join(import.meta.dirname, "fixtures/fake-copilot.mjs"),
+    FAKE_COPILOT_MODE: "nohook-native",
+  });
+  try {
+    const result = await copilotAgentTurn({
+      ctx,
+      mode: "analysis",
+      policy: { ...policy, workspaces: [] },
+      cwd: await runWorkingDirectory(ctx.run.id, ctx.step.id),
+      prompt: "Investigate safely",
+      metrics: newMetrics(""),
+    });
+    assert.equal(result.isError, true, JSON.stringify(result));
+    assert.equal(result.failure, "UNSAFE_SIDE_EFFECT");
+    assert.match(result.text, /without running the platform's pre-execution hook/);
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("a native Copilot tool whose hook ran, slightly after the tool event, is not a bypass", async () => {
+  const { ctx, restore } = await lifecycleAttempt("codex", "agent", {
+    COPILOT_BIN: join(import.meta.dirname, "fixtures/fake-copilot.mjs"),
+    FAKE_COPILOT_MODE: "hooked-native",
+  });
+  try {
+    const result = await copilotAgentTurn({
+      ctx,
+      mode: "analysis",
+      policy: { ...policy, workspaces: [] },
+      cwd: await runWorkingDirectory(ctx.run.id, ctx.step.id),
+      prompt: "Investigate safely",
+      metrics: newMetrics(""),
+    });
+    assert.notEqual(result.failure, "UNSAFE_SIDE_EFFECT", JSON.stringify(result));
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("Copilot and Antigravity refuse a step that asks for subagent delegation before starting anything", async () => {
+  const input = { policy: { ...policy, delegation: true } } as never;
+  for (const turn of [copilotAgentTurn, antigravityAgentTurn]) {
+    const result = await turn(input);
+    assert.equal(result.isError, true);
+    assert.equal(result.failure, "POLICY_VIOLATION");
+    assert.match(result.text, /subagent/);
+  }
+});
+
+test("a Copilot stream cut off after a partial reply is INCOMPLETE_OUTPUT, not a success", async () => {
+  const { ctx, restore } = await lifecycleAttempt("codex", "agent", {
+    COPILOT_BIN: join(import.meta.dirname, "fixtures/fake-copilot.mjs"),
+    FAKE_COPILOT_MODE: "truncated",
+  });
+  try {
+    const result = await copilotAgentTurn({
+      ctx,
+      mode: "analysis",
+      policy: { ...policy, workspaces: [] },
+      cwd: await runWorkingDirectory(ctx.run.id, ctx.step.id),
+      prompt: "Answer",
+      metrics: newMetrics(""),
+    });
+    assert.equal(result.isError, true, JSON.stringify(result));
+    assert.equal(result.failure, "INCOMPLETE_OUTPUT");
+    assert.match(result.text, /partial reply was discarded/);
+  } finally {
+    restore();
+    await cancelRun(ctx.run.id);
+  }
+});
+
+test("a Copilot session that ends with assistant.idle and no result event is a success", async () => {
+  const { ctx, restore } = await lifecycleAttempt("codex", "agent", {
+    COPILOT_BIN: join(import.meta.dirname, "fixtures/fake-copilot.mjs"),
+    FAKE_COPILOT_MODE: "idle-only",
+  });
+  try {
+    const result = await copilotAgentTurn({
+      ctx,
+      mode: "analysis",
+      policy: { ...policy, workspaces: [] },
+      cwd: await runWorkingDirectory(ctx.run.id, ctx.step.id),
+      prompt: "Answer",
+      metrics: newMetrics(""),
+    });
+    assert.equal(result.isError, false, JSON.stringify(result));
+    assert.equal(result.text, "all done");
   } finally {
     restore();
     await cancelRun(ctx.run.id);

@@ -601,12 +601,14 @@ export async function gitMounts(paths: string[]) {
 
 const EGRESS_PORT = 18080;
 /** Definitions an agent could rewrite to change its own hooks, permissions or MCP servers: read-only in the sandbox. */
-const PROTECTED_IN_WORKTREE = [
+export const PROTECTED_IN_WORKTREE = [
   ".claude",
   ".mcp.json",
   ".codex",
   ".cursor",
   ".github/copilot-instructions.md",
+  ".github/hooks",
+  ".agents",
   "CLAUDE.md.local",
 ];
 

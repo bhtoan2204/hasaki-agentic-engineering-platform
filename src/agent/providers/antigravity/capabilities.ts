@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { antigravityConfig } from "../../../config.ts";
 import { agentEnvironment } from "../../environment.ts";
+import { providerCapabilities } from "../../providerCapabilities.ts";
 import { execution } from "../../../auth/execution.ts";
 
 const exec = promisify(execFile);
@@ -171,7 +172,7 @@ export async function modelCatalog(bin: string): Promise<AntigravityModel[] | nu
     const stdout = r.stdout;
     const lines = stdout.split("\n");
     const models: AntigravityModel[] = [];
-    const supportedEfforts = ["low", "medium", "high", "xhigh", "max"];
+    const supportedEfforts = providerCapabilities("antigravity").controls.efforts;
 
     for (const rawLine of lines) {
       const line = rawLine.trim();
@@ -191,7 +192,7 @@ export async function modelCatalog(bin: string): Promise<AntigravityModel[] | nu
         models.push({
           slug,
           name,
-          efforts: supportedEfforts,
+          efforts: [...supportedEfforts],
           default_effort: "medium",
         });
       }
@@ -212,7 +213,7 @@ export function checkModel(
   if (model && !m) {
     return `Antigravity model "${model}" is not available to the worker's account (available: ${models.map((x) => x.slug).join(", ")}).`;
   }
-  const supportedEfforts = ["low", "medium", "high", "xhigh", "max"];
+  const supportedEfforts = providerCapabilities("antigravity").controls.efforts;
   if (effort && !supportedEfforts.includes(effort)) {
     return `Antigravity does not support reasoning effort "${effort}" (supported: ${supportedEfforts.join(", ")}).`;
   }

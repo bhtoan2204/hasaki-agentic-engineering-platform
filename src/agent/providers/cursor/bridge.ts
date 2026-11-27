@@ -16,7 +16,7 @@ export function startBridge() {
     // load a server that answers with LSP-style Content-Length headers ("namespace platform not found").
     framing: "auto",
     async call(name, args) {
-      const r = await brokerRequest(socket, { token, kind: "tool", name, args }, 65000);
+      const r = await brokerRequest(socket, { token, kind: "tool", name, args }, 30 * 60 * 1000);
       return r?.ok
         ? String(r.text ?? "")
         : `ERROR: platform broker refused: ${r?.error ?? "unknown"}`;

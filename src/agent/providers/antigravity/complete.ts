@@ -1,10 +1,11 @@
 import { antigravityConfig } from "../../../config.ts";
 import { redactSecrets } from "../../../integrations/redact.ts";
 import { activityLabel, type CompletionStreamListener } from "../../completionStream.ts";
+import { completionFailure } from "../../completionFailure.ts";
 import { superviseSpawn } from "../../process/supervisor.ts";
 import { buildAntigravityArgs, MAX_RESPONSE_CHARS, writeAntigravityPrompt } from "./args.ts";
 import { antigravityCapabilities, antigravityEnv } from "./capabilities.ts";
-import { AntigravityStream } from "./stream.ts";
+import { AntigravityStream, classifyAntigravityError } from "./stream.ts";
 
 /** One-shot headless auxiliary completion (Phase 10). */
 export async function antigravityComplete(
@@ -28,7 +29,8 @@ export async function antigravityComplete(
     effort: opts?.effort ?? cfg.effort,
   });
   if (!cap.ok) {
-    throw new Error(cap.error || "Antigravity CLI is not available on this worker");
+    const detail = cap.error || "Antigravity CLI is not available on this worker";
+    throw completionFailure(detail, classifyAntigravityError(detail));
   }
   opts?.signal?.throwIfAborted();
 
@@ -39,6 +41,7 @@ export async function antigravityComplete(
   });
 
   const env = antigravityEnv(process.env);
+  const timeoutMs = opts?.timeoutMs ?? cfg.timeoutMs;
   const proc = await superviseSpawn({
     command: cfg.bin,
     args,
@@ -46,22 +49,18 @@ export async function antigravityComplete(
     env,
     class: "agent",
     graceMs: 5000,
+    timeoutMs,
   });
   const child = proc.child;
 
   const onAbort = () => proc.stop();
   opts?.signal?.addEventListener("abort", onAbort, { once: true });
-  const timeoutMs = opts?.timeoutMs ?? cfg.timeoutMs;
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    onAbort();
-  }, timeoutMs);
 
   let text = "";
   let started = false;
   let model = opts?.model ?? cfg.model;
   let stderr = "";
+  let lastError: string | undefined;
   let tokens: Record<string, number | null> | null = null;
   const parser = new AntigravityStream();
 
@@ -70,6 +69,7 @@ export async function antigravityComplete(
     for (const ev of events) {
       const before = text;
       if (ev.model) model = ev.model;
+      if (ev.error) lastError = ev.error;
       if (ev.type === "result") {
         if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
       } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
@@ -99,7 +99,7 @@ export async function antigravityComplete(
 
   child.once("error", () => {});
   const writePromise = writeAntigravityPrompt(child, prompt, opts?.signal).catch((error) => {
-    if (!opts?.signal?.aborted && !timedOut) onAbort();
+    if (!opts?.signal?.aborted) onAbort();
     return error as Error;
   });
   const exitCode = await new Promise<number | null>((resolve) => {
@@ -107,14 +107,14 @@ export async function antigravityComplete(
     child.on("error", () => resolve(null));
   });
   const inputError = await writePromise;
-  clearTimeout(timer);
 
   opts?.signal?.removeEventListener("abort", onAbort);
-  await proc.done;
+  const timedOut = (await proc.done).outcome === "timeout";
 
   const tail = parser.flush();
   for (const ev of tail.events) {
     if (ev.model) model = ev.model;
+    if (ev.error) lastError = ev.error;
     if (ev.type === "result") {
       if (ev.text != null) text = ev.text.slice(0, MAX_RESPONSE_CHARS);
     } else if (ev.text && text.length < MAX_RESPONSE_CHARS)
@@ -122,13 +122,21 @@ export async function antigravityComplete(
   }
 
   if (opts?.signal?.aborted) throw new Error("Antigravity auxiliary completion canceled");
-  if (timedOut) throw new Error("Antigravity auxiliary completion timed out");
-  if (inputError) throw new Error(`Antigravity prompt delivery failed: ${inputError.message}`);
-  if (exitCode !== 0) {
-    throw new Error(
-      redactSecrets(stderr.trim()) ||
-        `Antigravity auxiliary completion failed with exit code ${exitCode}`,
+  if (timedOut)
+    throw completionFailure(
+      `Antigravity auxiliary completion timed out after ${Math.round(timeoutMs / 1000)}s`,
+      "EXECUTION_TIMEOUT",
     );
+  if (inputError)
+    throw completionFailure(
+      `Antigravity prompt delivery failed: ${inputError.message}`,
+      "AGENT_ERROR",
+    );
+  if (exitCode !== 0) {
+    const detail =
+      redactSecrets(lastError || stderr.trim()) ||
+      `Antigravity auxiliary completion failed with exit code ${exitCode}`;
+    throw completionFailure(detail, classifyAntigravityError(detail));
   }
 
   return { text: text.trim(), model: model || undefined, tokens };

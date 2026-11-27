@@ -663,6 +663,15 @@ const turn = (
   };
 };
 
+test("a stream cut off after a partial reply, without a result event, is INCOMPLETE_OUTPUT", async () => {
+  process.env.FAKE_AGY_MODE = "truncated";
+  const t = turn("analysis", new AbortController().signal, "answer me");
+  const result = await t.run();
+  assert.equal(result.isError, true, JSON.stringify(result));
+  assert.equal(result.failure, "INCOMPLETE_OUTPUT");
+  assert.match(result.text, /partial reply was discarded/);
+});
+
 test("Antigravity sends small and Unicode prompts through stdin only", async () => {
   process.env.FAKE_AGY_MODE = "ok";
   const prompt = "Tạo PR\n" + JSON.stringify({ escaped: '"\\', emoji: "🧪" });
@@ -771,6 +780,18 @@ test("Antigravity handles premature stdin close without duplicate invocation", a
     fakeLog().filter((e) => Array.isArray(e.argv)).length,
     0,
     "no second invocation is scheduled",
+  );
+});
+
+test("antigravityComplete passes its timeout to the supervisor and reports it by category", async () => {
+  process.env.FAKE_AGY_MODE = "hang";
+  await assert.rejects(
+    antigravityComplete("hi", { timeoutMs: 300 }),
+    (error: Error & { failure?: string }) => {
+      assert.equal(error.failure, "EXECUTION_TIMEOUT");
+      assert.match(error.message, /timed out/);
+      return true;
+    },
   );
 });
 

@@ -234,7 +234,7 @@ export function auditKnowledge(input: AuditInput) {
         [a],
         "verified",
         "Review provider availability",
-        "Unavailable on all four providers",
+        "Unavailable on all five providers",
       );
     if (input.missingPaths?.[a.key]?.length)
       add(

@@ -222,6 +222,12 @@ async function tool(mcp, name, args) {
   return r.result;
 }
 
+if (mode === "truncated") {
+  out({ type: "init", session_id: sessionId, model: "gemini-3.8-flash-high" });
+  out({ type: "message", role: "assistant", content: "half an ans" });
+  process.exit(0);
+}
+
 if (mode === "native-model") {
   out({ event: "init", conversation_id: sessionId, init: { cwd: process.cwd() } });
   if (telemetryCommand) {
@@ -287,6 +293,10 @@ if (mode === "ask") {
     reasoning: 5,
     cache_read: 40,
   });
+  out({
+    event: "result",
+    result: { status: "SUCCESS", response: "Waiting for user input before proceeding.", num_turns: 1 },
+  });
   if (mcp) mcp.close();
   process.exit(0);
 }
@@ -337,6 +347,10 @@ out({
   output: 35,
   reasoning: 12,
   cache_read: 60,
+});
+out({
+  event: "result",
+  result: { status: "SUCCESS", response: "Antigravity task completed successfully ✓", num_turns: 1 },
 });
 
 if (mcp) mcp.close();

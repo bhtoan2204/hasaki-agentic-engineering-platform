@@ -1,10 +1,10 @@
 import { type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { copilotConfig } from "../../../config.ts";
 import { pool, q } from "../../../db/pool.ts";
-import { liveRuntime, observeLiveUsage } from "../../../eval/liveRuntime.ts";
+import { observeLiveUsage } from "../../../eval/liveRuntime.ts";
 import { workspacesOf } from "../../../git/provider.ts";
 import { redactSecrets } from "../../../integrations/redact.ts";
 import type { ExecutionContext } from "../../../workflow/executors/registry.ts";
@@ -16,7 +16,6 @@ import {
   superviseTurn,
   turnLimits,
 } from "../../harness/cliTurn.ts";
-import { bridgeToolsFor } from "../../mcpBridge.ts";
 import { newMetrics, type AgentMetrics } from "../../metrics.ts";
 import { isModelBlocked } from "../../modelPolicy.ts";
 import { dispatchPlatformTool, envFromExecution } from "../../platformTools.ts";
@@ -30,9 +29,9 @@ import {
 } from "./args.ts";
 import { copilotCapabilities, copilotEnv } from "./capabilities.ts";
 import {
-  copilotHeadlessSettings,
   copilotHookDecision,
   excludeFromGit,
+  removeCopilotWorkspaceConfig,
   writeCopilotWorkspaceConfig,
 } from "./policy.ts";
 import { CopilotStream, TextBatch, classifyCopilotError, type CopilotEvent } from "./stream.ts";
@@ -94,7 +93,23 @@ function releaseSlot(max: number) {
   }
 }
 
+/** The hook process starts as the tool event is emitted, so give it a moment to reach the broker. */
+async function hookRan(broker: Broker | null): Promise<boolean> {
+  for (let waited = 0; waited <= 3000; waited += 50) {
+    if ((broker?.preToolUseCalls ?? 0) > 0) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
 export async function copilotAgentTurn(input: CopilotTurnInput): Promise<CopilotTurnResult> {
+  if (input.policy.delegation)
+    return {
+      isError: true,
+      text: "Copilot runs cannot enforce the platform's read-only subagent policy. Disable delegation on the step, or create the run with Claude. The platform does not fall back to another provider.",
+      assistantTurns: 0,
+      failure: "POLICY_VIOLATION",
+    };
   const turnMark = await checkpointMark(input.ctx.attempt.id);
   const usageBase = { ...input.metrics?.tokens };
   const cap = await copilotCapabilities(false, {
@@ -173,10 +188,9 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
       onModel: recordModel,
     });
 
-    // Write .agents/hooks.json and .agents/mcp_config.json into cwd or scratch
-    writeCopilotWorkspaceConfig(input.cwd, {
-      brokerSocket: broker.socketPath,
-      brokerToken: broker.token,
+    // Hooks go into the worktree; the MCP config (no credentials) stays in the scratch directory.
+    const { mcpConfigPath } = writeCopilotWorkspaceConfig(input.cwd, {
+      mcpDir: scratchDir,
       mode: input.mode,
     });
 
@@ -194,29 +208,17 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
 
     const limits = turnLimits(input.ctx.attempt.effective_agent, cfg.timeoutMs);
 
-    // Persist headless permission defaults for MCP tools (CLI 1.0 reads settings; argv --settings is gone).
-    writeFileSync(
-      join(scratchDir, "settings.json"),
-      JSON.stringify(
-        copilotHeadlessSettings(
-          bridgeToolsFor("coding", { commit: true }).map((tool) => tool.name),
-        ),
-      ),
-    );
     const useStdin = shouldUseStdinPrompt(input.prompt);
     const args = buildCopilotArgs({
       prompt: useStdin ? undefined : input.prompt,
       useStdinPrompt: useStdin,
       model: input.model || undefined,
       effort: input.effort || undefined,
-      sandbox:
-        liveRuntime.getStore() || input.mode === "coding"
-          ? true
-          : (input.ctx.attempt.effective_agent?.options?.sandbox ?? cfg.sandbox),
       conversationId: input.resumeId || undefined,
       additionalDirs,
-      mcpConfigPath: join(input.cwd, ".agents", "mcp_config.json"),
+      mcpConfigPath,
       allowTools: true,
+      trustFolder: true,
     });
 
     const env = copilotEnv(process.env, {
@@ -298,6 +300,8 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
         ).catch(() => {});
       }
 
+      // The real CLI ends a finished session with assistant.idle; it does not send a result event.
+      if (ev.type === "assistant.idle") sawResult = true;
       if (ev.type === "result") {
         sawResult = true;
         assistantTurns = Math.max(assistantTurns, ev.turns ?? 1);
@@ -331,14 +335,9 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
 
       // CLI 1.0 hooks are best-effort (.github/hooks). Native tools may appear before PreToolUse
       // fires; only hard-fail when the broker was never contacted after a platform MCP tool.
-      if (
-        ev.tool &&
-        /mcp__platform__|mcp_platform_|platform\./i.test(ev.tool) &&
-        (broker?.preToolUseCalls ?? 0) === 0 &&
-        !violation
-      ) {
+      if (ev.tool && !violation && !(await hookRan(broker))) {
         violation =
-          "Copilot started a platform tool without running the platform's pre-execution hook; the run was stopped";
+          "Copilot started a tool without running the platform's pre-execution hook; the run was stopped";
         input.metrics?.denied.push({ tool: ev.tool, reason: violation });
         proc?.stop();
       }
@@ -537,10 +536,12 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
       };
     }
 
-    if (!sawResult && !fullText && !submitted)
+    if (!sawResult && !submitted)
       return {
         isError: true,
-        text: "Copilot exited without a result, a reply or a submitted output",
+        text: fullText
+          ? "Copilot's output ended before the CLI reported completion; the partial reply was discarded"
+          : "Copilot exited without a result, a reply or a submitted output",
         assistantTurns,
         failure: "INCOMPLETE_OUTPUT",
         submitted,
@@ -556,8 +557,6 @@ export async function copilotAgentTurn(input: CopilotTurnInput): Promise<Copilot
     release();
     if (broker) await broker.close();
     rmSync(scratchDir, { recursive: true, force: true });
-    rmSync(join(input.cwd, ".agents", "hooks.json"), { force: true });
-    rmSync(join(input.cwd, ".agents", "mcp_config.json"), { force: true });
-    rmSync(join(input.cwd, ".github", "hooks", "ctp-platform.json"), { force: true });
+    removeCopilotWorkspaceConfig(input.cwd);
   }
 }

@@ -142,13 +142,15 @@ export const PROVIDER_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> 
     controls: {
       model: true,
       max_turns: false,
-      efforts: ["low", "medium", "high", "xhigh", "max"],
+      efforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
       options: ["sandbox", "max_concurrent"],
     },
     guarantees: {
       preToolPolicy: true,
       hookBypassDetection: true,
-      writeSandbox: true,
+      // Copilot's own --sandbox covers shell commands only (built-in file edits are not OS-sandboxed) and needs host
+      // prerequisites the platform does not probe, so no OS write sandbox is promised; edits are held by the hook.
+      writeSandbox: false,
       networkIsolation: false,
       osIsolation: false,
       delegation: false,
@@ -237,7 +239,7 @@ export const PROVIDER_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> 
       settingsLayers: false,
       emptyModelSentinel: "",
       supportsMcpStdio: true,
-      bridgeRpcTimeoutMs: 65_000,
+      bridgeRpcTimeoutMs: 30 * 60_000,
     },
     completion: {
       visionImages: false,
