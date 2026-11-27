@@ -1,5 +1,6 @@
 import { pool, q, one, withTx, type Db } from "../db/pool.ts";
 import { config } from "../config.ts";
+import { coveredHours, zeroFill, type CoveredScan } from "./coverage.ts";
 import { ingest, loadIntakePolicies, policyFor } from "../workitems/intake.ts";
 import { workItems } from "../workitems/service.ts";
 import {
@@ -142,6 +143,7 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
     previous_version: string | null;
     version_changed_at: Date | null;
     reopened_at: Date | null;
+    sources: string[] | null;
     hours: Array<{ hour: string; count: number }> | null;
   }>(
     db,
@@ -152,6 +154,7 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
      SELECT g.fingerprint, g.namespace, g.service, g.level, g.signature, g.first_seen_at, g.detail->>'image' AS image,
             st.version, st.previous_version, st.version_changed_at,
             (SELECT max(e.created_at) FROM prod_error_lifecycle_events e WHERE e.fingerprint = g.fingerprint AND e.action = 'reopen') AS reopened_at,
+            ARRAY(SELECT jsonb_array_elements_text(COALESCE(g.detail->'sources', '[]'::jsonb))) AS sources,
             (SELECT json_agg(json_build_object('hour', h.hour, 'count', h.count) ORDER BY h.hour)
                FROM (SELECT (x->>'hour')::timestamptz AS hour, max((x->>'count')::bigint) AS count
                        FROM prod_error_observations o JOIN prod_error_scans s ON s.id = o.scan_id AND s.ok,
@@ -164,6 +167,26 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
     [latest.id, limit],
   );
   const recentFrom = new Date(latest.window_start ?? latest.started_at);
+  // Scans that answered completely: an hour they covered where a group has no point is an hour at zero.
+  const scans = (
+    await q<{
+      window_start: Date | null;
+      window_end: Date | null;
+      namespaces: string[] | null;
+      partial: boolean;
+      sources: CoveredScan["sources"];
+    }>(
+      db,
+      `SELECT window_start, window_end, namespaces, partial, sources FROM prod_error_scans
+        WHERE ok AND window_start IS NOT NULL AND window_end IS NOT NULL AND started_at > now() - interval '9 days'`,
+    )
+  ).map((x): CoveredScan => ({
+    windowStart: new Date(x.window_start!),
+    windowEnd: new Date(x.window_end!),
+    namespaces: x.namespaces,
+    partial: !!x.partial,
+    sources: x.sources,
+  }));
   const series: ErrorSeries[] = rows.map((r) => {
     // A version change is remembered for a day so a spike shortly after a deployment is correlated with it.
     const changed =
@@ -179,7 +202,10 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
       level: r.level,
       signature: r.signature,
       firstSeenAt: new Date(r.first_seen_at),
-      points: (r.hours ?? []).map((h) => ({ at: new Date(h.hour), count: Number(h.count) })),
+      points: zeroFill(
+        (r.hours ?? []).map((h) => ({ at: new Date(h.hour), count: Number(h.count) })),
+        coveredHours({ namespace: r.namespace, sources: r.sources ?? undefined }, scans),
+      ),
       recentFrom,
       latestScanId: Number(latest.id),
       coveredDays,

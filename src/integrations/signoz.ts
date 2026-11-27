@@ -1078,15 +1078,33 @@ export interface SpanErrorGroup {
   hourly: Array<[number, number]>;
 }
 
-const spanFilter = (namespaces: string[]) => {
+/**
+ * The filter and the aggregation of the error span groups. `off` is the original query (every span with has_error,
+ * counted by span). `trace` counts distinct traces, so one failing request is one error however many spans carry it;
+ * `root` counts entry spans only (no parent, or a server span). Both leave out the HTTP statuses that are expected
+ * answers. The window and the baseline use the same query, so their counts stay comparable.
+ */
+export function errorSpanQuery(
+  namespaces: string[],
+  opts: {
+    count: "off" | "trace" | "root";
+    ignoreStatusCodes: number[];
+    serverKind: string;
+  } = config.prodErrors.signoz,
+) {
   const nsKey = config.signoz.namespaceKey || "deployment.environment";
+  const parts = ["has_error = true", ...(namespaces.length ? [anyOf(nsKey, namespaces)] : [])];
+  if (opts.count !== "off") {
+    if (opts.ignoreStatusCodes.length)
+      parts.push(`NOT ${anyOf("response_status_code", opts.ignoreStatusCodes.map(String))}`);
+    if (opts.count === "root") parts.push(`(parent_span_id = '' OR ${opts.serverKind})`);
+  }
   return {
     nsKey,
-    expression: ["has_error = true", ...(namespaces.length ? [anyOf(nsKey, namespaces)] : [])].join(
-      " AND ",
-    ),
+    expression: parts.join(" AND "),
+    aggregation: opts.count === "trace" ? "count_distinct(trace_id)" : "count()",
   };
-};
+}
 
 /**
  * Error spans (`has_error = true`) of the given namespaces, counted by SigNoz per namespace, service, span name,
@@ -1102,11 +1120,11 @@ export async function signozErrorSpanGroups(
   signal?: AbortSignal,
 ) {
   const cfg = current();
-  const { nsKey, expression } = spanFilter(namespaces);
+  const { nsKey, expression, aggregation } = errorSpanQuery(namespaces);
   const scope = namespaces.length ? anyOf(nsKey, namespaces) : "";
   const spec = {
     signal: "traces",
-    aggregations: [{ expression: "count()", alias: "value" }],
+    aggregations: [{ expression: aggregation, alias: "value" }],
     filter: { expression },
     groupBy: [nsKey, ...SPAN_GROUP_KEYS].map((name) => ({ name })),
     order: [{ key: { name: "value" }, direction: "desc" }],
@@ -1128,6 +1146,8 @@ export async function signozErrorSpanGroups(
     query(
       envelope(w, "raw", {
         signal: "traces",
+        // The status message and code tell which group a sample belongs to.
+        selectFields: TRACE_FIELDS.map((name) => ({ name })),
         filter: { expression },
         order: [{ key: { name: "timestamp" }, direction: "desc" }],
         limit: Math.min(200, config.signoz.maxLimit),

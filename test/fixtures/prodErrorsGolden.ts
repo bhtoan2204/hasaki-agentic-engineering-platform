@@ -7,7 +7,14 @@
  */
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { mergeSourceRows, toGroups, type SourceRow } from "../../src/prodErrors/scan.ts";
+import {
+  fingerprint,
+  mergeSourceRows,
+  toGroups,
+  type GroupContext,
+  type SourceRow,
+} from "../../src/prodErrors/scan.ts";
+import { DEFAULT_THRESHOLDS } from "../../src/prodErrors/severity.ts";
 
 export const GOLDEN_PATH = resolve(
   import.meta.dirname,
@@ -34,7 +41,12 @@ const splunk = (o: Record<string, unknown>) =>
     ...o,
   }) as unknown as SourceRow;
 
-export function goldenCases(): Array<{ name: string; day: string; sources: Src[] }> {
+export function goldenCases(): Array<{
+  name: string;
+  day: string;
+  sources: Src[];
+  ctx?: GroupContext;
+}> {
   const many = Array.from(
     { length: 320 },
     (_, i) =>
@@ -46,7 +58,34 @@ export function goldenCases(): Array<{ name: string; day: string; sources: Src[]
         today: String(1000 - (i % 7)),
       }) as unknown as SourceRow,
   );
+  const v2Rows = [
+    splunk({ svc: "quiet", sig: "quiet", today: "10", yesterday: "10", sample: "quiet" }),
+    splunk({ svc: "heavy", sig: "heavy", today: "50", yesterday: "50", sample: "heavy" }),
+    splunk({ svc: "chronic", sig: "chronic", today: "250", yesterday: "250", sample: "chronic" }),
+    splunk({ svc: "fresh", sig: "fresh", today: "10", yesterday: "0", sample: "fresh" }),
+    splunk({ svc: "old", sig: "old", today: "10", yesterday: "0", sample: "old" }),
+    splunk({ svc: "boom", sig: "boom", today: "5", yesterday: "5", sample: "panic: boom" }),
+    splunk({ svc: "money", sig: "money", today: "60", yesterday: "0", sample: "double charge detected" }),
+    splunk({ svc: "spike", sig: "spike", today: "100", yesterday: "20", sample: "spike" }),
+    splunk({ svc: "nobase", sig: "nobase", today: "60", yesterday: "0", sample: "nobase", no_baseline: true }),
+    splunk({ svc: "slow", sig: "slow", lv: "SLOW", today: "6", yesterday: "0", sample: "slow" }),
+  ];
+  const known = {
+    [fingerprint("payment-prod", "old", "ERROR", "old")]: H - 20 * 86400,
+    [fingerprint("payment-prod", "fresh", "ERROR", "fresh")]: H - 3600,
+  };
+  const v2 = (decides: boolean, windowHours: number): GroupContext => ({
+    windowHours,
+    baselineHours: windowHours,
+    windowEnd: H,
+    known,
+    thresholds: DEFAULT_THRESHOLDS,
+    v2: decides,
+  });
   return [
+    { name: "severity v2 beside v1 (flag off)", day: "2026-11-05", sources: [{ source: "splunk", rows: v2Rows }], ctx: v2(false, 1) },
+    { name: "severity v2 decides (flag on)", day: "2026-11-05", sources: [{ source: "splunk", rows: v2Rows }], ctx: v2(true, 1) },
+    { name: "severity v2 on a 30 minute window", day: "2026-11-05", sources: [{ source: "splunk", rows: v2Rows }], ctx: v2(true, 0.5) },
     { name: "empty", day: "2026-11-02", sources: [{ source: "splunk", rows: [] }] },
     {
       name: "splunk shapes",
@@ -220,7 +259,7 @@ export function goldenCases(): Array<{ name: string; day: string; sources: Src[]
 export function goldenOutput() {
   return goldenCases().map((c) => ({
     ...c,
-    groups: toGroups(mergeSourceRows(...c.sources), c.day),
+    groups: toGroups(mergeSourceRows(...c.sources), c.day, c.ctx),
   }));
 }
 

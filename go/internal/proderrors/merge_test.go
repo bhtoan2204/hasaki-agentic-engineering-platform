@@ -21,7 +21,8 @@ func TestGolden(t *testing.T) {
 			Source string `json:"source"`
 			Rows   []Row  `json:"rows"`
 		} `json:"sources"`
-		Groups []any `json:"groups"`
+		Ctx    *Context `json:"ctx"`
+		Groups []any    `json:"groups"`
 	}
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
@@ -31,7 +32,7 @@ func TestGolden(t *testing.T) {
 		for _, s := range c.Sources {
 			sources = append(sources, Source{Name: s.Source, Rows: s.Rows})
 		}
-		groups, err := ToGroups(MergeSourceRows(sources...), c.Day)
+		groups, err := ToGroups(MergeSourceRows(sources...), c.Day, c.Ctx)
 		if err != nil {
 			t.Fatalf("%s: %v", c.Name, err)
 		}

@@ -13,7 +13,7 @@ import {
   type SpanErrorGroup,
 } from "../integrations/signoz.ts";
 import { redactPii } from "../integrations/redact.ts";
-import { crashSpl, isCrash, isMoney } from "./classify.ts";
+import { assess, assessV2, crashSpl, isCrash, type SeverityThresholds } from "./severity.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { workItems } from "../workitems/service.ts";
 import { startRun } from "../workflow/engine.ts";
@@ -34,7 +34,6 @@ import { escapeHtml as esc, linkFooter, RULE, sendTelegramHtml } from "../telegr
 
 export type Severity = "critical" | "high" | "medium" | "low";
 export type ScanSource = "splunk" | "signoz";
-const SEV: Severity[] = ["low", "low", "medium", "high", "critical"];
 
 export interface GroupRow {
   fingerprint: string;
@@ -55,6 +54,9 @@ export interface GroupRow {
     /** The only source of this group had no data for the comparison window. */
     no_baseline?: boolean;
     slow?: SlowDetail;
+    /** The verdict of the formula that did not decide (see GroupContext). */
+    severity_v1?: { severity: Severity; score: number; reasons: string[] };
+    severity_v2?: { severity: Severity; score: number; reasons: string[] };
   };
   day: string;
   today_count: number;
@@ -161,51 +163,7 @@ export function buildScanSpl(
   ].join(" | ");
 }
 
-/** Severity of one group from its level, text and today-vs-yesterday counts. */
-export function assess(g: {
-  level: string;
-  signature: string;
-  sample: string;
-  today: number;
-  yesterday: number;
-  /** false = the source has no data for the comparison window: no new / up / down judgement. */
-  baseline?: boolean;
-}) {
-  const reasons: string[] = [];
-  const text = `${g.signature}\n${g.sample}`;
-  let s = g.today >= 1000 ? 2 : 1;
-  if (g.today >= 1000) reasons.push(`many|${g.today}`);
-  if (/^(FATAL|PANIC|DPANIC|CRITICAL)$/.test(g.level) || isCrash(text)) {
-    s = 4;
-    reasons.push("panic");
-  }
-  let changed = false;
-  if (g.baseline === false) {
-    // nothing to compare with
-  } else if (g.yesterday === 0) {
-    reasons.push("new");
-    s = Math.max(s, g.today >= 5 ? 3 : 2);
-    changed = true;
-  } else if (g.today >= 50 && g.today >= 3 * g.yesterday) {
-    reasons.push(`up|${Math.round(g.today / g.yesterday)}|${g.yesterday}`);
-    s = Math.max(s, 3);
-    changed = true;
-  } else if (g.today * 2 <= g.yesterday) reasons.push(`down|${g.yesterday}`);
-  if (isMoney(text)) {
-    reasons.push("money");
-    // new/spiking money-related errors go up one level; critical only with real volume
-    if (changed && g.today >= 5) s = Math.max(s, Math.min(g.today >= 50 ? 4 : 3, s + 1));
-  }
-  // Slowness alone is never an incident: one slow request is low, a new slow endpoint medium, only a spike is high.
-  if (g.level === "SLOW")
-    s = reasons.some((r) => r.startsWith("up|")) ? 3 : changed && g.today >= 5 ? 2 : 1;
-  const severity = SEV[s];
-  return {
-    severity,
-    score: s * 1000 + Math.min(999, Math.round(Math.log10(g.today + 1) * 100)),
-    reasons,
-  };
-}
+export { assess } from "./severity.ts";
 
 export const fingerprint = (ns: string, svc: string, level: string, sig: string) =>
   createHash("sha1").update([ns, svc, level, sig].join("\u0000")).digest("hex").slice(0, 20);
@@ -216,16 +174,57 @@ const iso = (v: unknown) =>
 const str = (v: unknown, max: number) =>
   v == null ? "" : String(Array.isArray(v) ? v[0] : v).slice(0, max);
 
+/** The severity thresholds as configured (config.prodErrors.severity without its flag). */
+export function severityThresholds(): SeverityThresholds {
+  const { v2: _v2, ...thresholds } = config.prodErrors.severity;
+  return thresholds;
+}
+
+/**
+ * What severity v2 needs beyond the row: the window's length in hours, when each signature was first stored
+ * (epoch seconds by fingerprint) and the thresholds. `v2` says which verdict is the group's severity; the other rides
+ * along in `detail` (`severity_v2` while v1 decides, `severity_v1` once v2 does) to compare them on real data.
+ */
+export interface GroupContext {
+  windowHours: number;
+  baselineHours: number;
+  /** End of the scan window, epoch seconds. */
+  windowEnd: number;
+  known: Record<string, number>;
+  thresholds: SeverityThresholds;
+  v2: boolean;
+}
+
 /** Splunk result rows → group rows (exported for tests). */
-export function toGroups(rows: Partial<SourceRow>[], day: string) {
+export function toGroups(rows: Partial<SourceRow>[], day: string, ctx?: GroupContext) {
   return rows.map((r) => {
     const level = str(r.lv, 20) || "ERROR";
     const signature = str(r.sig, 200);
     const sample = str(r.sample, 2000);
     const today = num(r.today);
     const yesterday = num(r.yesterday);
+    const fp = fingerprint(str(r.ns, 100), str(r.svc, 100), level, signature);
+    const v1 = assess({ level, signature, sample, today, yesterday, baseline: !r.no_baseline });
+    const first = ctx?.known[fp];
+    const v2 = ctx
+      ? assessV2(
+          {
+            level,
+            signature,
+            sample,
+            today,
+            yesterday,
+            baseline: !r.no_baseline,
+            windowHours: ctx.windowHours,
+            baselineHours: ctx.baselineHours,
+            firstSeenAgeHours: first === undefined ? null : (ctx.windowEnd - first) / 3600,
+          },
+          ctx.thresholds,
+        )
+      : null;
+    const decided = ctx?.v2 && v2 ? v2 : v1;
     return {
-      fingerprint: fingerprint(str(r.ns, 100), str(r.svc, 100), level, signature),
+      fingerprint: fp,
       namespace: str(r.ns, 100),
       service: str(r.svc, 100),
       level,
@@ -243,6 +242,7 @@ export function toGroups(rows: Partial<SourceRow>[], day: string) {
           Array.isArray(r.sources) && r.sources.length ? (r.sources as ScanSource[]) : undefined,
         no_baseline: r.no_baseline || undefined,
         slow: r.slow,
+        ...(ctx && v2 ? (ctx.v2 ? { severity_v1: v1 } : { severity_v2: v2 }) : {}),
       },
       hourly: (Array.isArray(r.analytics_hourly)
         ? r.analytics_hourly
@@ -262,7 +262,7 @@ export function toGroups(rows: Partial<SourceRow>[], day: string) {
       yesterday_count: yesterday,
       first_at: iso(r.first),
       last_at: iso(r.last),
-      ...assess({ level, signature, sample, today, yesterday, baseline: !r.no_baseline }),
+      ...decided,
     };
   });
 }
@@ -346,6 +346,17 @@ export function capSourceRows(rows: SourceRow[], limit = SOURCE_CAP) {
   return { rows: ranked.slice(0, limit), truncated: rows.length > limit };
 }
 
+/**
+ * Namespace values a SigNoz error query reported against the configured namespaces. Degraded when none of them is
+ * configured (the namespace attribute is probably not the Kubernetes namespace); the values are never remapped, since
+ * the namespace is part of a group's fingerprint.
+ */
+export function namespaceMapping(found: string[], configured: string[]) {
+  const distinct = [...new Set(found.filter(Boolean))];
+  const unknown = distinct.filter((n) => !configured.includes(n));
+  return { degraded: distinct.length > 0 && unknown.length === distinct.length, unknown };
+}
+
 /** What a Splunk search says about being cut short (auto-finalized at its time limit, results incomplete). */
 export function partialReasons(messages: unknown) {
   return (Array.isArray(messages) ? messages.map(String) : []).filter(
@@ -408,15 +419,26 @@ export function signozRows(
     const row = groups.get(keyOf(g).key);
     if (row) row.yesterday += g.count;
   }
-  // Newest spans first: the first span matching a group gives its trace id and a more precise last time.
+  // Newest spans first: the first span matching a group gives its trace id and a more precise last time. A sample that
+  // carries a status message or code belongs to the group with exactly those; one without them matches on service and name.
   for (const s of samples) {
     const d = s.data;
     const time = Math.floor(Date.parse(s.timestamp) / 1000);
+    const exact = d.status_message !== undefined || d.response_status_code !== undefined;
+    const sig = exact
+      ? redactPii(
+          signatureOf(
+            `${text(d.name) ?? ""}${text(d.response_status_code) ? ` [${text(d.response_status_code)}]` : ""}`,
+            text(d.status_message),
+          ),
+        )
+      : "";
     for (const row of groups.values()) {
       if (
         row.trace_id ||
         row.svc !== text(d["service.name"]) ||
-        row.caller !== masked(text(d.name))
+        row.caller !== masked(text(d.name)) ||
+        (exact && row.sig !== sig)
       )
         continue;
       row.trace_id = text(d.trace_id);
@@ -599,6 +621,8 @@ export const maskGaps = (gaps: Awaited<ReturnType<typeof signozTraceGaps>>) =>
 
 export const SIGNOZ_TRUNCATED =
   "SigNoz: quá nhiều nhóm trace lỗi, chỉ lấy các nhóm nhiều nhất; các nhóm nhỏ có thể bị bỏ sót";
+export const SIGNOZ_NAMESPACE_MISMATCH = (unknown: string[]) =>
+  `SigNoz: giá trị namespace (${unknown.slice(0, 5).join(", ")}) không khớp namespace nào trong cấu hình; kiểm tra config.signoz.namespaceKey (giá trị không bị đổi, vì namespace nằm trong fingerprint)`;
 export const SIGNOZ_NO_BASELINE =
   "SigNoz: chưa có trace của kỳ so sánh (hôm qua cùng khung giờ), các nhóm chỉ từ SigNoz không được đánh giá mới/tăng";
 
@@ -660,6 +684,14 @@ const SEV_ICON: Record<Severity, string> = { critical: "🔴", high: "🟠", med
 const MAX_IN_MESSAGE = 6;
 const count = (n: number) => n.toLocaleString("vi-VN");
 
+/** Reasons are stored as keys (`chronic|250`); the two v2 ones read better spelled out in the alert. */
+function reasonLabel(reason: string) {
+  const [code, n] = reason.split("|");
+  if (code === "chronic") return `mãn tính ~${n}/giờ`;
+  if (code === "returned") return "xuất hiện lại";
+  return reason;
+}
+
 function trendText(g: Pick<GroupRow, "today_count" | "yesterday_count" | "detail">) {
   if (g.detail?.no_baseline) return "chưa có dữ liệu hôm qua";
   if (g.yesterday_count === 0) return "🆕 mới xuất hiện hôm nay";
@@ -679,7 +711,7 @@ export function buildAlertMessage(rows: GroupRow[], hm: string) {
   }
   const crit = rows.filter((g) => g.severity === "critical").length;
   const blocks = rows.slice(0, MAX_IN_MESSAGE).map((g) => {
-    const why = g.reasons.filter((r) => !/^mới|^tăng|^nhiều/.test(r));
+    const why = g.reasons.filter((r) => !/^mới|^tăng|^nhiều/.test(r)).map(reasonLabel);
     return [
       `${SEV_ICON[g.severity]} <b>${g.severity.toUpperCase()}</b> · <b>${esc(g.service)}</b>`,
       `<code>${esc(g.signature.length > 160 ? g.signature.slice(0, 157) + "…" : g.signature)}</code>`,

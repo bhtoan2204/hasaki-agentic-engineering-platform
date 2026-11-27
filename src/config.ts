@@ -829,6 +829,27 @@ export interface Config {
       wakeRatio: number;
       wakeMinCount: number;
     };
+    /** Severity v2 (rates per hour); `v2` off keeps v1 as the severity and stores v2 beside it (PROD_ERRORS_SEVERITY_V2). */
+    severity: {
+      v2: boolean;
+      heavyRate: number;
+      chronicHigh: number;
+      spikeRatio: number;
+      spikeMinRate: number;
+      minNewCount: number;
+      minWindowHours: number;
+      minSampleCount: number;
+      newWithinHours: number;
+    };
+    /** How SigNoz error spans are counted (PROD_ERRORS_SIGNOZ_DISTINCT = off | trace | root). */
+    signoz: {
+      /** off: every span with has_error (as before); trace: distinct traces; root: entry spans only. */
+      count: "off" | "trace" | "root";
+      /** HTTP statuses that are expected answers, not errors (applied to the window and the baseline alike). */
+      ignoreStatusCodes: number[];
+      /** What marks an entry span besides having no parent, for count = root. */
+      serverKind: string;
+    };
   };
 }
 
@@ -1175,6 +1196,22 @@ const defaults: Config = {
     notifyOnEscalation: true,
     renotifyDays: 0,
     ignoreTtl: { enabled: true, days: 14, wakeMinRate: 20, wakeRatio: 5, wakeMinCount: 50 },
+    severity: {
+      v2: false,
+      heavyRate: 40,
+      chronicHigh: 200,
+      spikeRatio: 3,
+      spikeMinRate: 6,
+      minNewCount: 5,
+      minWindowHours: 1,
+      minSampleCount: 20,
+      newWithinHours: 24,
+    },
+    signoz: {
+      count: "off",
+      ignoreStatusCodes: [400, 404, 409, 422],
+      serverKind: "kind_string = 'Server'",
+    },
   },
   learning: {
     detectChanges: true,
@@ -1290,7 +1327,13 @@ function load(): Config {
     kafka: { ...defaults.kafka, ...(fromFile.kafka ?? {}) },
     qcHttp: { ...defaults.qcHttp, ...(fromFile.qcHttp ?? {}) },
     vault: { ...defaults.vault, ...(fromFile.vault ?? {}) },
-    prodErrors: { ...defaults.prodErrors, ...(fromFile.prodErrors ?? {}) },
+    prodErrors: {
+      ...defaults.prodErrors,
+      ...(fromFile.prodErrors ?? {}),
+      ignoreTtl: { ...defaults.prodErrors.ignoreTtl, ...(fromFile.prodErrors?.ignoreTtl ?? {}) },
+      severity: { ...defaults.prodErrors.severity, ...(fromFile.prodErrors?.severity ?? {}) },
+      signoz: { ...defaults.prodErrors.signoz, ...(fromFile.prodErrors?.signoz ?? {}) },
+    },
     agent: { ...defaults.agent, ...(fromFile.agent ?? {}) },
     learning: { ...defaults.learning, ...(fromFile.learning ?? {}) },
     database: { ...defaults.database, ...(fromFile.database ?? {}) },
@@ -1363,6 +1406,21 @@ function load(): Config {
     "PROD_ERRORS_IGNORE_TTL",
     cfg.prodErrors.ignoreTtl.enabled,
   );
+  cfg.prodErrors.severity.v2 = flag("PROD_ERRORS_SEVERITY_V2", cfg.prodErrors.severity.v2);
+  const distinct = (process.env.PROD_ERRORS_SIGNOZ_DISTINCT ?? "").trim().toLowerCase();
+  if (distinct)
+    cfg.prodErrors.signoz.count =
+      distinct === "root"
+        ? "root"
+        : ["off", "0", "false", "no"].includes(distinct)
+          ? "off"
+          : "trace";
+  if (process.env.PROD_ERRORS_SIGNOZ_IGNORE_STATUS !== undefined)
+    cfg.prodErrors.signoz.ignoreStatusCodes = process.env.PROD_ERRORS_SIGNOZ_IGNORE_STATUS.split(
+      ",",
+    )
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 100 && n <= 599);
   if (process.env.PROD_ERRORS_RENOTIFY_DAYS)
     cfg.prodErrors.renotifyDays = Math.max(0, Number(process.env.PROD_ERRORS_RENOTIFY_DAYS) || 0);
   if (process.env.IGNORE_REPOSITORIES)

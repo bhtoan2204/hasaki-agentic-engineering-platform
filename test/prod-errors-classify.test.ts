@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
-import { isCrash, isMoney } from "../src/prodErrors/classify.ts";
+import { isCrash, isMoney } from "../src/prodErrors/severity.ts";
 
 const vectors = JSON.parse(
   readFileSync(

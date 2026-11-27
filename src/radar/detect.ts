@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { needsBump } from "../prodErrors/severity.ts";
 
 /**
  * Engineering Radar detectors: pure, deterministic functions over series the platform already stores. Statistical
@@ -99,14 +100,19 @@ export const robustZ = (x: number, base: number[]) => (x - median(base)) / (1.48
 
 const RETRY_SIGNATURE =
   /\bretr(?:y|ies|ying)\b|\battempt\s*#?\d|\bbackoff\b|\bre-?queue|\bredeliver|\bmax(?:imum)? attempts\b/i;
-const MONEY = /payment|refund|settle|wallet|charge|invoice|billing/i;
 
 export const findingFingerprint = (parts: string[]) =>
   createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 24);
 
-function severityOf(ratio: number, count: number, level: string, signature: string): Severity {
+/** The steps are Radar's own; what counts as a crash or money (and so raises a step) is the scan's definition. */
+export function severityOf(
+  ratio: number,
+  count: number,
+  level: string,
+  signature: string,
+): Severity {
   let s: Severity = ratio >= 10 || count >= 1000 ? "high" : ratio >= 4 ? "medium" : "low";
-  if (/panic|fatal|crit/i.test(level) || MONEY.test(signature))
+  if (needsBump(level, signature))
     s = s === "low" ? "medium" : s === "medium" ? "high" : "critical";
   return s;
 }

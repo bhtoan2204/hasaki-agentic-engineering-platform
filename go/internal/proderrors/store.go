@@ -155,6 +155,30 @@ FROM jsonb_to_recordset($1::jsonb) AS g(fingerprint text, today_count int, yeste
   first_at timestamptz, last_at timestamptz, severity text, hourly jsonb)
 ON CONFLICT(scan_id,fingerprint) DO NOTHING`
 
+// firstSeen is when each fingerprint was first stored (epoch seconds); a fingerprint never stored is absent.
+func (s *Store) firstSeen(ctx context.Context, fingerprints []string) (map[string]float64, error) {
+	out := map[string]float64{}
+	if len(fingerprints) == 0 {
+		return out, nil
+	}
+	rows, err := s.DB.Query(ctx,
+		`SELECT fingerprint, extract(epoch FROM first_seen_at)::float8 FROM prod_error_groups WHERE fingerprint = ANY($1)`,
+		fingerprints)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fp string
+		var at float64
+		if err := rows.Scan(&fp, &at); err != nil {
+			return nil, err
+		}
+		out[fp] = at
+	}
+	return out, rows.Err()
+}
+
 // finish ends the job (fenced). ok/status/finished_at mirror the TypeScript engine's final update.
 func (s *Store) finish(ctx context.Context, sc *Scan, status string, errText *string, groups, events, notified *int64) error {
 	tag, err := s.DB.Exec(ctx, `

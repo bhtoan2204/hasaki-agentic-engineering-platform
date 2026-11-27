@@ -907,3 +907,123 @@ test("T12: ignore has a TTL, a spike or the end of the TTL reopens the group and
   );
   assert.ok(audited.n >= 2);
 });
+
+// ---------------------------------------------------------------- Phase 2 (docs/prod-errors-hardening)
+
+test("T15/T17 (Go engine): thresholds come from the TS config, v2 rides along until its flag is on, first_seen_at decides new", async () => {
+  await setSplunkCookie(COOKIE);
+  const sevCfg = config.prodErrors.severity;
+  const saved = { ...sevCfg };
+  assert.ok(sevCfg, "config.prodErrors.severity exists");
+  const one1h = (rowsNow: Array<ReturnType<typeof row>>) => {
+    rows = rowsNow;
+    return runScan("manual", new Date(), { preset: "1h" });
+  };
+  const find = async (svc: string) =>
+    (await listGroups()).groups.find((g: GroupRow) => g.service === svc)!;
+  try {
+    sevCfg.heavyRate = 5;
+    sevCfg.v2 = false;
+    await one1h([
+      row({ svc: "v2-svc", sig: "v2 sig", today: "30", yesterday: "30", sample: "plain" }),
+    ]);
+    let g = await find("v2-svc");
+    assert.equal(g.severity, "low", "v1 is still the severity");
+    assert.equal(
+      g.detail.severity_v2.severity,
+      "medium",
+      "30/h is over the heavy rate the TS config set",
+    );
+
+    sevCfg.v2 = true;
+    await one1h([
+      row({ svc: "v2-svc", sig: "v2 sig", today: "30", yesterday: "30", sample: "plain" }),
+    ]);
+    g = await find("v2-svc");
+    assert.equal(g.severity, "medium");
+    assert.deepEqual(g.reasons, ["many|30"]);
+    assert.equal(g.detail.severity_v1.severity, "low");
+
+    sevCfg.heavyRate = saved.heavyRate;
+    const ret = row({
+      svc: "ret-svc",
+      sig: "ret sig",
+      today: "10",
+      yesterday: "0",
+      sample: "plain",
+    });
+    await one1h([ret]);
+    assert.deepEqual((await find("ret-svc")).reasons, ["new"]);
+    await q(
+      pool,
+      "UPDATE prod_error_groups SET first_seen_at = now() - interval '10 days' WHERE service = 'ret-svc'",
+    );
+    await one1h([ret]);
+    const again = await find("ret-svc");
+    assert.deepEqual(again.reasons, ["returned"]);
+    assert.equal(again.severity, "medium");
+  } finally {
+    Object.assign(sevCfg, saved);
+  }
+});
+
+test("T20/T22 (Go engine): SigNoz counts distinct traces with the same filter in both windows; foreign namespaces make it degraded", async () => {
+  const { saveSignoz, disconnectSignoz } = await import("../src/integrations/signoz.ts");
+  await clearSplunkCookie();
+  const nowMs = Date.now();
+  const { sz, queries } = await startSignozFake(
+    [[["prod", "deg-svc", "GET /x", "boom", "500"], [3]]],
+    nowMs,
+  );
+  const hosts = config.signoz.allowedInternalHosts;
+  config.signoz.allowedInternalHosts = ["127.0.0.1"];
+  const cfg = config.prodErrors.signoz;
+  const saved = { ...cfg };
+  try {
+    await saveSignoz({
+      baseUrl: `http://127.0.0.1:${(sz.address() as { port: number }).port}`,
+      token: "sz-scan-key-0123456789",
+      enabled: true,
+    });
+    cfg.count = "trace";
+    queries.length = 0;
+    await runScan("manual", new Date(nowMs), { preset: "1h" });
+    const grouped = queries.filter(
+      (b) =>
+        b.requestType === "scalar" &&
+        (b.compositeQuery.queries[0].spec as { groupBy?: unknown[] }).groupBy?.length &&
+        !/parent_span_id/.test(b.compositeQuery.queries[0].spec.filter.expression),
+    );
+    assert.equal(grouped.length, 2, "window and baseline");
+    const specOf = (b: (typeof grouped)[number]) =>
+      b.compositeQuery.queries[0].spec as unknown as {
+        filter: { expression: string };
+        aggregations: Array<{ expression: string }>;
+      };
+    assert.equal(specOf(grouped[0]).filter.expression, specOf(grouped[1]).filter.expression);
+    assert.equal(specOf(grouped[0]).aggregations[0].expression, "count_distinct(trace_id)");
+    assert.match(specOf(grouped[0]).filter.expression, /NOT \(response_status_code = '400'/);
+    assert.doesNotMatch(
+      specOf(grouped[0]).filter.expression,
+      /'429'/,
+      "429 is not excluded by default",
+    );
+
+    const s = await sourcesOfLastScan();
+    assert.equal(s.sources.signoz.status, "degraded");
+    assert.equal(s.partial, false, "degraded is a warning, not a missing source");
+    const g = (await listGroups()).groups.find((x: GroupRow) => x.service === "deg-svc")!;
+    assert.equal(g.namespace, "prod", "the namespace value is not remapped");
+    assert.match(
+      String(
+        (await one(pool, "SELECT error FROM prod_error_scans ORDER BY id DESC LIMIT 1")).error,
+      ),
+      /deployment\.environment|namespace/i,
+    );
+  } finally {
+    sz.close();
+    await disconnectSignoz();
+    config.signoz.allowedInternalHosts = hosts;
+    Object.assign(cfg ?? {}, saved);
+  }
+});

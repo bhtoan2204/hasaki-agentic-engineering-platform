@@ -97,60 +97,6 @@ var (
 	sev   = []string{"low", "low", "medium", "high", "critical"}
 )
 
-// assess is scan.ts assess(): severity, score and reasons of one group.
-func assess(level, signature, sample string, today, yesterday float64, baseline bool) (string, int, []string) {
-	reasons := []string{}
-	text := signature + "\n" + sample
-	s := 1
-	if today >= 1000 {
-		s = 2
-		reasons = append(reasons, "many|"+numberToString(today))
-	}
-	if fatal.MatchString(level) || isCrash(text) {
-		s = 4
-		reasons = append(reasons, "panic")
-	}
-	changed := false
-	switch {
-	case !baseline:
-	case yesterday == 0:
-		reasons = append(reasons, "new")
-		if today >= 5 {
-			s = max(s, 3)
-		} else {
-			s = max(s, 2)
-		}
-		changed = true
-	case today >= 50 && today >= 3*yesterday:
-		reasons = append(reasons, "up|"+numberToString(jsRound(today/yesterday))+"|"+numberToString(yesterday))
-		s = max(s, 3)
-		changed = true
-	case today*2 <= yesterday:
-		reasons = append(reasons, "down|"+numberToString(yesterday))
-	}
-	if isMoney(text) {
-		reasons = append(reasons, "money")
-		if changed && today >= 5 {
-			top := 3
-			if today >= 50 {
-				top = 4
-			}
-			s = max(s, min(top, s+1))
-		}
-	}
-	if level == "SLOW" {
-		switch {
-		case slices.ContainsFunc(reasons, func(r string) bool { return strings.HasPrefix(r, "up|") }):
-			s = 3
-		case changed && today >= 5:
-			s = 2
-		default:
-			s = 1
-		}
-	}
-	return sev[s], s*1000 + int(min(999, jsRound(math.Log10(today+1)*100))), reasons
-}
-
 // jsRound is Math.round: halves round toward +∞.
 func jsRound(f float64) float64 { return math.Floor(f + 0.5) }
 
@@ -169,8 +115,22 @@ func iso(v any) (*string, error) {
 	return &s, nil
 }
 
-// ToGroups is scan.ts toGroups(): merged rows → group rows.
-func ToGroups(rows []Row, day string) ([]Group, error) {
+// Fingerprints are the fingerprints ToGroups will give these rows (to load what is known about them first).
+func Fingerprints(rows []Row) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		level := str(get(r, "lv"), 20)
+		if level == "" {
+			level = "ERROR"
+		}
+		out = append(out, fingerprint(str(get(r, "ns"), 100), str(get(r, "svc"), 100), level, str(get(r, "sig"), 200)))
+	}
+	return out
+}
+
+// ToGroups is scan.ts toGroups(): merged rows → group rows. With a context, severity v2 is judged too: it decides the
+// severity when ctx.V2 is set and rides along in the detail otherwise (and v1 does, once v2 decides).
+func ToGroups(rows []Row, day string, ctx *Context) ([]Group, error) {
 	out := make([]Group, 0, len(rows))
 	for _, r := range rows {
 		level := str(get(r, "lv"), 20)
@@ -220,9 +180,27 @@ func ToGroups(rows []Row, day string) ([]Group, error) {
 		if err != nil {
 			return nil, err
 		}
-		severity, score, reasons := assess(level, signature, sample, today, yesterday, !truthy(get(r, "no_baseline")))
+		fp := fingerprint(ns, svc, level, signature)
+		baseline := !truthy(get(r, "no_baseline"))
+		severity, score, reasons := assess(level, signature, sample, today, yesterday, baseline)
+		if ctx != nil {
+			var age *float64
+			if first, ok := ctx.Known[fp]; ok {
+				h := (ctx.WindowEnd - first) / 3600
+				age = &h
+			}
+			s2, sc2, r2 := assessV2(level, signature, sample, today, yesterday, baseline, ctx.WindowHours, ctx.BaselineHours, age, ctx.Thresholds)
+			v1 := map[string]any{"severity": severity, "score": score, "reasons": reasons}
+			v2 := map[string]any{"severity": s2, "score": sc2, "reasons": r2}
+			if ctx.V2 {
+				severity, score, reasons = s2, sc2, r2
+				detail["severity_v1"] = v1
+			} else {
+				detail["severity_v2"] = v2
+			}
+		}
 		out = append(out, Group{
-			Fingerprint: fingerprint(ns, svc, level, signature), Namespace: ns, Service: svc, Level: level,
+			Fingerprint: fp, Namespace: ns, Service: svc, Level: level,
 			Caller: str(get(r, "caller"), 200), Signature: signature, Sample: sample, Detail: detail, Hourly: hourly,
 			Day: day, TodayCount: today, YesterdayCount: yesterday, FirstAt: first, LastAt: last,
 			Severity: severity, Score: score, Reasons: reasons,

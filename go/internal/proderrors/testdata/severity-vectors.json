@@ -1,0 +1,463 @@
+[
+ {
+  "name": "quiet",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": null,
+   "today": 10,
+   "yesterday": 10,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "low",
+   "reasons": []
+  }
+ },
+ {
+  "name": "heavy over a day",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": null,
+   "today": 1000,
+   "yesterday": 1000,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "many|1000"
+   ]
+  }
+ },
+ {
+  "name": "same rate over one hour",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 50,
+   "yesterday": 50,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "many|50"
+   ]
+  }
+ },
+ {
+  "name": "chronic high volume",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": null,
+   "today": 6000,
+   "yesterday": 6000,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "high",
+   "reasons": [
+    "many|6000",
+    "chronic|250"
+   ]
+  }
+ },
+ {
+  "name": "new, never seen",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": null,
+   "today": 10,
+   "yesterday": 0,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "high",
+   "reasons": [
+    "new"
+   ]
+  }
+ },
+ {
+  "name": "new but few",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": null,
+   "today": 3,
+   "yesterday": 0,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "new"
+   ]
+  }
+ },
+ {
+  "name": "returned after a long time",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": 240,
+   "today": 10,
+   "yesterday": 0,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "returned"
+   ]
+  }
+ },
+ {
+  "name": "still new within a day",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": 5,
+   "today": 10,
+   "yesterday": 0,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "high",
+   "reasons": [
+    "new"
+   ]
+  }
+ },
+ {
+  "name": "00:30 window, small sample, not high",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 0.5,
+   "firstSeenAgeHours": null,
+   "today": 8,
+   "yesterday": 0,
+   "windowHours": 0.5
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "new"
+   ]
+  }
+ },
+ {
+  "name": "00:30 window with a panic stays critical",
+  "input": {
+   "level": "PANIC",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 0.5,
+   "firstSeenAgeHours": null,
+   "today": 8,
+   "yesterday": 0,
+   "windowHours": 0.5
+  },
+  "expect": {
+   "severity": "critical",
+   "reasons": [
+    "panic",
+    "new"
+   ]
+  }
+ },
+ {
+  "name": "00:30 window with enough samples",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 0.5,
+   "firstSeenAgeHours": null,
+   "today": 25,
+   "yesterday": 0,
+   "windowHours": 0.5
+  },
+  "expect": {
+   "severity": "high",
+   "reasons": [
+    "new"
+   ]
+  }
+ },
+ {
+  "name": "spike by rate",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 100,
+   "yesterday": 20,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "high",
+   "reasons": [
+    "many|100",
+    "up|5|20"
+   ]
+  }
+ },
+ {
+  "name": "a low rate is not a spike",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 5,
+   "yesterday": 1,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "low",
+   "reasons": []
+  }
+ },
+ {
+  "name": "down",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 5,
+   "yesterday": 20,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "low",
+   "reasons": [
+    "down|20"
+   ]
+  }
+ },
+ {
+  "name": "new money error escalates",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "double charge detected",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 60,
+   "yesterday": 0,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "critical",
+   "reasons": [
+    "many|60",
+    "new",
+    "money"
+   ]
+  }
+ },
+ {
+  "name": "returned money error does not escalate",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "refund failed",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": 500,
+   "today": 60,
+   "yesterday": 0,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "many|60",
+    "returned",
+    "money"
+   ]
+  }
+ },
+ {
+  "name": "no baseline: no new, up or down",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": false,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 60,
+   "yesterday": 0,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "many|60"
+   ]
+  }
+ },
+ {
+  "name": "slow, new",
+  "input": {
+   "level": "SLOW",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 6,
+   "yesterday": 0,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "medium",
+   "reasons": [
+    "new"
+   ]
+  }
+ },
+ {
+  "name": "slow, spiking",
+  "input": {
+   "level": "SLOW",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 100,
+   "yesterday": 20,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "high",
+   "reasons": [
+    "many|100",
+    "up|5|20"
+   ]
+  }
+ },
+ {
+  "name": "retryable deadlock is not a crash",
+  "input": {
+   "level": "ERROR",
+   "signature": "Deadlock found when trying to get lock; try restarting transaction",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 5,
+   "yesterday": 5,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "low",
+   "reasons": []
+  }
+ },
+ {
+  "name": "recovered panic is not a crash",
+  "input": {
+   "level": "ERROR",
+   "signature": "recovered from panic: boom",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 5,
+   "yesterday": 5,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "low",
+   "reasons": []
+  }
+ },
+ {
+  "name": "crash text",
+  "input": {
+   "level": "ERROR",
+   "signature": "panic: boom",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 1,
+   "firstSeenAgeHours": null,
+   "today": 5,
+   "yesterday": 5,
+   "windowHours": 1
+  },
+  "expect": {
+   "severity": "critical",
+   "reasons": [
+    "panic"
+   ]
+  }
+ },
+ {
+  "name": "new beats chronic",
+  "input": {
+   "level": "ERROR",
+   "signature": "",
+   "sample": "",
+   "baseline": true,
+   "baselineHours": 24,
+   "firstSeenAgeHours": null,
+   "today": 6000,
+   "yesterday": 0,
+   "windowHours": 24
+  },
+  "expect": {
+   "severity": "high",
+   "reasons": [
+    "many|6000",
+    "new"
+   ]
+  }
+ }
+]

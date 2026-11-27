@@ -1,5 +1,1925 @@
 [
  {
+  "name": "severity v2 beside v1 (flag off)",
+  "day": "2026-11-05",
+  "sources": [
+   {
+    "source": "splunk",
+    "rows": [
+     {
+      "ns": "payment-prod",
+      "svc": "quiet",
+      "lv": "ERROR",
+      "sig": "quiet",
+      "today": "10",
+      "yesterday": "10",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "quiet",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "heavy",
+      "lv": "ERROR",
+      "sig": "heavy",
+      "today": "50",
+      "yesterday": "50",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "heavy",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "chronic",
+      "lv": "ERROR",
+      "sig": "chronic",
+      "today": "250",
+      "yesterday": "250",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "chronic",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "fresh",
+      "lv": "ERROR",
+      "sig": "fresh",
+      "today": "10",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "fresh",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "old",
+      "lv": "ERROR",
+      "sig": "old",
+      "today": "10",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "old",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "boom",
+      "lv": "ERROR",
+      "sig": "boom",
+      "today": "5",
+      "yesterday": "5",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "panic: boom",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "money",
+      "lv": "ERROR",
+      "sig": "money",
+      "today": "60",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "double charge detected",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "spike",
+      "lv": "ERROR",
+      "sig": "spike",
+      "today": "100",
+      "yesterday": "20",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "spike",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "nobase",
+      "lv": "ERROR",
+      "sig": "nobase",
+      "today": "60",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "nobase",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ],
+      "no_baseline": true
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "slow",
+      "lv": "SLOW",
+      "sig": "slow",
+      "today": "6",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "slow",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     }
+    ]
+   }
+  ],
+  "ctx": {
+   "windowHours": 1,
+   "baselineHours": 1,
+   "windowEnd": 1793815200,
+   "known": {
+    "a75e8a751e348dc9fe6c": 1792087200,
+    "84ff4e8e2ef04eeb852e": 1793811600
+   },
+   "thresholds": {
+    "heavyRate": 40,
+    "chronicHigh": 200,
+    "spikeRatio": 3,
+    "spikeMinRate": 6,
+    "minNewCount": 5,
+    "minWindowHours": 1,
+    "minSampleCount": 20,
+    "newWithinHours": 24
+   },
+   "v2": false
+  },
+  "groups": [
+   {
+    "fingerprint": "68cd1c167fe5bbb38c7b",
+    "namespace": "payment-prod",
+    "service": "chronic",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "chronic",
+    "sample": "chronic",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "high",
+      "score": 3240,
+      "reasons": [
+       "many|250",
+       "chronic|250"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 250,
+    "yesterday_count": 250,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "low",
+    "score": 1240,
+    "reasons": []
+   },
+   {
+    "fingerprint": "58f4a854ea9960a37427",
+    "namespace": "payment-prod",
+    "service": "spike",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "spike",
+    "sample": "spike",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "high",
+      "score": 3200,
+      "reasons": [
+       "many|100",
+       "up|5|20"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 100,
+    "yesterday_count": 20,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3200,
+    "reasons": [
+     "up|5|20"
+    ]
+   },
+   {
+    "fingerprint": "3d9804f9337995ea1655",
+    "namespace": "payment-prod",
+    "service": "money",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "money",
+    "sample": "double charge detected",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "critical",
+      "score": 4179,
+      "reasons": [
+       "many|60",
+       "new",
+       "money"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 60,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "critical",
+    "score": 4179,
+    "reasons": [
+     "new",
+     "money"
+    ]
+   },
+   {
+    "fingerprint": "98dab6654ad887cbe99b",
+    "namespace": "payment-prod",
+    "service": "nobase",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "nobase",
+    "sample": "nobase",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "no_baseline": true,
+     "severity_v2": {
+      "severity": "medium",
+      "score": 2179,
+      "reasons": [
+       "many|60"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 60,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "low",
+    "score": 1179,
+    "reasons": []
+   },
+   {
+    "fingerprint": "6a9f9b4ae7cd2d28d775",
+    "namespace": "payment-prod",
+    "service": "heavy",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "heavy",
+    "sample": "heavy",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "medium",
+      "score": 2171,
+      "reasons": [
+       "many|50"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 50,
+    "yesterday_count": 50,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "low",
+    "score": 1171,
+    "reasons": []
+   },
+   {
+    "fingerprint": "122e68d7d35a9c7d2f53",
+    "namespace": "payment-prod",
+    "service": "quiet",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "quiet",
+    "sample": "quiet",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "low",
+      "score": 1104,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 10,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "low",
+    "score": 1104,
+    "reasons": []
+   },
+   {
+    "fingerprint": "84ff4e8e2ef04eeb852e",
+    "namespace": "payment-prod",
+    "service": "fresh",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "fresh",
+    "sample": "fresh",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "high",
+      "score": 3104,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3104,
+    "reasons": [
+     "new"
+    ]
+   },
+   {
+    "fingerprint": "a75e8a751e348dc9fe6c",
+    "namespace": "payment-prod",
+    "service": "old",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "old",
+    "sample": "old",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "medium",
+      "score": 2104,
+      "reasons": [
+       "returned"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3104,
+    "reasons": [
+     "new"
+    ]
+   },
+   {
+    "fingerprint": "9ee2274a10aaabb62aae",
+    "namespace": "payment-prod",
+    "service": "slow",
+    "level": "SLOW",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "slow",
+    "sample": "slow",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "medium",
+      "score": 2085,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 6,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2085,
+    "reasons": [
+     "new"
+    ]
+   },
+   {
+    "fingerprint": "f4d637d7e9871538b08f",
+    "namespace": "payment-prod",
+    "service": "boom",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "boom",
+    "sample": "panic: boom",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v2": {
+      "severity": "critical",
+      "score": 4078,
+      "reasons": [
+       "panic"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 5,
+    "yesterday_count": 5,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "critical",
+    "score": 4078,
+    "reasons": [
+     "panic"
+    ]
+   }
+  ]
+ },
+ {
+  "name": "severity v2 decides (flag on)",
+  "day": "2026-11-05",
+  "sources": [
+   {
+    "source": "splunk",
+    "rows": [
+     {
+      "ns": "payment-prod",
+      "svc": "quiet",
+      "lv": "ERROR",
+      "sig": "quiet",
+      "today": "10",
+      "yesterday": "10",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "quiet",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "heavy",
+      "lv": "ERROR",
+      "sig": "heavy",
+      "today": "50",
+      "yesterday": "50",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "heavy",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "chronic",
+      "lv": "ERROR",
+      "sig": "chronic",
+      "today": "250",
+      "yesterday": "250",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "chronic",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "fresh",
+      "lv": "ERROR",
+      "sig": "fresh",
+      "today": "10",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "fresh",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "old",
+      "lv": "ERROR",
+      "sig": "old",
+      "today": "10",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "old",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "boom",
+      "lv": "ERROR",
+      "sig": "boom",
+      "today": "5",
+      "yesterday": "5",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "panic: boom",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "money",
+      "lv": "ERROR",
+      "sig": "money",
+      "today": "60",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "double charge detected",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "spike",
+      "lv": "ERROR",
+      "sig": "spike",
+      "today": "100",
+      "yesterday": "20",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "spike",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "nobase",
+      "lv": "ERROR",
+      "sig": "nobase",
+      "today": "60",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "nobase",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ],
+      "no_baseline": true
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "slow",
+      "lv": "SLOW",
+      "sig": "slow",
+      "today": "6",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "slow",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     }
+    ]
+   }
+  ],
+  "ctx": {
+   "windowHours": 1,
+   "baselineHours": 1,
+   "windowEnd": 1793815200,
+   "known": {
+    "a75e8a751e348dc9fe6c": 1792087200,
+    "84ff4e8e2ef04eeb852e": 1793811600
+   },
+   "thresholds": {
+    "heavyRate": 40,
+    "chronicHigh": 200,
+    "spikeRatio": 3,
+    "spikeMinRate": 6,
+    "minNewCount": 5,
+    "minWindowHours": 1,
+    "minSampleCount": 20,
+    "newWithinHours": 24
+   },
+   "v2": true
+  },
+  "groups": [
+   {
+    "fingerprint": "68cd1c167fe5bbb38c7b",
+    "namespace": "payment-prod",
+    "service": "chronic",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "chronic",
+    "sample": "chronic",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "low",
+      "score": 1240,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 250,
+    "yesterday_count": 250,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3240,
+    "reasons": [
+     "many|250",
+     "chronic|250"
+    ]
+   },
+   {
+    "fingerprint": "58f4a854ea9960a37427",
+    "namespace": "payment-prod",
+    "service": "spike",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "spike",
+    "sample": "spike",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "high",
+      "score": 3200,
+      "reasons": [
+       "up|5|20"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 100,
+    "yesterday_count": 20,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3200,
+    "reasons": [
+     "many|100",
+     "up|5|20"
+    ]
+   },
+   {
+    "fingerprint": "3d9804f9337995ea1655",
+    "namespace": "payment-prod",
+    "service": "money",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "money",
+    "sample": "double charge detected",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "critical",
+      "score": 4179,
+      "reasons": [
+       "new",
+       "money"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 60,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "critical",
+    "score": 4179,
+    "reasons": [
+     "many|60",
+     "new",
+     "money"
+    ]
+   },
+   {
+    "fingerprint": "98dab6654ad887cbe99b",
+    "namespace": "payment-prod",
+    "service": "nobase",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "nobase",
+    "sample": "nobase",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "no_baseline": true,
+     "severity_v1": {
+      "severity": "low",
+      "score": 1179,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 60,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2179,
+    "reasons": [
+     "many|60"
+    ]
+   },
+   {
+    "fingerprint": "6a9f9b4ae7cd2d28d775",
+    "namespace": "payment-prod",
+    "service": "heavy",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "heavy",
+    "sample": "heavy",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "low",
+      "score": 1171,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 50,
+    "yesterday_count": 50,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2171,
+    "reasons": [
+     "many|50"
+    ]
+   },
+   {
+    "fingerprint": "122e68d7d35a9c7d2f53",
+    "namespace": "payment-prod",
+    "service": "quiet",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "quiet",
+    "sample": "quiet",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "low",
+      "score": 1104,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 10,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "low",
+    "score": 1104,
+    "reasons": []
+   },
+   {
+    "fingerprint": "84ff4e8e2ef04eeb852e",
+    "namespace": "payment-prod",
+    "service": "fresh",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "fresh",
+    "sample": "fresh",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "high",
+      "score": 3104,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3104,
+    "reasons": [
+     "new"
+    ]
+   },
+   {
+    "fingerprint": "a75e8a751e348dc9fe6c",
+    "namespace": "payment-prod",
+    "service": "old",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "old",
+    "sample": "old",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "high",
+      "score": 3104,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2104,
+    "reasons": [
+     "returned"
+    ]
+   },
+   {
+    "fingerprint": "9ee2274a10aaabb62aae",
+    "namespace": "payment-prod",
+    "service": "slow",
+    "level": "SLOW",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "slow",
+    "sample": "slow",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "medium",
+      "score": 2085,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 6,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2085,
+    "reasons": [
+     "new"
+    ]
+   },
+   {
+    "fingerprint": "f4d637d7e9871538b08f",
+    "namespace": "payment-prod",
+    "service": "boom",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "boom",
+    "sample": "panic: boom",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "critical",
+      "score": 4078,
+      "reasons": [
+       "panic"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 5,
+    "yesterday_count": 5,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "critical",
+    "score": 4078,
+    "reasons": [
+     "panic"
+    ]
+   }
+  ]
+ },
+ {
+  "name": "severity v2 on a 30 minute window",
+  "day": "2026-11-05",
+  "sources": [
+   {
+    "source": "splunk",
+    "rows": [
+     {
+      "ns": "payment-prod",
+      "svc": "quiet",
+      "lv": "ERROR",
+      "sig": "quiet",
+      "today": "10",
+      "yesterday": "10",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "quiet",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "heavy",
+      "lv": "ERROR",
+      "sig": "heavy",
+      "today": "50",
+      "yesterday": "50",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "heavy",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "chronic",
+      "lv": "ERROR",
+      "sig": "chronic",
+      "today": "250",
+      "yesterday": "250",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "chronic",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "fresh",
+      "lv": "ERROR",
+      "sig": "fresh",
+      "today": "10",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "fresh",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "old",
+      "lv": "ERROR",
+      "sig": "old",
+      "today": "10",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "old",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "boom",
+      "lv": "ERROR",
+      "sig": "boom",
+      "today": "5",
+      "yesterday": "5",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "panic: boom",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "money",
+      "lv": "ERROR",
+      "sig": "money",
+      "today": "60",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "double charge detected",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "spike",
+      "lv": "ERROR",
+      "sig": "spike",
+      "today": "100",
+      "yesterday": "20",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "spike",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "nobase",
+      "lv": "ERROR",
+      "sig": "nobase",
+      "today": "60",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "nobase",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ],
+      "no_baseline": true
+     },
+     {
+      "ns": "payment-prod",
+      "svc": "slow",
+      "lv": "SLOW",
+      "sig": "slow",
+      "today": "6",
+      "yesterday": "0",
+      "first": "1793815884.344",
+      "last": "1793867358.555",
+      "sample": "slow",
+      "caller": "zalopay/zalopay.go:56",
+      "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+      "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+      "analytics_hourly": [
+       "1793815200:700",
+       "1793818800:590"
+      ]
+     }
+    ]
+   }
+  ],
+  "ctx": {
+   "windowHours": 0.5,
+   "baselineHours": 0.5,
+   "windowEnd": 1793815200,
+   "known": {
+    "a75e8a751e348dc9fe6c": 1792087200,
+    "84ff4e8e2ef04eeb852e": 1793811600
+   },
+   "thresholds": {
+    "heavyRate": 40,
+    "chronicHigh": 200,
+    "spikeRatio": 3,
+    "spikeMinRate": 6,
+    "minNewCount": 5,
+    "minWindowHours": 1,
+    "minSampleCount": 20,
+    "newWithinHours": 24
+   },
+   "v2": true
+  },
+  "groups": [
+   {
+    "fingerprint": "68cd1c167fe5bbb38c7b",
+    "namespace": "payment-prod",
+    "service": "chronic",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "chronic",
+    "sample": "chronic",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "low",
+      "score": 1240,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 250,
+    "yesterday_count": 250,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3240,
+    "reasons": [
+     "many|250",
+     "chronic|250"
+    ]
+   },
+   {
+    "fingerprint": "58f4a854ea9960a37427",
+    "namespace": "payment-prod",
+    "service": "spike",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "spike",
+    "sample": "spike",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "high",
+      "score": 3200,
+      "reasons": [
+       "up|5|20"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 100,
+    "yesterday_count": 20,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "high",
+    "score": 3200,
+    "reasons": [
+     "many|100",
+     "up|5|20"
+    ]
+   },
+   {
+    "fingerprint": "3d9804f9337995ea1655",
+    "namespace": "payment-prod",
+    "service": "money",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "money",
+    "sample": "double charge detected",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "critical",
+      "score": 4179,
+      "reasons": [
+       "new",
+       "money"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 60,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "critical",
+    "score": 4179,
+    "reasons": [
+     "many|60",
+     "new",
+     "money"
+    ]
+   },
+   {
+    "fingerprint": "98dab6654ad887cbe99b",
+    "namespace": "payment-prod",
+    "service": "nobase",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "nobase",
+    "sample": "nobase",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "no_baseline": true,
+     "severity_v1": {
+      "severity": "low",
+      "score": 1179,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 60,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2179,
+    "reasons": [
+     "many|60"
+    ]
+   },
+   {
+    "fingerprint": "6a9f9b4ae7cd2d28d775",
+    "namespace": "payment-prod",
+    "service": "heavy",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "heavy",
+    "sample": "heavy",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "low",
+      "score": 1171,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 50,
+    "yesterday_count": 50,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2171,
+    "reasons": [
+     "many|50"
+    ]
+   },
+   {
+    "fingerprint": "122e68d7d35a9c7d2f53",
+    "namespace": "payment-prod",
+    "service": "quiet",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "quiet",
+    "sample": "quiet",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "low",
+      "score": 1104,
+      "reasons": []
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 10,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "low",
+    "score": 1104,
+    "reasons": []
+   },
+   {
+    "fingerprint": "84ff4e8e2ef04eeb852e",
+    "namespace": "payment-prod",
+    "service": "fresh",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "fresh",
+    "sample": "fresh",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "high",
+      "score": 3104,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2104,
+    "reasons": [
+     "new"
+    ]
+   },
+   {
+    "fingerprint": "a75e8a751e348dc9fe6c",
+    "namespace": "payment-prod",
+    "service": "old",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "old",
+    "sample": "old",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "high",
+      "score": 3104,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 10,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2104,
+    "reasons": [
+     "returned"
+    ]
+   },
+   {
+    "fingerprint": "9ee2274a10aaabb62aae",
+    "namespace": "payment-prod",
+    "service": "slow",
+    "level": "SLOW",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "slow",
+    "sample": "slow",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "medium",
+      "score": 2085,
+      "reasons": [
+       "new"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 6,
+    "yesterday_count": 0,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "medium",
+    "score": 2085,
+    "reasons": [
+     "new"
+    ]
+   },
+   {
+    "fingerprint": "f4d637d7e9871538b08f",
+    "namespace": "payment-prod",
+    "service": "boom",
+    "level": "ERROR",
+    "caller": "zalopay/zalopay.go:56",
+    "signature": "boom",
+    "sample": "panic: boom",
+    "detail": {
+     "image": "harbor/payment/payment-zalopay:prod.2611051524.efd844a",
+     "request_id": "c2f33798-eeeb-401a-91af-a1304002994d",
+     "sources": [
+      "splunk"
+     ],
+     "severity_v1": {
+      "severity": "critical",
+      "score": 4078,
+      "reasons": [
+       "panic"
+      ]
+     }
+    },
+    "hourly": [
+     {
+      "hour": "2026-11-04T18:00:00.000Z",
+      "count": 700
+     },
+     {
+      "hour": "2026-11-04T19:00:00.000Z",
+      "count": 590
+     }
+    ],
+    "day": "2026-11-05",
+    "today_count": 5,
+    "yesterday_count": 5,
+    "first_at": "2026-11-04T18:11:24.344Z",
+    "last_at": "2026-11-05T08:29:18.555Z",
+    "severity": "critical",
+    "score": 4078,
+    "reasons": [
+     "panic"
+    ]
+   }
+  ]
+ },
+ {
   "name": "empty",
   "day": "2026-11-02",
   "sources": [

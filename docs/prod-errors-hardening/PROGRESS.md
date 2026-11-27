@@ -1,6 +1,6 @@
 # Tiến độ hardening luồng scan Production Errors
 
-> **Trạng thái hiện tại:** **Phase 1 đã xong (1.0 → 1.8), chờ bạn duyệt trước khi qua Phase 2.** Mục 1.9 (quét thủ công im lặng trên môi trường thật) là việc vận hành, chưa làm được ở đây. Phase 2 chưa bắt đầu; Phase 3 không làm đợt này (Q-9). Mọi thay đổi uncommitted.
+> **Trạng thái hiện tại:** **Phase 1 và Phase 2 đã hoàn tất.** Phase 1 đã được commit (`68d26a0`); Phase 2 đang uncommitted. **Phase 3 hoãn (Q-9)**: không làm trong đợt này; nếu làm sau thì chấp nhận miss `shared_analyses`. Còn lại là các việc kiểm chứng trên Splunk/SigNoz thật (cuối tài liệu).
 
 ## Checklist
 
@@ -25,40 +25,40 @@
 
 ### Phase 2 — Severity, Radar, SigNoz
 
-- [ ] 2.0 Test đỏ T14–T22
-- [ ] 2.1 `severity.ts` (thuần) + `severity.go` + `severity-vectors.json`
-- [ ] 2.2 `assess` theo `window_hours`, `first_seen_at` (`known`), bậc mãn tính; ngưỡng từ TS qua op `sources`
-- [ ] 2.3 Chế độ shadow `severity_v2` và so sánh với `severity` trên dữ liệu thật
-- [ ] 2.4 Radar dùng chung phân loại; điền giờ 0 (chỉ giờ được bao phủ đầy đủ)
-- [ ] 2.5 SigNoz: đếm distinct/không trùng span con, loại 4xx kỳ vọng, mẫu trace khớp `status_message`
-- [ ] 2.6 SigNoz: kiểm tra mapping namespace (chỉ cảnh báo)
-- [ ] 2.7 Golden đồng bộ; đủ bộ kiểm thử; tài liệu
+- [x] 2.0 Test đỏ T14–T22
+- [x] 2.1 `severity.ts` (thuần) + `severity.go` + `severity-vectors.json`
+- [x] 2.2 `assess` theo `window_hours`, `first_seen_at` (`known`), bậc mãn tính; ngưỡng từ TS qua op `sources`
+- [x] 2.3 Chế độ shadow `severity_v2` và so sánh với `severity` trên dữ liệu thật
+- [x] 2.4 Radar dùng chung phân loại; điền giờ 0 (chỉ giờ được bao phủ đầy đủ)
+- [x] 2.5 SigNoz: đếm distinct/không trùng span con, loại 4xx kỳ vọng, mẫu trace khớp `status_message`
+- [x] 2.6 SigNoz: kiểm tra mapping namespace (chỉ cảnh báo)
+- [x] 2.7 Golden đồng bộ; đủ bộ kiểm thử; tài liệu
 
 ### Phase 3 — Tùy chọn (chỉ khi Q-9 = có)
 
-- [ ] 3.0 Test đỏ T23–T25
-- [ ] 3.1 `NORMALIZE_RULES` (một nguồn) → `signatureOf` + SPL; parity test
-- [ ] 3.2 Migration 116 (alias, `norm_version`) + dual compute
-- [ ] 3.3 Kế thừa trạng thái, chặn `new`, quét thủ công im lặng
-- [ ] 3.4 Radar/analytics đọc alias; quyết định `shared_analyses` (Q-9)
-- [ ] 3.5 Kế hoạch rollback đã kiểm
+- [ ] 3.0 Test đỏ T23–T25 _(hoãn, Q-9)_
+- [ ] 3.1 `NORMALIZE_RULES` (một nguồn) → `signatureOf` + SPL; parity test _(hoãn, Q-9)_
+- [ ] 3.2 Migration 116 (alias, `norm_version`) + dual compute _(hoãn, Q-9)_
+- [ ] 3.3 Kế thừa trạng thái, chặn `new`, quét thủ công im lặng _(hoãn, Q-9)_
+- [ ] 3.4 Radar/analytics đọc alias; quyết định `shared_analyses` (Q-9) _(hoãn, Q-9)_
+- [ ] 3.5 Kế hoạch rollback đã kiểm _(hoãn, Q-9)_
 
-## Quyết định đang chờ
+## Quyết định đã chốt (khớp `PLAN.md` §9)
 
-| #    | Câu hỏi                                                                                   | Đề xuất                                                | Quyết định |
-| ---- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------ | ---------- |
-| Q-1  | Ngưỡng rate/giờ (`heavyRate`, `chronicHigh`, `spikeRatio`, `spikeMinRate`, `minNewCount`) | 40/h, 200/h, 3×, 6/h, 5                                | _chờ_      |
-| Q-2  | Cửa sổ < 1h: chặn `new`/`spike` ở medium; `minWindowHours`, `minSampleCount`              | 1h, 20                                                 | _chờ_      |
-| Q-3  | TTL `ignored` và ngưỡng đánh thức                                                         | 14 ngày; `≥ max(20/h, 5×ignored_rate)` và `today ≥ 50` | _chờ_      |
-| Q-4  | Nhắc lại `critical` mãn tính                                                              | tắt                                                    | _chờ_      |
-| Q-5  | Mã HTTP kỳ vọng loại khỏi SigNoz; span `CLIENT`                                           | 400, 404, 409, 422, 429; giữ `CLIENT`                  | _chờ_      |
-| Q-6  | Khởi động `EXTRA_LEVELS` im lặng                                                          | im lặng                                                | _chờ_      |
-| Q-7  | Carry-over khi `partial`                                                                  | hiển thị + nhãn stale                                  | _chờ_      |
-| Q-8  | Auto-reopen ghi `lifecycle reopen`?                                                       | không (chỉ `audit`)                                    | _chờ_      |
-| Q-9  | Làm Phase 3? `shared_analyses` miss hay alias resolver                                    | chưa; nếu có thì chấp nhận miss                        | _chờ_      |
-| Q-10 | SigNoz `count_distinct(trace_id)` hay span gốc/SERVER                                     | distinct nếu live check đạt                            | _chờ_      |
-| Q-11 | Remap namespace SigNoz đẩy sang Phase 3                                                   | đẩy sang Phase 3                                       | _chờ_      |
-| Q-12 | Liên kết nhóm Splunk↔SigNoz                                                               | ngoài phạm vi                                          | _chờ_      |
+| #    | Quyết định                                                                                                                                        |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q-1  | `heavyRate = 40/h`, `chronicHigh = 200/h`, `spikeRatio = 3`, `spikeMinRate = 6/h`, `minNewCount = 5` (cấu hình ở TS `config.prodErrors.severity`) |
+| Q-2  | `minWindowHours = 1`, `minSampleCount = 20`                                                                                                       |
+| Q-3  | TTL `ignored` 14 ngày; đánh thức khi `rate ≥ max(20/h, 5 × ignored_rate)` và `today ≥ 50`                                                         |
+| Q-4  | Tắt nhắc lại `critical` mãn tính (`renotifyDays = 0`)                                                                                             |
+| Q-5  | Loại mặc định `[400, 404, 409, 422]`, **không** loại 429; giữ span `CLIENT`                                                                       |
+| Q-6  | Khởi động `EXTRA_LEVELS` bằng quét thủ công im lặng                                                                                               |
+| Q-7  | Carry-over khi `partial`: hiển thị nhóm nguồn lỗi từ scan đầy đủ gần nhất + nhãn stale + banner                                                   |
+| Q-8  | Auto-reopen không ghi `lifecycle 'reopen'`, chỉ `audit()`; reset `notified_severity = NULL` khi mở lại                                            |
+| Q-9  | Chưa làm Phase 3; nếu làm sau thì chấp nhận miss `shared_analyses`                                                                                |
+| Q-10 | Ưu tiên `count_distinct(trace_id)` nếu live check SigNoz đạt; giữ fallback span gốc/SERVER                                                        |
+| Q-11 | Remap namespace SigNoz đẩy sang Phase 3                                                                                                           |
+| Q-12 | Liên kết nhóm Splunk ↔ SigNoz ngoài phạm vi                                                                                                       |
 
 ## Ràng buộc đã ghi nhận (không đổi nếu không được duyệt lại)
 
@@ -158,3 +158,81 @@ Test viết và chạy **đỏ trước**, rồi mới implement. Kết quả đ
 - [ ] Chi phí thêm của 3 `eval` mới trên khối lượng thật.
 - [ ] **1.9** Quét thủ công im lặng (quét thủ công không bao giờ gửi Telegram) trước khi bật `PROD_ERRORS_EXTRA_LEVELS`, rồi xem số nhóm `new` phát sinh.
 - [ ] Sau triển khai: số nhóm hạ severity do regex siết; không có Telegram hàng loạt sau migration 114.
+
+## Phase 2 — kết quả
+
+### Trình tự TDD (đỏ → xanh)
+
+| Test                                                 | Đỏ vì                                                                   | Xanh nhờ                                                                                                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vector chung `severity-vectors.json` (22 ca) TS + Go | `severity.ts` chưa có; Go `assessV2`/`DefaultThresholds` chưa biên dịch | `assessV2` + `SeverityThresholds` ở `severity.ts`; `assessV2` + `Thresholds` ở `severity.go`                                                                        |
+| T14 (cửa sổ 00:30)                                   | `toGroups` không nhận context                                           | `GroupContext`; mẫu < `minSampleCount` trong cửa sổ < 1h chặn ở medium (crash miễn)                                                                                 |
+| T15 (cùng rate/giờ, cửa sổ 1h/4h/24h)                | công thức đếm tuyệt đối                                                 | rate = `today / max(windowHours, minWindowHours)`                                                                                                                   |
+| T16 (mãn tính volume cao)                            | v1: 6000/ngày không đổi chỉ `medium`                                    | bậc `chronic` (≥ 200/h, không phải `new`) → `high`                                                                                                                  |
+| T17 (`new` theo `first_seen_at`)                     | `yesterday == 0` luôn là `new`                                          | `known` + `newWithinHours = 24`: quá 24h là `returned` (≤ medium)                                                                                                   |
+| T25 (cờ tắt = v1; shadow)                            | không có `detail.severity_v2`                                           | cờ tắt: `severity` là v1, `detail.severity_v2` đi kèm; cờ bật: v2 quyết định, `detail.severity_v1` đi kèm; không context ⇒ y hệt cũ                                 |
+| T18 (Radar giờ 0)                                    | `radar/coverage.ts` chưa có                                             | `coveredHours` (loại scan partial/truncated/nguồn skipped/namespace khác, chỉ giờ trọn) + `zeroFill`; chuỗi thưa + burst chỉ phát hiện `error_spike` sau khi điền 0 |
+| T19 (Radar ≡ scan về crash/money)                    | Radar có `MONEY` riêng, không xét crash                                 | `needsBump` dùng chung từ `severity.ts`; Radar đọc 39 vector `classify-vectors.json`                                                                                |
+| T20 (SigNoz đếm)                                     | `errorSpanQuery` chưa có                                                | `off` = truy vấn cũ; `trace` = `count_distinct(trace_id)`; `root` = `parent_span_id = '' OR kind`; loại mã trạng thái                                               |
+| T21 (mẫu trace khớp khóa nhóm)                       | khớp theo service+name                                                  | khớp thêm `status_message` + `response_status_code`; mẫu thiếu hai trường vẫn khớp kiểu cũ                                                                          |
+| T22 (namespace)                                      | `namespaceMapping` chưa có                                              | cảnh báo + `sources.signoz.status = "degraded"`; giá trị namespace không đổi                                                                                        |
+| Integration T15/T17 (Go thật)                        | `config.prodErrors.severity` chưa có                                    | ngưỡng từ TS tới Go qua op `sources`; shadow; `returned` sau khi lùi `first_seen_at` 10 ngày                                                                        |
+| Integration T20/T22 (Go thật)                        | `config.prodErrors.signoz` chưa có                                      | cùng filter ở cửa sổ và baseline; `degraded`; `partial=false`                                                                                                       |
+| Golden                                               | ca mới (v2 cạnh v1, v2 quyết định, cửa sổ 30 phút)                      | `prodErrorsGolden.ts --write`; diff chỉ **thêm** ca mới; Go `TestGolden` khớp                                                                                       |
+
+Ghi chú: lần chạy integration đỏ đầu tiên bị treo vì `finally` của test ném lỗi trước khi đóng server SigNoz giả; đã đổi thứ tự (đóng server trước). Test integration SigNoz lúc đầu đếm cả truy vấn latency; đã lọc theo `parent_span_id`.
+
+### Đã làm (theo mục)
+
+- **2.1** `src/prodErrors/severity.ts` (thuần) gộp `classify.ts` + `assess` cũ + `assessV2`; `go/internal/proderrors/severity.go` là bản port (`classify.go` đã xóa). `scan.ts` re-export `assess`.
+- **2.2** `assessV2` theo rate/giờ, `first_seen_at`, `chronic`, `returned`; ngưỡng ở `config.prodErrors.severity`, truyền sang Go qua op `sources` (`severity_v2`, `thresholds`; schema cập nhật). Go nạp `first_seen_at` của các fingerprint bằng **một** truy vấn trước `ToGroups`; `windowHours` suy ra từ `Request.Start/End` nên **không cần migration 115**.
+- **2.3** Shadow: cờ `PROD_ERRORS_SEVERITY_V2` (mặc định tắt). Tắt: `severity/score/reasons` là v1, `detail.severity_v2 = {severity, score, reasons}`. Bật: v2 là chính, `detail.severity_v1` đi kèm. UI và Telegram có lý do `returned`, `chronic` (vi/en).
+- **2.4** Radar: `severityOf` dùng `needsBump` chung (bỏ `MONEY` riêng); `loadErrorSeries` điền giờ 0 chỉ cho giờ trọn vẹn của scan OK **không** `partial`, **không** `truncated`, đúng nguồn của nhóm và đúng namespace.
+- **2.5** SigNoz: `PROD_ERRORS_SIGNOZ_DISTINCT = off | trace | root` (mặc định `off` = truy vấn cũ, giống hệt); `PROD_ERRORS_SIGNOZ_IGNORE_STATUS` (mặc định `400,404,409,422`); `serverKind` cấu hình được. Mẫu trace lấy thêm `selectFields` (`status_message`, `response_status_code`).
+- **2.6** Namespace: `namespaceMapping` + ghi chú + `sources.signoz.status = "degraded"` (Go ghi); không remap.
+- **2.7** Golden tái sinh, kiểm thử đầy đủ.
+
+### Khác kế hoạch hoặc cần biết
+
+- Nếu `PROD_ERRORS_SIGNOZ_DISTINCT = off`, **cả** việc loại mã trạng thái cũng tắt (toàn bộ thay đổi đếm nằm sau một cờ, để cờ tắt = y hệt trước). Chỉ sửa mẫu trace (2.5b) và cảnh báo namespace (2.6) luôn bật.
+- Cú pháp lọc mã trạng thái dùng `NOT (response_status_code = '400' OR …)` và `kind_string = 'Server'`: **chưa kiểm chứng** trên SigNoz thật (xem danh sách bên dưới).
+- Lý do "cửa sổ ngắn" không có khóa riêng trong `reasons` (chỉ chặn bậc), để không thêm chuỗi UI; có thể thêm sau nếu cần giải thích.
+- Radar: điền 0 làm `rate` và median baseline chính xác hơn, nên một số chuỗi thưa sẽ được phát hiện `error_spike` mà trước đây không (đúng mục tiêu). `minBaseline` (12 giờ) nay đếm cả giờ 0.
+- Phase 1 đã commit; vì vậy đề xuất commit bên dưới chỉ gồm Phase 2.
+
+### Kết quả kiểm thử Phase 2
+
+| Lệnh                                                                                                                                                        | Kết quả                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `npm run typecheck` (root + web)                                                                                                                            | pass                                                                |
+| `npm run lint`                                                                                                                                              | pass                                                                |
+| `npx prettier --check .`                                                                                                                                    | pass                                                                |
+| `npm run arch:check`                                                                                                                                        | `{"files":528,"edges":3008,"cycles":5,"violations":5}` (không tăng) |
+| `npm test`                                                                                                                                                  | 1585/1585 pass                                                      |
+| `go test ./internal/proderrors/... ./internal/worker/...`, `go vet ./internal/proderrors/ ./cmd/...`, `gofmt`                                               | pass                                                                |
+| Integration toàn bộ `test/*.integration.ts` (gồm `prodErrors` 22, `prod-errors-go`, `radar*`, `shared-*`, `incident-*`, `unified-incident`, `production-*`) | 1291 tests: 1289 pass, 0 fail, 2 skip                               |
+| `npm run build`                                                                                                                                             | pass                                                                |
+| Gitleaks 8.30.1 (cùng bản và checksum với CI) trên file đổi/mới và `testdata`                                                                               | 0 finding                                                           |
+
+### Cần kiểm chứng trên Splunk/SigNoz thật
+
+- [ ] **SigNoz `query_range v5`:** `count_distinct(trace_id)` có chạy với `requestType = scalar` và `time_series`; nếu không, dùng `PROD_ERRORS_SIGNOZ_DISTINCT=root`.
+- [ ] **SigNoz:** cú pháp `NOT (response_status_code = '400' OR …)` (span không có thuộc tính này có bị loại nhầm không) và kiểu dữ liệu của `response_status_code` (chuỗi hay số).
+- [ ] **SigNoz:** tên trường loại span (`kind_string = 'Server'`?) cho chế độ `root`; chỉnh `config.prodErrors.signoz.serverKind` nếu khác.
+- [ ] **SigNoz:** `selectFields` của truy vấn mẫu trả đúng `status_message`/`response_status_code` (nếu thiếu, mẫu trace quay về khớp theo service+name).
+- [ ] **SigNoz:** giá trị thật của `deployment.environment` so với namespace k8s đã cấu hình (ghi chú/`degraded` có xuất hiện không).
+- [ ] So sánh `severity` với `detail.severity_v2` trên ≥ 3 ngày dữ liệu thật trước khi bật `PROD_ERRORS_SEVERITY_V2`; xem phân bố `returned`, `chronic`.
+- [ ] Radar: số `error_spike` mới sau khi điền giờ 0 (kỳ vọng tăng ở chuỗi thưa).
+- [ ] Các mục Splunk của Phase 1 (cú pháp SPL mới, `partial_reasons`, quét im lặng 1.9) vẫn còn mở.
+
+### Đề xuất tách commit cho Phase 2 (chưa chạy)
+
+Phase 1 đã nằm trong `68d26a0`. Phase 2 nên tách thành 4 commit:
+
+1. `refactor(prod-errors): one severity module for the scan, the Go port and Radar` — `severity.ts`, `severity.go`, xóa `classify.ts/.go`, `merge.go` (chuyển `assess`), `radar/detect.ts` (`needsBump`), `severity-vectors.json`, các test `prod-errors-severity`, `prod-errors-classify`, `severity_test.go`.
+2. `feat(prod-errors): severity v2 by rate per hour, shadowed beside v1` — `config.ts`, `scan.ts` (`GroupContext`, `toGroups`, `severityThresholds`), `gateway.ts`, Go (`ToGroups` context, `store.firstSeen`, `scan.go`), schema, `golden.json` + fixture, UI/i18n lý do mới, test `prod-errors-phase2` (T14–T17, T25), integration T15/T17.
+3. `fix(radar): count the hours a complete scan saw nothing, and share the crash/money rules` — `radar/coverage.ts`, `radar/scan.ts`, test T18/T19.
+4. `feat(signoz): count distinct traces behind a flag, match trace samples exactly, warn on namespace mismatch` — `integrations/signoz.ts`, `scan.ts` (`signozRows`, `namespaceMapping`), `gateway.ts` (`degraded`), Go `degraded`, test T20–T22, integration T20/T22.
+5. `docs(prod-errors): record phase 2 results` — `docs/prod-errors-hardening/*`.
+
+Commit `feat`/`refactor`/`fix` cần footer `func:` — mình cần mã function từ bạn.

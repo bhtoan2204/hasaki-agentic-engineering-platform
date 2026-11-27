@@ -31,6 +31,7 @@ import {
   capSourceRows,
   finalizeScan,
   maskGaps,
+  namespaceMapping,
   notifyFailure,
   partialReasons,
   scanNamespaces,
@@ -38,8 +39,10 @@ import {
   signozSlowRows,
   SOURCE_CAP,
   type SourceRow,
+  SIGNOZ_NAMESPACE_MISMATCH,
   SIGNOZ_NO_BASELINE,
   SIGNOZ_TRUNCATED,
+  severityThresholds,
 } from "./scan.ts";
 import { windowOf, type ScanRequest, type ScanTrigger } from "./jobs.ts";
 import { ignoreError } from "../ignoreError.ts";
@@ -198,6 +201,9 @@ async function operate(
           splunk: { connected: splunkConnected(), expired: splunkExpired() },
           signoz: { enabled: signozEnabled() },
           slow_threshold_ms: config.prodErrors.slowThresholdMs,
+          // The one place the severity thresholds live: the Go engine judges with exactly these.
+          severity_v2: config.prodErrors.severity.v2,
+          thresholds: severityThresholds(),
         },
       };
     case "splunk": {
@@ -241,9 +247,14 @@ async function operate(
           base,
           ns.map((n) => n.namespace),
         );
+        const mapping = namespaceMapping(
+          spans.today.map((g) => g.ns),
+          config.prodErrors.namespaces.map((n) => n.namespace),
+        );
         const notes = [
           ...(spans.truncated ? [SIGNOZ_TRUNCATED] : []),
           ...(spans.hasBaseline ? [] : [SIGNOZ_NO_BASELINE]),
+          ...(mapping.degraded ? [SIGNOZ_NAMESPACE_MISMATCH(mapping.unknown)] : []),
         ];
         return {
           status: 200,
@@ -251,6 +262,7 @@ async function operate(
             rows: signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline),
             has_baseline: spans.hasBaseline,
             truncated: !!spans.truncated,
+            degraded: mapping.degraded,
             notes,
           },
         };

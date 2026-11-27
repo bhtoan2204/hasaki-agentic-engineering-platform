@@ -189,12 +189,17 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 		Signoz struct {
 			Enabled bool `json:"enabled"`
 		} `json:"signoz"`
-		SlowThresholdMs int `json:"slow_threshold_ms"`
+		SlowThresholdMs int        `json:"slow_threshold_ms"`
+		SeverityV2      bool       `json:"severity_v2"`
+		Thresholds      Thresholds `json:"thresholds"`
 	}
 	if err := policy.Do(ctx, "sources", func(ctx context.Context) error {
 		return sc.gw.call(ctx, sc, "sources", "", nil, &src)
 	}); err != nil {
 		return outcome{}, err
+	}
+	if src.Thresholds == (Thresholds{}) {
+		src.Thresholds = DefaultThresholds()
 	}
 	useSplunk, useSignoz := src.Splunk.Connected, src.Signoz.Enabled
 	if !useSplunk && !useSignoz {
@@ -271,7 +276,19 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 	if sz.ok {
 		sources = append(sources, Source{Name: "signoz", Rows: sz.errs}, Source{Name: "signoz", Rows: sz.slow})
 	}
-	groups, err := ToGroups(MergeSourceRows(sources...), sc.Request.Day)
+	merged := MergeSourceRows(sources...)
+	known, err := sc.store.firstSeen(ctx, Fingerprints(merged))
+	if err != nil {
+		return outcome{}, err
+	}
+	groups, err := ToGroups(merged, sc.Request.Day, &Context{
+		WindowHours:   float64(sc.Request.End-sc.Request.Start) / 3600,
+		BaselineHours: float64(sc.Request.BaseEnd-sc.Request.BaseStart) / 3600,
+		WindowEnd:     float64(sc.Request.End),
+		Known:         known,
+		Thresholds:    src.Thresholds,
+		V2:            src.SeverityV2,
+	})
 	if err != nil {
 		return outcome{}, err
 	}
@@ -306,7 +323,12 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 	if useSignoz {
 		reports["signoz"] = &sourceReport{Status: "failed", Error: truncate(strings.Join(sz.notes, "; "), 500)}
 		if sz.ok {
-			reports["signoz"] = &sourceReport{Status: "ok", Rows: len(sz.errs), Truncated: sz.truncated, Slow: sz.slowState}
+			status := "ok"
+			if sz.degraded {
+				// Answered, but its namespace values match nothing configured: a warning, not a missing source.
+				status = "degraded"
+			}
+			reports["signoz"] = &sourceReport{Status: status, Rows: len(sz.errs), Truncated: sz.truncated, Slow: sz.slowState}
 		}
 	}
 	if err := sc.store.publish(ctx, sc, groups, w, partial(reports), reports); err != nil {
@@ -326,6 +348,7 @@ type signozResult struct {
 	ok         bool
 	fatal      error
 	truncated  bool
+	degraded   bool
 	slowState  string // ok | failed | off
 }
 
@@ -351,6 +374,7 @@ func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, thresho
 		Rows        []Row    `json:"rows"`
 		HasBaseline bool     `json:"has_baseline"`
 		Truncated   bool     `json:"truncated"`
+		Degraded    bool     `json:"degraded"`
 		Notes       []string `json:"notes"`
 	}
 	if err := policy.Do(ctx, "signoz-errors", func(ctx context.Context) error {
@@ -363,7 +387,7 @@ func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, thresho
 	}
 	notes := slices.Clone(e.Notes)
 	if threshold == 0 {
-		return signozResult{errs: e.Rows, notes: notes, ok: true, truncated: e.Truncated, slowState: "off"}
+		return signozResult{errs: e.Rows, notes: notes, ok: true, truncated: e.Truncated, degraded: e.Degraded, slowState: "off"}
 	}
 	var s struct {
 		Rows []Row `json:"rows"`
@@ -374,7 +398,7 @@ func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, thresho
 		if permanent(err) {
 			return signozResult{fatal: err}
 		}
-		return signozResult{errs: e.Rows, notes: append(notes, slowNotePrefix+err.Error()), ok: true, truncated: e.Truncated, slowState: "failed"}
+		return signozResult{errs: e.Rows, notes: append(notes, slowNotePrefix+err.Error()), ok: true, truncated: e.Truncated, degraded: e.Degraded, slowState: "failed"}
 	}
 	byTodayDesc(s.Rows) // TypeScript sorts the latency rows in place before picking the slowest
 	var top []Row
@@ -402,7 +426,7 @@ func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, thresho
 		})
 	}
 	wg.Wait()
-	return signozResult{errs: e.Rows, slow: s.Rows, notes: notes, ok: true, truncated: e.Truncated, slowState: "ok"}
+	return signozResult{errs: e.Rows, slow: s.Rows, notes: notes, ok: true, truncated: e.Truncated, degraded: e.Degraded, slowState: "ok"}
 }
 
 // published resumes a scan whose groups were already written (a crash between publishing and finalizing).

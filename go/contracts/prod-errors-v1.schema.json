@@ -32,7 +32,7 @@
     },
     "SourcesResponse": {
       "type": "object",
-      "required": ["splunk", "signoz", "slow_threshold_ms"],
+      "required": ["splunk", "signoz", "slow_threshold_ms", "severity_v2", "thresholds"],
       "properties": {
         "splunk": {
           "type": "object",
@@ -44,7 +44,26 @@
           "required": ["enabled"],
           "properties": { "enabled": { "type": "boolean" } }
         },
-        "slow_threshold_ms": { "type": "integer", "minimum": 0 }
+        "slow_threshold_ms": { "type": "integer", "minimum": 0 },
+        "severity_v2": {
+          "type": "boolean",
+          "description": "severity v2 decides the severity (otherwise v1 does and v2 rides along in the group detail)"
+        },
+        "thresholds": {
+          "type": "object",
+          "description": "severity v2 thresholds: the only place they are configured is TypeScript config.prodErrors.severity",
+          "required": ["heavyRate", "chronicHigh", "spikeRatio", "spikeMinRate", "minNewCount", "minWindowHours", "minSampleCount", "newWithinHours"],
+          "properties": {
+            "heavyRate": { "type": "number" },
+            "chronicHigh": { "type": "number" },
+            "spikeRatio": { "type": "number" },
+            "spikeMinRate": { "type": "number" },
+            "minNewCount": { "type": "number" },
+            "minWindowHours": { "type": "number" },
+            "minSampleCount": { "type": "number" },
+            "newWithinHours": { "type": "number" }
+          }
+        }
       }
     },
     "SourceRow": {
@@ -85,11 +104,15 @@
     },
     "SignozErrorsResponse": {
       "type": "object",
-      "required": ["rows", "has_baseline", "truncated", "notes"],
+      "required": ["rows", "has_baseline", "truncated", "degraded", "notes"],
       "properties": {
         "rows": { "type": "array", "items": { "$ref": "#/$defs/SourceRow" } },
         "has_baseline": { "type": "boolean" },
         "truncated": { "type": "boolean", "description": "SigNoz returned the cap of error span groups" },
+        "degraded": {
+          "type": "boolean",
+          "description": "none of the namespace values SigNoz reported is a configured namespace (warning only: values are never remapped)"
+        },
         "notes": { "type": "array", "items": { "type": "string" } }
       }
     },

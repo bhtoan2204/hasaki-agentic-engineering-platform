@@ -309,6 +309,8 @@ function reasonText(
     code === "down" ||
     code === "panic" ||
     code === "new" ||
+    code === "returned" ||
+    code === "chronic" ||
     code === "money"
   ) {
     return t(`pe.reason.${code}`, {
