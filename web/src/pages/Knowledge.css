@@ -25,9 +25,10 @@
   font-weight: 600;
   flex: none;
   transition:
-    background-color 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
 }
 
 .kn-cat svg {
@@ -35,18 +36,19 @@
 }
 
 .kn-cat:hover:not(:disabled) {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   border-color: var(--brand-400);
   color: var(--brand-700);
 }
 
 .kn-cat:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--focus);
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 .kn-cat:active:not(:disabled) {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
+  transform: scale(0.98);
 }
 
 .kn-cat:disabled {
@@ -179,15 +181,13 @@
   box-shadow: var(--shadow-1);
   font: inherit;
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s,
-    background-color 0.15s;
+    border-color var(--t-fast),
+    background-color var(--t-fast);
 }
 
 .kn-item:hover:not(:disabled) {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   border-color: var(--brand-400);
-  box-shadow: var(--shadow-2);
 }
 
 .kn-item:focus-visible {
@@ -196,7 +196,7 @@
 }
 
 .kn-item:active:not(:disabled) {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
 }
 
 .kn-item.on {
@@ -300,10 +300,16 @@
 a.kn-meta-item {
   color: var(--brand-700);
   text-decoration: none;
+  transition: color var(--t-fast);
 }
 
 a.kn-meta-item:hover {
   text-decoration: underline;
+}
+
+a.kn-meta-item:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 .kn-tag {
@@ -529,14 +535,27 @@ a.kn-meta-item:hover {
   text-decoration: none;
 }
 
+a.kn-kv-chip {
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
+}
+
 a.kn-kv-chip:hover {
+  background-color: var(--surface-3);
   border-color: var(--brand-400);
   color: var(--brand-700);
 }
 
+a.kn-kv-chip:active {
+  transform: scale(0.98);
+}
+
 a.kn-kv-chip:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--focus);
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 /* form */
@@ -1067,7 +1086,9 @@ a.kn-kv-chip:focus-visible {
 @media (prefers-reduced-motion: reduce) {
 
   .kn-cat,
-  .kn-item {
+  .kn-item,
+  a.kn-meta-item,
+  a.kn-kv-chip {
     transition: none;
   }
 }

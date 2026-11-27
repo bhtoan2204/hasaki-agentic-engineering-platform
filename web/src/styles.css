@@ -83,6 +83,7 @@
   --shadow-1: 0 1px 2px rgba(17, 21, 19, 0.06), 0 1px 1px rgba(17, 21, 19, 0.03);
   --shadow-2: 0 6px 18px -8px rgba(17, 40, 28, 0.2), 0 2px 4px rgba(17, 21, 19, 0.04);
   --shadow-3: 0 24px 48px -20px rgba(17, 40, 28, 0.34);
+  --t-fast: 120ms ease-out;
   --sidebar-w: 248px;
   --topbar-h: 60px;
   /* legacy aliases used by existing pages */
@@ -246,20 +247,22 @@ button,
     0 1px 0 rgba(255, 255, 255, 0.16) inset,
     0 1px 2px rgba(17, 40, 28, 0.28);
   transition:
-    background 0.15s,
-    box-shadow 0.15s,
-    transform 0.05s,
-    border-color 0.15s;
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast),
+    opacity var(--t-fast),
+    transform var(--t-fast);
 }
 
-button:hover,
-.btn:hover {
+button:hover:not(:disabled),
+.btn:hover:not(:disabled) {
   background: var(--brand-600);
   text-decoration: none;
 }
 
-button:active {
-  transform: translateY(1px);
+button:active:not(:disabled),
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 button.ghost,
@@ -750,6 +753,28 @@ input[type="radio"] {
   min-width: 0;
 }
 
+.stat[role="button"] {
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    transform var(--t-fast);
+}
+
+.stat[role="button"]:hover {
+  background-color: var(--surface-2);
+  border-color: var(--brand-400);
+}
+
+.stat[role="button"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.stat[role="button"]:active {
+  transform: scale(0.99);
+}
+
 .stat-label {
   display: flex;
   align-items: center;
@@ -848,11 +873,18 @@ th {
 
 tr.click {
   cursor: pointer;
-  transition: background 0.12s;
+}
+
+tr.click td {
+  transition: background-color var(--t-fast);
 }
 
 tr.click:hover td {
-  background: var(--brand-50);
+  background-color: var(--surface-2);
+}
+
+tr.click:active td {
+  background-color: var(--surface-3);
 }
 
 .table-wrap {
@@ -980,11 +1012,25 @@ tr.click:hover td {
   font-size: 13px;
   font-weight: 600;
   box-shadow: none;
+  transition:
+    color var(--t-fast),
+    border-color var(--t-fast),
+    background-color var(--t-fast),
+    transform var(--t-fast);
 }
 
-.tab:hover {
+.tab:hover:not(:disabled) {
   background: transparent;
   color: var(--ink);
+}
+
+.tab:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
 }
 
 .tab.on {
@@ -1008,11 +1054,19 @@ tr.click:hover td {
   padding: 5px 11px;
   font-size: 12.5px;
   border-radius: 6px;
+  transition:
+    background-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
 }
 
-.segmented button:hover {
+.segmented button:hover:not(:disabled) {
   background: var(--surface);
   color: var(--ink);
+}
+
+.segmented button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .segmented button.on {
@@ -1432,19 +1486,24 @@ tr.click:hover td {
   margin: 1px 0;
   position: relative;
   transition:
-    background 0.12s,
-    color 0.12s;
+    background-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
 }
 
 .sb-link svg {
   flex: none;
   color: var(--muted);
-  transition: color 0.12s;
+  transition: color var(--t-fast);
 }
 
 .sb-link:hover {
   background: var(--surface-3);
   color: var(--ink);
+}
+
+.sb-link:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .sb-link:hover svg {

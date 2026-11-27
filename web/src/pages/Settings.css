@@ -140,14 +140,14 @@
   font-weight: 600;
   box-shadow: none;
   transition:
-    background 0.14s,
-    color 0.14s,
-    border-color 0.14s,
-    box-shadow 0.14s;
+    background-color var(--t-fast),
+    color var(--t-fast),
+    border-color var(--t-fast),
+    transform var(--t-fast);
 }
 
 .agent-profile-tab:hover:not(:disabled) {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
   color: var(--ink);
 }
 
@@ -157,7 +157,7 @@
 }
 
 .agent-profile-tab:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.98);
 }
 
 .agent-profile-tab:disabled {
@@ -337,7 +337,7 @@
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
-  transition: border-color 0.15s;
+  transition: border-color var(--t-fast);
 }
 
 .agent-combobox:hover {
@@ -400,11 +400,15 @@
   background: transparent;
   color: var(--muted);
   box-shadow: none;
+  transition:
+    background-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
 }
 
 .agent-combo-clear:hover:not(:disabled),
 .agent-combo-toggle:hover:not(:disabled) {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
   color: var(--ink);
 }
 
@@ -416,7 +420,7 @@
 
 .agent-combo-clear:active:not(:disabled),
 .agent-combo-toggle:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.95);
 }
 
 .agent-combo-clear:disabled,
@@ -458,11 +462,18 @@
   cursor: pointer;
   font-size: var(--fs-sm);
   color: var(--ink);
+  transition:
+    background-color var(--t-fast),
+    color var(--t-fast);
 }
 
 .agent-combo-option:hover,
 .agent-combo-option.is-focused {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
+}
+
+.agent-combo-option:active {
+  background-color: var(--brand-50);
 }
 
 .agent-combo-option.is-selected {
@@ -562,8 +573,9 @@
   font-weight: 500;
   text-decoration: none;
   transition:
-    background 0.12s,
-    color 0.12s;
+    background-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
 }
 
 .set-nav a > span {
@@ -572,7 +584,7 @@
 }
 
 .set-nav a:hover {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
   color: var(--ink);
 }
 
@@ -582,7 +594,7 @@
 }
 
 .set-nav a:active {
-  transform: translateY(1px);
+  transform: scale(0.98);
 }
 
 .set-nav a.is-active {
@@ -708,8 +720,10 @@
   cursor: pointer;
   user-select: none;
   transition:
-    border-color 0.12s,
-    background 0.12s;
+    border-color var(--t-fast),
+    background-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
 }
 
 .set-chip:hover {
@@ -728,7 +742,8 @@
 }
 
 .set-chip:active {
-  transform: translateY(1px);
+  background-color: var(--surface-3);
+  transform: scale(0.98);
 }
 
 .set-chip:has(input:disabled) {
@@ -936,6 +951,9 @@
   .set-chip,
   .set-provider,
   .agent-combobox,
+  .agent-combo-clear,
+  .agent-combo-toggle,
+  .agent-combo-option,
   .agent-profile-tab {
     transition: none;
   }

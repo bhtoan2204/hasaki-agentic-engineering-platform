@@ -12,13 +12,22 @@
   border-radius: var(--r-md);
   background: var(--surface);
   overflow: visible;
+  transition:
+    border-color var(--t-fast),
+    background-color var(--t-fast);
 }
 
 .node.gn:hover {
   border-color: var(--line-strong);
-  box-shadow:
-    var(--shadow-2),
-    0 0 0 1px var(--line-strong);
+}
+
+.split > .canvas .react-flow__node:hover .node.gn {
+  border-color: var(--brand-400);
+  background-color: var(--surface-2);
+}
+
+.split > .canvas .react-flow__node:active .node.gn {
+  background-color: var(--surface-3);
 }
 
 .gn-rail {
@@ -204,6 +213,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+  transition: color var(--t-fast);
 }
 
 .rv-crumbs a:hover {
@@ -949,10 +959,23 @@
   background: var(--surface);
   border: 1px solid var(--line);
   cursor: pointer;
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast);
 }
 
 .rv-repo-opt:hover {
+  background-color: var(--surface-2);
   border-color: var(--brand-400);
+}
+
+.rv-repo-opt:focus-within {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.rv-repo-opt:active {
+  background-color: var(--surface-3);
 }
 
 .rv-repo-opt input {
@@ -993,10 +1016,26 @@
   border: 1px solid var(--line);
   cursor: pointer;
   font-size: var(--fs-xs);
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast);
 }
 
 .rv-repo-chip:hover {
+  background-color: var(--surface-2);
   border-color: var(--brand-400);
+}
+
+.rv-repo-chip:focus-within {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.rv-repo-chip:active {
+  background-color: var(--surface-3);
+  transform: scale(0.98);
 }
 
 .rv-repo-chip.on {
@@ -1579,7 +1618,7 @@
   inset: 0 3px;
   border-radius: 2px;
   background: transparent;
-  transition: background 0.15s;
+  transition: background-color var(--t-fast);
 }
 
 .rv-resize:hover::after,
@@ -1730,6 +1769,19 @@ body.rv-resizing .react-flow {
   width: 268px;
   cursor: pointer;
   box-shadow: var(--shadow-1);
+  transition:
+    border-color var(--t-fast),
+    background-color var(--t-fast),
+    transform var(--t-fast);
+}
+
+.node.gn.gc:hover {
+  border-color: var(--brand-400);
+  background-color: var(--surface-2);
+}
+
+.node.gn.gc:active {
+  transform: scale(0.99);
 }
 
 /* Child titles are requests, often long: two lines before ellipsis. */
@@ -1902,6 +1954,12 @@ body.rv-resizing .react-flow {
     animation: none;
   }
 
+  .node.gn,
+  .node.gn.gc,
+  .rv-crumbs a,
+  .rv-progress > span,
+  .rv-repo-opt,
+  .rv-repo-chip,
   .rv-resize::after {
     transition: none;
   }

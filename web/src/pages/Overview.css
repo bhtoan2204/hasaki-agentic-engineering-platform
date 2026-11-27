@@ -127,17 +127,16 @@
 }
 
 .ov-office .office--mini .office-stage {
-  box-shadow: 0 0 0 2px var(--o-stage-edge);
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
+  border: 1px solid var(--o-stage-edge);
+  transition: border-color var(--t-fast);
 }
 
 .ov-office .office--mini:hover .office-stage {
-  transform: translateY(-2px);
-  box-shadow:
-    0 0 0 2px var(--brand-400),
-    var(--shadow-2);
+  border-color: var(--brand);
+}
+
+.ov-office .office--mini:active .office-stage {
+  opacity: 0.96;
 }
 
 .ov-office .o-bubble {
@@ -170,7 +169,7 @@
   color: var(--ink);
   text-decoration: none !important;
   border-bottom: 1px solid var(--line);
-  transition: background-color 0.15s;
+  transition: background-color var(--t-fast);
 }
 
 .ov-list li:last-child a {
@@ -178,16 +177,16 @@
 }
 
 .ov-list li a:hover {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
 }
 
 .ov-list li a:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--focus);
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
 }
 
 .ov-list li a:active {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
 }
 
 .ov-li-main {
