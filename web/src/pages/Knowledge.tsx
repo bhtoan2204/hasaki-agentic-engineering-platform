@@ -448,9 +448,6 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                         <span className="kn-item-body">
                           <span className="kn-item-title">
                             <b>{k.title}</b>
-                            <Badge s={k.owner_id ? "RUNNING" : "COMPLETED"}>
-                              {k.owner_id ? t("auth.my") : t("auth.shared")}
-                            </Badge>
                             {k.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
                             {k.aging ? (
                               <Badge s={AGING_TONE[k.aging.state]}>
@@ -466,10 +463,13 @@ export function KnowledgePage({ itemKey, subKey }: { itemKey?: string; subKey?: 
                           )}
                           <span className="kn-item-meta">
                             <ScopeBadge type={k.scope_type} scopeRef={k.scope_ref} />
-                            <span className="kn-tag">{t(catKey(k.category))}</span>
-                            <span className="kn-tag mono">v{k.current_version}</span>
+                            <span className="kn-meta-item">{t(catKey(k.category))}</span>
+                            <span className="kn-meta-item mono">v{k.current_version}</span>
                             <LoadChip metadata={k.metadata} />
-                            <time className="kn-tag" dateTime={k.updated_at}>
+                            <span className="kn-meta-item">
+                              {k.owner_id ? t("auth.my") : t("auth.shared")}
+                            </span>
+                            <time className="kn-meta-item" dateTime={k.updated_at}>
                               {t("kn.updatedAt", {
                                 time: updatedDate.format(new Date(k.updated_at)),
                               })}
@@ -602,8 +602,9 @@ function RepoImport({ onDone }: { onDone: () => void }) {
                   <Badge s={c.action === "create" ? "READY" : "WAITING"}>{c.action}</Badge>
                   <div className="kn-import-body">
                     <span className="mono">{c.key}</span>
-                    <span className="muted small">
-                      {c.category} · {c.repos.join(", ")}
+                    <span className="kn-item-meta">
+                      <span>{c.category}</span>
+                      <span>{c.repos.join(", ")}</span>
                     </span>
                   </div>
                 </li>
@@ -664,11 +665,13 @@ function KeyValues({ value, empty }: { value?: Record<string, unknown> | null; e
           <dd>
             {Array.isArray(x) && x.every((y) => typeof y !== "object" || y === null) ? (
               x.length ? (
-                x.map((y, i) => (
-                  <span key={i} className="pill">
-                    {String(y)}
-                  </span>
-                ))
+                <span className="kn-kv-chips">
+                  {x.map((y, i) => (
+                    <span key={i} className="kn-kv-chip">
+                      {String(y)}
+                    </span>
+                  ))}
+                </span>
               ) : (
                 <span className="muted">[]</span>
               )
@@ -894,8 +897,8 @@ function KnowledgeEditor({
               <div className="kn-head-key mono">{item.key}</div>
               <div className="kn-item-meta">
                 <ScopeBadge type={item.scope_type} scopeRef={item.scope_ref} />
-                <span className="kn-tag">{t(catKey(item.category))}</span>
-                <span className="kn-tag mono">v{item.current_version}</span>
+                <span className="kn-meta-item">{t(catKey(item.category))}</span>
+                <span className="kn-meta-item mono">v{item.current_version}</span>
                 <LoadChip metadata={cur?.metadata} />
                 {item.enforced && <Badge s="FAILED">{t("kn.enforced")}</Badge>}
                 {item.enabled ? (
@@ -1173,9 +1176,9 @@ function KnowledgeEditor({
                       {v.version === item.current_version && (
                         <span className="kn-tag chip-brand">{t("kn.current")}</span>
                       )}
-                      <span className="muted small">
-                        {time(v.created_at)}
-                        {v.created_by ? ` · ${v.created_by}` : ""}
+                      <span className="kn-item-meta">
+                        <span>{time(v.created_at)}</span>
+                        {v.created_by && <span>{v.created_by}</span>}
                       </span>
                       <span className="grow" />
                       {v.version !== item.current_version && (
@@ -1204,13 +1207,10 @@ function KnowledgeEditor({
                       </button>
                     </div>
                     {v.effective_from && (
-                      <div className="small kn-tl-note">
-                        {t("kp.effectiveOn", { date: time(v.effective_from) })}
-                        {v.version === item.effective_version
-                          ? ""
-                          : new Date(v.effective_from) > new Date()
-                            ? ` · ${t("kp.notYet")}`
-                            : ""}
+                      <div className="small kn-tl-note kn-item-meta">
+                        <span>{t("kp.effectiveOn", { date: time(v.effective_from) })}</span>
+                        {v.version !== item.effective_version &&
+                          new Date(v.effective_from) > new Date() && <span>{t("kp.notYet")}</span>}
                       </div>
                     )}
                     {v.change_note && <div className="small kn-tl-note">{v.change_note}</div>}
@@ -1276,10 +1276,12 @@ function KnowledgeEditor({
                   {usage.used.map((u, i) => (
                     <li key={i}>
                       <a href={`#/runs/${u.run_id}/${u.step_key}`}>
-                        {t("common.runN", { id: u.run_id })} · {u.step_name}
-                      </a>{" "}
-                      <span className="muted small">
-                        {u.definition_key} · v{u.version} · {time(u.created_at)}
+                        {t("common.runN", { id: u.run_id })} / {u.step_name}
+                      </a>
+                      <span className="kn-item-meta">
+                        <span>{u.definition_key}</span>
+                        <span className="mono">v{u.version}</span>
+                        <span>{time(u.created_at)}</span>
                       </span>
                     </li>
                   ))}
@@ -1323,7 +1325,7 @@ function AgingCard({
       <div className="card-head">
         <h4>{t("kn.agingTitle")}</h4>
         <Badge s={AGING_TONE[aging.state]}>{t(`kn.agingState.${aging.state}`)}</Badge>
-        {aging.pinned && <span className="pill">{t("kn.agingPinned")}</span>}
+        {aging.pinned && <span className="kn-meta-item">{t("kn.agingPinned")}</span>}
       </div>
       <div className="kv small">
         {aging.policy && (
@@ -1414,16 +1416,11 @@ function MemoryProvenance({
       onDone();
   };
   return (
-    <div
-      className="card"
-      style={{
-        borderLeft: `4px solid var(${tone === "COMPLETED" ? "--st-ok" : tone === "FAILED" ? "--st-err" : "--st-wait"})`,
-      }}
-    >
+    <div className="card">
       <div className="card-head">
         <h4>{t("kn.memoryTitle")}</h4>
         <Badge s={tone}>{m.trust}</Badge>
-        <span className="pill">confidence: {m.confidence}</span>
+        <span className="kn-meta-item mono">confidence: {m.confidence}</span>
       </div>
       <div className="kv small">
         <span>{t("kn.run")}</span>
@@ -1443,8 +1440,9 @@ function MemoryProvenance({
         {m.approved_by && (
           <>
             <span>{t("kn.reviewedBy")}</span>
-            <span>
-              {m.approved_by} · {time(m.approved_at)}
+            <span className="kn-item-meta">
+              <span>{m.approved_by}</span>
+              <span>{time(m.approved_at)}</span>
             </span>
           </>
         )}
@@ -1511,8 +1509,8 @@ function Evolution({ item }: { item: KnowledgeDetail }) {
           <History size={14} /> {t("kp.supersededBy")}{" "}
           <a className="mono" href={`#/knowledge/${item.superseded_by_item.key}`}>
             {item.superseded_by_item.key}
-          </a>{" "}
-          — {t("kp.supersededHint")}
+          </a>
+          <span>({t("kp.supersededHint")})</span>
         </div>
       )}
       {item.supersedes?.length > 0 && (
@@ -1581,7 +1579,7 @@ function KnowledgeAuditPanel() {
           ) : (
             data.findings.map((f, i) => (
               <div key={i}>
-                <b>{f.kind}</b> · {f.classification}
+                <b>{f.kind}</b> <span className="muted small">{f.classification}</span>
                 <p>{f.keys.join(", ")}</p>
                 <p>{f.action}</p>
               </div>

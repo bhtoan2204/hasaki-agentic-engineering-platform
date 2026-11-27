@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
+  Check,
   CheckCircle2,
   GitCompare,
   History,
@@ -9,6 +10,7 @@ import {
   RotateCcw,
   ShieldAlert,
   Sparkles,
+  X,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -307,37 +309,42 @@ export function ProposalsPanel({ id, onChanged }: { id?: string; onChanged: () =
                       <span className="kn-item-title">
                         <b>{p.proposed?.title || p.target_key || `#${p.id}`}</b>
                         <ProposalStatus s={p.status} />
-                        <span className="kn-tag">{p.change_type}</span>
                       </span>
-                      <span className="kn-item-key mono">
-                        #{p.id}
-                        {p.target_key
-                          ? ` · ${p.target_key}${p.target_version ? ` v${p.target_version}` : ""}`
-                          : ""}
+                      <span className="kn-item-key mono kn-item-meta">
+                        <span>#{p.id}</span>
+                        {p.target_key && (
+                          <span>
+                            {p.target_key}
+                            {p.target_version ? ` v${p.target_version}` : ""}
+                          </span>
+                        )}
                       </span>
                       <span className="kn-item-meta">
-                        <span className="kn-tag">{t(`kp.source.${p.source_kind}`)}</span>
+                        <span className="kn-meta-item">{p.change_type}</span>
+                        <span className="kn-meta-item">{t(`kp.source.${p.source_kind}`)}</span>
                         {p.proposed?.scope_type && (
-                          <span className="kn-tag mono">
+                          <span className="kn-meta-item mono">
                             {p.proposed.scope_type}
                             {p.proposed.scope_ref ? `:${p.proposed.scope_ref}` : ""}
                           </span>
                         )}
-                        <span className="kn-tag">
+                        <span className="kn-meta-item">
                           {t("kp.confidence", {
                             n: Math.round(Number(p.confidence) * 100),
                           })}
                         </span>
-                        <span className="kn-tag">{t("kp.evidenceN", { n: p.evidence_count })}</span>
+                        <span className="kn-meta-item">
+                          {t("kp.evidenceN", { n: p.evidence_count })}
+                        </span>
                         {p.validation_passed === "false" && (
                           <span className="kn-tag kp-warn">{t("kp.validationFailed")}</span>
                         )}
                         {p.source_run_id && (
-                          <span className="muted small">
+                          <span className="kn-meta-item">
                             {t("common.runN", { id: p.source_run_id })}
                           </span>
                         )}
-                        <span className="muted small">{time(p.created_at)}</span>
+                        <span className="kn-meta-item">{time(p.created_at)}</span>
                       </span>
                     </span>
                   </button>
@@ -458,29 +465,30 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
           <h2 className="kn-head-title">{p.proposed?.title || p.target_key || `#${p.id}`}</h2>
           <div className="kn-item-meta">
             <ProposalStatus s={p.status} />
-            <span className="kn-tag">{p.change_type}</span>
-            <span className="kn-tag">{t(`kp.source.${p.source_kind}`)}</span>
-            {p.domain && <span className="kn-tag">{p.domain}</span>}
-            <span className="kn-tag">
+            <span className="kn-meta-item">{p.change_type}</span>
+            <span className="kn-meta-item">{t(`kp.source.${p.source_kind}`)}</span>
+            {p.domain && <span className="kn-meta-item">{p.domain}</span>}
+            <span className="kn-meta-item">
               {t("kp.confidence", {
                 n: Math.round(Number(p.confidence) * 100),
               })}
             </span>
             {p.target_key && (
-              <a className="kn-tag mono" href={`#/knowledge/${p.target_key}`}>
+              <a className="kn-meta-item mono" href={`#/knowledge/${p.target_key}`}>
                 {p.target_key}
                 {p.target_version ? ` v${p.target_version}` : ""}
               </a>
             )}
             {p.source_run_id && (
-              <a className="kn-tag" href={`#/runs/${p.source_run_id}`}>
+              <a className="kn-meta-item" href={`#/runs/${p.source_run_id}`}>
                 {t("common.runN", { id: p.source_run_id })}
               </a>
             )}
           </div>
         </div>
         <div className="kn-head-time muted small">
-          #{p.id} · {time(p.created_at)}
+          <span className="mono">#{p.id}</span>
+          <span>{time(p.created_at)}</span>
         </div>
       </div>
 
@@ -553,27 +561,23 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             <ul className="kp-evidence">
               {(p.evidence ?? []).map((e, i: number) => (
                 <li key={i}>
-                  <div className="small">
-                    <span className="kn-tag">{t(`kp.ev.${e.source}`)}</span>{" "}
-                    <span className="kn-tag">{e.trust}</span> <b>{e.author}</b>
+                  <div className="kp-ev-meta small">
+                    <span className="kn-meta-item">{t(`kp.ev.${e.source}`)}</span>
+                    <span className="kn-meta-item">{e.trust}</span>
+                    <b>{e.author}</b>
                     {e.ref?.run_id && (
-                      <>
-                        {" "}
-                        ·{" "}
-                        <a href={`#/runs/${e.ref.run_id}${e.ref.step ? `/${e.ref.step}` : ""}`}>
-                          {t("common.runN", { id: e.ref.run_id })}
-                          {e.ref.step ? ` / ${e.ref.step}` : ""}
-                        </a>
-                      </>
+                      <a
+                        className="kn-meta-item"
+                        href={`#/runs/${e.ref.run_id}${e.ref.step ? `/${e.ref.step}` : ""}`}
+                      >
+                        {t("common.runN", { id: e.ref.run_id })}
+                        {e.ref.step ? ` / ${e.ref.step}` : ""}
+                      </a>
                     )}
                     {e.ref?.path && (
-                      <>
-                        {" "}
-                        ·{" "}
-                        <span className="mono">
-                          {e.ref.repo}/{e.ref.path}
-                        </span>
-                      </>
+                      <span className="kn-meta-item mono">
+                        {e.ref.repo}/{e.ref.path}
+                      </span>
                     )}
                   </div>
                   <blockquote className="kp-quote">{e.quote}</blockquote>
@@ -604,11 +608,13 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 <dt>{t("kp.repos")}</dt>
                 <dd>
                   {p.impacts?.repositories?.length ? (
-                    p.impacts.repositories.map((r: string) => (
-                      <span key={r} className="pill">
-                        {r}
-                      </span>
-                    ))
+                    <span className="kn-kv-chips">
+                      {p.impacts.repositories.map((r: string) => (
+                        <span key={r} className="kn-kv-chip">
+                          {r}
+                        </span>
+                      ))}
+                    </span>
                   ) : (
                     <span className="muted">—</span>
                   )}
@@ -618,11 +624,13 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 <dt>{t("kp.workflows")}</dt>
                 <dd>
                   {p.impacts?.workflows?.length ? (
-                    p.impacts.workflows.map((w: string) => (
-                      <a key={w} className="pill" href={`#/workflows/${w}`}>
-                        {w}
-                      </a>
-                    ))
+                    <span className="kn-kv-chips">
+                      {p.impacts.workflows.map((w: string) => (
+                        <a key={w} className="kn-kv-chip" href={`#/workflows/${w}`}>
+                          {w}
+                        </a>
+                      ))}
+                    </span>
                   ) : (
                     <span className="muted">—</span>
                   )}
@@ -632,11 +640,13 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 <div className="kn-kv-row">
                   <dt>{t("kp.competing")}</dt>
                   <dd>
-                    {p.impacts.competing_rules.map((r) => (
-                      <a key={r.key} className="pill mono" href={`#/knowledge/${r.key}`}>
-                        {r.key}
-                      </a>
-                    ))}
+                    <span className="kn-kv-chips">
+                      {p.impacts.competing_rules.map((r) => (
+                        <a key={r.key} className="kn-kv-chip" href={`#/knowledge/${r.key}`}>
+                          {r.key}
+                        </a>
+                      ))}
+                    </span>
                   </dd>
                 </div>
               )}
@@ -644,13 +654,19 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
                 <div className="kn-kv-row">
                   <dt>{t("kp.otherOpen")}</dt>
                   <dd>
-                    {p.impacts.open_proposals
-                      .filter((x) => x.id !== p.id)
-                      .map((x) => (
-                        <a key={x.id} className="pill" href={`#/knowledge/~proposals/${x.id}`}>
-                          #{x.id}
-                        </a>
-                      ))}
+                    <span className="kn-kv-chips">
+                      {p.impacts.open_proposals
+                        .filter((x) => x.id !== p.id)
+                        .map((x) => (
+                          <a
+                            key={x.id}
+                            className="kn-kv-chip"
+                            href={`#/knowledge/~proposals/${x.id}`}
+                          >
+                            #{x.id}
+                          </a>
+                        ))}
+                    </span>
                   </dd>
                 </div>
               )}
@@ -671,7 +687,8 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             <ul className="kp-checks">
               {p.validation.checks.map((c) => (
                 <li key={c.name} className={c.passed ? "okc" : "err"}>
-                  {c.passed ? "✓" : "✗"} <b>{c.name}</b>{" "}
+                  {c.passed ? <Check size={14} aria-hidden /> : <X size={14} aria-hidden />}
+                  <b>{c.name}</b>
                   <span className="muted small">{c.detail}</span>
                 </li>
               ))}
@@ -702,8 +719,9 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             {p.reviewed_by && (
               <>
                 <span>{t("kp.reviewedBy")}</span>
-                <span>
-                  {p.reviewed_by} · {time(p.reviewed_at)}
+                <span className="kn-item-meta">
+                  <span>{p.reviewed_by}</span>
+                  <span>{time(p.reviewed_at)}</span>
                 </span>
               </>
             )}
@@ -730,8 +748,9 @@ function ProposalDetail({ id, onChanged }: { id: number; onChanged: () => void }
             {p.rolled_back_by && (
               <>
                 <span>{t("kp.rolledBack")}</span>
-                <span>
-                  {p.rolled_back_by} · {time(p.rolled_back_at)}
+                <span className="kn-item-meta">
+                  <span>{p.rolled_back_by}</span>
+                  <span>{time(p.rolled_back_at)}</span>
                 </span>
               </>
             )}
