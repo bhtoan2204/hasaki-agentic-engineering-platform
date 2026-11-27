@@ -363,9 +363,9 @@ export function StepInspector({
               >
                 {attempts.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {t("si.attemptN", { n: a.number })} · {t("cl.gen")} {a.generation} ·{" "}
+                    {t("si.attemptN", { n: a.number })} ({t("cl.gen")} {a.generation},{" "}
                     {t("status." + a.status)}
-                    {a.invalidated_at ? ` (${t("si.invalidated")})` : ""}
+                    {a.invalidated_at ? `, ${t("si.invalidated")}` : ""})
                   </option>
                 ))}
               </select>
@@ -387,9 +387,9 @@ export function StepInspector({
           />
         )}
         {step.config.optimization_decision && (
-          <details className="card" style={{ margin: 12, padding: 12 }}>
+          <details className="card si-opt-details">
             <summary>{t("optimization.provenance")}</summary>
-            <pre className="small" style={{ whiteSpace: "pre-wrap" }}>
+            <pre className="small si-opt-pre">
               {JSON.stringify(step.config.optimization_decision, null, 2)}
             </pre>
             <a
@@ -400,9 +400,11 @@ export function StepInspector({
           </details>
         )}
         {isAgent && (
-          <div className="small muted" style={{ padding: 12 }}>
-            {t("agent.effective")}: {effectiveProvider} ·{" "}
-            {effectiveModel || t("agent.modelDefault")}
+          <div className="small muted si-effective rv-inline-meta">
+            <span>
+              {t("agent.effective")}: {effectiveProvider}
+            </span>
+            <span>{effectiveModel || t("agent.modelDefault")}</span>
           </div>
         )}
         {isAgent &&
@@ -431,12 +433,12 @@ export function StepInspector({
         {step.type === "task_result_report" &&
           step.status === "WAITING_APPROVAL" &&
           tab !== "report" && (
-            <div className="rv-attn" style={{ padding: "12px 16px" }}>
-              <div className="rv-attn-head" style={{ alignItems: "center" }}>
+            <div className="rv-attn si-attn-compact">
+              <div className="rv-attn-head si-attn-head-center">
                 <span className="rv-attn-icon">
                   <Hand size={18} />
                 </span>
-                <div style={{ flex: 1 }}>
+                <div className="rv-title-wrap">
                   <b>{t("si.reportWaiting")}</b>
                 </div>
                 <button type="button" className="sm" onClick={() => setTab("report")}>
@@ -452,9 +454,7 @@ export function StepInspector({
               <b className="grow">{t("common.error")}</b>
               <Copy text={step.error} />
             </div>
-            <div className="mono" style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
-              {step.error}
-            </div>
+            <div className="mono si-step-err">{step.error}</div>
           </div>
         )}
         <Tabs tabs={tabs} value={tab} onChange={setTab} />
@@ -624,17 +624,10 @@ export function StepInspector({
             questions.map((q) => (
               <div
                 key={q.id}
-                className="rv-card"
-                style={{
-                  borderLeft: `3px solid ${q.status === "open" ? "var(--st-wait)" : q.status === "answered" ? "var(--st-ok)" : "var(--line-strong)"}`,
-                }}
+                className={`rv-card si-qa-card${q.status === "open" ? " is-open" : q.status === "answered" ? " is-answered" : ""}`}
               >
-                <div className="row tight" style={{ alignItems: "flex-start" }}>
-                  <MessageCircleQuestion
-                    size={15}
-                    color="var(--st-wait)"
-                    style={{ marginTop: 2, flex: "none" }}
-                  />
+                <div className="row tight si-qa-row">
+                  <MessageCircleQuestion size={15} color="var(--st-wait)" className="si-qa-icon" />
                   <b className="grow">{q.question}</b>
                   <Badge
                     s={
@@ -648,31 +641,22 @@ export function StepInspector({
                     {q.status}
                   </Badge>
                 </div>
-                {q.context && (
-                  <div className="muted small" style={{ whiteSpace: "pre-wrap", marginTop: 4 }}>
-                    {q.context}
-                  </div>
-                )}
+                {q.context && <div className="muted small si-qa-ctx">{q.context}</div>}
                 {q.answer && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      padding: "8px 10px",
-                      background: "var(--st-ok-bg)",
-                      borderRadius: "var(--r-sm)",
-                    }}
-                  >
-                    <ArrowRight size={13} style={{ verticalAlign: -2 }} /> {q.answer}{" "}
+                  <div className="si-qa-answer">
+                    <ArrowRight size={13} className="si-inline-icon" /> {q.answer}{" "}
                     <span className="muted small">
                       {q.answered_by} {time(q.answered_at)}
                     </span>
                   </div>
                 )}
-                <div className="muted small" style={{ marginTop: 6 }}>
-                  {t("si.attemptOf", {
-                    n: attempts.find((a) => a.id === q.attempt_id)?.number ?? "?",
-                  })}{" "}
-                  · {time(q.created_at)}
+                <div className="muted small si-qa-meta rv-inline-meta">
+                  <span>
+                    {t("si.attemptOf", {
+                      n: attempts.find((a) => a.id === q.attempt_id)?.number ?? "?",
+                    })}
+                  </span>
+                  <span>{time(q.created_at)}</span>
                 </div>
               </div>
             ))
@@ -699,11 +683,7 @@ export function StepInspector({
                   {attempts.map((a) => (
                     <tr
                       key={a.id}
-                      className="click"
-                      style={{
-                        opacity: a.invalidated_at ? 0.6 : 1,
-                        background: a.id === attempt?.id ? "var(--sel)" : undefined,
-                      }}
+                      className={`click si-hist-row${a.invalidated_at ? " is-invalid" : ""}${a.id === attempt?.id ? " is-selected" : ""}`}
                       onClick={() => (setAttemptId(a.id), setTab(isAgent ? "execution" : "output"))}
                     >
                       <td>
@@ -721,18 +701,19 @@ export function StepInspector({
                           </div>
                         )}
                         {a.input?.pending?.reexecute && (
-                          <div className="small" style={{ marginTop: 2 }}>
-                            <RotateCcw size={11} style={{ verticalAlign: -1 }} />{" "}
+                          <div className="small si-reexec-note">
+                            <RotateCcw size={11} className="si-inline-icon" />
                             {a.input.pending.reexecute.instructions
                               ? `“${String(a.input.pending.reexecute.instructions).slice(0, 80)}”`
                               : t("si.reexecuteWord")}
                             {!!a.input.pending.reexecute.skills?.length && (
                               <span className="muted">
                                 {" "}
-                                ·{" "}
+                                (
                                 {a.input.pending.reexecute.skills
                                   .map((s) => `${s.key}@v${s.version}`)
                                   .join(", ")}
+                                )
                               </span>
                             )}
                           </div>
@@ -743,7 +724,7 @@ export function StepInspector({
                       <td className="mono small">{(a.worker ?? "").split(":").slice(-1)[0]}</td>
                       <td className="err small">
                         {a.error?.failure && (
-                          <span className="pill" title={a.error.failure.reason}>
+                          <span className="rv-meta-chip" title={a.error.failure.reason}>
                             {a.error.failure.class} → {a.error.failure.action}
                           </span>
                         )}{" "}
@@ -760,14 +741,7 @@ export function StepInspector({
               </div>
               {jobs.length ? (
                 jobs.map((j) => (
-                  <div
-                    key={j.id}
-                    className="small mono"
-                    style={{
-                      padding: "4px 0",
-                      borderBottom: "1px dashed var(--line)",
-                    }}
-                  >
+                  <div key={j.id} className="small mono si-job-row">
                     #{j.id} {j.status} gen{j.generation} claims={j.claims}
                     {j.force ? " force" : ""} {j.lease_owner ?? ""} {j.last_error ?? ""}
                   </div>
@@ -787,10 +761,10 @@ export function StepInspector({
 function FailureCard({ f }: { f: FailureInfo }) {
   const { t } = useI18n();
   return (
-    <div className="card tight" style={{ borderLeft: "4px solid var(--st-err)" }}>
+    <div className="card tight si-failure-card">
       <div className="row tight">
         <b className="small">{t("si.failure", { class: f.class })}</b>
-        <span className="pill">
+        <span className="rv-meta-chip">
           {f.action === "retry"
             ? t("si.retryIn", { n: f.delay_s })
             : f.action === "human"

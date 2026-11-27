@@ -33,7 +33,7 @@ export function RunTotals({ runId, tick }: { runId: number; tick: number }) {
         </h4>
         <span className="muted small">{t("rv.latencyHint")}</span>
       </div>
-      <div className="rv-minis" style={{ marginBottom: 10 }}>
+      <div className="rv-minis si-minis-mb">
         <div className="rv-mini">
           <span>{t("rv.wall")}</span>
           <b>{fmtS(data.wall_ms)}</b>

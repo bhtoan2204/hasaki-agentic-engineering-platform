@@ -16,27 +16,16 @@ export function Artifacts({ artifacts }: { artifacts: ArtifactRow[] }) {
         <button
           key={a.id}
           type="button"
-          className="ghost rp-file"
+          className={`ghost rp-file si-artifact-btn${openId === a.id ? " is-open" : ""}`}
           aria-expanded={openId === a.id}
-          style={{
-            width: "100%",
-            justifyContent: "flex-start",
-            whiteSpace: "normal",
-            textAlign: "left",
-            fontWeight: 400,
-            ...(openId === a.id
-              ? { borderColor: "var(--brand)", background: "var(--brand-50)" }
-              : {}),
-          }}
           onClick={() => setOpenId(openId === a.id ? null : a.id)}
         >
           <Paperclip size={14} color="var(--brand)" />
-          <b className="grow" style={{ overflowWrap: "anywhere" }}>
-            {a.name}
-          </b>
-          <span className="muted small">
-            {a.kind} · {t("si.chars", { n: a.size })}
-            {a.data?.exit_code != null && ` · ${t("si.exit", { code: a.data.exit_code })}`}
+          <b className="grow si-artifact-name">{a.name}</b>
+          <span className="muted small rv-inline-meta">
+            <span>{a.kind}</span>
+            <span>{t("si.chars", { n: a.size })}</span>
+            {a.data?.exit_code != null && <span>{t("si.exit", { code: a.data.exit_code })}</span>}
           </span>
         </button>
       ))}

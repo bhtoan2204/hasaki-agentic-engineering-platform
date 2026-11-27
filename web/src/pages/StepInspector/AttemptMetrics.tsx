@@ -1,30 +1,31 @@
+import { Check, Cpu, X } from "lucide-react";
 import { defaultModelKey } from "../../agentMetrics.ts";
 import { agentKey } from "../../agentProvider.tsx";
-import { Cpu } from "lucide-react";
 import { useI18n } from "../../i18n/index.tsx";
 import { type AttemptMetricsData } from "./shared.tsx";
 
 export function AttemptMetrics({ m }: { m: AttemptMetricsData }) {
   const { t } = useI18n();
   const tools = Object.entries<number>(m.tool_calls ?? {}).sort((a, b) => b[1] - a[1]);
+  const modelMeta = [
+    m.provider ? t(agentKey(m.provider, true)) : null,
+    m.model ||
+      (m.provider && defaultModelKey(m.provider) ? t(defaultModelKey(m.provider)!) : null),
+    m.reasoning_effort,
+  ].filter(Boolean);
   return (
     <div className="rv-card">
       <div className="rv-card-head">
         <h4>
           <Cpu size={16} /> {t("si.metrics")}
         </h4>
-        <span className="mono muted small" title={m.model_source ?? ""}>
-          {[
-            m.provider ? t(agentKey(m.provider, true)) : null,
-            m.model ||
-              (m.provider && defaultModelKey(m.provider) ? t(defaultModelKey(m.provider)!) : null),
-            m.reasoning_effort,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
+        <span className="mono muted small rv-inline-meta" title={m.model_source ?? ""}>
+          {modelMeta.map((part, i) => (
+            <span key={i}>{part}</span>
+          ))}
         </span>
       </div>
-      <div className="rv-minis" style={{ marginBottom: 10 }}>
+      <div className="rv-minis si-minis-mb">
         <div className="rv-mini">
           <span>{t("si.cost")}</span>
           <b>{m.cost_usd == null ? "—" : `$${Number(m.cost_usd).toFixed(4)}`}</b>
@@ -95,10 +96,15 @@ export function AttemptMetrics({ m }: { m: AttemptMetricsData }) {
                   loaded_unused: boolean;
                   provider_limited: boolean;
                 }) => (
-                  <div key={s.key} title={s.evidence.join(", ")}>
-                    {s.key}@v{s.version} · {s.tier} · {s.tokens} tokens · {s.states.join(" → ")}
-                    {s.loaded_unused ? " · loaded_unused" : ""}
-                    {s.provider_limited ? " · provider_limited" : ""}
+                  <div key={s.key} className="rv-inline-meta" title={s.evidence.join(", ")}>
+                    <span className="mono">
+                      {s.key}@v{s.version}
+                    </span>
+                    <span>{s.tier}</span>
+                    <span>{s.tokens} tokens</span>
+                    <span>{s.states.join(" → ")}</span>
+                    {s.loaded_unused && <span>loaded_unused</span>}
+                    {s.provider_limited && <span>provider_limited</span>}
                   </div>
                 ),
               )}
@@ -106,10 +112,21 @@ export function AttemptMetrics({ m }: { m: AttemptMetricsData }) {
           </>
         )}
         <span>{t("si.integration")}</span>
-        <span className="small">
-          {(m.integration_calls ?? [])
-            .map((c) => `${c.name} ${c.ok ? "✓" : "✗"} ${c.ms}ms`)
-            .join(", ") || "—"}
+        <span className="small rv-inline-meta">
+          {m.integration_calls?.length
+            ? m.integration_calls.map((c, i) => (
+                <span key={`${c.name}-${i}`} className="rv-inline-meta">
+                  {c.ok ? (
+                    <Check size={12} aria-hidden className="okc" />
+                  ) : (
+                    <X size={12} aria-hidden className="err" />
+                  )}
+                  <span>
+                    {c.name} {c.ms}ms
+                  </span>
+                </span>
+              ))
+            : "—"}
         </span>
         <span>{t("si.subagents")}</span>
         <span className="small">{(m.subagents ?? []).map((s) => s.type).join(", ") || "—"}</span>

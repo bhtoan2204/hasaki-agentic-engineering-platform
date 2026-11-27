@@ -43,15 +43,7 @@ export function CommandLog({
       {error && <ErrorBox error={error} onRetry={reload} />}
       {loading && <Loading />}
       <div className="rv-toolrow">
-        <span
-          className="small muted grow"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            flexWrap: "wrap",
-          }}
-        >
+        <span className="small muted grow si-cmd-status">
           {live ? (
             <>
               <span className="spinner" />{" "}
@@ -65,9 +57,7 @@ export function CommandLog({
               <CheckCircle2 size={13} /> {t("si.done")}
             </>
           )}
-          {live && quiet > 60 && (
-            <span style={{ color: "var(--st-wait)" }}> — {t("si.quiet")}</span>
-          )}
+          {live && quiet > 60 && <span className="si-cmd-quiet">({t("si.quiet")})</span>}
         </span>
         <label>
           <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />{" "}

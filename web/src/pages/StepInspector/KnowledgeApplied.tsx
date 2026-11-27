@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import { useApi } from "../../api.ts";
 import { Badge, Empty, ErrorBox, Markdown, SkeletonRows, time } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
@@ -23,39 +24,37 @@ export function KnowledgeApplied({ snapshotId }: { snapshotId: number | null }) 
   for (const k of c.knowledge) (groups[k.category] ??= []).push(k);
   return (
     <div>
-      <div className="rv-card soft small" style={{ padding: "9px 12px" }}>
-        Snapshot #{snapshot.id} · <span className="mono">{snapshot.hash.slice(0, 16)}</span> ·
-        project {c.project || "—"} · repos {c.repositories.join(", ") || "—"} ·{" "}
-        {time(snapshot.created_at)}
+      <div className="rv-card soft small si-ka-summary rv-inline-meta">
+        <span>Snapshot #{snapshot.id}</span>
+        <span className="mono">{snapshot.hash.slice(0, 16)}</span>
+        <span>project {c.project || "none"}</span>
+        <span>repos {c.repositories.join(", ") || "none"}</span>
+        <span>{time(snapshot.created_at)}</span>
       </div>
       {!c.knowledge.length && <Empty>{t("si.noKnowledge")}</Empty>}
       {Object.entries(groups).map(([cat, items]) => (
-        <div key={cat}>
-          <h3>{t(`kn.cat.${cat}`) === `kn.cat.${cat}` ? cat : t(`kn.cat.${cat}`)}</h3>
+        <div key={cat} className="rv-sec">
+          <div className="rv-sec-title">
+            {t(`kn.cat.${cat}`) === `kn.cat.${cat}` ? cat : t(`kn.cat.${cat}`)}
+          </div>
           {items.map((k) => {
             const p = plan.get(k.key);
             return (
-              <details
-                key={k.key}
-                className="rv-card"
-                style={{ padding: "8px 12px", margin: "6px 0" }}
-              >
-                <summary style={{ color: "var(--ink)" }}>
-                  <b>{k.title}</b>{" "}
-                  <span className="mono muted">
-                    {k.key} v{k.version}
-                  </span>{" "}
-                  <span className="muted small">· {k.reason}</span>{" "}
-                  {p && (
-                    <Badge s={TIER[p.disclosure]}>
-                      {p.disclosure} · {p.score}
-                    </Badge>
-                  )}
-                  {p && (
-                    <div className="muted small" style={{ marginLeft: 16 }}>
-                      {p.why}
-                    </div>
-                  )}
+              <details key={k.key} className="rv-card si-ka-item">
+                <summary>
+                  <span className="rv-inline-meta">
+                    <b>{k.title}</b>
+                    <span className="mono muted">
+                      {k.key} v{k.version}
+                    </span>
+                    <span className="muted small">{k.reason}</span>
+                    {p && (
+                      <Badge s={TIER[p.disclosure]}>
+                        {p.disclosure} ({p.score})
+                      </Badge>
+                    )}
+                  </span>
+                  {p && <div className="muted small si-ka-why">{p.why}</div>}
                 </summary>
                 <Markdown text={k.content} />
                 <div className="row tight">
@@ -69,27 +68,31 @@ export function KnowledgeApplied({ snapshotId }: { snapshotId: number | null }) 
         </div>
       ))}
       {c.prompt_plan?.upstream && Object.keys(c.prompt_plan.upstream).length > 0 && (
-        <>
-          <h3>{t("si.upstream")}</h3>
+        <div className="rv-sec">
+          <div className="rv-sec-title">{t("si.upstream")}</div>
           {Object.entries(c.prompt_plan.upstream).map(([k, u]) => (
-            <div key={k} className="small" style={{ padding: "2px 0" }}>
-              <b>{k}</b> {u.direct && <span className="muted">({t("si.direct")})</span>} —{" "}
+            <div key={k} className="small si-ka-upstream rv-inline-meta">
+              <span>
+                <b>{k}</b> {u.direct && <span className="muted">({t("si.direct")})</span>}
+              </span>
               {u.mode === "full" ? (
-                t("si.full")
+                <span>{t("si.full")}</span>
               ) : (
-                <span style={{ color: "var(--st-wait)" }}>{t("si.summarised")}</span>
-              )}{" "}
-              ~{u.tokens} / {u.full_tokens} tokens
+                <span className="si-ka-summarised">{t("si.summarised")}</span>
+              )}
+              <span className="muted">
+                ~{u.tokens} / {u.full_tokens} tokens
+              </span>
             </div>
           ))}
-        </>
+        </div>
       )}
       {!!c.overridden?.length && (
-        <>
-          <h3>{t("si.overridden")}</h3>
+        <div className="rv-sec">
+          <div className="rv-sec-title">{t("si.overridden")}</div>
           {c.overridden.map((o) => (
             <div key={o.key} className="small muted">
-              ✗{" "}
+              <X size={13} aria-hidden className="si-inline-icon err" />
               {o.reason === "superseded"
                 ? t("si.supersededBy", {
                     key: o.key,
@@ -106,7 +109,7 @@ export function KnowledgeApplied({ snapshotId }: { snapshotId: number | null }) 
                     })}
             </div>
           ))}
-        </>
+        </div>
       )}
       {!!c.missing_explicit?.length && (
         <div className="errorbox small">

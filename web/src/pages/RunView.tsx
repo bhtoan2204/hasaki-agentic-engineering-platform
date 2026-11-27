@@ -398,7 +398,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             <span className="rv-icon">
               <Workflow size={21} strokeWidth={2} />
             </span>
-            <div style={{ minWidth: 0 }}>
+            <div className="rv-title-wrap">
               <h1 className="rv-title">
                 <span className="rv-id">#{run.id}</span>
                 <span className="rv-name">{run.title || run.definition_key}</span>
@@ -407,11 +407,11 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                   profile={run.profile}
                   title={(run.profile_decision?.reasons ?? []).join("\n")}
                 />
-                <span className="pill" title={t("run.agentHint")}>
+                <span className="rv-meta-chip" title={t("run.agentHint")}>
                   {t("run.agent")}: {t(agentKey(run.agent_provider))}
                 </span>
                 <span
-                  className="pill"
+                  className="rv-meta-chip"
                   title={run.output_locale ? t("run.outputCurrent") : t("run.outputLegacyHint")}
                 >
                   {t("run.outputCurrent")}:{" "}
@@ -436,7 +436,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
                   ([repo, b]) => (
                     <span
                       key={repo}
-                      className="pill chip-brand"
+                      className="rv-meta-chip is-brand"
                       title={t("rv.continueTip", {
                         source: run.inputs?.branches_source
                           ? t("rv.from", { source: run.inputs.branches_source })
@@ -579,7 +579,7 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
             <div className="rv-counts">
               {countEntries.map(([s, n]) => (
                 <Badge key={s} s={s}>
-                  {status(s)} · {n}
+                  {status(s)} {n}
                 </Badge>
               ))}
             </div>
@@ -641,22 +641,26 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       {run.worker && (
         <div className="rv-banner idle" role="status">
           <Info size={15} />
-          <span>
-            {t("rv.assignedInstance")}: {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"}{" "}
-            · {health?.health ?? run.worker.health}
-            {" · "}
-            {t("rv.lastSeen")}:{" "}
-            {(health?.last_seen_at ?? run.worker.last_seen_at)
-              ? time(health?.last_seen_at ?? run.worker.last_seen_at)
-              : "UNKNOWN"}
-            {" · "}
-            {t("rv.workerAvailable")}:{" "}
-            {(health?.available ?? run.worker.available) ? "ONLINE" : "WAITING_FOR_WORKER"}
-            {run.worker.recovery && <> · {run.worker.recovery}</>}
+          <span className="rv-inline-meta">
+            <span>
+              {t("rv.assignedInstance")}: {health?.instance_id ?? run.worker.instance_id ?? "UNKNOWN"}
+            </span>
+            <span>{health?.health ?? run.worker.health}</span>
+            <span>
+              {t("rv.lastSeen")}:{" "}
+              {(health?.last_seen_at ?? run.worker.last_seen_at)
+                ? time(health?.last_seen_at ?? run.worker.last_seen_at)
+                : "UNKNOWN"}
+            </span>
+            <span>
+              {t("rv.workerAvailable")}:{" "}
+              {(health?.available ?? run.worker.available) ? "ONLINE" : "WAITING_FOR_WORKER"}
+            </span>
+            {run.worker.recovery && <span>{run.worker.recovery}</span>}
             {(!run.worker.local || !(health?.available ?? run.worker.available)) && (
-              <> — {t("rv.ownerOnly")}</>
+              <span>({t("rv.ownerOnly")})</span>
             )}
-            {run.worker.recovery === "NEEDS_ATTENTION" && <> — {t("rv.reconcile")}</>}
+            {run.worker.recovery === "NEEDS_ATTENTION" && <span>({t("rv.reconcile")})</span>}
           </span>
         </div>
       )}
@@ -670,12 +674,14 @@ export function RunView({ id, stepKey }: { id: number; stepKey?: string }) {
       {run.delegation?.parent && (
         <div className="rv-banner idle rv-delegation" data-testid="run-delegation">
           <Info size={15} />
-          <span>
-            {t("rv.childOf")}{" "}
-            <a href={`#/runs/${run.delegation.parent.run_id}`}>
-              #{run.delegation.parent.run_id} {run.delegation.parent.title}
-            </a>{" "}
-            · {t(`child.mode.${run.delegation.parent.mode}`)}
+          <span className="rv-inline-meta">
+            <span>
+              {t("rv.childOf")}{" "}
+              <a href={`#/runs/${run.delegation.parent.run_id}`}>
+                #{run.delegation.parent.run_id} {run.delegation.parent.title}
+              </a>
+            </span>
+            <span>{t(`child.mode.${run.delegation.parent.mode}`)}</span>
           </span>
         </div>
       )}
