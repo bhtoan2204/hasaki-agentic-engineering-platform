@@ -9,6 +9,7 @@ import {
   FileText,
   FolderGit2,
   GitPullRequest,
+  Hand,
   History,
   KeyRound,
   ListTodo,
@@ -20,6 +21,7 @@ import {
   RefreshCw,
   ScanSearch,
   Settings2,
+  SkipForward,
   Sparkles,
   StepForward,
   Workflow,
@@ -1086,7 +1088,22 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
           <ul className="wi-sum-plain">
             {s.tests.map((x, n) => (
               <li key={n}>
-                {x.skipped ? "⏭" : x.passed ? "✅" : "❌"} <b>{x.repo}</b>
+                {x.skipped ? (
+                  <SkipForward size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                ) : x.passed ? (
+                  <CheckCircle2
+                    size={14}
+                    aria-hidden
+                    style={{ verticalAlign: "-2px", marginRight: 4, color: "var(--st-ok)" }}
+                  />
+                ) : (
+                  <XCircle
+                    size={14}
+                    aria-hidden
+                    style={{ verticalAlign: "-2px", marginRight: 4, color: "var(--st-err)" }}
+                  />
+                )}{" "}
+                <b>{x.repo}</b>
                 {x.detail && <span className="muted"> — {x.detail}</span>}
               </li>
             ))}
@@ -1121,12 +1138,16 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
               <li key={n}>
                 {d.kind === "answer" ? (
                   <>
-                    <span className="muted">❓ {d.question}</span>
+                    <span className="muted">
+                      <CircleHelp size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                      {d.question}
+                    </span>
                     <div>→ {d.answer}</div>
                   </>
                 ) : (
                   <>
-                    ✋ <b>{d.question}</b>: {d.answer}
+                    <Hand size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                    <b>{d.question}</b>: {d.answer}
                   </>
                 )}
               </li>

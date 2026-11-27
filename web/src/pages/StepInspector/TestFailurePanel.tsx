@@ -76,7 +76,7 @@ export function TestFailurePanel({
             )}
           </div>
           {d.explanation && (
-            <div className="rv-card soft" style={{ padding: "10px 12px" }}>
+            <div style={{ paddingTop: "10px", borderTop: "1px solid var(--line)" }}>
               <div className="small">
                 <b>{explainedByAi(d.explanation.by) ? t("si.ai") : t("si.brief")}:</b>{" "}
                 {d.explanation.text}

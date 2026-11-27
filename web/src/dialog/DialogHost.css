@@ -1,7 +1,7 @@
 .app-dialog {
-  width: min(440px, calc(100vw - 32px));
+  width: min(440px, calc(100% - 32px));
   padding: 0;
-  border-radius: var(--r-lg, 12px);
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-3);
 }
 
@@ -25,23 +25,23 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--brand, #16a34a) 14%, transparent);
-  color: var(--brand, #16a34a);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--brand);
 }
 
 .app-dialog-icon-destructive {
-  background: color-mix(in srgb, var(--st-err, #dc2626) 14%, transparent);
-  color: var(--st-err, #dc2626);
+  background: color-mix(in srgb, var(--st-err) 14%, transparent);
+  color: var(--st-err);
 }
 
 .app-dialog-icon-warning {
-  background: color-mix(in srgb, var(--st-warn, #d97706) 16%, transparent);
-  color: var(--st-warn, #d97706);
+  background: color-mix(in srgb, var(--st-warn) 16%, transparent);
+  color: var(--st-warn);
 }
 
 .app-dialog-icon-info {
-  background: color-mix(in srgb, var(--brand, #16a34a) 12%, transparent);
-  color: var(--brand, #16a34a);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  color: var(--brand);
 }
 
 .app-dialog-copy {
@@ -81,7 +81,7 @@
 }
 
 .app-dialog-error {
-  color: var(--st-err, #dc2626);
+  color: var(--st-err);
   font-size: 0.85rem;
 }
 
@@ -94,9 +94,9 @@
 }
 
 .app-dialog-confirm.danger {
-  background: var(--st-err, #dc2626);
-  border-color: var(--st-err, #dc2626);
-  color: #fff;
+  background: var(--st-err);
+  border-color: var(--st-err);
+  color: var(--on-brand);
 }
 
 .app-dialog-confirm.danger:hover:not(:disabled) {

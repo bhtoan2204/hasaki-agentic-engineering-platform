@@ -164,7 +164,7 @@ export function ReexecuteDialog({
         <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
         {t("si.forceReplay")}
       </label>
-      <div className="rv-card soft" style={{ margin: "10px 0 0", padding: "10px 12px" }}>
+      <div style={{ margin: "10px 0 0", paddingTop: "10px", borderTop: "1px solid var(--line)" }}>
         <strong className="small">{t("si.replayPreview")}</strong>
         {previewError ? (
           <ErrorBox error={previewError} onRetry={reloadPreview} />

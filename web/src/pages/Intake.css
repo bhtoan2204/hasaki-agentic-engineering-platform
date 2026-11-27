@@ -264,7 +264,7 @@
 
 .in-mode.on {
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .in-policy-mode {

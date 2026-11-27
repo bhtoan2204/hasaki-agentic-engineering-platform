@@ -110,7 +110,7 @@
 }
 
 .pe-critical {
-  color: #fff;
+  color: var(--on-brand);
   background: var(--st-err);
 }
 
@@ -351,7 +351,7 @@
 .sp-fill {
   height: 100%;
   border-radius: inherit;
-  transition: width 0.9s ease;
+  transition: transform 0.9s ease, opacity 0.3s ease;
   background: repeating-linear-gradient(
     -45deg,
     var(--brand) 0 10px,
@@ -365,7 +365,7 @@
   position: absolute;
   top: 2px;
   transform: translateX(-50%);
-  transition: left 0.9s ease;
+  transition: transform 0.9s ease, opacity 0.3s ease;
   pointer-events: none;
 }
 
@@ -451,7 +451,7 @@
 .sp-step.is-done .sp-dot {
   background: var(--st-ok);
   border-color: var(--st-ok);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .sp-step.is-now {

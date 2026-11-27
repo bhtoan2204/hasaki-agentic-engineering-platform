@@ -113,7 +113,7 @@
   gap: 10px;
   max-height: 420px;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: clip;
   padding-right: 2px;
 }
 
@@ -162,7 +162,7 @@
   display: flex;
   overflow: hidden;
   background: var(--brand);
-  transition: width 0.4s ease;
+  transition: transform 0.4s ease, opacity 0.4s ease;
 }
 
 .ins-bar-fill > span {

@@ -523,7 +523,7 @@ export function Drawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        style={width ? { width: `min(${width}px, 100vw)` } : undefined}
+        style={width ? { width: `min(${width}px, 100%)` } : undefined}
       >
         <div className="drawer-head">
           <h4 id={titleId}>{title}</h4>

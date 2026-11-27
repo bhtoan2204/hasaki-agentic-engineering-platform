@@ -86,15 +86,13 @@
   margin: 0;
 }
 
-.agent-defaults-card,
-.agent-profiles-card {
+.agent-defaults-section,
+.agent-profiles-section {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  padding: var(--sp-4);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--surface);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
 }
 
 .agent-subhead {
@@ -829,7 +827,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  width: min(720px, calc(100vw - 2 * var(--sp-4)));
+  width: min(720px, calc(100% - 2 * var(--sp-4)));
   padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-pill);
@@ -928,8 +926,8 @@
   }
 
   .agent-provider-panel,
-  .agent-defaults-card,
-  .agent-profiles-card {
+  .agent-defaults-section,
+  .agent-profiles-section {
     padding: var(--sp-3);
   }
 

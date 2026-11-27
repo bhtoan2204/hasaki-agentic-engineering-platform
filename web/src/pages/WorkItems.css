@@ -88,7 +88,7 @@
 
 .wi-sf.on .wi-sf-n {
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .wi-dot {
@@ -631,7 +631,7 @@
   display: grid;
   place-items: center;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   box-shadow: var(--shadow-2);
   flex: none;
 }
@@ -768,7 +768,7 @@
 }
 
 .wi-prod .pe-critical {
-  color: #fff;
+  color: var(--on-brand);
   background: var(--st-err);
 }
 

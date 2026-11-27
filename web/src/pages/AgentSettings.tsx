@@ -422,7 +422,7 @@ export function AgentSettings() {
           </p>
         </div>
 
-        <div className="agent-defaults-card">
+        <div className="agent-defaults-section">
           <div className="agent-subhead">
             <h4>{t("set.providerDefaults")}</h4>
             <span className="muted small">{t("set.providerDefaultsHint")}</span>
@@ -444,7 +444,7 @@ export function AgentSettings() {
           />
         </div>
 
-        <div className="agent-profiles-card">
+        <div className="agent-profiles-section">
           <div className="agent-subhead">
             <h4>{t("set.modelRouting")}</h4>
             <p className="muted small agent-profiles-guide">{t("set.modelRoutingLead")}</p>

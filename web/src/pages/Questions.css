@@ -173,7 +173,7 @@
 .qx-opt.on {
   background: var(--brand);
   border-color: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .qx-opt svg {
