@@ -13,7 +13,6 @@ import {
   PlayCircle,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
   UserRound,
   Wrench,
   XCircle,
@@ -209,11 +208,9 @@ export function OverviewPage() {
 function Hero({ active, waiting }: { active: number; waiting: number }) {
   const { t } = useI18n();
   return (
-    <section className="ov-hero card hero">
+    <section className="ov-hero card">
       <div className="ov-hero-text">
-        <div className="ov-hero-kicker">
-          <Sparkles size={14} /> {BRAND.tagline}
-        </div>
+        <div className="ov-hero-kicker">{BRAND.tagline}</div>
         <h1>{t("ov.welcome", { product: BRAND.product })}</h1>
         <p>
           {active ? (
@@ -265,10 +262,11 @@ function MiniOffice({ runId }: { runId: number | null }) {
         <h4>{t("nav.office")}</h4>
         <span className="sub">
           {snap.run ? (
-            <>
-              {t("common.runN", { id: snap.run.id })} · {t("ov.working", { n: working })}
-              {waiting ? ` · ${t("ov.needYou", { n: waiting })}` : ""}
-            </>
+            <span className="ov-sub-meta">
+              <span>{t("common.runN", { id: snap.run.id })}</span>
+              <span>{t("ov.working", { n: working })}</span>
+              {waiting > 0 && <span>{t("ov.needYou", { n: waiting })}</span>}
+            </span>
           ) : (
             t("ov.officeIdle")
           )}
@@ -329,11 +327,11 @@ function ActionInbox({ questions }: { questions: OverviewQuestion[] }) {
                 <span className="ov-dot wait" />
                 <span className="ov-li-main">
                   <b>
-                    {t("common.runN", { id: qs[0].run_id })} · {qs[0].step_key}
+                    {t("common.runN", { id: qs[0].run_id })} / {qs[0].step_key}
                   </b>
-                  <span className="muted small">
-                    {t("office.bubble.questions", { n: qs.length })} ·{" "}
-                    {String(qs[0].question ?? "").slice(0, 90)}
+                  <span className="muted small ov-li-meta">
+                    <span>{t("office.bubble.questions", { n: qs.length })}</span>
+                    <span>{String(qs[0].question ?? "").slice(0, 90)}</span>
                   </span>
                 </span>
                 <ArrowRight size={15} />
@@ -472,8 +470,9 @@ function RecentRuns({ runs }: { runs: OverviewRun[] }) {
                   <span className="ov-run-id">#{r.id}</span>
                   <span className="ov-li-main">
                     <b className="ov-ellipsis">{r.title}</b>
-                    <span className="muted small">
-                      {r.definition_key} · {t("common.ago", { when: ago(r.updated_at) })}
+                    <span className="muted small ov-li-meta">
+                      <span>{r.definition_key}</span>
+                      <span>{t("common.ago", { when: ago(r.updated_at) })}</span>
                     </span>
                   </span>
                   <span
@@ -570,21 +569,20 @@ function RecentVerification({ runs }: { runs: OverviewRun[] }) {
             return (
               <li key={`${r.run}-${r.step}-${r.n}`}>
                 <a href={`#/runs/${r.run}/${encodeURIComponent(r.step)}`}>
-                  <span
-                    className={`ov-dot ${tone === "COMPLETED" ? "ok" : tone === "FAILED" ? "err" : tone === "WAITING" ? "wait" : ""}`}
-                  />
                   <span className="ov-li-main">
                     <b>
-                      {t("common.runN", { id: r.run })} · {r.step} #{r.n}
+                      {t("common.runN", { id: r.run })} / {r.step} #{r.n}
                     </b>
-                    <span className="muted small">
-                      {typeof r.v.rounds === "number"
-                        ? t("ov.verifyRounds", {
-                            rounds: r.v.rounds,
-                            repairs: r.v.repairs ?? 0,
-                          })
-                        : (r.v.reason ?? "")}
-                      {r.v.needs_review ? ` · ${t("ov.needsReview")}` : ""}
+                    <span className="muted small ov-li-meta">
+                      <span>
+                        {typeof r.v.rounds === "number"
+                          ? t("ov.verifyRounds", {
+                              rounds: r.v.rounds,
+                              repairs: r.v.repairs ?? 0,
+                            })
+                          : (r.v.reason ?? "")}
+                      </span>
+                      {r.v.needs_review && <span>{t("ov.needsReview")}</span>}
                     </span>
                   </span>
                   <Badge s={tone}>{status}</Badge>

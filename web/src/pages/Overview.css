@@ -1,78 +1,56 @@
 /* Overview dashboard */
 .ov {
+  container-type: inline-size;
+  container-name: overview;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: var(--sp-5);
 }
 
 .ov-hero {
   display: flex;
   align-items: center;
   gap: var(--sp-6);
-  padding: 28px 32px;
+  padding: var(--sp-6) var(--sp-8);
   margin: 0;
-  overflow: hidden;
-  position: relative;
-  background:
-    radial-gradient(120% 140% at 100% 0%, var(--peach) 0%, transparent 55%),
-    linear-gradient(135deg, var(--brand-50) 0%, var(--blush) 100%);
-}
-
-.ov-hero::after {
-  content: "";
-  position: absolute;
-  right: -60px;
-  bottom: -80px;
-  width: 260px;
-  height: 260px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--brand) 14%, transparent),
-    transparent 70%
-  );
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-1);
 }
 
 .ov-hero-text {
   flex: 1;
   min-width: 0;
-  position: relative;
-  z-index: 1;
 }
 
 .ov-hero-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  color: var(--brand-700);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  padding: 4px 10px;
-  border-radius: var(--r-pill);
+  display: inline-block;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--muted);
 }
 
 .ov-hero h1 {
   font-size: var(--fs-3xl);
-  letter-spacing: -0.03em;
-  margin: 12px 0 6px;
-  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  margin: var(--sp-2) 0;
+  line-height: 1.15;
 }
 
 .ov-hero p {
   color: var(--ink-2);
   max-width: 640px;
-  margin: 0 0 6px;
-  font-size: var(--fs-lg);
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-md);
+  line-height: 1.5;
 }
 
 .ov-mascot {
-  width: 168px;
+  width: 152px;
   flex: none;
   position: relative;
-  z-index: 1;
 }
 
 .ov-mascot svg {
@@ -92,15 +70,16 @@
 
 .ov-mascot-bubble {
   position: absolute;
-  top: 2px;
-  left: -36px;
+  top: 0;
+  left: -32px;
   background: var(--surface);
-  border: 2px solid var(--ink);
-  border-radius: 10px;
-  padding: 3px 10px;
-  font-weight: 700;
-  font-size: 13px;
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--ink) 25%, transparent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-3);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
 }
 
 .ov-stats {
@@ -109,7 +88,7 @@
 
 .ov-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(500px, 1fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(min(100%, 440px), 1fr);
   gap: var(--sp-4);
   align-items: start;
 }
@@ -126,16 +105,29 @@
   margin: 0;
 }
 
+.ov-sub-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
 .ov-office .office--mini {
   height: auto;
   overflow: hidden;
   background: transparent;
   cursor: pointer;
   display: block;
+  border-radius: var(--r-md);
+}
+
+.ov-office .office--mini:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 .ov-office .office--mini .office-stage {
-  box-shadow: 0 0 0 3px var(--o-stage-edge);
+  box-shadow: 0 0 0 2px var(--o-stage-edge);
   transition:
     transform 0.2s,
     box-shadow 0.2s;
@@ -144,13 +136,13 @@
 .ov-office .office--mini:hover .office-stage {
   transform: translateY(-2px);
   box-shadow:
-    0 0 0 3px var(--brand-400),
+    0 0 0 2px var(--brand-400),
     var(--shadow-2);
 }
 
 .ov-office .o-bubble {
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 0 var(--sp-2);
 }
 
 .ov-office .o-bubble:not(.is-em) {
@@ -158,7 +150,7 @@
 }
 
 .ov-note {
-  margin: 10px 0 0;
+  margin: var(--sp-3) 0 0;
 }
 
 .ov-list {
@@ -172,12 +164,13 @@
 .ov-list li a {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 6px;
-  border-radius: 10px;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-2);
+  border-radius: var(--r-sm);
   color: var(--ink);
   text-decoration: none !important;
   border-bottom: 1px solid var(--line);
+  transition: background-color 0.15s;
 }
 
 .ov-list li:last-child a {
@@ -185,12 +178,22 @@
 }
 
 .ov-list li a:hover {
-  background: var(--brand-50);
+  background: var(--surface-2);
+}
+
+.ov-list li a:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.ov-list li a:active {
+  background: var(--surface-3);
 }
 
 .ov-li-main {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
   flex: 1;
   line-height: 1.35;
@@ -198,7 +201,15 @@
 
 .ov-li-main b {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+}
+
+.ov-li-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .ov-ellipsis {
@@ -208,22 +219,21 @@
 }
 
 .ov-run-id {
-  font: 700 12px var(--mono);
-  color: var(--brand-700);
-  background: var(--brand-50);
-  border-radius: 8px;
-  padding: 3px 7px;
+  font: 600 var(--fs-sm) var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  min-width: 44px;
   flex: none;
 }
 
 .ov-run-progress {
-  width: 90px;
+  width: 88px;
   flex: none;
 }
 
 .ov-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--st-idle);
   flex: none;
@@ -239,15 +249,14 @@
 
 .ov-dot.wait {
   background: var(--st-wait);
-  box-shadow: 0 0 0 4px var(--st-wait-bg);
 }
 
 .ov-inbox-empty {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   color: var(--muted);
-  padding: 10px 2px;
+  padding: var(--sp-2) 0;
 }
 
 .ov-health-list {
@@ -256,15 +265,14 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .ov-health-list li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 4px;
-  border-bottom: 1px dashed var(--line);
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-1);
+  border-bottom: 1px solid var(--line);
 }
 
 .ov-health-list li:last-child {
@@ -272,23 +280,26 @@
 }
 
 .ov-health-list b {
-  font-size: 15px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .ov-health-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: var(--brand-50);
-  color: var(--brand);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
   display: grid;
   place-items: center;
   flex: none;
 }
 
 .ov-hint {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -297,38 +308,9 @@
 .ov-warn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 10px;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
   color: var(--st-wait);
-}
-
-@media (max-width: 1100px) {
-  .ov-main,
-  .ov-bottom {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 640px) {
-  .ov-hero {
-    flex-direction: column-reverse;
-    align-items: flex-start;
-    padding: 22px 20px;
-    gap: 8px;
-  }
-
-  .ov-hero h1 {
-    font-size: var(--fs-2xl);
-  }
-
-  .ov-mascot {
-    width: 110px;
-    margin-left: 40px;
-  }
-
-  .ov-run-progress {
-    display: none;
-  }
 }
 
 .ov-timesheet .card-head {
@@ -339,7 +321,7 @@
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 .ts-summary {
@@ -347,7 +329,7 @@
   align-items: center;
   gap: var(--sp-4);
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: var(--sp-3);
 }
 
 .ts-balance {
@@ -358,6 +340,7 @@
 .ts-balance b {
   font-size: 24px;
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 .ov-timesheet .is-ok,
@@ -373,8 +356,9 @@
 .ts-figures {
   display: grid;
   grid-template-columns: auto auto;
-  gap: 2px 10px;
+  gap: var(--sp-1) var(--sp-3);
   margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .ts-figures dt {
@@ -389,16 +373,16 @@
 .ts-alert {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  padding: 8px 10px;
-  margin-bottom: 10px;
-  border-radius: 8px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border-radius: var(--r-sm);
   color: var(--st-wait);
   background: var(--st-wait-bg);
 }
 
 .ov-timesheet .ts-days {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
   overflow: visible;
 }
 
@@ -406,10 +390,16 @@
   width: 100%;
   min-width: 0;
   max-width: 104px;
-  height: var(--control-h-xs, 28px);
+  height: var(--control-h-xs);
   min-height: 0;
-  padding: 0 22px 0 8px;
-  font-size: 12.5px;
+  padding: 0 var(--sp-6) 0 var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.ov-timesheet .ts-days select:disabled {
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .ov-timesheet .ts-days select.ts-edited {
@@ -418,18 +408,19 @@
 }
 
 .ts-hint {
-  margin: 8px 0 0;
+  margin: var(--sp-2) 0 0;
 }
 
 .ts-days td,
 .ts-days th {
   white-space: nowrap;
-  padding: 5px 6px;
-  font-size: 12.5px;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 .ts-kind {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
@@ -440,4 +431,40 @@
 .ts-missing_punch {
   color: var(--st-wait);
   font-weight: 600;
+}
+
+@container overview (max-width: 1024px) {
+  .ov-main,
+  .ov-bottom {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container overview (max-width: 640px) {
+  .ov-hero {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    padding: var(--sp-5);
+    gap: var(--sp-3);
+  }
+
+  .ov-hero h1 {
+    font-size: var(--fs-2xl);
+  }
+
+  .ov-mascot {
+    width: 104px;
+    margin-left: var(--sp-8);
+  }
+
+  .ov-run-progress {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-office .office--mini .office-stage,
+  .ov-list li a {
+    transition: none;
+  }
 }
