@@ -234,6 +234,12 @@ export async function ensureFresh(names: string[], maxReindex = 3) {
   return { freshness, reindexed };
 }
 
+/** Background refresh of every registered repository's index: the same bounded batch as an analysis, without needing one. */
+export async function refreshStaleIndexes(maxReindex = 3) {
+  const names = (await repositories.list()).map((r) => r.name);
+  return ensureFresh(names, maxReindex);
+}
+
 /** Test files of a repository (at its indexed commit) that mention a contract key: candidate regression tests. */
 export async function testsMentioning(name: string, keys: string[], limit = 10) {
   const path = await checkoutOf(name);

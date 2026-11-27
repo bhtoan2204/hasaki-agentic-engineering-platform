@@ -3,6 +3,7 @@ import { pruneLoginAttempts } from "./auth/sessions.ts";
 import { keyRing, writeFormat } from "./auth/crypto.ts";
 import { enforceAutonomyTimeouts } from "./chat/autonomy.ts";
 import { radarTick } from "./radar/scan.ts";
+import { refreshStaleIndexes } from "./impact/index.ts";
 import { dispatchDelegations } from "./workflow/delegationDispatch.ts";
 import { invalidateCausalMemories } from "./memory/causal.ts";
 import { enqueue as enqueueCodeIndex } from "./codeIntelligence/indexer.ts";
@@ -127,6 +128,13 @@ registerReconcileTask("causal_memory", async () => {
   if (Date.now() - causalCheckedAt < 30 * 60_000) return;
   causalCheckedAt = Date.now();
   await invalidateCausalMemories();
+});
+// Impact indexes: stale repositories are re-extracted in the background, 3 per pass, every 10 minutes.
+let impactRefreshedAt = 0;
+registerReconcileTask("impact_index", async () => {
+  if (Date.now() - impactRefreshedAt < 10 * 60_000) return;
+  impactRefreshedAt = Date.now();
+  await refreshStaleIndexes();
 });
 // Failed/successful login attempts past retention are deleted in bounded batches (every 10 minutes).
 let loginAttemptsPrunedAt = 0;

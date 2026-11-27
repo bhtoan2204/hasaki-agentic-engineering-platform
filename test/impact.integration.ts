@@ -275,6 +275,22 @@ test("stale indexes are detected and only the changed repository is re-extracted
   assert.equal(again.skipped, "fresh", "an unchanged commit is not re-extracted");
 });
 
+test("the background refresh re-extracts stale indexes in bounded batches without any analysis request", async () => {
+  const { refreshStaleIndexes } = await import("../src/impact/index.ts");
+  for (const name of ["imp-pay", "imp-oms"]) {
+    const root = join(config.reposRoot, name);
+    writeFileSync(join(root, "bg-refresh.txt"), name);
+    commitAll(root, "bg refresh");
+    assert.equal((await freshnessOf(name)).stale, true);
+  }
+  const first = await refreshStaleIndexes(1);
+  assert.equal(first.reindexed, 1, "the batch is bounded");
+  const second = await refreshStaleIndexes(1);
+  assert.equal(second.reindexed, 1);
+  for (const name of ["imp-pay", "imp-oms"]) assert.equal((await freshnessOf(name)).stale, false);
+  assert.equal((await refreshStaleIndexes(1)).reindexed, 0, "nothing left to do");
+});
+
 test("concurrent re-extraction of one repository never duplicates contracts", async () => {
   const { indexRepository } = await import("../src/impact/index.ts");
   await Promise.all([
