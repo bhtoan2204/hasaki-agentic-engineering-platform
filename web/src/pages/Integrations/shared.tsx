@@ -8,7 +8,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, useApi } from "../../api.ts";
-import { act, Empty, ErrorBox, SkeletonRows } from "../../ui.tsx";
+import { act } from "../../ui.tsx";
 import { useI18n } from "../../i18n/index.tsx";
 import { PasteForm } from "./PasteForm.tsx";
 
@@ -441,35 +441,5 @@ export function BackgroundGit(p: { open: boolean; onToggle: (id: string) => void
       </label>
       {st?.enabled && !st.hosts.length && <p className="small err">{t("ig.bg.noToken")}</p>}
     </Row>
-  );
-}
-
-export function AgentAccounts() {
-  const { t } = useI18n();
-  const status = useApi<Array<{ id: string; ok: boolean; error?: string }>>("/api/agent-providers");
-  return (
-    <section className="ig-group">
-      <h3 className="ig-group-title">{t("ig.cli.title")}</h3>
-      <p className="small muted">{t("ig.cli.lead")}</p>
-      {status.loading && !status.data && <SkeletonRows rows={2} />}
-      {status.error && <ErrorBox error={status.error} onRetry={status.reload} />}
-      {status.data && !status.data.length && <Empty>{t("ig.cli.none")}</Empty>}
-      {status.data?.map((provider) => (
-        <div key={provider.id} className="card">
-          <strong>{provider.id}</strong> ·{" "}
-          {provider.ok ? t("ig.cli.available") : t("ig.cli.unavailable")}
-          {!provider.ok && provider.error && (
-            <p className="small muted" role="alert">
-              {provider.error}
-            </p>
-          )}
-          {provider.id === "copilot" && (
-            <p className="small">
-              {slot(t("ig.cli.copilotHint"), { cmd: <code>copilot auth login</code> })}
-            </p>
-          )}
-        </div>
-      ))}
-    </section>
   );
 }

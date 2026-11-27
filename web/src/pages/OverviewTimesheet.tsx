@@ -72,7 +72,6 @@ const dayLabel = (date: string | null) => {
 export function TimesheetCard() {
   const { t } = useI18n();
   const [at, setAt] = useState(thisMonth);
-  const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const { data, error, loading, reload } = useApi<Sheet>(
     `/api/timesheet?year=${at.year}&month=${at.month}`,
@@ -172,87 +171,75 @@ export function TimesheetCard() {
               </span>
             </div>
           )}
-          <button
-            type="button"
-            className="ghost sm"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? t("ts.hideDays") : t("ts.showDays", { n: data?.days?.length ?? 0 })}
-          </button>
-          {open && (
-            <div className="table-wrap ts-days">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{t("ts.col.date")}</th>
-                    <th>{t("ts.col.inOut")}</th>
-                    <th>{t("ts.col.result")}</th>
-                    <th>{t("ts.col.kind")}</th>
+          <div className="table-wrap ts-days">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("ts.col.date")}</th>
+                  <th>{t("ts.col.inOut")}</th>
+                  <th>{t("ts.col.result")}</th>
+                  <th>{t("ts.col.kind")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.days ?? []).map((d, i) => (
+                  <tr key={d.date ?? i} className={d.in_progress ? "muted" : ""}>
+                    <td title={d.shift ?? undefined}>{dayLabel(d.date)}</td>
+                    <td>
+                      {hm(d.check_in)} – {hm(d.check_out)}
+                    </td>
+                    <td
+                      title={
+                        d.in_progress ? undefined : `${t("ts.col.worked")} ${dur(d.worked_seconds)}`
+                      }
+                    >
+                      {!d.in_progress && d.kind !== "missing_punch" && (
+                        <b className={d.diff_seconds < 0 ? "is-short" : "is-ok"}>
+                          {dur(d.diff_seconds, true)}
+                        </b>
+                      )}{" "}
+                      {(d.in_progress || d.kind !== "full") && (
+                        <span className={`ts-kind ts-${d.in_progress ? "progress" : d.kind}`}>
+                          {kindText(d)}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {d.date && !d.in_progress && d.auto_kind !== "missing_punch" ? (
+                        <select
+                          className={d.overridden ? "xs ts-edited" : "xs"}
+                          aria-label={`${t("ts.col.kind")} ${dayLabel(d.date)}`}
+                          title={
+                            d.overridden
+                              ? t("ts.editedHint", {
+                                  auto: t(
+                                    d.auto_kind === "half_leave"
+                                      ? "ts.kind.half_leave"
+                                      : "ts.kind.full",
+                                  ),
+                                })
+                              : undefined
+                          }
+                          disabled={saving === d.date}
+                          value={d.overridden ? d.kind : "auto"}
+                          onChange={(e) =>
+                            setKind(d.date!, e.target.value as "auto" | "full" | "half_leave")
+                          }
+                        >
+                          <option value="auto">{t("ts.kind.auto")}</option>
+                          <option value="full">{t("ts.kind.full")}</option>
+                          <option value="half_leave">{t("ts.kind.half_leave")}</option>
+                        </select>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {(data?.days ?? []).map((d, i) => (
-                    <tr key={d.date ?? i} className={d.in_progress ? "muted" : ""}>
-                      <td title={d.shift ?? undefined}>{dayLabel(d.date)}</td>
-                      <td>
-                        {hm(d.check_in)} – {hm(d.check_out)}
-                      </td>
-                      <td
-                        title={
-                          d.in_progress
-                            ? undefined
-                            : `${t("ts.col.worked")} ${dur(d.worked_seconds)}`
-                        }
-                      >
-                        {!d.in_progress && d.kind !== "missing_punch" && (
-                          <b className={d.diff_seconds < 0 ? "is-short" : "is-ok"}>
-                            {dur(d.diff_seconds, true)}
-                          </b>
-                        )}{" "}
-                        {(d.in_progress || d.kind !== "full") && (
-                          <span className={`ts-kind ts-${d.in_progress ? "progress" : d.kind}`}>
-                            {kindText(d)}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {d.date && !d.in_progress && d.auto_kind !== "missing_punch" ? (
-                          <select
-                            className={d.overridden ? "xs ts-edited" : "xs"}
-                            aria-label={`${t("ts.col.kind")} ${dayLabel(d.date)}`}
-                            title={
-                              d.overridden
-                                ? t("ts.editedHint", {
-                                    auto: t(
-                                      d.auto_kind === "half_leave"
-                                        ? "ts.kind.half_leave"
-                                        : "ts.kind.full",
-                                    ),
-                                  })
-                                : undefined
-                            }
-                            disabled={saving === d.date}
-                            value={d.overridden ? d.kind : "auto"}
-                            onChange={(e) =>
-                              setKind(d.date!, e.target.value as "auto" | "full" | "half_leave")
-                            }
-                          >
-                            <option value="auto">{t("ts.kind.auto")}</option>
-                            <option value="full">{t("ts.kind.full")}</option>
-                            <option value="half_leave">{t("ts.kind.half_leave")}</option>
-                          </select>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="muted small ts-hint">{t("ts.editHint")}</p>
-            </div>
-          )}
+                ))}
+              </tbody>
+            </table>
+            <p className="muted small ts-hint">{t("ts.editHint")}</p>
+          </div>
         </>
       ) : null}
     </section>

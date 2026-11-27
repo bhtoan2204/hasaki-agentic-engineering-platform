@@ -13,7 +13,7 @@ import { SigNoz } from "./Integrations/SigNoz.tsx";
 import { Splunk } from "./Integrations/Splunk.tsx";
 import { Telegram } from "./Integrations/Telegram.tsx";
 import { Vault } from "./Integrations/Vault.tsx";
-import { AgentAccounts, BackgroundGit } from "./Integrations/shared.tsx";
+import { BackgroundGit } from "./Integrations/shared.tsx";
 
 export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {}) {
   const { t } = useI18n();
@@ -25,7 +25,6 @@ export function IntegrationsPage({ me }: { me?: { role?: string } | null } = {})
   return (
     <>
       <PageHeader icon={PlugZap} title={t("ig.title")} subtitle={t("ig.subtitle")} />
-      <AgentAccounts />
       <section className="ig-group">
         <h3 className="ig-group-title">
           {t("ig.sources")} <span className="muted small">· {t("ig.sourcesHint")}</span>

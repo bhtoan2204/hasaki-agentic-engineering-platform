@@ -23,6 +23,7 @@ import {
   PageHeader,
   SearchInput,
   Segmented,
+  SelectDropdown,
   SkeletonRows,
   StatCard,
   dur,
@@ -242,20 +243,21 @@ export function RunsPage() {
         crumbs={[[t("nav.overview"), "#/overview"], [t("runs.title")]]}
         actions={
           <div className="runs-launch">
-            <select
-              aria-label={t("runs.pickWf")}
+            <SelectDropdown
+              ariaLabel={t("runs.pickWf")}
               value={wf}
-              onChange={(e) => setWf(e.target.value)}
-            >
-              <option value="">{t("runs.pickWfPh")}</option>
-              {(wfs ?? [])
-                .filter((w) => w.latest_version > 0)
-                .map((w) => (
-                  <option key={w.key} value={w.key}>
-                    {w.name} (v{w.latest_version})
-                  </option>
-                ))}
-            </select>
+              placeholder={t("runs.pickWfPh")}
+              onChange={setWf}
+              options={[
+                { value: "", label: t("runs.pickWfPh") },
+                ...(wfs ?? [])
+                  .filter((w) => w.latest_version > 0)
+                  .map((w) => ({
+                    value: w.key,
+                    label: `${w.name} (v${w.latest_version})`,
+                  })),
+              ]}
+            />
             <button
               type="button"
               disabled={!wf}

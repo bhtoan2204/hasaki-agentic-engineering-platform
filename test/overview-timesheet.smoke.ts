@@ -133,7 +133,7 @@ try {
         await card.locator(".ts-balance").waitFor();
         assert.match(await card.locator(".ts-balance").innerText(), /\+0h10/);
         assert.match(await card.locator(".ts-alert").innerText(), /03\/11/);
-        await card.getByRole("button", { name: /3/ }).click();
+        await card.locator("tbody tr").first().waitFor();
         assert.equal(await card.locator("tbody tr").count(), 3);
         assert.match(
           await card.locator("tbody tr").nth(2).innerText(),

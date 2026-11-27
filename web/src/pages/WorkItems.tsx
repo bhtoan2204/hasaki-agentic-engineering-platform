@@ -53,6 +53,7 @@ import {
   PageHeader,
   SearchInput,
   Segmented,
+  SelectDropdown,
   SkeletonRows,
   Tabs,
   time,
@@ -1369,18 +1370,20 @@ export function WorkItemDetail({ id }: { id: number }) {
               </div>
             </div>
             <Field label={t("common.workflow")}>
-              <select
+              <SelectDropdown
+                ariaLabel={t("common.workflow")}
                 value={wf}
-                onChange={(e) => ((wfTouched.current = true), setWf(e.target.value))}
-              >
-                {(wfs ?? [])
+                onChange={(next) => {
+                  wfTouched.current = true;
+                  setWf(next);
+                }}
+                options={(wfs ?? [])
                   .filter((x) => x.latest_version > 0)
-                  .map((x) => (
-                    <option key={x.key} value={x.key}>
-                      {x.name} (v{x.latest_version}) — {x.description?.slice(0, 60)}
-                    </option>
-                  ))}
-              </select>
+                  .map((x) => ({
+                    value: x.key,
+                    label: `${x.name} (v${x.latest_version})${x.description ? ` — ${x.description.slice(0, 60)}` : ""}`,
+                  }))}
+              />
             </Field>
             {selectedWf?.description && <div className="wi-wfdesc">{selectedWf.description}</div>}
             <ProfilePreview

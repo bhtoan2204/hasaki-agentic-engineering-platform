@@ -1,14 +1,16 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
-import { Search, X, LoaderCircle, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, Search, X, LoaderCircle, type LucideIcon } from "lucide-react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { renderMarkdownSafe } from "./markdown.ts";
@@ -610,6 +612,244 @@ export function Field({
       {children}
       {hint && <small className="muted">{hint}</small>}
     </label>
+  );
+}
+
+export interface SelectOption {
+  value: string;
+  label: string;
+}
+
+/** Accessible single-select dropdown whose popup matches trigger width, truncates long labels, and flips upward near the bottom edge. */
+export function SelectDropdown({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  placeholder,
+  disabled = false,
+  className = "",
+}: {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [menuPos, setMenuPos] = useState<{
+    left: number;
+    width: number;
+    maxHeight: number;
+    top?: number;
+    bottom?: number;
+  } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  const selectedIndex = options.findIndex((o) => o.value === value);
+  const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : undefined;
+  const displayLabel = selectedOption?.label ?? (value || placeholder || "");
+  const isPlaceholder = !selectedOption && !value && Boolean(placeholder);
+
+  const closeMenu = useCallback((returnFocus = false) => {
+    setOpen(false);
+    setMenuPos(null);
+    if (returnFocus) triggerRef.current?.focus();
+  }, []);
+
+  const openMenu = useCallback(
+    (initialIdx?: number) => {
+      if (disabled || options.length === 0) return;
+      setActiveIndex(initialIdx ?? (selectedIndex >= 0 ? selectedIndex : 0));
+      setOpen(true);
+    },
+    [disabled, options.length, selectedIndex],
+  );
+
+  const choose = useCallback(
+    (idx: number) => {
+      const opt = options[idx];
+      if (!opt) return;
+      onChange(opt.value);
+      closeMenu(true);
+    },
+    [closeMenu, onChange, options],
+  );
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !trigger.isConnected) {
+        setOpen(false);
+        return;
+      }
+      const r = trigger.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+      const edge = 8;
+      const gap = 4;
+      const maxPopupH = 320;
+      const spaceBelow = Math.max(0, vh - r.bottom - gap - edge);
+      const spaceAbove = Math.max(0, r.top - gap - edge);
+      const contentH = menu ? menu.scrollHeight + 2 : maxPopupH;
+      const neededH = Math.min(contentH, maxPopupH);
+      const openUp = spaceBelow < neededH && spaceAbove > spaceBelow;
+      const availableH = openUp ? spaceAbove : spaceBelow;
+      const maxHeight = Math.max(0, Math.min(maxPopupH, availableH));
+      const width = Math.min(r.width, vw - edge * 2);
+      const left = Math.max(edge, Math.min(r.left, vw - width - edge));
+      setMenuPos(
+        openUp
+          ? { left, width, maxHeight, bottom: vh - r.top + gap }
+          : { left, width, maxHeight, top: r.bottom + gap },
+      );
+    };
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && !triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+        setMenuPos(null);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [open, options.length]);
+
+  useEffect(() => {
+    if (!open || activeIndex < 0) return;
+    document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [open, activeIndex, listId]);
+
+  const findNextByChar = (ch: string) => {
+    const q = ch.toLowerCase();
+    const start = open ? activeIndex : selectedIndex;
+    for (let offset = 1; offset <= options.length; offset++) {
+      const idx = (start + offset + options.length) % options.length;
+      if (options[idx]?.label.toLowerCase().startsWith(q)) return idx;
+    }
+    return -1;
+  };
+
+  return (
+    <div className={`wf-select${className ? ` ${className}` : ""}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        role="combobox"
+        aria-autocomplete="none"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-activedescendant={open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
+        aria-label={ariaLabel}
+        title={displayLabel || undefined}
+        disabled={disabled}
+        className={`wf-select-trigger${open ? " is-open" : ""}${isPlaceholder ? " is-placeholder" : ""}`}
+        onClick={() => (open ? closeMenu() : openMenu())}
+        onKeyUp={(e) => {
+          if (e.key === " ") e.preventDefault();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (!open) openMenu(selectedIndex >= 0 ? selectedIndex : 0);
+            else setActiveIndex((i) => Math.min(options.length - 1, Math.max(0, i) + 1));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (!open)
+              openMenu(selectedIndex >= 0 ? selectedIndex : Math.max(0, options.length - 1));
+            else setActiveIndex((i) => Math.max(0, (i < 0 ? options.length - 1 : i) - 1));
+          } else if (e.key === "Home" && open) {
+            e.preventDefault();
+            setActiveIndex(0);
+          } else if (e.key === "End" && open) {
+            e.preventDefault();
+            setActiveIndex(Math.max(0, options.length - 1));
+          } else if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (!open) openMenu();
+            else if (activeIndex >= 0) choose(activeIndex);
+            else closeMenu(true);
+          } else if (e.key === "Escape" && open) {
+            e.preventDefault();
+            closeMenu(true);
+          } else if (e.key === "Tab" && open) {
+            closeMenu(false);
+          } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            const nextIdx = findNextByChar(e.key);
+            if (nextIdx >= 0) {
+              if (open) setActiveIndex(nextIdx);
+              else if (options[nextIdx]) onChange(options[nextIdx].value);
+            }
+          }
+        }}
+      >
+        <span className="wf-select-value">{displayLabel}</span>
+        <ChevronDown
+          size={15}
+          className={`wf-select-chevron${open ? " is-open" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            id={listId}
+            ref={menuRef}
+            role="listbox"
+            aria-label={ariaLabel}
+            className="wf-select-menu"
+            style={
+              menuPos
+                ? {
+                    left: menuPos.left,
+                    width: menuPos.width,
+                    maxHeight: menuPos.maxHeight,
+                    ...(menuPos.top !== undefined
+                      ? { top: menuPos.top }
+                      : { bottom: menuPos.bottom }),
+                  }
+                : { visibility: "hidden", top: -9999, left: -9999 }
+            }
+          >
+            {options.map((opt, idx) => {
+              const isSelected = opt.value === value;
+              const isFocused = idx === activeIndex;
+              return (
+                <div
+                  key={`${opt.value}-${idx}`}
+                  id={`${listId}-${idx}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  title={opt.label}
+                  className={`wf-select-option${isSelected ? " is-selected" : ""}${isFocused ? " is-focused" : ""}`}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => choose(idx)}
+                >
+                  <span className="wf-select-option-label">{opt.label}</span>
+                  {isSelected && <Check size={14} className="wf-select-check" aria-hidden="true" />}
+                </div>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </div>
   );
 }
 
