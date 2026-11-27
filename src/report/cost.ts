@@ -124,7 +124,7 @@ export function summarize(
     };
     add(s, r);
     steps.set(r.step_key, s);
-    if (usedAgent(r)) {
+    if (r.cost != null || (r.input_tokens ?? 0) + (r.output_tokens ?? 0) > 0) {
       const key = `${r.provider ?? "?"}|${r.model ?? "?"}`;
       const m = models.get(key) ?? {
         ...emptyBucket(),
@@ -187,7 +187,9 @@ export async function attemptRows(runIds: number[], db: Db = pool): Promise<Atte
   return q<AttemptCostRow>(
     db,
     `SELECT t.attempt_id, t.run_id, s.key AS step_key, s.name AS step_name, t.status, r.status AS run_status, s.current_attempt_id,
-            t.provider, t.model, t.reported_cost_usd AS cost, t.input_tokens, t.output_tokens, t.cache_read_tokens,
+            COALESCE(t.provider, (SELECT v.value->>'provider' FROM jsonb_each(COALESCE(t.provider_sessions, '{}'::jsonb)) v
+                                  WHERE v.value->>'provider' IS NOT NULL ORDER BY v.key LIMIT 1)) AS provider,
+            t.model, t.reported_cost_usd AS cost, t.input_tokens, t.output_tokens, t.cache_read_tokens,
             t.cache_creation_tokens, t.reasoning_tokens
        FROM execution_attempt_telemetry t
        JOIN workflow_steps s ON s.id = t.step_id

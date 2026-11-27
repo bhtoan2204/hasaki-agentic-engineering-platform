@@ -59,6 +59,18 @@ test("summarize: unknown cost stays null; partial availability when some agent a
   assert.equal(cmd.by_model.length, 0);
 });
 
+test("summarize: an attempt that spent nothing does not get its own model line", () => {
+  const s = summarize([
+    row({ cost: 0.5, model: "m" }),
+    row({ attempt_id: 2, current_attempt_id: 2, status: "CANCELED", cost: null, model: "default" }),
+  ]);
+  assert.deepEqual(
+    s.by_model.map((m) => m.model),
+    ["m"],
+  );
+  assert.equal(s.total.attempts, 2);
+});
+
 test("budgetLine thresholds and parseBudget validation", () => {
   assert.equal(budgetLine(null, null, 3).status, "none");
   assert.equal(budgetLine(10, "own", 7.9, 0.8).status, "ok");
