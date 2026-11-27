@@ -13,8 +13,8 @@ import (
 	"hasaki-orbit/go/internal/worker"
 )
 
-// RequiredSchemaVersion is the migration that made scans durable jobs (085_prod_error_scan_jobs).
-const RequiredSchemaVersion = 85
+// RequiredSchemaVersion is the migration whose columns this module writes (114_prod_errors_hardening: partial, sources).
+const RequiredSchemaVersion = 114
 
 // Lease is how long a claim holds without a heartbeat; heartbeats run at a third of it.
 const Lease = 30 * time.Second
@@ -99,8 +99,12 @@ func (s *Store) heartbeat(ctx context.Context, sc *Scan, progress map[string]any
 
 // publish writes the scan's groups and observations and marks it published, in one transaction under the fence.
 // A group a newer scan already wrote keeps the newer values (last_scan_id), so a slow older scan never wins.
-func (s *Store) publish(ctx context.Context, sc *Scan, groups []Group, warnings *string) error {
+func (s *Store) publish(ctx context.Context, sc *Scan, groups []Group, warnings *string, partial bool, reports map[string]*sourceReport) error {
 	rows, err := json.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	sources, err := json.Marshal(reports)
 	if err != nil {
 		return err
 	}
@@ -123,7 +127,8 @@ func (s *Store) publish(ctx context.Context, sc *Scan, groups []Group, warnings 
 			}
 		}
 		// The warnings are kept with the stage, so a resumed finalize reports them too.
-		_, err = tx.Exec(ctx, `UPDATE prod_error_scans SET stage='published', error=$2 WHERE id=$1`, sc.ID, warnings)
+		_, err = tx.Exec(ctx, `UPDATE prod_error_scans SET stage='published', error=$2, partial=$3, sources=$4 WHERE id=$1`,
+			sc.ID, warnings, partial, sources)
 		return err
 	})
 }

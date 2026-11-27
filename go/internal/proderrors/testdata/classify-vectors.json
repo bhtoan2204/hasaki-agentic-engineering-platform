@@ -1,0 +1,230 @@
+[
+ {
+  "name": "go panic",
+  "text": "panic: runtime error: index out of range [3] with length 3",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "go fatal deadlock",
+  "text": "fatal error: all goroutines are asleep - deadlock!",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "go oom",
+  "text": "runtime: out of memory: cannot allocate 4096-byte block",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "java oom",
+  "text": "java.lang.OutOfMemoryError: Java heap space",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "oomkilled",
+  "text": "container terminated: OOMKilled",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "re-panic keeps crashing",
+  "text": "panic: boom [recovered]\n\tpanic: boom",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "nil pointer",
+  "text": "nil pointer dereference in order handler",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "plain panic word",
+  "text": "worker panic while flushing queue",
+  "crash": true,
+  "money": false
+ },
+ {
+  "name": "mysql deadlock",
+  "text": "Error 1213 (40001): Deadlock found when trying to get lock; try restarting transaction",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "mysql deadlock short",
+  "text": "Deadlock found when trying to get lock; try restarting transaction",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "postgres deadlock",
+  "text": "ERROR: deadlock detected",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "sqlstate 40P01",
+  "text": "pq: deadlock; SQLSTATE 40P01",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "lock wait timeout",
+  "text": "Lock wait timeout exceeded; try restarting transaction",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "recovered nil pointer",
+  "text": "recovered from panic: runtime error: invalid memory address or nil pointer dereference",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "panic recovered",
+  "text": "panic recovered in http handler: boom",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "recovered panic index",
+  "text": "recovered panic: index out of range",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "plain error",
+  "text": "payment gateway returned 502",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "refund",
+  "text": "refund failed for order",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "hoan tien",
+  "text": "hoàn tiền thất bại",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "sign not match",
+  "text": "failed to check sign, err=sign not match",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "invalid sign",
+  "text": "invalid sign from ipn",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "checksum",
+  "text": "checksum mismatch",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "cod",
+  "text": "COD collection failed",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "duplicate payment",
+  "text": "duplicate payment callback received",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "double charge",
+  "text": "double charge detected",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "amount mismatch",
+  "text": "amount mismatch between order and gateway",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "callback with context",
+  "text": "callback timeout for payment gateway",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "webhook with context",
+  "text": "webhook failed for order 123",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "settlement",
+  "text": "settlement failed for transaction",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "charge with wallet",
+  "text": "charge failed for wallet",
+  "crash": false,
+  "money": true
+ },
+ {
+  "name": "mysql duplicate entry",
+  "text": "Duplicate entry '1' for key 'PRIMARY'",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "pg duplicate key",
+  "text": "duplicate key value violates unique constraint",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "double click",
+  "text": "double click detected on button",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "callback alone",
+  "text": "callback timeout",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "capture screenshot",
+  "text": "failed to capture screenshot",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "battery charge",
+  "text": "battery charge low",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "amount alone",
+  "text": "invalid amount of items",
+  "crash": false,
+  "money": false
+ },
+ {
+  "name": "settle down",
+  "text": "settle down before retry",
+  "crash": false,
+  "money": false
+ }
+]

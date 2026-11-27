@@ -112,6 +112,22 @@ export function goldenCases(): Array<{ name: string; day: string; sources: Src[]
       sources: [{ source: "splunk", rows: many }],
     },
     {
+      name: "a crash group survives the per-source cap",
+      day: "2026-11-04",
+      sources: [
+        {
+          source: "splunk",
+          rows: [
+            ...many,
+            splunk({ ns: "oms-prod", svc: "oms-api", sig: "rare crash", lv: "ERROR", today: "1", yesterday: "0", is_crash: "1" }),
+            splunk({ ns: "oms-prod", svc: "oms-api", sig: "rare recovered", lv: "ERROR", today: "1", yesterday: "0", sample: "recovered from panic: boom" }),
+            splunk({ ns: "oms-prod", svc: "oms-api", sig: "rare deadlock", lv: "ERROR", today: "1", yesterday: "0", sample: "Deadlock found when trying to get lock; try restarting transaction" }),
+            splunk({ ns: "oms-prod", svc: "oms-api", sig: "rare fatal", lv: "FATAL", today: "1", yesterday: "0" }),
+          ],
+        },
+      ],
+    },
+    {
       name: "splunk and signoz overlap",
       day: "2026-11-03",
       sources: [

@@ -62,23 +62,34 @@
         "analytics_hourly": {},
         "sources": { "type": "array" },
         "no_baseline": { "type": "boolean" },
-        "slow": { "type": "object" }
+        "slow": { "type": "object" },
+        "is_crash": { "description": "1 when any event of the group is a crash: the group survives the per-source cap" }
       }
     },
     "SplunkResponse": {
       "type": "object",
-      "required": ["results", "messages"],
+      "required": ["results", "messages", "truncated", "partial_reasons"],
       "properties": {
         "results": { "type": "array", "items": { "$ref": "#/$defs/SourceRow" }, "maxItems": 300 },
-        "messages": { "type": "array", "items": { "type": "string" } }
+        "messages": { "type": "array", "items": { "type": "string" } },
+        "truncated": {
+          "type": "boolean",
+          "description": "the search returned more groups than the cap (crash groups first); the rest were cut"
+        },
+        "partial_reasons": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "messages saying Splunk cut the search short (auto-finalized at its time limit)"
+        }
       }
     },
     "SignozErrorsResponse": {
       "type": "object",
-      "required": ["rows", "has_baseline", "notes"],
+      "required": ["rows", "has_baseline", "truncated", "notes"],
       "properties": {
         "rows": { "type": "array", "items": { "$ref": "#/$defs/SourceRow" } },
         "has_baseline": { "type": "boolean" },
+        "truncated": { "type": "boolean", "description": "SigNoz returned the cap of error span groups" },
         "notes": { "type": "array", "items": { "type": "string" } }
       }
     },

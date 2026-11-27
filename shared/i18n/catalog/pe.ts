@@ -38,6 +38,13 @@ export const peMessages: Record<"vi" | "en", Record<string, string>> = {
     "pe.scheduled": ", theo lịch",
     "pe.lastFail": "Lần quét {ago} lỗi: {error}",
     "pe.staleData": "dữ liệu bên dưới từ lần quét {ago}",
+    "pe.partialScan":
+      "Lần quét chưa đầy đủ: {sources} không trả lời. Các nhóm của nguồn đó là dữ liệu của lần quét đầy đủ gần nhất ({ago}).",
+    "pe.partialScanNoCarry": "Lần quét chưa đầy đủ: {sources} không trả lời.",
+    "pe.cutScan":
+      "Nguồn {sources} trả về quá nhiều nhóm: chỉ giữ các nhóm lớn nhất (nhóm crash luôn được giữ).",
+    "pe.staleSource": "dữ liệu cũ · {source}",
+    "pe.ignoredUntil": "bỏ qua đến {date}",
     "pe.never": "Chưa quét lần nào — bấm Quét ngay.",
     "pe.oldDay": "Dữ liệu của ngày {day}, hôm nay chưa quét.",
     "pe.scanDone": "Quét xong: {groups} nhóm lỗi, {attention} cần xem",
@@ -160,6 +167,13 @@ export const peMessages: Record<"vi" | "en", Record<string, string>> = {
     "pe.scheduled": ", scheduled",
     "pe.lastFail": "Scan {ago} failed: {error}",
     "pe.staleData": "the data below is from the scan {ago}",
+    "pe.partialScan":
+      "The scan is incomplete: {sources} did not answer. That source's groups come from the last complete scan ({ago}).",
+    "pe.partialScanNoCarry": "The scan is incomplete: {sources} did not answer.",
+    "pe.cutScan":
+      "{sources} returned too many groups: only the largest were kept (crash groups are always kept).",
+    "pe.staleSource": "stale data · {source}",
+    "pe.ignoredUntil": "ignored until {date}",
     "pe.never": "No scan yet — press Scan now.",
     "pe.oldDay": "Data is for {day}; today has not been scanned.",
     "pe.scanDone": "Scan finished: {groups} error groups, {attention} need a look",

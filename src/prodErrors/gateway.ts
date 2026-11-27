@@ -28,12 +28,16 @@ import {
 } from "../integrations/signoz.ts";
 import {
   buildScanSpl,
+  capSourceRows,
   finalizeScan,
   maskGaps,
   notifyFailure,
+  partialReasons,
   scanNamespaces,
   signozRows,
   signozSlowRows,
+  SOURCE_CAP,
+  type SourceRow,
   SIGNOZ_NO_BASELINE,
   SIGNOZ_TRUNCATED,
 } from "./scan.ts";
@@ -209,12 +213,22 @@ async function operate(
             query: buildScanSpl(w, ns),
             since_minutes: w.minutes,
             until_minutes: w.untilMinutes,
-            max_results: 300,
+            max_results: SOURCE_CAP + 1,
             timeout_seconds: config.prodErrors.timeoutSeconds,
           },
           progressWriter(job.id, fence),
         );
-        return { status: 200, body: { results: r.results ?? [], messages: r.messages ?? [] } };
+        // One row more than the cap tells a cut; crash groups stay whatever else is dropped.
+        const capped = capSourceRows((r.results ?? []) as unknown as SourceRow[]);
+        return {
+          status: 200,
+          body: {
+            results: capped.rows,
+            messages: r.messages ?? [],
+            truncated: capped.truncated,
+            partial_reasons: partialReasons(r.messages),
+          },
+        };
       } catch (e) {
         return providerFailure("splunk", e);
       }
@@ -236,6 +250,7 @@ async function operate(
           body: {
             rows: signozRows(spans.today, spans.yesterday, spans.samples, spans.hasBaseline),
             has_baseline: spans.hasBaseline,
+            truncated: !!spans.truncated,
             notes,
           },
         };

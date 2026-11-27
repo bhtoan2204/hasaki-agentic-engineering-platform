@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -155,6 +156,27 @@ type outcome struct {
 	warnings       *string
 }
 
+// sourceReport is what one source gave this scan (prod_error_scans.sources): a failed source makes the scan partial,
+// a cut one is only shown.
+type sourceReport struct {
+	Status         string   `json:"status"` // ok | failed | skipped
+	Error          string   `json:"error,omitempty"`
+	Truncated      bool     `json:"truncated,omitempty"`
+	Rows           int      `json:"rows"`
+	PartialReasons []string `json:"partial_reasons,omitempty"`
+	Slow           string   `json:"slow,omitempty"` // SigNoz latency groups: ok | failed | off
+}
+
+// partial: some source that should have answered did not (or its latency groups did not).
+func partial(reports map[string]*sourceReport) bool {
+	for _, r := range reports {
+		if r.Status == "failed" || r.Slow == "failed" {
+			return true
+		}
+	}
+	return false
+}
+
 func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, prog *progress) (outcome, error) {
 	if sc.Stage == "published" {
 		return sc.store.published(ctx, sc)
@@ -192,21 +214,18 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 	}
 
 	var wg sync.WaitGroup
-	var splunk *struct {
-		Results  []Row    `json:"results"`
-		Messages []string `json:"messages"`
+	type splunkReply struct {
+		Results        []Row    `json:"results"`
+		Messages       []string `json:"messages"`
+		Truncated      bool     `json:"truncated"`
+		PartialReasons []string `json:"partial_reasons"`
 	}
+	var splunk *splunkReply
 	var splunkErr error
-	var signozErrs, signozSlow []Row
-	var signozOK bool
-	var signozNotes []string
-	var signozFatal error
+	var sz signozResult
 	if useSplunk {
 		wg.Go(func() {
-			var r struct {
-				Results  []Row    `json:"results"`
-				Messages []string `json:"messages"`
-			}
+			var r splunkReply
 			splunkErr = policy.Do(ctx, "splunk", func(ctx context.Context) error {
 				return sc.gw.call(ctx, sc, "splunk", splunkProvider, nil, &r)
 			})
@@ -217,7 +236,7 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 	}
 	if useSignoz {
 		wg.Go(func() {
-			signozErrs, signozSlow, signozNotes, signozOK, signozFatal = sc.collectSignoz(ctx, policy, src.SlowThresholdMs)
+			sz = sc.collectSignoz(ctx, policy, src.SlowThresholdMs)
 		})
 	}
 	wg.Wait()
@@ -225,19 +244,19 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 		return outcome{}, err
 	}
 	// A lost lease or a revoked permission ends the scan whatever the other source returned.
-	for _, err := range []error{splunkErr, signozFatal} {
+	for _, err := range []error{splunkErr, sz.fatal} {
 		if permanent(err) {
 			return outcome{}, err
 		}
 	}
-	notes = append(notes, signozNotes...)
+	notes = append(notes, sz.notes...)
 	if splunkErr != nil {
 		if !useSignoz {
 			return outcome{}, splunkErr
 		}
 		notes = append(notes, splunkNotePrefix+splunkErr.Error())
 	}
-	if splunk == nil && !signozOK {
+	if splunk == nil && !sz.ok {
 		if len(notes) > 0 {
 			return outcome{}, errors.New(strings.Join(notes, "; "))
 		}
@@ -249,8 +268,8 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 	if splunk != nil {
 		sources = append(sources, Source{Name: "splunk", Rows: splunk.Results})
 	}
-	if signozOK {
-		sources = append(sources, Source{Name: "signoz", Rows: signozErrs}, Source{Name: "signoz", Rows: signozSlow})
+	if sz.ok {
+		sources = append(sources, Source{Name: "signoz", Rows: sz.errs}, Source{Name: "signoz", Rows: sz.slow})
 	}
 	groups, err := ToGroups(MergeSourceRows(sources...), sc.Request.Day)
 	if err != nil {
@@ -271,7 +290,26 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 		s := strings.Join(warnings, "; ")
 		w = &s
 	}
-	if err := sc.store.publish(ctx, sc, groups, w); err != nil {
+	reports := map[string]*sourceReport{
+		"splunk": {Status: "skipped", Error: skipReason(src.Splunk.Expired, noteSplunkExpired, noteSplunkMissing)},
+		"signoz": {Status: "skipped"},
+	}
+	if useSplunk {
+		reports["splunk"] = &sourceReport{Status: "failed", Error: truncate(errText(splunkErr), 500)}
+		if splunk != nil {
+			reports["splunk"] = &sourceReport{Status: "ok", Rows: len(splunk.Results), Truncated: splunk.Truncated, PartialReasons: splunk.PartialReasons}
+		}
+	} else if src.Splunk.Expired {
+		// A session that ran out is a failure of a source that used to answer: its groups stay on the page as stale.
+		reports["splunk"].Status = "failed"
+	}
+	if useSignoz {
+		reports["signoz"] = &sourceReport{Status: "failed", Error: truncate(strings.Join(sz.notes, "; "), 500)}
+		if sz.ok {
+			reports["signoz"] = &sourceReport{Status: "ok", Rows: len(sz.errs), Truncated: sz.truncated, Slow: sz.slowState}
+		}
+	}
+	if err := sc.store.publish(ctx, sc, groups, w, partial(reports), reports); err != nil {
 		return outcome{}, err
 	}
 	var events int64
@@ -281,26 +319,51 @@ func (sc *Scan) collectAndPublish(ctx context.Context, policy worker.Policy, pro
 	return outcome{groups: int64(len(groups)), events: events, warnings: w}, nil
 }
 
+// signozResult is what collectSignoz found: its rows, why it is partial, and whether SigNoz cut its error groups.
+type signozResult struct {
+	errs, slow []Row
+	notes      []string
+	ok         bool
+	fatal      error
+	truncated  bool
+	slowState  string // ok | failed | off
+}
+
+func skipReason(expired bool, ifExpired, ifMissing string) string {
+	if expired {
+		return ifExpired
+	}
+	return ifMissing
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 // collectSignoz reads error traces, then latency groups, then the slowest groups' trace gaps (bounded fan-out).
 // Like TypeScript, a failed error query drops SigNoz, a failed latency query or gap read only adds a note or an
 // empty gap list.
-func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, threshold int) (errs, slow []Row, notes []string, ok bool, fatal error) {
+func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, threshold int) signozResult {
 	var e struct {
 		Rows        []Row    `json:"rows"`
 		HasBaseline bool     `json:"has_baseline"`
+		Truncated   bool     `json:"truncated"`
 		Notes       []string `json:"notes"`
 	}
 	if err := policy.Do(ctx, "signoz-errors", func(ctx context.Context) error {
 		return sc.gw.call(ctx, sc, "signoz-errors", signozProvider, nil, &e)
 	}); err != nil {
 		if permanent(err) {
-			return nil, nil, nil, false, err
+			return signozResult{fatal: err}
 		}
-		return nil, nil, []string{signozNotePrefix + err.Error()}, false, nil
+		return signozResult{notes: []string{signozNotePrefix + err.Error()}}
 	}
-	notes = append(notes, e.Notes...)
+	notes := slices.Clone(e.Notes)
 	if threshold == 0 {
-		return e.Rows, nil, notes, true, nil
+		return signozResult{errs: e.Rows, notes: notes, ok: true, truncated: e.Truncated, slowState: "off"}
 	}
 	var s struct {
 		Rows []Row `json:"rows"`
@@ -309,9 +372,9 @@ func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, thresho
 		return sc.gw.call(ctx, sc, "signoz-slow", signozProvider, map[string]any{"has_baseline": e.HasBaseline}, &s)
 	}); err != nil {
 		if permanent(err) {
-			return nil, nil, nil, false, err
+			return signozResult{fatal: err}
 		}
-		return e.Rows, nil, append(notes, slowNotePrefix+err.Error()), true, nil
+		return signozResult{errs: e.Rows, notes: append(notes, slowNotePrefix+err.Error()), ok: true, truncated: e.Truncated, slowState: "failed"}
 	}
 	byTodayDesc(s.Rows) // TypeScript sorts the latency rows in place before picking the slowest
 	var top []Row
@@ -339,7 +402,7 @@ func (sc *Scan) collectSignoz(ctx context.Context, policy worker.Policy, thresho
 		})
 	}
 	wg.Wait()
-	return e.Rows, s.Rows, notes, true, nil
+	return signozResult{errs: e.Rows, slow: s.Rows, notes: notes, ok: true, truncated: e.Truncated, slowState: "ok"}
 }
 
 // published resumes a scan whose groups were already written (a crash between publishing and finalizing).

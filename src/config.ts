@@ -815,6 +815,20 @@ export interface Config {
     timeoutSeconds: number;
     /** A request (root span) slower than this is counted in a SigNoz latency group; 0 disables latency groups. */
     slowThresholdMs: number;
+    /** Level fields `severity`/`lvl`/`log.level` and plain text log lines in the Splunk scan (PROD_ERRORS_EXTRA_LEVELS). */
+    extraLevels: boolean;
+    /** Announce a group again when its level rises above the one announced (off: once per day, as before). */
+    notifyOnEscalation: boolean;
+    /** Re-announce a high/critical group still without a work item after this many days; 0 = never. */
+    renotifyDays: number;
+    /** An ignored group comes back after `days`, or earlier when it spikes (rate >= max(wakeMinRate, wakeRatio × rate when ignored) and count >= wakeMinCount). */
+    ignoreTtl: {
+      enabled: boolean;
+      days: number;
+      wakeMinRate: number;
+      wakeRatio: number;
+      wakeMinCount: number;
+    };
   };
 }
 
@@ -1157,6 +1171,10 @@ const defaults: Config = {
     schedule: ["09:00", "14:00", "17:00"],
     timeoutSeconds: 1800,
     slowThresholdMs: 1000,
+    extraLevels: false,
+    notifyOnEscalation: true,
+    renotifyDays: 0,
+    ignoreTtl: { enabled: true, days: 14, wakeMinRate: 20, wakeRatio: 5, wakeMinCount: 50 },
   },
   learning: {
     detectChanges: true,
@@ -1336,6 +1354,17 @@ function load(): Config {
   cfg.lsp.enabled = flag("LSP_ENABLED", cfg.lsp.enabled);
   if (process.env.PROD_SLOW_THRESHOLD_MS)
     cfg.prodErrors.slowThresholdMs = Math.max(0, Number(process.env.PROD_SLOW_THRESHOLD_MS) || 0);
+  cfg.prodErrors.extraLevels = flag("PROD_ERRORS_EXTRA_LEVELS", cfg.prodErrors.extraLevels);
+  cfg.prodErrors.notifyOnEscalation = flag(
+    "PROD_ERRORS_NOTIFY_ON_ESCALATION",
+    cfg.prodErrors.notifyOnEscalation,
+  );
+  cfg.prodErrors.ignoreTtl.enabled = flag(
+    "PROD_ERRORS_IGNORE_TTL",
+    cfg.prodErrors.ignoreTtl.enabled,
+  );
+  if (process.env.PROD_ERRORS_RENOTIFY_DAYS)
+    cfg.prodErrors.renotifyDays = Math.max(0, Number(process.env.PROD_ERRORS_RENOTIFY_DAYS) || 0);
   if (process.env.IGNORE_REPOSITORIES)
     cfg.ignoredRepositories = process.env.IGNORE_REPOSITORIES.split(",")
       .map((x) => x.trim())

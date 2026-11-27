@@ -102,9 +102,11 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
     window_start: Date | null;
     started_at: Date;
     namespaces: string[] | null;
+    partial: boolean;
+    sources: Record<string, { truncated?: boolean } | undefined> | null;
   }>(
     db,
-    "SELECT id, window_start, started_at, namespaces FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1",
+    "SELECT id, window_start, started_at, namespaces, partial, sources FROM prod_error_scans WHERE ok ORDER BY id DESC LIMIT 1",
   );
   if (!latest) return { series: [] as ErrorSeries[], latestScan: null, seriesCoverage: null };
   // How much of the newest scan the cap leaves out (counted, plus a bounded sample of the largest skipped).
@@ -204,6 +206,9 @@ export async function loadErrorSeries(limit = config.radar.maxSeries, db: Db = p
       latest_scan_at: new Date(latest.started_at).toISOString(),
       latest_scan_age_hours: Math.round(ageHours * 10) / 10,
       latest_scan_namespaces: latest.namespaces ?? null,
+      // A source missing or a result cut: a group absent from this scan is not proven to be at zero.
+      latest_scan_partial: !!latest.partial,
+      latest_scan_truncated: Object.values(latest.sources ?? {}).some((s) => !!s?.truncated),
       signatures_in_scan: Number(totals.total),
       signatures_evaluated: series.length,
       signatures_skipped: Math.max(0, Number(totals.total) - series.length),

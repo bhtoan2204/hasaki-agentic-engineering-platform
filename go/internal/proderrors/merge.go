@@ -92,8 +92,6 @@ func hourlyPoints(v any) []any {
 }
 
 var (
-	money = regexp.MustCompile(`(?i)refund|hoàn tiền|charge|capture|settle|reconcil|duplicate|double|callback|webhook|\bipn\b|amount|\bcod\b|checksum|sign(ature)? not match|invalid sign`)
-	crash = regexp.MustCompile(`(?i)\bpanic\b|fatal error|nil pointer|index out of range|deadlock|out of memory|oomkilled`)
 	fatal = regexp.MustCompile(`^(FATAL|PANIC|DPANIC|CRITICAL)$`)
 	point = regexp.MustCompile(`^(\d+):(\d+)$`)
 	sev   = []string{"low", "low", "medium", "high", "critical"}
@@ -108,7 +106,7 @@ func assess(level, signature, sample string, today, yesterday float64, baseline 
 		s = 2
 		reasons = append(reasons, "many|"+numberToString(today))
 	}
-	if fatal.MatchString(level) || crash.MatchString(text) {
+	if fatal.MatchString(level) || isCrash(text) {
 		s = 4
 		reasons = append(reasons, "panic")
 	}
@@ -130,7 +128,7 @@ func assess(level, signature, sample string, today, yesterday float64, baseline 
 	case today*2 <= yesterday:
 		reasons = append(reasons, "down|"+numberToString(yesterday))
 	}
-	if money.MatchString(text) {
+	if isMoney(text) {
 		reasons = append(reasons, "money")
 		if changed && today >= 5 {
 			top := 3
@@ -263,11 +261,7 @@ func MergeSourceRows(sources ...Source) []Row {
 	order := []string{}
 	merged := map[string]Row{}
 	for _, src := range sources {
-		rows := slices.Clone(src.Rows)
-		byTodayDesc(rows)
-		if len(rows) > 300 {
-			rows = rows[:300]
-		}
+		rows, _ := capRows(src.Rows, 300)
 		for _, r := range rows {
 			lv := get(r, "lv")
 			if lv == nil {

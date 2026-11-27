@@ -5,6 +5,8 @@
 import { test as nodeTest, after, before } from "node:test";
 import type { AddressInfo } from "node:net";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createServer, type Server } from "node:http";
 import { pool, q, one } from "../src/db/pool.ts";
 import { migrate } from "../src/db/migrate.ts";
@@ -51,6 +53,7 @@ let splunk: Server;
 let tg: Server;
 let rows: Array<ReturnType<typeof row>> = [];
 let polls = 0;
+let splunkFail = false;
 const searches: URLSearchParams[] = [];
 const telegrams: Array<{ text: string; parse_mode: string }> = [];
 
@@ -107,8 +110,13 @@ before(async () => {
         ],
       });
     }
-    if (req.method === "GET" && url.pathname.endsWith("/search/jobs/job1/results"))
+    if (req.method === "GET" && url.pathname.endsWith("/search/jobs/job1/results")) {
+      if (splunkFail) {
+        res.writeHead(403, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ messages: [{ type: "FATAL", text: "forbidden" }] }));
+      }
       return json({ results: rows });
+    }
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
@@ -518,33 +526,9 @@ test("runScan with options: only the chosen project, the chosen window; the page
   );
 });
 
-test("runScan: scans SigNoz error traces when Splunk is not connected and marks the groups' source", async () => {
-  const { saveSignoz, disconnectSignoz } = await import("../src/integrations/signoz.ts");
-  const nowMs = Date.now();
+/** A fake SigNoz that answers every query of a scan with the given [labels, hourly counts] groups. */
+async function startSignozFake(groups: Array<[string[], number[]]>, nowMs: number) {
   const hour = nowMs - (nowMs % 3_600_000);
-  // [deployment.environment, service.name, name, status_message, response_status_code] and today's hourly counts.
-  const groups: Array<[string[], number[]]> = [
-    [
-      [
-        "payment-prod",
-        "payment-vnpay",
-        "POST /ipn",
-        "ipn order 100230056 rejected: invalid sign",
-        "500",
-      ],
-      [1],
-    ],
-    [
-      [
-        "payment-prod",
-        "payment-vnpay",
-        "POST /ipn",
-        "ipn order 100230057 rejected: invalid sign",
-        "500",
-      ],
-      [1],
-    ],
-  ];
   const queries: Array<{
     requestType?: string;
     start: number;
@@ -613,6 +597,36 @@ test("runScan: scans SigNoz error traces when Splunk is not connected and marks 
     });
   });
   await new Promise<void>((r) => sz.listen(0, "127.0.0.1", r));
+  return { sz, queries };
+}
+
+test("runScan: scans SigNoz error traces when Splunk is not connected and marks the groups' source", async () => {
+  const { saveSignoz, disconnectSignoz } = await import("../src/integrations/signoz.ts");
+  const nowMs = Date.now();
+  // [deployment.environment, service.name, name, status_message, response_status_code] and today's hourly counts.
+  const groups: Array<[string[], number[]]> = [
+    [
+      [
+        "payment-prod",
+        "payment-vnpay",
+        "POST /ipn",
+        "ipn order 100230056 rejected: invalid sign",
+        "500",
+      ],
+      [1],
+    ],
+    [
+      [
+        "payment-prod",
+        "payment-vnpay",
+        "POST /ipn",
+        "ipn order 100230057 rejected: invalid sign",
+        "500",
+      ],
+      [1],
+    ],
+  ];
+  const { sz, queries } = await startSignozFake(groups, nowMs);
   const hosts = config.signoz.allowedInternalHosts;
   config.signoz.allowedInternalHosts = ["127.0.0.1"];
   try {
@@ -669,4 +683,227 @@ test("runScan: scans SigNoz error traces when Splunk is not connected and marks 
     config.signoz.allowedInternalHosts = hosts;
     sz.close();
   }
+});
+
+// ---------------------------------------------------------------- Phase 1 hardening (docs/prod-errors-hardening)
+
+const sourcesOfLastScan = () =>
+  one(pool, "SELECT ok, partial, sources FROM prod_error_scans ORDER BY id DESC LIMIT 1");
+
+test("T3/T4: a search cut at the cap keeps the crash group and records truncated", async () => {
+  await setSplunkCookie(COOKIE);
+  const many = Array.from({ length: 300 }, (_, i) =>
+    row({ svc: "cap-svc", sig: `cap sig ${i}`, today: String(1000 - i), yesterday: "1000" }),
+  );
+  rows = [
+    ...many,
+    row({
+      svc: "cap-svc",
+      sig: "cap rare panic",
+      today: "1",
+      yesterday: "0",
+      sample: "panic: boom",
+      is_crash: "1",
+    }),
+  ];
+  const r = await runScan("manual");
+  assert.deepEqual(r, { ok: true, groups: 300 });
+  assert.match(
+    searches.at(-1)!.get("search")!,
+    /head 301$/,
+    "one row more than the cap tells a cut",
+  );
+  const rare = (await listGroups()).groups.find((g: GroupRow) => g.signature === "cap rare panic");
+  assert.equal(rare?.severity, "critical", "the crash group is not cut for 300 bigger ones");
+  const s = await sourcesOfLastScan();
+  assert.equal(s.sources.splunk.truncated, true);
+  assert.equal(s.partial, false, "a cut is shown, it does not make the scan partial");
+});
+
+test("T5/T6: a failing source keeps its groups on the page as stale and does not announce them", async () => {
+  const { saveSignoz, disconnectSignoz } = await import("../src/integrations/signoz.ts");
+  await setSplunkCookie(COOKIE);
+  rows = [
+    row({
+      svc: "part-svc",
+      sig: "part sig",
+      today: "900",
+      yesterday: "900",
+      sample: "panic: stale",
+    }),
+  ];
+  await runScan("manual");
+  assert.equal((await sourcesOfLastScan()).partial, false);
+
+  splunkFail = true;
+  const nowMs = Date.now();
+  const { sz } = await startSignozFake(
+    [[["payment-prod", "part-signoz", "GET /x", "boom", "500"], [3]]],
+    nowMs,
+  );
+  const hosts = config.signoz.allowedInternalHosts;
+  config.signoz.allowedInternalHosts = ["127.0.0.1"];
+  try {
+    await saveSignoz({
+      baseUrl: `http://127.0.0.1:${(sz.address() as { port: number }).port}`,
+      token: "sz-scan-key-0123456789",
+      enabled: true,
+    });
+    const before = telegrams.length;
+    const r = await runScan("schedule", new Date(nowMs), { preset: "1h" });
+    assert.equal(r.ok, true);
+    const s = await sourcesOfLastScan();
+    assert.equal(s.ok, true);
+    assert.equal(s.partial, true);
+    assert.equal(s.sources.splunk.status, "failed");
+    assert.match(s.sources.splunk.error, /403|quyền/);
+    assert.equal(s.sources.signoz.status, "ok");
+
+    const list = await listGroups();
+    const stale = list.groups.find((g: GroupRow) => g.service === "part-svc");
+    assert.ok(stale, "the Splunk group from the last complete scan is still listed");
+    assert.equal((stale as unknown as { stale_source: string }).stale_source, "splunk");
+    assert.ok(list.groups.some((g: GroupRow) => g.service === "part-signoz"));
+    assert.equal((list as unknown as { partial: boolean }).partial, true);
+    assert.ok(
+      telegrams.slice(before).every((m) => !m.text.includes("part-svc")),
+      "a stale group is not announced as new",
+    );
+  } finally {
+    splunkFail = false;
+    await disconnectSignoz();
+    config.signoz.allowedInternalHosts = hosts;
+    sz.close();
+  }
+  await runScan("manual");
+  const after = await listGroups();
+  assert.ok(
+    after.groups.every((g: GroupRow) => !(g as unknown as { stale_source?: string }).stale_source),
+  );
+});
+
+test("T10: a critical group is announced once, not every day; a rise in level is announced again", async () => {
+  await setSplunkCookie(COOKIE);
+  const day = (n: number) => new Date(Date.now() - n * 86_400_000);
+  const ours = (from: number) => telegrams.slice(from).filter((m) => m.text.includes("notify-svc"));
+  const high = row({
+    svc: "notify-svc",
+    sig: "notify sig",
+    today: "60",
+    yesterday: "0",
+    sample: "plain failure",
+  });
+  rows = [high];
+  const before = telegrams.length;
+  await runScan("schedule", day(3));
+  await runScan("schedule", day(2));
+  await runScan("schedule", day(1));
+  assert.equal(ours(before).length, 1, "the same level on three days is one announcement");
+  rows = [{ ...high, sample: "panic: boom" }];
+  await runScan("schedule", day(0));
+  const rise = ours(before);
+  assert.equal(rise.length, 2, "a higher level is announced again");
+  assert.match(rise[1].text, /CRITICAL/);
+  assert.match(rise[1].text, /tăng bậc/);
+});
+
+test("T11: the migration backfills notified_severity, so deploying it does not announce everything again", async () => {
+  const sql = readFileSync(
+    resolve(import.meta.dirname, "../migrations/114_prod_errors_hardening.sql"),
+    "utf8",
+  );
+  const backfill = /UPDATE prod_error_groups[\s\S]*?;/.exec(sql);
+  assert.ok(backfill, "the migration backfills the announced level");
+  const ins = (fp: string, notified: string | null) =>
+    q(
+      pool,
+      `INSERT INTO prod_error_groups (fingerprint, namespace, service, level, signature, day, severity, notified_day)
+       VALUES ($1, 'oms-prod', 'backfill-svc', 'ERROR', $1, '2026-11-01', 'high', $2) ON CONFLICT (fingerprint) DO NOTHING`,
+      [fp, notified],
+    );
+  await q(pool, "DELETE FROM prod_error_groups WHERE service = 'backfill-svc'");
+  await ins("b0b0b0b0b0b0b0b0b0b1", "2026-11-01");
+  await ins("b0b0b0b0b0b0b0b0b0b2", null);
+  await q(pool, backfill[0]);
+  const rowsAfter = await q<{ fingerprint: string; notified_severity: string | null }>(
+    pool,
+    "SELECT fingerprint, notified_severity FROM prod_error_groups WHERE service = 'backfill-svc' ORDER BY fingerprint",
+  );
+  assert.deepEqual(
+    rowsAfter.map((r) => r.notified_severity),
+    ["high", null],
+  );
+  await q(pool, "DELETE FROM prod_error_groups WHERE service = 'backfill-svc'");
+});
+
+test("T12: ignore has a TTL, a spike or the end of the TTL reopens the group and re-arms its announcement", async () => {
+  await setSplunkCookie(COOKIE);
+  const find = async () =>
+    (await listGroups({ all: true })).groups.find((g: GroupRow) => g.service === "ign-svc")!;
+  const state = (fp: string) =>
+    one(
+      pool,
+      "SELECT status, ignored_until, ignored_rate, notified_severity FROM prod_error_groups WHERE fingerprint = $1",
+      [fp],
+    );
+  const events = (fp: string) =>
+    one(pool, "SELECT count(*)::int AS n FROM prod_error_lifecycle_events WHERE fingerprint = $1", [
+      fp,
+    ]);
+  const base = row({
+    svc: "ign-svc",
+    sig: "ign sig",
+    today: "60",
+    yesterday: "0",
+    sample: "plain failure",
+  });
+  rows = [base];
+  await runScan("manual");
+  const fp = (await find()).fingerprint;
+  await setIgnored(fp, true);
+  let st = await state(fp);
+  assert.equal(st.status, "ignored");
+  const days = (new Date(st.ignored_until).getTime() - Date.now()) / 86_400_000;
+  assert.ok(days > 13.9 && days <= 14.01, `default TTL is 14 days (${days})`);
+
+  await runScan("manual");
+  assert.equal((await state(fp)).status, "ignored", "the same volume does not wake it");
+
+  // a spike well above the wake threshold reopens it and re-arms the announcement
+  await q(
+    pool,
+    "UPDATE prod_error_groups SET ignored_rate = 1, notified_severity = 'high' WHERE fingerprint = $1",
+    [fp],
+  );
+  rows = [{ ...base, today: "2000" }];
+  const before = telegrams.length;
+  await runScan("schedule");
+  st = await state(fp);
+  assert.equal(st.status, "open");
+  assert.equal(st.ignored_until, null);
+  assert.ok(
+    telegrams.slice(before).some((m) => m.text.includes("ign-svc")),
+    "notified_severity was reset, so a high group is announced again",
+  );
+
+  // the end of the TTL reopens it as well, and clears what was announced
+  await setIgnored(fp, true);
+  await q(
+    pool,
+    "UPDATE prod_error_groups SET ignored_until = now() - interval '1 minute', notified_severity = 'critical' WHERE fingerprint = $1",
+    [fp],
+  );
+  rows = [base];
+  await runScan("manual");
+  st = await state(fp);
+  assert.equal(st.status, "open");
+  assert.equal(st.notified_severity, null);
+
+  assert.equal((await events(fp)).n, 0, "no lifecycle reopen: Radar reads those as recurrence");
+  const audited = await one(
+    pool,
+    "SELECT count(*)::int AS n FROM audit_log WHERE action = 'prod_errors.group.auto_reopen' AND resource_id = $1",
+    [fp],
+  );
+  assert.ok(audited.n >= 2);
 });

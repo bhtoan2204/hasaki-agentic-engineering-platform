@@ -287,7 +287,15 @@ export const observabilityRoutes: Route[] = [
   [
     "POST",
     /^\/api\/prod-errors\/([0-9a-f]{20})\/ignore$/,
-    ({ p, body, actor }) => (requireAdmin(actor), setIgnored(p[0], body.ignored !== false)),
+    ({ p, body, actor }) => (
+      requireAdmin(actor),
+      setIgnored(p[0], body.ignored !== false, {
+        days:
+          Number.isFinite(Number(body.days)) && Number(body.days) > 0
+            ? Number(body.days)
+            : undefined,
+      })
+    ),
   ],
   [
     "POST",

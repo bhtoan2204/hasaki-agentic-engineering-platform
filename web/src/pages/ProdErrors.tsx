@@ -57,6 +57,9 @@ interface Group {
     pod?: string;
     sources?: Array<"splunk" | "signoz">;
   };
+  /** Set when a partial scan lacks this group's source: the group is from the last complete scan. */
+  stale_source?: "splunk" | "signoz" | "signoz_slow" | null;
+  ignored_until?: string | null;
   today_count: number;
   yesterday_count: number;
   first_at: string | null;
@@ -89,6 +92,10 @@ interface Data {
   lastScan: ScanRun | null;
   lastOk: ScanRun | null;
   ignored: number;
+  /** The newest scan lacks a source, and which scan's groups stand in for it. */
+  partial?: boolean;
+  sources?: Record<string, { status?: string; truncated?: boolean; slow?: string } | undefined>;
+  stale?: { scan_id: number; finished_at: string; sources: string[] } | null;
   settings: { schedule: string[]; notify: boolean };
   splunk: { connected: boolean; expired: boolean };
   signoz?: { connected: boolean };
@@ -602,8 +609,16 @@ function GroupRow({
               {g.run_status ? ` · ${runName(g.run_status)}` : ""}
             </span>
           ) : g.status === "ignored" ? (
-            <span className="muted">{t("pe.ignored")}</span>
+            <span className="muted">
+              {t("pe.ignored")}
+              {g.ignored_until ? ` · ${t("pe.ignoredUntil", { date: dmy(g.ignored_until) })}` : ""}
+            </span>
           ) : null}
+          {g.stale_source && (
+            <span className="pill" title={t("pe.staleSource", { source: g.stale_source })}>
+              {t("pe.staleSource", { source: g.stale_source })}
+            </span>
+          )}
           <HuntBadge
             status={huntStatus}
             confirmed={huntId == null || huntId === hunt?.id ? hunt?.confirmed : undefined}
@@ -956,6 +971,31 @@ export function ProdErrorsPage({
               startedAt={last?.started_at}
               typicalSeconds={secs(lastOk?.started_at, lastOk?.finished_at)}
             />
+          )}
+          {data.partial && (
+            <div className="pe-status small pe-warn" role="status">
+              {data.stale
+                ? t("pe.partialScan", {
+                    sources: data.stale.sources.join(", "),
+                    ago: ago(data.stale.finished_at),
+                  })
+                : t("pe.partialScanNoCarry", {
+                    sources: Object.entries(data.sources ?? {})
+                      .filter(([, s]) => s?.status === "failed" || s?.slow === "failed")
+                      .map(([name]) => name)
+                      .join(", "),
+                  })}
+            </div>
+          )}
+          {Object.entries(data.sources ?? {}).some(([, s]) => s?.truncated) && (
+            <div className="pe-status small muted" role="status">
+              {t("pe.cutScan", {
+                sources: Object.entries(data.sources ?? {})
+                  .filter(([, s]) => s?.truncated)
+                  .map(([name]) => name)
+                  .join(", "),
+              })}
+            </div>
           )}
           <div className="pe-status small">
             {!data.splunk.connected && !data.signoz?.connected ? (

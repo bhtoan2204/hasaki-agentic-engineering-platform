@@ -13,6 +13,7 @@ import {
   type SpanErrorGroup,
 } from "../integrations/signoz.ts";
 import { redactPii } from "../integrations/redact.ts";
+import { crashSpl, isCrash, isMoney } from "./classify.ts";
 import { ensureTestOwner } from "../auth/testOwner.ts";
 import { workItems } from "../workitems/service.ts";
 import { startRun } from "../workflow/engine.ts";
@@ -66,6 +67,9 @@ export interface GroupRow {
   status: "open" | "ignored";
   work_item_id: number | null;
   notified_day: string | null;
+  /** The level last announced (a rise announces it again); null = never announced or re-armed. */
+  notified_severity?: Severity | null;
+  ignored_until?: string | null;
   first_seen_at: string;
 }
 
@@ -97,13 +101,29 @@ import { log } from "../logging.ts";
 // ---------------------------------------------------------------- search
 
 const LEVELS = ["ERROR", "FATAL", "PANIC", "DPANIC", "CRITICAL"];
+/** Groups kept per source: the most frequent ones, crash groups first. */
+export const SOURCE_CAP = 300;
+
+/** The plain text level rule (Phase 1 extra levels): a line that starts, after a timestamp, with a level word. */
+const TEXT_LEVEL = /^[0-9TZ:.,+\-/[\] ]{0,40}(?<tl>ERROR|FATAL|PANIC|CRITICAL)\b/i;
+const splString = (re: RegExp) => re.source.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+const FATAL_LEVELS = ["FATAL", "PANIC", "DPANIC", "CRITICAL"];
 
 /**
  * Both log shapes seen in k8s_prod: payment services log JSON at the top level (level/message/caller), OMS services'
  * JSON sits inside the container `log` string (spath input=log). Plain lines (gorm SQL, librdkafka) only count when they
- * are a Go panic / fatal error.
+ * are a Go panic / fatal error. With `extraLevels`, the level may also come from `severity`, `lvl` or `log.level`, and
+ * a plain text line counts when it starts with a level word after its timestamp.
+ *
+ * The groups come back crash first (`is_crash`), then by count, and the search asks for one row more than the cap so a
+ * cut can be told: a rare panic is never pushed out by 300 noisier groups.
  */
-export function buildScanSpl(w: ScanWindow, namespaces = config.prodErrors.namespaces) {
+export function buildScanSpl(
+  w: ScanWindow,
+  namespaces = config.prodErrors.namespaces,
+  opts: { extraLevels?: boolean } = {},
+) {
+  const extra = opts.extraLevels ?? config.prodErrors.extraLevels;
   const byIndex = new Map<string, string[]>();
   for (const n of namespaces) {
     const index = indexOf(n.namespace);
@@ -113,28 +133,33 @@ export function buildScanSpl(w: ScanWindow, namespaces = config.prodErrors.names
     .map(([index, ns]) => `(index=${index} kubernetes.namespace_name IN (${ns.join(",")}))`)
     .join(" OR ");
   const inWindow = `(_time>=${w.start} AND _time<=${w.end})`;
+  const level = extra ? "coalesce(level,LEVEL,severity,lvl,'log.level')" : "coalesce(level,LEVEL)";
   return [
     `search ${byIndex.size > 1 ? `(${scope})` : scope} (${LEVELS.join(" OR ")} OR "panic:" OR "fatal error")`,
     `where ${inWindow} OR (_time>=${w.baseStart} AND _time<=${w.baseEnd})`,
     `spath input=log`,
-    `eval lv=upper(coalesce(level,LEVEL)), msg=coalesce(message,MESSAGE,msg,log,_raw), err=coalesce(error,err), ns='kubernetes.namespace_name', svc='kubernetes.container_name'`,
+    `eval lv=upper(${level}), msg=coalesce(message,MESSAGE,msg,log,_raw), err=coalesce(error,err), ns='kubernetes.namespace_name', svc='kubernetes.container_name'`,
+    ...(extra
+      ? [
+          `rex field=msg "(?i)${splString(TEXT_LEVEL)}"`,
+          `eval lv=if(isnull(lv) AND isnotnull(tl), upper(tl), lv)`,
+        ]
+      : []),
     `where lv IN (${LEVELS.map((l) => `"${l}"`).join(",")}) OR (isnull(lv) AND match(msg,"^(panic:|fatal error:)"))`,
     `eval day=if(${inWindow},"t","y")`,
     String.raw`eval sig=substr(msg . if(isnull(err), "", " :: " . err), 1, 400), sig=replace(sig,"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}","<uuid>"), sig=replace(sig,"\\b[0-9a-fA-F]{16,}\\b","<hex>"), sig=replace(sig,"\\b[A-Za-z0-9_-]*[0-9][A-Za-z0-9_-]*\\b","<n>"), sig=replace(sig,"\\s+"," "), sig=substr(sig,1,200)`,
+    `eval txt=msg . " " . coalesce(err,"")`,
+    `eval crash=${crashSpl(FATAL_LEVELS.map((l) => `"${l}"`).join(","))}`,
     `eval analytics_hour=floor(_time/3600)*3600`,
     `eventstats count AS analytics_hour_count by ns svc lv sig day analytics_hour`,
     `eval analytics_hour_point=if(day="t", tostring(analytics_hour).":".tostring(analytics_hour_count), null())`,
-    `stats values(analytics_hour_point) as analytics_hourly count(eval(day="t")) as today count(eval(day="y")) as yesterday min(eval(if(day="t",_time,null()))) as first max(_time) as last latest(msg) as sample latest(err) as err latest(caller) as caller latest(kubernetes.container_image) as image latest(request_id) as request_id latest(stacktrace) as stack latest(kubernetes.pod_name) as pod by ns svc lv sig`,
+    `stats values(analytics_hour_point) as analytics_hourly count(eval(day="t")) as today count(eval(day="y")) as yesterday min(eval(if(day="t",_time,null()))) as first max(_time) as last latest(msg) as sample latest(err) as err latest(caller) as caller latest(kubernetes.container_image) as image latest(request_id) as request_id latest(stacktrace) as stack latest(kubernetes.pod_name) as pod max(crash) as is_crash by ns svc lv sig`,
     `where today>0`,
-    `sort - today`,
-    `head 300`,
+    `eval rank=is_crash*1000000000+today`,
+    `sort - rank`,
+    `head ${SOURCE_CAP + 1}`,
   ].join(" | ");
 }
-
-const MONEY =
-  /refund|hoàn tiền|charge|capture|settle|reconcil|duplicate|double|callback|webhook|\bipn\b|amount|\bcod\b|checksum|sign(ature)? not match|invalid sign/i;
-const CRASH =
-  /\bpanic\b|fatal error|nil pointer|index out of range|deadlock|out of memory|oomkilled/i;
 
 /** Severity of one group from its level, text and today-vs-yesterday counts. */
 export function assess(g: {
@@ -150,7 +175,7 @@ export function assess(g: {
   const text = `${g.signature}\n${g.sample}`;
   let s = g.today >= 1000 ? 2 : 1;
   if (g.today >= 1000) reasons.push(`many|${g.today}`);
-  if (/^(FATAL|PANIC|DPANIC|CRITICAL)$/.test(g.level) || CRASH.test(text)) {
+  if (/^(FATAL|PANIC|DPANIC|CRITICAL)$/.test(g.level) || isCrash(text)) {
     s = 4;
     reasons.push("panic");
   }
@@ -166,7 +191,7 @@ export function assess(g: {
     s = Math.max(s, 3);
     changed = true;
   } else if (g.today * 2 <= g.yesterday) reasons.push(`down|${g.yesterday}`);
-  if (MONEY.test(text)) {
+  if (isMoney(text)) {
     reasons.push("money");
     // new/spiking money-related errors go up one level; critical only with real volume
     if (changed && g.today >= 5) s = Math.max(s, Math.min(g.today >= 50 ? 4 : 3, s + 1));
@@ -300,6 +325,34 @@ export interface SourceRow {
   analytics_hourly?: string | string[];
   sources?: ScanSource[];
   slow?: SlowDetail;
+  /** 1 when any event of the group is a crash (Splunk computes it before the cap). */
+  is_crash?: string | number;
+}
+
+/** A row that must survive the per-source cap: marked by the search, a fatal level or a crash text. */
+export function rowIsCrash(r: Pick<SourceRow, "lv" | "sig" | "sample" | "is_crash">) {
+  return (
+    Number(r.is_crash) > 0 ||
+    FATAL_LEVELS.includes(String(r.lv ?? "").toUpperCase()) ||
+    isCrash(`${r.sig}\n${r.sample ?? ""}`)
+  );
+}
+
+/** The per-source cap: crash groups first, then by today; `truncated` says something was cut. */
+export function capSourceRows(rows: SourceRow[], limit = SOURCE_CAP) {
+  const ranked = [...rows].sort(
+    (a, b) => Number(rowIsCrash(b)) - Number(rowIsCrash(a)) || num(b.today) - num(a.today),
+  );
+  return { rows: ranked.slice(0, limit), truncated: rows.length > limit };
+}
+
+/** What a Splunk search says about being cut short (auto-finalized at its time limit, results incomplete). */
+export function partialReasons(messages: unknown) {
+  return (Array.isArray(messages) ? messages.map(String) : []).filter(
+    (m) =>
+      !/^(INFO|DEBUG)\b/i.test(m) &&
+      /finaliz|time ?limit|max_time|truncat|incomplete|partial|exceed/i.test(m),
+  );
 }
 
 /**
@@ -371,10 +424,8 @@ export function signozRows(
       break;
     }
   }
-  return [...groups.values()]
-    .filter((g) => g.today > 0)
-    .sort((a, b) => b.today - a.today)
-    .slice(0, 300)
+  return capSourceRows([...groups.values()].filter((g) => g.today > 0) as unknown as SourceRow[])
+    .rows.map((g) => g as unknown as SourceRow & { hourly: Map<number, number> })
     .map(({ hourly, ...g }): SourceRow => ({
       ...g,
       analytics_hourly: [...hourly].sort(([a], [b]) => a - b).map(([hour, n]) => `${hour}:${n}`),
@@ -449,7 +500,7 @@ export function mergeSourceRows(...sources: Array<{ source: ScanSource; rows: So
   >();
   // Each source keeps its own 300 largest groups: a busy log source must not push every trace group out.
   for (const { source, rows } of sources)
-    for (const r of [...rows].sort((a, b) => num(b.today) - num(a.today)).slice(0, 300)) {
+    for (const r of capSourceRows(rows).rows) {
       const key = [r.ns, r.svc, String(r.lv ?? "").toUpperCase() || "ERROR", r.sig].join("\u0000");
       const prev = merged.get(key);
       const hourly = (h: unknown) => (Array.isArray(h) ? h : h ? [h] : []).map(String);
@@ -594,8 +645,9 @@ export async function finalizeScan(
   trigger: ScanTrigger,
   w: Pick<ScanWindow, "day" | "hm">,
 ) {
-  void scanId;
-  const notified = trigger === "schedule" ? await notifyNew(w.day, w.hm) : 0;
+  // An ignored group that spiked or whose ignore ran out is open again before the announcement is chosen.
+  await reopenIgnored(scanId).catch((e) => log.error("reopen ignored:", (e as Error).message));
+  const notified = trigger === "schedule" ? await notifyNew(w.day, w.hm, scanId) : 0;
   // Policy-controlled intake (no-op without a policy): one envelope per group, never per log row.
   await ingestProdErrorGroups().catch((e) => log.error("intake:", (e as Error).message));
   return notified;
@@ -632,6 +684,9 @@ export function buildAlertMessage(rows: GroupRow[], hm: string) {
       `${SEV_ICON[g.severity]} <b>${g.severity.toUpperCase()}</b> · <b>${esc(g.service)}</b>`,
       `<code>${esc(g.signature.length > 160 ? g.signature.slice(0, 157) + "…" : g.signature)}</code>`,
       `▸ ${count(g.today_count)} lần hôm nay · ${trendText(g)}`,
+      ...(g.notified_severity && g.notified_severity !== g.severity
+        ? [`▸ ⬆️ tăng bậc (${g.notified_severity} → ${g.severity})`]
+        : []),
       ...(g.caller ? [`▸ tại <code>${esc(g.caller)}</code>`] : []),
       ...(why.length ? [`▸ <i>${esc(why.join(", "))}</i>`] : []),
     ].join("\n");
@@ -675,23 +730,44 @@ export function buildFailureMessage(hm: string, msg: string) {
   return { text, replyMarkup: footer.reply_markup };
 }
 
-/** Telegram: open critical/high groups not announced yet today. Returns how many were announced. */
-async function notifyNew(day: string, hm: string) {
+const RANK_SQL = (col: string) =>
+  `CASE ${col} WHEN 'critical' THEN 3 WHEN 'high' THEN 2 WHEN 'medium' THEN 1 ELSE 0 END`;
+
+/**
+ * Telegram: open critical/high groups this scan wrote that were never announced, or whose level rose above the one
+ * announced (a chronic group is not announced again every day; `renotifyDays` can ask for a reminder). Groups a
+ * partial scan only carried over from an earlier scan are not announced. Returns how many were announced.
+ */
+async function notifyNew(day: string, hm: string, scanId: number) {
   if (!(await getSettings()).notify) return 0;
-  const rows = await q<GroupRow>(
-    pool,
-    `SELECT * FROM prod_error_groups WHERE day = $1 AND status = 'open' AND severity IN ('critical', 'high') AND work_item_id IS NULL
-       AND notified_day IS DISTINCT FROM day ORDER BY score DESC`,
-    [day],
-  );
+  const legacy = !config.prodErrors.notifyOnEscalation;
+  const rows = legacy
+    ? await q<GroupRow>(
+        pool,
+        `SELECT * FROM prod_error_groups WHERE day = $1 AND status = 'open' AND severity IN ('critical', 'high') AND work_item_id IS NULL
+           AND notified_day IS DISTINCT FROM day ORDER BY score DESC`,
+        [day],
+      )
+    : await q<GroupRow>(
+        pool,
+        `SELECT * FROM prod_error_groups
+          WHERE day = $1 AND status = 'open' AND severity IN ('critical', 'high') AND work_item_id IS NULL AND last_scan_id = $2
+            AND (notified_severity IS NULL OR ${RANK_SQL("severity")} > ${RANK_SQL("notified_severity")}
+                 OR ($3::int > 0 AND notified_at < now() - make_interval(days => $3::int)))
+          ORDER BY score DESC`,
+        [day, scanId, Math.max(0, Math.floor(config.prodErrors.renotifyDays))],
+      );
   if (!rows.length) return 0;
   const m = buildAlertMessage(rows, hm);
   const res = await sendTelegramHtml(m.text, m.replyMarkup);
   const ok = "ok" in res && res.ok;
   if (ok)
-    await q(pool, "UPDATE prod_error_groups SET notified_day = day WHERE fingerprint = ANY($1)", [
-      rows.map((r) => r.fingerprint),
-    ]);
+    await q(
+      pool,
+      `UPDATE prod_error_groups SET notified_day = day, notified_severity = severity, notified_at = now()
+        WHERE fingerprint = ANY($1)`,
+      [rows.map((r) => r.fingerprint)],
+    );
   return ok ? rows.length : 0;
 }
 
@@ -801,14 +877,42 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
   // Show the groups of the latest successful scan (it may cover some projects and any time window). Scans from before
   // scan options existed have no window: those fall back to "the latest day", as before.
   const byScan = !wanted && lastOk?.window_start ? Number(lastOk.id) : null;
-  const filter = byScan ? "g.last_scan_id = $1" : "g.day = $1";
   const key = byScan ?? day;
+  // A partial scan lacks a source: that source's groups of the last complete scan stay listed, marked stale.
+  const failed = (lastOk?.sources ?? {}) as Record<
+    string,
+    { status?: string; slow?: string } | undefined
+  >;
+  const gaps = {
+    splunk: failed.splunk?.status === "failed",
+    signoz: failed.signoz?.status === "failed",
+    slow: failed.signoz?.slow === "failed",
+  };
+  const carryFrom =
+    byScan && lastOk?.partial && (gaps.splunk || gaps.signoz || gaps.slow)
+      ? await one<{ id: number; finished_at: string }>(
+          pool,
+          "SELECT id, finished_at FROM prod_error_scans WHERE ok AND NOT partial AND id < $1 ORDER BY id DESC LIMIT 1",
+          [byScan],
+        )
+      : undefined;
+  const carry = carryFrom
+    ? `(g.last_scan_id = ${Number(carryFrom.id)} AND (
+         (${gaps.splunk} AND g.detail->'sources' ? 'splunk')
+         OR (${gaps.signoz} AND g.detail->'sources' ? 'signoz' AND g.level <> 'SLOW')
+         OR (${gaps.slow} AND g.level = 'SLOW')))`
+    : "false";
+  const filter = byScan ? `(g.last_scan_id = $1 OR ${carry})` : "g.day = $1";
+  const staleSource = carryFrom
+    ? `CASE WHEN g.last_scan_id = $1 THEN NULL WHEN g.level = 'SLOW' THEN 'signoz_slow'
+            WHEN ${gaps.splunk} AND g.detail->'sources' ? 'splunk' THEN 'splunk' ELSE 'signoz' END`
+    : "NULL::text";
   const groupsQuery = q(
     pool,
     // The stack trace is over half of the list payload and is read only when a card's trace is opened (the incident
     // detail route returns it): the list carries `has_stack` instead.
     `SELECT (jsonb_populate_record(g, jsonb_build_object('detail', (g.detail - 'stack') || jsonb_build_object('has_stack', g.detail ? 'stack')))).*,
-            g.day::text AS day, w.owner_id AS work_item_owner_id, w.code AS work_item_code, w.title AS work_item_title, w.status AS work_item_status,
+            g.day::text AS day, ${staleSource} AS stale_source, w.owner_id AS work_item_owner_id, w.code AS work_item_code, w.title AS work_item_title, w.status AS work_item_status,
             r.id AS run_id, r.status AS run_status,
             (SELECT coalesce(json_agg(json_build_object('repo', p.repo, 'url', p.url, 'title', p.title) ORDER BY p.id), '[]')
                FROM pull_requests p WHERE p.work_item_id = g.work_item_id) AS pull_requests
@@ -842,6 +946,18 @@ export async function listGroups(opts: { day?: string; all?: boolean } = {}) {
     namespaces: config.prodErrors.namespaces.map((n) => ({ ...n, index: indexOf(n.namespace) })),
     /** The scan whose results are listed (window, baseline, projects), for the page header and column labels. */
     shown: byScan ? lastOk : null,
+    /** The newest scan is missing a source (or got a cut one): which, and the scan whose groups stand in for it. */
+    partial: !!lastOk?.partial,
+    sources: lastOk?.sources ?? {},
+    stale: carryFrom
+      ? {
+          scan_id: Number(carryFrom.id),
+          finished_at: carryFrom.finished_at,
+          sources: Object.entries(gaps)
+            .filter(([, failed]) => failed)
+            .map(([name]) => name),
+        }
+      : null,
     presets: SCAN_PRESETS,
     maxCustomHours: MAX_CUSTOM_HOURS,
     groups,
@@ -916,14 +1032,73 @@ async function getGroup(fp: string) {
   return g;
 }
 
-export async function setIgnored(fp: string, ignored: boolean) {
+/**
+ * Ignore a group for `days` (default: config.prodErrors.ignoreTtl.days), or open it again. The ignore remembers the
+ * rate (events per hour) the group had, so a later spike can be told from the same noise (reopenIgnored).
+ */
+export async function setIgnored(fp: string, ignored: boolean, opts: { days?: number } = {}) {
   await getGroup(fp);
-  await q(
+  const ttl = config.prodErrors.ignoreTtl;
+  if (!ignored) {
+    await q(
+      pool,
+      `UPDATE prod_error_groups SET status = 'open', ignored_until = NULL, ignored_at = NULL, ignored_rate = NULL,
+         updated_at = now() WHERE fingerprint = $1`,
+      [fp],
+    );
+    return { fingerprint: fp, status: "open" };
+  }
+  const days = Math.min(90, Math.max(1, Math.floor(opts.days ?? ttl.days)));
+  const row = await one<{ ignored_until: string | null }>(
     pool,
-    "UPDATE prod_error_groups SET status = $2, updated_at = now() WHERE fingerprint = $1",
-    [fp, ignored ? "ignored" : "open"],
+    `UPDATE prod_error_groups SET status = 'ignored', ignored_at = now(), updated_at = now(),
+       ignored_until = CASE WHEN $3 THEN now() + make_interval(days => $2::int) END,
+       ignored_rate = (SELECT o.event_count / GREATEST(EXTRACT(EPOCH FROM (s.window_end - s.window_start)) / 3600, 1)
+                         FROM prod_error_observations o JOIN prod_error_scans s ON s.id = o.scan_id
+                        WHERE o.fingerprint = $1 ORDER BY o.scan_id DESC LIMIT 1)
+     WHERE fingerprint = $1 RETURNING ignored_until`,
+    [fp, days, ttl.enabled],
   );
-  return { fingerprint: fp, status: ignored ? "ignored" : "open" };
+  return { fingerprint: fp, status: "ignored", ignored_until: row?.ignored_until ?? null };
+}
+
+/**
+ * After a scan: an ignored group comes back when its ignore ran out, or when this scan saw it spike (at least
+ * `wakeMinCount` events and a rate of `max(wakeMinRate, wakeRatio × the rate it had when ignored)`). Its announced level
+ * is reset so a group that is high or critical again is announced again. Audited, and deliberately not a lifecycle
+ * "reopen": Radar reads those as a recurring incident.
+ */
+export async function reopenIgnored(scanId: number) {
+  const ttl = config.prodErrors.ignoreTtl;
+  if (!ttl.enabled) return [];
+  const reopened = await q<{ fingerprint: string; why: string; today_count: number }>(
+    pool,
+    `WITH s AS (
+       SELECT GREATEST(EXTRACT(EPOCH FROM (window_end - window_start)) / 3600, 1) AS hours
+         FROM prod_error_scans WHERE id = $1),
+     due AS (
+       SELECT g.fingerprint, g.today_count,
+              CASE WHEN g.ignored_until IS NOT NULL AND g.ignored_until < now() THEN 'ttl' ELSE 'spike' END AS why
+         FROM prod_error_groups g, s
+        WHERE g.status = 'ignored' AND (
+              (g.ignored_until IS NOT NULL AND g.ignored_until < now())
+           OR (g.last_scan_id = $1 AND g.today_count >= $4
+               AND g.today_count / s.hours >= GREATEST($2::numeric, $3::numeric * COALESCE(g.ignored_rate, 0))))
+     )
+     UPDATE prod_error_groups g SET status = 'open', ignored_until = NULL, ignored_at = NULL, ignored_rate = NULL,
+            notified_severity = NULL, notified_at = NULL, notified_day = NULL, updated_at = now()
+       FROM due WHERE g.fingerprint = due.fingerprint
+     RETURNING g.fingerprint, due.why, due.today_count`,
+    [scanId, ttl.wakeMinRate, ttl.wakeRatio, ttl.wakeMinCount],
+  );
+  for (const r of reopened)
+    await q(
+      pool,
+      `INSERT INTO audit_log (actor_id, action, resource_type, resource_id, detail)
+       VALUES (NULL, 'prod_errors.group.auto_reopen', 'prod_error_group', $1, $2)`,
+      [r.fingerprint, JSON.stringify({ why: r.why, scan_id: scanId, today_count: r.today_count })],
+    );
+  return reopened;
 }
 
 /**
