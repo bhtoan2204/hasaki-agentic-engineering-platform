@@ -671,7 +671,11 @@ test("C1 RCA: a runtime RCA started with the hunt's evidence neither reads nor p
 
     // Control: with log access and no evidence of the other workflow, the RCA is shared (looked up and claimed).
     events.length = 0;
-    await putUserSecret(owner.id, "splunk_token", JSON.stringify({ token: "t", user: owner.username }));
+    await putUserSecret(
+      owner.id,
+      "splunk_token",
+      JSON.stringify({ token: "t", user: owner.username }),
+    );
     try {
       const plain = await startRuntimeShared(caseFingerprint("correct-code-suspected"), owner, {});
       assert.ok("run_id" in plain && plain.run_id, "runs as before");

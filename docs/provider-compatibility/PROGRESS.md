@@ -18,11 +18,11 @@
   - Tạo [`src/agent/providerProbes.ts`](file:///home/toan/hasaki-orbit/src/agent/providerProbes.ts) (`discoverProviderAdapter`, `probePreflightCapability`, `probeHandoffReadiness`) làm adapter probe registry thống nhất cho [`src/agent/providerStatus.ts`](file:///home/toan/hasaki-orbit/src/agent/providerStatus.ts), [`src/agent/handoff.ts`](file:///home/toan/hasaki-orbit/src/agent/handoff.ts) và [`src/agent/harness/stages/preflight.ts`](file:///home/toan/hasaki-orbit/src/agent/harness/stages/preflight.ts).
   - Thay các kiểm tra/label provider hardcode bằng `providerCapabilities()` tại [`configuration.ts`](file:///home/toan/hasaki-orbit/src/agent/configuration.ts), [`stepAgent.ts`](file:///home/toan/hasaki-orbit/src/agent/stepAgent.ts), [`complete.ts`](file:///home/toan/hasaki-orbit/src/agent/complete.ts), [`chat/runtime.ts`](file:///home/toan/hasaki-orbit/src/chat/runtime.ts), [`budget.ts`](file:///home/toan/hasaki-orbit/src/agent/harness/stages/budget.ts), [`context.ts`](file:///home/toan/hasaki-orbit/src/agent/harness/stages/context.ts), [`execute.ts`](file:///home/toan/hasaki-orbit/src/agent/harness/stages/execute.ts), [`output.ts`](file:///home/toan/hasaki-orbit/src/agent/harness/stages/output.ts), [`preflight.ts`](file:///home/toan/hasaki-orbit/src/agent/harness/stages/preflight.ts), [`workflow/engine/handoff.ts`](file:///home/toan/hasaki-orbit/src/workflow/engine/handoff.ts), [`eval/optimization.ts`](file:///home/toan/hasaki-orbit/src/eval/optimization.ts), [`workflow/profiles.ts`](file:///home/toan/hasaki-orbit/src/workflow/profiles.ts), [`workflow/recovery.ts`](file:///home/toan/hasaki-orbit/src/workflow/recovery.ts).
   - Cập nhật [`eslint.config.mjs`](file:///home/toan/hasaki-orbit/eslint.config.mjs) chuẩn hóa danh sách launcher/probe/bridge/hook theo `src/agent/providers/*/` và bổ sung unit test tại [`test/harness-guarantees.test.ts`](file:///home/toan/hasaki-orbit/test/harness-guarantees.test.ts).
-- [ ] **Bước 5 — Vá Security & Policy** *(Phase 2)*
-- [ ] **Bước 6 — Đồng bộ Reliability, Bridge timeout, Validation & External Skills** *(Phase 2)*
-- [ ] **Bước 7 — Telemetry & Chat Completion parity** *(Phase 3)*
-- [ ] **Bước 8 — Dọn Claude-isms (`metrics`, `report`, `builtin.ts` PR footer, `testFailure`, `web/` UI)** *(Phase 3)*
-- [ ] **Bước 9 — Kiểm thử toàn diện cuối** *(Phase 3)*
+- [ ] **Bước 5 — Vá Security & Policy** _(Phase 2)_
+- [ ] **Bước 6 — Đồng bộ Reliability, Bridge timeout, Validation & External Skills** _(Phase 2)_
+- [ ] **Bước 7 — Telemetry & Chat Completion parity** _(Phase 3)_
+- [ ] **Bước 8 — Dọn Claude-isms (`metrics`, `report`, `builtin.ts` PR footer, `testFailure`, `web/` UI)** _(Phase 3)_
+- [ ] **Bước 9 — Kiểm thử toàn diện cuối** _(Phase 3)_
 
 ## Kết quả kiểm thử kết thúc Phase 1
 

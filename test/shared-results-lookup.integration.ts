@@ -17,7 +17,10 @@ import { installationId } from "../src/sharing/scope.ts";
 import { sharedBugHunt, sharedCodeAssessment, sharedRuntimeRca } from "../src/sharing/flows.ts";
 import { repositories } from "../src/repos/service.ts";
 import { setRepositoryAccess } from "../src/repos/access.ts";
-import { loadAgentConfiguration, saveProviderConfiguration } from "../src/agent/configurationStore.ts";
+import {
+  loadAgentConfiguration,
+  saveProviderConfiguration,
+} from "../src/agent/configurationStore.ts";
 
 let alice = 0;
 let bob = 0;
@@ -536,7 +539,11 @@ test("N1: sharedCodeAssessment separates keys by outputLocale and project", asyn
 
 test("N2: profile (STANDARD vs DEEP) resolves without LLM, picks profile model config, separates keys, and avoids double classification in startRun", async () => {
   const admin = (
-    await createUser({ username: "share-n2-admin", password: "share-n2-admin-password", role: "admin" })
+    await createUser({
+      username: "share-n2-admin",
+      password: "share-n2-admin-password",
+      role: "admin",
+    })
   ).id;
   const r1 = `n2-repo-${++seq}`;
   const r2 = `n2-repo-${++seq}`;
@@ -561,10 +568,17 @@ test("N2: profile (STANDARD vs DEEP) resolves without LLM, picks profile model c
       repositories: [r1],
       title: `Codebase assessment ${r1} — refactor auth`,
     });
-    const ctxMulti = await analysisContext(pool, "codebase-assessment", "claude", undefined, alice, {
-      repositories: [r1, r2],
-      title: `Codebase assessment ${r1}`,
-    });
+    const ctxMulti = await analysisContext(
+      pool,
+      "codebase-assessment",
+      "claude",
+      undefined,
+      alice,
+      {
+        repositories: [r1, r2],
+        title: `Codebase assessment ${r1}`,
+      },
+    );
     assert.equal(ctxStd.profile, "STANDARD");
     assert.equal(ctxDeep.profile, "DEEP");
     assert.equal(ctxMulti.profile, "DEEP");
@@ -665,8 +679,12 @@ test("N2: profile (STANDARD vs DEEP) resolves without LLM, picks profile model c
       provider: "claude",
       start: async (tx) =>
         Number(
-          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-rca-s" }, tx))
-            .id,
+          (
+            await startRun(
+              { definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-rca-s" },
+              tx,
+            )
+          ).id,
         ),
     });
     const rcaDeep = await sharedRuntimeRca({
@@ -677,8 +695,12 @@ test("N2: profile (STANDARD vs DEEP) resolves without LLM, picks profile model c
       provider: "claude",
       start: async (tx) =>
         Number(
-          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-rca-d" }, tx))
-            .id,
+          (
+            await startRun(
+              { definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-rca-d" },
+              tx,
+            )
+          ).id,
         ),
     });
     assert.equal(rcaStd?.outcome, "miss");
@@ -693,8 +715,12 @@ test("N2: profile (STANDARD vs DEEP) resolves without LLM, picks profile model c
       commits: { [r1]: "a".repeat(40) },
       start: async (tx) =>
         Number(
-          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-h1" }, tx))
-            .id,
+          (
+            await startRun(
+              { definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-h1" },
+              tx,
+            )
+          ).id,
         ),
     });
     const huntTwo = await sharedBugHunt({
@@ -705,8 +731,12 @@ test("N2: profile (STANDARD vs DEEP) resolves without LLM, picks profile model c
       commits: { [r1]: "a".repeat(40), [r2]: "a".repeat(40) },
       start: async (tx) =>
         Number(
-          (await startRun({ definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-h2" }, tx))
-            .id,
+          (
+            await startRun(
+              { definitionKey: "shared-fixture", ownerId: alice, start: false, title: "n2-h2" },
+              tx,
+            )
+          ).id,
         ),
     });
     assert.equal(huntOne?.outcome, "miss");

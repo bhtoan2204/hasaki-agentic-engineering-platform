@@ -342,7 +342,8 @@ test("N1: GET /api/code-scans/shared isolates assessments by project and output_
     { shared: null },
   );
   assert.deepEqual(
-    (await bob(`/api/code-scans/shared?repositories=${name}&project=Payment&output_locale=en`)).body,
+    (await bob(`/api/code-scans/shared?repositories=${name}&project=Payment&output_locale=en`))
+      .body,
     { shared: null },
   );
   const hit = await bob<{ shared: { analysis_id: number } }>(
@@ -362,8 +363,8 @@ test("N2: GET /api/code-scans/shared matches profile by multi-repo, title, or ex
   const deepMultiId = await publish(assessKey([r1, r2], "", { profile: "DEEP" }), "api-alice");
 
   assert.equal(
-    (await bob<{ shared: { analysis_id: number } }>(`/api/code-scans/shared?repositories=${r1}`)).body
-      .shared.analysis_id,
+    (await bob<{ shared: { analysis_id: number } }>(`/api/code-scans/shared?repositories=${r1}`))
+      .body.shared.analysis_id,
     stdId,
   );
   assert.equal(
@@ -375,8 +376,11 @@ test("N2: GET /api/code-scans/shared matches profile by multi-repo, title, or ex
     deepSingleId,
   );
   assert.equal(
-    (await bob<{ shared: { analysis_id: number } }>(`/api/code-scans/shared?repositories=${r1},${r2}`))
-      .body.shared.analysis_id,
+    (
+      await bob<{ shared: { analysis_id: number } }>(
+        `/api/code-scans/shared?repositories=${r1},${r2}`,
+      )
+    ).body.shared.analysis_id,
     deepMultiId,
   );
   assert.equal(

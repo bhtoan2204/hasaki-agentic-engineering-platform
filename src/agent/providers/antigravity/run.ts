@@ -22,11 +22,7 @@ import { isModelBlocked } from "../../modelPolicy.ts";
 import { dispatchPlatformTool, envFromExecution } from "../../platformTools.ts";
 import { superviseSpawn, supervisionNote, type Supervised } from "../../process/supervisor.ts";
 import type { PolicyContext, ToolMode } from "../../toolPolicy.ts";
-import {
-  buildAntigravityArgs,
-  MAX_RESPONSE_CHARS,
-  writeAntigravityPrompt,
-} from "./args.ts";
+import { buildAntigravityArgs, MAX_RESPONSE_CHARS, writeAntigravityPrompt } from "./args.ts";
 import { antigravityCapabilities, antigravityEnv } from "./capabilities.ts";
 import {
   antigravityHeadlessSettings,

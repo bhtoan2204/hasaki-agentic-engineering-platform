@@ -24,9 +24,7 @@ async function hasLogAccess(userId: number): Promise<boolean> {
   if (hasPersonalSplunkSecret(ciphertexts)) return true;
   if (isSignozConfigUsable(decryptSecretIfPresent(ciphertexts.get(SIGNOZ_SECRET_KIND))))
     return true;
-  return (
-    config.splunk.allowSharedToken && !!(await getSharedSecret(SPLUNK_SHARED_SECRET_KIND))
-  );
+  return config.splunk.allowSharedToken && !!(await getSharedSecret(SPLUNK_SHARED_SECRET_KIND));
 }
 
 /**

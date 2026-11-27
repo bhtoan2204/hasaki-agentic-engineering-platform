@@ -538,7 +538,10 @@ test("N1, N3, N5: backfill uses outputLocale/project, scrubs focus, and clears t
   assert.ok(view, "read API matches the backfilled scrubbed focus, project and locale");
 
   // N5: a newer run created after a completed pass is picked up on the next run without --restart.
-  const later = await assessmentRun(await repoFor(alice), { project: "Payment", outputLocale: "vi" });
+  const later = await assessmentRun(await repoFor(alice), {
+    project: "Payment",
+    outputLocale: "vi",
+  });
   const next = await backfillSharedResults({ apply: true });
   assert.equal(next.done, true);
   assert.equal(next.inserted, 1, "N5: picked up the newer run without restart");

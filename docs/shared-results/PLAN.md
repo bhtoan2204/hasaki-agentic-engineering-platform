@@ -92,13 +92,13 @@ request ──▶ key = sharedKey(kind, inputs)  (pure)
   owner-only. The source run, owner and inputs are recorded as provenance; the payload a reuser sees is the scrubbed
   report: RCA report, bug-hunt report and findings, assessment findings.
 - **Reuse for Code Assessment** ~~ingests the shared findings into the reuser's own `code_findings` (a sighting that
-  points at the shared result), so each user keeps their own status lifecycle.~~ *(Deferred — N4)*: in Phase 1, a hit returns
+  points at the shared result), so each user keeps their own status lifecycle.~~ _(Deferred — N4)_: in Phase 1, a hit returns
   the scrubbed shared view (`reused: "shared"`) and renders it on the Code Assessment card without mutating the reuser's
   per-user `code_findings` / `code_finding_sightings` tables. Auto-ingestion with shared provenance & per-user triage
   lifecycle requires schema/status rules (avoiding polluting personal triage queues or bypassing owner scoping) and is
   explicitly deferred to Phase 2.
 - **Reuse for Production Errors** ~~links the shared result into the reuser's `incident_investigations` workspace as a
-  "shared" source. Their workbench shows it next to their own runs, and `createFix` stays per user.~~ *(Deferred — N4)*:
+  "shared" source. Their workbench shows it next to their own runs, and `createFix` stays per user.~~ _(Deferred — N4)_:
   in Phase 1, a shared runtime RCA or shared bug hunt returns the scrubbed shared view (`shared`) on the Production Errors
   workbench without inserting cross-owner rows into `incident_investigations` (`incident_investigation_sources`) or
   feeding reconciled RCA / `createFix`. Allowing a shared analysis to drive reconciled conclusions and code fixes

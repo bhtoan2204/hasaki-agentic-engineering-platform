@@ -2,11 +2,7 @@ import { antigravityConfig } from "../../../config.ts";
 import { redactSecrets } from "../../../integrations/redact.ts";
 import { activityLabel, type CompletionStreamListener } from "../../completionStream.ts";
 import { superviseSpawn } from "../../process/supervisor.ts";
-import {
-  buildAntigravityArgs,
-  MAX_RESPONSE_CHARS,
-  writeAntigravityPrompt,
-} from "./args.ts";
+import { buildAntigravityArgs, MAX_RESPONSE_CHARS, writeAntigravityPrompt } from "./args.ts";
 import { antigravityCapabilities, antigravityEnv } from "./capabilities.ts";
 import { AntigravityStream } from "./stream.ts";
 

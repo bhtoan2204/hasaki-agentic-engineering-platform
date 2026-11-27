@@ -34,7 +34,12 @@ import {
   type CursorEvent,
 } from "./stream.ts";
 
-export { cursorBinary, cursorCapabilities, cursorEnv, type CursorCapability } from "./capabilities.ts";
+export {
+  cursorBinary,
+  cursorCapabilities,
+  cursorEnv,
+  type CursorCapability,
+} from "./capabilities.ts";
 export { cursorComplete } from "./complete.ts";
 
 const scrubEnv = cursorEnv;

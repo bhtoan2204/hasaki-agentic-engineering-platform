@@ -273,7 +273,11 @@ test("C4 (decision #2): code assessment and bug hunt subjects also include the m
   await publish(assessCodex);
   await publish(assessKey(name, { model: "claude/claude-opus-5-5#cfg:bbbb" }));
   await settleBackground();
-  assert.equal((await rowsOf(assessCodex))[0].status, "valid", "assessment: another provider stays valid");
+  assert.equal(
+    (await rowsOf(assessCodex))[0].status,
+    "valid",
+    "assessment: another provider stays valid",
+  );
   await publish(assessKey(name, { model: "codex/gpt-5#cfg:cccc" }));
   await settleBackground();
   const [assessRow] = await rowsOf(assessCodex);
@@ -323,7 +327,11 @@ test("C4 (decision #2): code assessment and bug hunt subjects also include the m
   await complete(runIdOf(h2));
   await settleSharedAnalyses();
   await settleBackground();
-  assert.equal((await rowsOf(huntCodex))[0].status, "valid", "bug hunt: another provider stays valid");
+  assert.equal(
+    (await rowsOf(huntCodex))[0].status,
+    "valid",
+    "bug hunt: another provider stays valid",
+  );
   const h3 = await lookupOrStart(huntReq(huntKey("codex/gpt-5#cfg:cccc")));
   await complete(runIdOf(h3));
   await settleSharedAnalyses();

@@ -161,7 +161,14 @@ async function publish(key: SharedKey, actor: number, output?: unknown, huntRepo
               );
               await tx.client.query(
                 "INSERT INTO bug_hunts (fingerprint, run_id, requested_by, repositories, scope_key, report) VALUES ($1, $2, $3, $4, $5, $6)",
-                [key.parts.error, runId, actor, [huntRepo], huntRepo, JSON.stringify({ confirmed: [] })],
+                [
+                  key.parts.error,
+                  runId,
+                  actor,
+                  [huntRepo],
+                  huntRepo,
+                  JSON.stringify({ confirmed: [] }),
+                ],
               );
               return runId;
             },
@@ -532,11 +539,11 @@ test("N6: a report with a secret assignment keeps its prose (span redaction); an
     report: "-----BEGIN PRIVATE KEY-----\nMIIEowIBAAKCAQEA7\n-----END PRIVATE KEY-----",
   });
   await settleSharedAnalyses();
-  const rejectedDefault = await one<{ status: string; result: unknown; failure: { reason: string } }>(
-    pool,
-    "SELECT status, result, failure FROM shared_analyses WHERE id = $1",
-    [r2.analysis!.id],
-  );
+  const rejectedDefault = await one<{
+    status: string;
+    result: unknown;
+    failure: { reason: string };
+  }>(pool, "SELECT status, result, failure FROM shared_analyses WHERE id = $1", [r2.analysis!.id]);
   assert.deepEqual(
     [rejectedDefault!.status, rejectedDefault!.result, rejectedDefault!.failure.reason],
     ["failed", null, "scrub failed"],
@@ -684,7 +691,18 @@ test("N9: hit path with default canRead measures real statement counts across al
       start: flowStart,
     });
     assert.equal(bhMiss?.outcome, "miss");
-    await q(pool, "INSERT INTO bug_hunts (fingerprint, run_id, requested_by, repositories, scope_key, report) VALUES ($1, $2, $3, $4, $5, $6)", [errFp, bhMiss!.outcome === "miss" ? bhMiss!.runId : 0, alice, [name], name, JSON.stringify({ confirmed: [] })]);
+    await q(
+      pool,
+      "INSERT INTO bug_hunts (fingerprint, run_id, requested_by, repositories, scope_key, report) VALUES ($1, $2, $3, $4, $5, $6)",
+      [
+        errFp,
+        bhMiss!.outcome === "miss" ? bhMiss!.runId : 0,
+        alice,
+        [name],
+        name,
+        JSON.stringify({ confirmed: [] }),
+      ],
+    );
     await complete(bhMiss!.outcome === "miss" ? bhMiss!.runId : 0);
     const rcaMiss = await sharedRuntimeRca({
       actor: { id: alice },

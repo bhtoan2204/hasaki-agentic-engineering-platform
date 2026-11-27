@@ -520,7 +520,7 @@ async function stdioCall(bridge: "codex" | "cursor", env: ReturnType<typeof envF
     });
   const child = spawn(
     process.execPath,
-    ["--disable-warning=ExperimentalWarning", `src/agent/${bridge}/bridge.ts`],
+    ["--disable-warning=ExperimentalWarning", `src/agent/providers/${bridge}/bridge.ts`],
     {
       env: {
         PATH: process.env.PATH,

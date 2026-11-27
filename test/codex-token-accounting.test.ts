@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { codexMetricUsage, parseCodexLine, type CodexUsage } from "../src/agent/providers/codex/stream.ts";
+import {
+  codexMetricUsage,
+  parseCodexLine,
+  type CodexUsage,
+} from "../src/agent/providers/codex/stream.ts";
 import { addUsage, newMetrics } from "../src/agent/metrics.ts";
 
 const usage = (over: Partial<CodexUsage>): CodexUsage => ({

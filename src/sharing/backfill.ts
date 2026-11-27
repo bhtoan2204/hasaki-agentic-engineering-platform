@@ -176,7 +176,9 @@ export async function backfillSharedResults(opts: BackfillOptions = {}): Promise
         run.agent_provider,
         {
           version: run.definition_version,
-          configuration: refreshEnvironmentDefaults(parseAgentConfiguration(run.agent_configuration)),
+          configuration: refreshEnvironmentDefaults(
+            parseAgentConfiguration(run.agent_configuration),
+          ),
           startedAt: new Date(run.started_at!),
         },
         undefined,

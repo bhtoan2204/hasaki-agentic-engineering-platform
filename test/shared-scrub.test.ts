@@ -168,7 +168,10 @@ test("N6: span-level redaction preserves surrounding report prose on looksSecret
   const out = scrubText(report);
   assert.notEqual(out, REDACTED, "must not replace the entire report with [redacted]");
   assert.ok(out.includes("## Findings"), "keeps surrounding prose");
-  assert.ok(out.includes("Reference path: `secretB64 = payment_client.ecom_global.secret`"), "keeps config path");
+  assert.ok(
+    out.includes("Reference path: `secretB64 = payment_client.ecom_global.secret`"),
+    "keeps config path",
+  );
   assert.ok(!out.includes(awsVal));
   assert.ok(!out.includes(dbVal));
   assert.equal(scrubText(out), out, "span redaction is idempotent");
