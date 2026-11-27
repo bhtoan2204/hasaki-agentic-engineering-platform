@@ -140,12 +140,7 @@ The test advances the real scheduler step by step while the page polls, so every
 
 ### Screenshots (`docs/validation/production-bug-hunter-ui/`)
 
-- [Collapsed incidents](production-bug-hunter-ui/1-collapsed.png)
-- [Expanded, before a hunt](production-bug-hunter-ui/2-expanded-before.png)
-- [Active hunt (verifying)](production-bug-hunter-ui/3-active.png)
-- [Completed with findings](production-bug-hunter-ui/4-completed.png)
-- [Failed hunt](production-bug-hunter-ui/5-failed.png)
-- [Mobile, Vietnamese](production-bug-hunter-ui/6-mobile-vi.png)
+Screenshots (`1-collapsed.png` through `6-mobile-vi.png`) are generated locally under `docs/validation/production-bug-hunter-ui/` when running `npm run smoke:bug-hunter`.
 
 ## Limitations
 

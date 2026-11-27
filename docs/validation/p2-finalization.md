@@ -15,7 +15,7 @@ Validated on main based on `20cd7ba`, 2026-11-07 Asia/Bangkok. All changes remai
 | Real executor integration | Tested with deterministic Codex process fixture through the actual executor. Plausible no-change output fails independent validation. **Live models NOT VERIFIED; live execution BLOCKED.** |
 | Baseline/candidate and regression gates | Implemented/tested: persisted compatible configurations, paired repetitions, critical gates, insufficient-data verdicts and cost/latency warnings. |
 | P1 OFF/ON evaluation | Implemented/tested: actual ranking, context retrieval, changed-worktree freshness and direct-search fallback. No global flag mutations across concurrent runs. |
-| Dashboard | Implemented/browser verified: persisted local runs #5/#6, paired PASS plus latency warning, private case evidence and artifact/workflow links. [Screenshot](p2-dashboard.png). Zero browser errors. |
+| Dashboard | Implemented/browser verified: persisted local runs #5/#6, paired PASS plus latency warning, private case evidence and artifact/workflow links. Zero browser errors. |
 | Cost/provider usage | Unknown metrics remain null; fixture provider cost is zero. No live usage, token savings or provider cost accuracy claim. |
 | Production readiness | NOT VERIFIED: production migration/configuration, portable runtime adapter and live spending controls remain outstanding. |
 

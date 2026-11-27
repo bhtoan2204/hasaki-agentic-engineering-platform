@@ -447,7 +447,7 @@ EVAL_REPORT=/tmp/p2-report.json npm run bench -- --suite=backend-v1 --repetition
 
 The CLI accepts only local PostgreSQL, creates or reuses `platform_bench` without dropping its results, and keeps synthetic Git repositories under `${TMPDIR:-/tmp}/hasaki-p2-benchmark`. It uses the existing local container runtime/image, never pulls an image, and blocks if network, resource and lifetime isolation cannot be verified. The current adapter requires Linux/Nix and Podman-compatible `docker --timeout`; see the [P2 architecture and operating limits](docs/architecture/p2-evaluation.md). Human answers in this CLI are explicitly scripted fixture controls; use `--answer-fixtures=false` to pause for manual handling. Live model execution is blocked until a connector can enforce isolation and hard spending limits.
 
-See the [P2 validation report](docs/validation/p2-finalization.md), [measured paired results](docs/validation/p2-benchmark.json), and [dashboard evidence](docs/validation/p2-dashboard.png). Fixture scores do not establish live-agent quality or token savings.
+See the [P2 validation report](docs/validation/p2-finalization.md) and [measured paired results](docs/validation/p2-benchmark.json). Fixture scores do not establish live-agent quality or token savings.
 
 ## URL-based repository registry
 

@@ -107,7 +107,7 @@ TEST_DATABASE_ADMIN_URL=postgres://platform@127.0.0.1:55433/platform \
 
 `test/step-agent.test.ts` covers precedence, model isolation, three-provider DAGs, parallel readers/exclusive writers, retries, recovery/provider switches, cancellation, pinned timeouts, immutable historical attribution, tool restrictions, owner/admin RBAC, and FAST boundary preservation. The Codex adapter test uses the real CLI protocol with the repository's deterministic fake binary, hooks and MCP broker; it makes no live model call. Existing regression tests exercise provider adapters and Phase 3 context bridges.
 
-Screenshots and browser results are in [screenshots](screenshots/smoke-results.txt). They use synthetic data and the actual application, with saved Studio configuration and a pending override in English/Vietnamese. Live paid provider execution is not part of the automated smoke.
+Screenshots and browser results are generated locally under `screenshots/` when running `npm run smoke:orchestration`. They use synthetic data and the actual application, with saved Studio configuration and a pending override in English/Vietnamese. Live paid provider execution is not part of the automated smoke.
 
 ### Recorded validation (2026-11-08)
 

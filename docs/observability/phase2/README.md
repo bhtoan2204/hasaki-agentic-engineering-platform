@@ -80,10 +80,4 @@ MTTA and MTTR measure initial platform detection (`first_seen_at`) to the record
 
 Apply migration 030 through the existing migration runner before serving the new routes. Historical migrations and Phase 1 storage are unchanged. The owner/created-at index supports the common owner+date cohort predicate; existing owner/id indexes cannot constrain that time range. Fingerprint/scan and fingerprint/event indexes support the observation and lifecycle lookups; no broad transcript indexes were added. No live provider calls, production scan, deployment, push, or remote repository mutation is required for validation.
 
-See [validation results](validation.md) and [browser smoke evidence](screenshots/smoke-results.txt). Screenshots show deterministic, isolated test fixtures, not production data:
-
-- [Production Health, English desktop](screenshots/health-en-desktop.png)
-- [AI Usage & Cost, English desktop](screenshots/usage-en-desktop.png)
-- [Agent Performance, English desktop](screenshots/performance-en-desktop.png)
-- [Workflow Insights, English desktop](screenshots/workflows-en-desktop.png)
-- [AI Usage & Cost, Vietnamese mobile](screenshots/usage-vi-mobile.png)
+See [validation results](validation.md). Screenshots and `smoke-results.txt` are generated locally under `screenshots/` using deterministic, isolated test fixtures (not production data).

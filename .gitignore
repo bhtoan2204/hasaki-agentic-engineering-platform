@@ -14,3 +14,12 @@ req94-*.log
 go/bin/
 *.prof
 *.pprof
+
+# Browser smoke / validation screenshots and generated result logs.
+docs/validation/ui-quality/
+docs/**/screenshots/
+docs/validation/**/*.png
+**/smoke-results.txt
+**/validation-results.txt
+**/browser-results.txt
+**/measurements.json

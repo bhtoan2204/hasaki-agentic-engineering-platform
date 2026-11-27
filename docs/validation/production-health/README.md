@@ -35,17 +35,7 @@ The partial index `prod_error_scans_window_end_ok` was added in migration 037. I
 
 ## Browser evidence
 
-- [Dashboard overview (English)](./01-dashboard-overview-en.png)
-- [Errors by service](./02-errors-by-service-en.png)
-- [Service details](./03-service-details-en.png)
-- [Incident drilldown](./04-incident-drilldown-en.png)
-- [Vietnamese dashboard](./05-dashboard-overview-vi.png)
-- [English dashboard](./06-dashboard-overview-en.png)
-- [Narrow viewport dashboard](./07-dashboard-overview-mobile.png)
-- [Dark theme dashboard](./08-dashboard-overview-dark.png)
-- [Smoke test results](./smoke-results.txt)
-
-Browser checks covered existing Insights tabs, service and incident navigation, 390 px width, dark/light themes, URL filters across tabs, missing-cost presentation, empty results, and recovery from a simulated 503. The smoke browser used the installed Nix Chromium wrapper.
+Browser checks covered existing Insights tabs, service and incident navigation, 390 px width, dark/light themes, URL filters across tabs, missing-cost presentation, empty results, and recovery from a simulated 503. The smoke browser used the installed Nix Chromium wrapper. (Screenshots and `smoke-results.txt` were generated locally during validation and are not committed to git.)
 
 ## Known data limits
 

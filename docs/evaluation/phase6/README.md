@@ -77,11 +77,7 @@ Default reads and all writes are owner-scoped. Team analytics and cross-owner sn
 
 Validation uses deterministic fake adapters and isolated PostgreSQL/Docker fixtures, without paid provider calls. The new integration tests cover all six plans, repeated runs, A/B/C controls, inventory drift, frozen cohorts, unknown cost/tokens, attribution, policy provenance/precedence, readiness, objective verification denominators, timezone boundaries, RBAC/audited support scope, pagination and conservative evidence thresholds. Existing failover/orchestration/telemetry tests remain part of full regression.
 
-Browser smoke exercises the actual HTTP application and VI/EN UI: fixture labels and unknown cost, insufficient-evidence snapshots, server pagination, Vietnamese three-provider configuration and no uncaught page errors.
-
-- [English screenshot](screenshots/agent-evaluation-en.png)
-- [Vietnamese screenshot](screenshots/agent-evaluation-vi.png)
-- [Browser smoke results](screenshots/smoke-results.txt)
+Browser smoke exercises the actual HTTP application and VI/EN UI: fixture labels and unknown cost, insufficient-evidence snapshots, server pagination, Vietnamese three-provider configuration and no uncaught page errors. (Screenshots and `smoke-results.txt` are generated locally under `screenshots/` via `npm run smoke:provider-evaluation`.)
 
 Typecheck and production build pass. Final regression results are recorded below after completion. Migration has been exercised in isolated test databases; no production migration or deployment was performed.
 

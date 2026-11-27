@@ -127,6 +127,4 @@ Apply migrations and upgrade assigned workers before enabling Phase 5 workflows.
 - Browser smoke: passed actual HTTP/login/CSRF, quota pause, readiness display, disabled-until-acknowledged confirmation, a Codex continuation in the same run, and English/Vietnamese handoff history. No uncaught page errors.
 - `git diff --check`: passed.
 
-All database checks used isolated local PostgreSQL. Readiness and execution adapters in the browser/handoff tests were deterministic fixtures. No live paid provider execution, production migration, or deployment was performed.
-
-[Browser smoke results](screenshots/smoke-results.txt) · [English preview](screenshots/handoff-preview-en.png) · [Resume confirmation](screenshots/handoff-confirmation-en.png) · [Vietnamese history](screenshots/handoff-history-vi.png)
+All database checks used isolated local PostgreSQL. Readiness and execution adapters in the browser/handoff tests were deterministic fixtures. No live paid provider execution, production migration, or deployment was performed. (Browser smoke screenshots and `smoke-results.txt` are generated locally via `npm run smoke:handoff`.)

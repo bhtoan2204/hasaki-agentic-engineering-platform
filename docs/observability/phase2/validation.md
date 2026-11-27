@@ -38,14 +38,7 @@ Migration 030 was applied by the normal migration runner in isolated test databa
 5. A deliberately simulated HTTP 503 displays the error state, followed by successful recovery.
 6. No browser JavaScript page errors occur.
 
-The screenshots are synthetic fixture evidence, not production data. Filters are collapsed in screenshots to show dashboard content; the smoke test exercises the expanded filter form before capturing them.
-
-- [Production Health](screenshots/health-en-desktop.png)
-- [AI Usage & Cost](screenshots/usage-en-desktop.png)
-- [Agent Performance](screenshots/performance-en-desktop.png)
-- [Workflow Insights](screenshots/workflows-en-desktop.png)
-- [Vietnamese mobile usage](screenshots/usage-vi-mobile.png)
-- [Smoke results](screenshots/smoke-results.txt)
+The screenshots are synthetic fixture evidence, not production data. Filters are collapsed in screenshots to show dashboard content; the smoke test exercises the expanded filter form before capturing them. (Screenshots and `smoke-results.txt` are generated locally under `screenshots/` when running the smoke test.)
 
 To reproduce using a local PostgreSQL admin endpoint and installed Chromium:
 

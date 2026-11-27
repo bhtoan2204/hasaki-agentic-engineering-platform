@@ -55,7 +55,7 @@ No backend, SQL, database migration, endpoint, cache, or authorization implement
 - Targeted analytics/navigation tests: 19/19 passed after migration.
 - Expanded targeted analytics/navigation/production errors/localization tests: 38/38 passed.
 - `npm test`: 496 passed, zero failed/skipped; approximately 350 seconds.
-- `npm run smoke:analytics` with installed Chromium: see [browser results](smoke-results.txt).
+- `npm run smoke:analytics` with installed Chromium (browser results and screenshots are generated locally and not committed to git).
 - `git diff --check`: passed.
 
 Deterministic API comparison ran latest main from an isolated detached worktree and the refactored workspace against separate seeded PostgreSQL databases. Scan timestamps were fixed, and only `generated_at` was excluded. Five response scenarios were compared: all services, service detail, high severity, alternate timezone, and missing service. Complete normalized responses were byte-for-byte identical (50,030 bytes):
@@ -75,18 +75,7 @@ CHROMIUM_BIN=/nix/store/fqriy9vihl23l4md56qgiks8z0d2xdlw-chromium-156.0.8078.79/
 
 ## Screenshots
 
-| View | English | Vietnamese | Mobile |
-| --- | --- | --- | --- |
-| Overview | [EN](overview-en.png) | [VI](overview-vi.png) | [EN](overview-en-mobile.png), [VI](overview-vi-mobile.png) |
-| Incidents (expanded operational evidence/actions) | [EN](incidents-en.png) | [VI](incidents-vi.png) | [EN](incidents-en-mobile.png), [VI](incidents-vi-mobile.png) |
-| Services | [EN](services-en.png) | [VI](services-vi.png) | [EN](services-en-mobile.png), [VI](services-vi-mobile.png) |
-| Service Details | [EN](service-en.png) | [VI](service-vi.png) | [EN](service-en-mobile.png), [VI](service-vi-mobile.png) |
-| Incident Details | [EN](incident-en.png) | [VI](incident-vi.png) | [EN](incident-en-mobile.png), [VI](incident-vi-mobile.png) |
-| Scan & Settings | [EN](settings-en.png) | [VI](settings-vi.png) | [EN](settings-en-mobile.png), [VI](settings-vi-mobile.png) |
-| Scan controls (simulated connection) | [EN](scan-controls-en.png) | [VI](scan-controls-vi.png) | [EN](scan-controls-en-mobile.png), [VI](scan-controls-vi-mobile.png) |
-| Updated Insights | [Usage](insights-usage-en.png), [Performance](insights-performance-en.png), [Workflows](insights-workflows-en.png) | [Workflows VI](insights-workflows-vi.png) | — |
-
-[Scanner progress (simulated)](scan-progress-en.png).
+Screenshots (`overview-*.png`, `incidents-*.png`, `services-*.png`, `service-*.png`, `incident-*.png`, `settings-*.png`, `scan-*.png`, `insights-*.png`) are generated locally when running `npm run smoke:analytics` and are excluded from git.
 
 ## Limitations
 

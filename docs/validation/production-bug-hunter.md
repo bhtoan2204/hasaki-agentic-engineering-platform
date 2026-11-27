@@ -177,11 +177,7 @@ Finding `C1`, `Format` at `orders/render.go:6-8`:
 - **Bug verdict:** SUSPECTED ("plausible from the code; no valid focused test").
 - **Missing proof:** "a failing focused test on the investigated revision".
 
-Screenshots, from a real browser on a real hunt:
-
-- [results](production-bug-hunter/incident-bug-hunter-results.png)
-- [start form](production-bug-hunter/incident-bug-hunter-start.png)
-- [queued, with the polling notice](production-bug-hunter/incident-bug-hunter-queued.png)
+Screenshots from a real browser on a real hunt (`incident-bug-hunter-{results,start,queued}.png`) were captured during validation and are no longer committed to git.
 
 ## 4. Offline benchmark: A (incident-investigation) vs B (bug hunt + independent verifier)
 
