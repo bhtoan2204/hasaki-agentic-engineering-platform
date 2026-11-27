@@ -19,6 +19,7 @@ import {
 import { act, Badge, Copy, Empty, Markdown, Tabs, time } from "../ui.tsx";
 import { useI18n } from "../i18n/index.tsx";
 import "./RunView.css";
+import "./Report.css";
 
 type ReportRequirement = {
   id: string;
@@ -70,11 +71,6 @@ const ST: Record<string, [string, string]> = {
   PARTIAL: ["WAITING", "PARTIAL"],
   MISSING: ["FAILED", "MISSING"],
 };
-const ST_COLOR: Record<string, string> = {
-  VERIFIED: "var(--st-ok)",
-  PARTIAL: "var(--st-wait)",
-  MISSING: "var(--st-err)",
-};
 
 function readFile(f: File): Promise<string> {
   return new Promise((ok, fail) => {
@@ -116,7 +112,7 @@ function EvidenceAdder({
     }
   };
   return (
-    <div className="row tight" style={{ marginTop: 8, gap: 6 }}>
+    <div className="row tight rp-adder">
       <button
         type="button"
         className="ghost xs"
@@ -149,7 +145,7 @@ function EvidenceAdder({
         />
       </span>
       <input
-        style={{ flex: 1, minWidth: 160 }}
+        className="rp-adder-input"
         placeholder={t("rp.notePh")}
         aria-label={t("rp.notePh")}
         value={note}
@@ -230,10 +226,12 @@ export function ReportPanel({
   const c = report.counts;
   return (
     <div>
-      <div className="rv-card" style={{ marginTop: 4 }}>
-        <div className="rv-card-head" style={{ marginBottom: 4 }}>
-          <h4>
-            <ClipboardList size={16} /> {report.task?.code} · {report.task?.title}
+      <div className="rv-card rp-head-card">
+        <div className="rv-card-head rp-card-head">
+          <h4 className="rp-title-row">
+            <ClipboardList size={16} />
+            {report.task?.code && <span className="mono">{report.task.code}</span>}
+            <span>{report.task?.title}</span>
           </h4>
           {final ? (
             <Badge s="COMPLETED">{t("rp.approvedBadge")}</Badge>
@@ -241,16 +239,19 @@ export function ReportPanel({
             <Badge s="WAITING_APPROVAL">{t("rp.draftBadge")}</Badge>
           )}
         </div>
-        <div className="muted small">
+        <div className="muted small rp-meta">
           {report.object && (
-            <>
-              {report.object}: <b className="mono">{report.object_value}</b> ·{" "}
-            </>
+            <span>
+              {report.object}: <b className="mono">{report.object_value}</b>
+            </span>
           )}
-          suggest <span className="mono">{report.suggest_id}</span> · {report.generated_by} ·{" "}
-          {time(report.generated_at)}
+          <span>
+            suggest <span className="mono">{report.suggest_id}</span>
+          </span>
+          <span>{report.generated_by}</span>
+          <span>{time(report.generated_at)}</span>
         </div>
-        <div className="rv-minis" style={{ marginTop: 10 }}>
+        <div className="rv-minis rp-minis">
           <div className="rv-mini tone-ok">
             <span>
               <CheckCircle2 size={12} /> {t("rp.verified")}
@@ -293,15 +294,9 @@ export function ReportPanel({
           </div>
           {report.sections.map((s) => (
             <div key={s.name}>
-              <h3 style={{ textTransform: "none", letterSpacing: 0 }}>{s.name}</h3>
+              <h3 className="rp-sec-title">{s.name}</h3>
               {s.requirements.map((r) => (
-                <div
-                  key={r.id}
-                  className="rp-req"
-                  style={{
-                    ["--rp-c" as string]: ST_COLOR[r.status] ?? "var(--line-strong)",
-                  }}
-                >
+                <div key={r.id} className={`rp-req rp-req-st-${r.status}`}>
                   <div className="rp-req-head">
                     <Badge s={ST[r.status]?.[0] ?? "PENDING"}>
                       {ST[r.status]?.[1] ?? r.status}
@@ -310,10 +305,11 @@ export function ReportPanel({
                     <span className="grow">{r.text}</span>
                   </div>
                   {r.evidence.length > 0 ? (
-                    <div style={{ marginTop: 6 }}>
+                    <div className="rp-ev-list">
                       {r.evidence.map((e) => (
                         <div key={e.id} className="rp-ev">
-                          <Link2 size={12} /> <span className="mono muted">{e.id}</span> {e.title}{" "}
+                          <Link2 size={12} /> <span className="mono muted">{e.id}</span>{" "}
+                          <span>{e.title}</span>
                           {e.ref?.url && (
                             <a href={e.ref.url} target="_blank" rel="noopener">
                               {t("rp.open")}
@@ -329,32 +325,17 @@ export function ReportPanel({
                             </a>
                           )}
                           {e.ref?.step_key && (
-                            <>
-                              {" "}
-                              · <a href={`#/runs/${run.id}/${e.ref.step_key}`}>{e.ref.step_key}</a>
-                            </>
+                            <a href={`#/runs/${run.id}/${e.ref.step_key}`}>{e.ref.step_key}</a>
                           )}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div
-                      className="small err"
-                      style={{
-                        marginTop: 6,
-                        display: "flex",
-                        gap: 5,
-                        alignItems: "center",
-                      }}
-                    >
+                    <div className="small err rp-ev-missing">
                       <XCircle size={12} /> {t("rp.noEvidence")}
                     </div>
                   )}
-                  {r.explanation && (
-                    <div className="muted small" style={{ marginTop: 2 }}>
-                      {r.explanation}
-                    </div>
-                  )}
+                  {r.explanation && <div className="muted small rp-expl">{r.explanation}</div>}
                   {!final && r.status !== "VERIFIED" && (
                     <EvidenceAdder runId={run.id} requirementId={r.id} onDone={onChanged} />
                   )}
@@ -364,12 +345,12 @@ export function ReportPanel({
           ))}
           {!!report.limitations?.length && (
             <div className="rv-card soft">
-              <div className="rv-card-head" style={{ marginBottom: 2 }}>
+              <div className="rv-card-head rp-card-head">
                 <h4>
                   <AlertTriangle size={15} /> {t("rp.limits")}
                 </h4>
               </div>
-              <ul className="small" style={{ margin: "4px 0" }}>
+              <ul className="small rp-limits-list">
                 {report.limitations.map((l: string, i: number) => (
                   <li key={i}>{l}</li>
                 ))}
@@ -416,18 +397,18 @@ export function ReportPanel({
               ) : (
                 <Paperclip size={14} color="var(--brand)" />
               )}
-              <span className="grow" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-                {a.data?.note_only ? t("rp.note") : a.name}{" "}
+              <span className="grow rp-file-name">
+                <span>{a.data?.note_only ? t("rp.note") : a.name}</span>
                 {a.data?.requirement_id && (
                   <span className="mono muted">→ {a.data.requirement_id}</span>
-                )}{" "}
+                )}
                 <span className="muted">{time(a.created_at)}</span>
               </span>
               <a
+                className="rp-open-link"
                 href={`/api/artifacts/${a.id}/raw`}
                 target="_blank"
                 rel="noopener"
-                style={{ display: "inline-flex", gap: 3, alignItems: "center" }}
               >
                 <ExternalLink size={12} /> {t("rp.open")}
               </a>
@@ -456,9 +437,9 @@ export function ReportPanel({
               <a href={`/api/artifacts/${a.id}/raw`} target="_blank" rel="noopener">
                 {a.name}
               </a>{" "}
-              <span className="muted">
-                {time(a.created_at)} · attempt{" "}
-                {attempts.find((t) => t.id === a.attempt_id)?.number ?? "?"}
+              <span className="muted rp-meta">
+                <span>{time(a.created_at)}</span>
+                <span>attempt {attempts.find((t) => t.id === a.attempt_id)?.number ?? "?"}</span>
               </span>{" "}
               {a.data?.final && <Badge s="COMPLETED">final</Badge>}
             </div>
@@ -471,18 +452,18 @@ export function ReportPanel({
             <span className="rv-attn-icon">
               <Hand size={20} />
             </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="rp-attn-main">
               <h4>{t("rp.approveTitle")}</h4>
               <div className="rv-attn-sub">{t("rp.approveSub")}</div>
             </div>
           </div>
           <textarea
+            className="rp-comment"
             rows={2}
             placeholder={t("rp.commentPh")}
             aria-label={t("rp.commentPh")}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            style={{ marginTop: 10, background: "var(--surface)" }}
           />
           <div className="rv-attn-actions">
             <button type="button" className="ok big" onClick={approve}>
@@ -505,23 +486,25 @@ function SpecPreview({ spec }: { spec: ReportSpec }) {
   const { t } = useI18n();
   return (
     <div className="rv-card">
-      <div className="rv-card-head" style={{ marginBottom: 2 }}>
+      <div className="rv-card-head rp-card-head">
         <h4>
           <ClipboardList size={15} /> {t("rp.specTitle")}
         </h4>
       </div>
       {spec.sections.map((s) => (
-        <div key={s.name} className="small" style={{ marginTop: 4 }}>
+        <div key={s.name} className="small rp-spec-sec">
           <b>{s.name}</b>
-          {s.requirements.map((r) => (
-            <div key={r.id}>
-              • <span className="mono muted">{r.id}</span> {r.text}
-            </div>
-          ))}
+          <ul className="rp-spec-list">
+            {s.requirements.map((r) => (
+              <li key={r.id}>
+                <span className="mono muted">{r.id}</span> {r.text}
+              </li>
+            ))}
+          </ul>
         </div>
       ))}
       {spec.reasoning && (
-        <div className="muted small" style={{ marginTop: 4 }}>
+        <div className="muted small rp-spec-sec">
           {t("rp.context")}: {spec.reasoning}
         </div>
       )}

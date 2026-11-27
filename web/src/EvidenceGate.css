@@ -1,0 +1,77 @@
+/* Evidence-gated investigation summary */
+.ev-card {
+  margin-top: var(--sp-2);
+}
+
+.ev-head {
+  margin-bottom: var(--sp-2);
+}
+
+.ev-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-top: var(--sp-1);
+}
+
+.ev-label {
+  min-width: 112px;
+}
+
+.ev-val {
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+}
+
+.ev-badge.tone-ok {
+  color: var(--st-ok);
+}
+
+.ev-badge.tone-wait {
+  color: var(--st-wait);
+}
+
+.ev-badge.tone-err {
+  color: var(--st-err);
+}
+
+.ev-badge.tone-muted {
+  color: var(--ink-2);
+}
+
+.ev-details {
+  margin-top: var(--sp-2);
+}
+
+.ev-list {
+  margin: var(--sp-1) 0 0 var(--sp-5);
+  padding: 0;
+}
+
+.ev-gate-err {
+  color: var(--st-err);
+  margin-top: var(--sp-2);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.ev-gate-err svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.ev-note {
+  margin: var(--sp-1) 0 0;
+}
+
+.ev-change-item {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  align-items: baseline;
+}

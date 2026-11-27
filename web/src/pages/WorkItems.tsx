@@ -219,25 +219,27 @@ function ProdErrorRefs({ rows }: { rows: ProdErrorRef[] }) {
             <span className={`pe-sev pe-${g.severity}`}>{g.severity}</span>
             <span className="wi-prod-main">
               <b>{g.service}</b> <span className="mono small">{g.signature}</span>
-              <span className="muted small">
+              <span className="muted small wi-prod-meta">
                 {current ? (
                   <>
-                    {t("wi.prodCurrent", {
-                      day: g.day,
-                      count: g.today_count,
-                      when: hm(g.last_at),
-                    })}
-                    {g.yesterday_count
-                      ? ` · ${t("wi.prodYesterday", { count: g.yesterday_count })}`
-                      : ""}
+                    <span>
+                      {t("wi.prodCurrent", {
+                        day: g.day,
+                        count: g.today_count,
+                        when: hm(g.last_at),
+                      })}
+                    </span>
+                    {g.yesterday_count > 0 && (
+                      <span>{t("wi.prodYesterday", { count: g.yesterday_count })}</span>
+                    )}
                   </>
                 ) : (
-                  <>
+                  <span>
                     {t("wi.prodGone", {
                       day: g.latest_day,
                       when: hm(g.last_at),
                     })}
-                  </>
+                  </span>
                 )}
               </span>
             </span>
@@ -421,7 +423,8 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
       {!!inbox?.length && (
         <>
           <div className="wi-hsub">
-            {t("wi.inbox")} <span className="muted">· {inbox.length}</span>
+            <span>{t("wi.inbox")}</span>
+            <span className="muted mono">{inbox.length}</span>
           </div>
           <div className="wi-hinbox">
             {inbox.map((r) => (
@@ -429,7 +432,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
                 <div className="wi-hitem-main">
                   <div className="wi-hitem-meta">
                     <span className="mono">{r.code}</span>
-                    {r.project && <span>· {r.project}</span>}
+                    {r.project && <span>{r.project}</span>}
                   </div>
                   <div className="wi-hitem-name">{r.name}</div>
                 </div>
@@ -438,7 +441,7 @@ function HasakiPanel({ onImported }: { onImported: () => void }) {
                     {r.run_status ? (
                       <Badge s={r.run_status} label />
                     ) : (
-                      <span className="pill chip-brand">{t("wi.imported")}</span>
+                      <span className="wi-imported">{t("wi.imported")}</span>
                     )}
                   </a>
                 ) : (
@@ -845,7 +848,7 @@ function DescriptionEditor({
         </span>
         <h4>{t("wi.request")}</h4>
         {source === "manual" && !editing && (
-          <span className="pill" title={t("wi.editedTip")}>
+          <span className="wi-edited-tag" title={t("wi.editedTip")}>
             <PenLine size={12} strokeWidth={2} /> {t("wi.edited")}
           </span>
         )}
@@ -1024,9 +1027,9 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
               <b>{st.name}</b>
               <span className="muted small mono">{st.key}</span>
               <span className="grow" />
-              <span className="muted small">
-                {fmtDur(st.duration_ms)}
-                {st.attempts > 1 ? ` · ${t("sum.tries", { n: st.attempts })}` : ""}
+              <span className="muted small wi-sum-meta">
+                <span>{fmtDur(st.duration_ms)}</span>
+                {st.attempts > 1 && <span>{t("sum.tries", { n: st.attempts })}</span>}
               </span>
             </div>
             {st.summary && <p className="wi-sum-text">{st.summary}</p>}
@@ -1057,12 +1060,15 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
           {s.changes.map((c) => (
             <details key={c.repo} className="wi-sum-repo">
               <summary>
-                <b>{c.repo}</b> <span className="mono small">{c.branch}</span> ·{" "}
-                <span className="wi-sum-add">+{c.additions}</span>{" "}
-                <span className="wi-sum-del">−{c.deletions}</span> ·{" "}
-                {t("sum.nFiles", { n: c.files.length })} ·{" "}
-                {t("sum.nCommits", { n: c.commits.length })}
-                {c.note && <span className="muted"> · {c.note}</span>}
+                <span className="wi-sum-meta">
+                  <b>{c.repo}</b>
+                  <span className="mono small">{c.branch}</span>
+                  <span className="wi-sum-add">+{c.additions}</span>
+                  <span className="wi-sum-del">−{c.deletions}</span>
+                  <span>{t("sum.nFiles", { n: c.files.length })}</span>
+                  <span>{t("sum.nCommits", { n: c.commits.length })}</span>
+                  {c.note && <span className="muted">{c.note}</span>}
+                </span>
               </summary>
               {c.commits.map((cm) => (
                 <div key={cm.hash} className="small">
@@ -1089,22 +1095,14 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
             {s.tests.map((x, n) => (
               <li key={n}>
                 {x.skipped ? (
-                  <SkipForward size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                  <SkipForward size={14} aria-hidden className="wi-sum-icon" />
                 ) : x.passed ? (
-                  <CheckCircle2
-                    size={14}
-                    aria-hidden
-                    style={{ verticalAlign: "-2px", marginRight: 4, color: "var(--st-ok)" }}
-                  />
+                  <CheckCircle2 size={14} aria-hidden className="wi-sum-icon is-ok" />
                 ) : (
-                  <XCircle
-                    size={14}
-                    aria-hidden
-                    style={{ verticalAlign: "-2px", marginRight: 4, color: "var(--st-err)" }}
-                  />
-                )}{" "}
+                  <XCircle size={14} aria-hidden className="wi-sum-icon is-err" />
+                )}
                 <b>{x.repo}</b>
-                {x.detail && <span className="muted"> — {x.detail}</span>}
+                {x.detail && <span className="muted"> ({x.detail})</span>}
               </li>
             ))}
           </ul>
@@ -1117,12 +1115,14 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
           <ul className="wi-sum-plain">
             {s.pull_requests.map((p) => (
               <li key={p.url}>
-                <b>{p.repo}</b> ·{" "}
-                <a href={p.url} target="_blank" rel="noopener">
-                  {p.title}
-                </a>{" "}
-                <span className="muted mono small">
-                  {p.source_branch} → {p.target_branch}
+                <span className="wi-sum-meta">
+                  <b>{p.repo}</b>
+                  <a href={p.url} target="_blank" rel="noopener">
+                    {p.title}
+                  </a>
+                  <span className="muted mono small">
+                    {p.source_branch} → {p.target_branch}
+                  </span>
                 </span>
               </li>
             ))}
@@ -1139,14 +1139,14 @@ export function RunSummaryView({ s }: { s: RunSummary }) {
                 {d.kind === "answer" ? (
                   <>
                     <span className="muted">
-                      <CircleHelp size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                      <CircleHelp size={14} aria-hidden className="wi-sum-icon" />
                       {d.question}
                     </span>
                     <div>→ {d.answer}</div>
                   </>
                 ) : (
                   <>
-                    <Hand size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                    <Hand size={14} aria-hidden className="wi-sum-icon" />
                     <b>{d.question}</b>: {d.answer}
                   </>
                 )}
@@ -1298,7 +1298,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                   {w.attachments.map((a: { name: string; url: string }) => (
                     <a key={a.url} href={a.url} target="_blank" rel="noreferrer" title={a.name}>
                       {/\.(png|jpe?g|gif|webp)$/i.test(a.name) ? (
-                        <img src={a.url} alt={a.name} loading="lazy" />
+                        <img src={a.url} alt={a.name} decoding="async" />
                       ) : (
                         <span className="mono">{a.name}</span>
                       )}
@@ -1342,7 +1342,7 @@ export function WorkItemDetail({ id }: { id: number }) {
                 {w.pull_requests.map((p) => (
                   <div key={p.id} className="wi-pr">
                     <div className="wi-pr-main">
-                      <b>{p.repo}</b> ·{" "}
+                      <b>{p.repo}</b>
                       <a href={p.url} target="_blank" rel="noopener">
                         {p.title}
                       </a>
@@ -1358,7 +1358,7 @@ export function WorkItemDetail({ id }: { id: number }) {
         </div>
 
         <aside className="wi-detail-side">
-          <section className="card hero wi-launch">
+          <section className="card wi-launch">
             <div className="wi-launch-head">
               <span className="wi-launch-icon">
                 <Play size={18} strokeWidth={2.2} />

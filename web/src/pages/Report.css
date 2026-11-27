@@ -1,0 +1,113 @@
+/* Task Result Report panel */
+.rp-head-card {
+  margin-top: var(--sp-1);
+}
+
+.rp-card-head {
+  margin-bottom: var(--sp-1);
+}
+
+.rp-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.rp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-minis {
+  margin-top: var(--sp-3);
+}
+
+.rp-sec-title {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rp-req-st-VERIFIED {
+  --rp-c: var(--st-ok);
+}
+
+.rp-req-st-PARTIAL {
+  --rp-c: var(--st-wait);
+}
+
+.rp-req-st-MISSING {
+  --rp-c: var(--st-err);
+}
+
+.rp-ev-list {
+  margin-top: var(--sp-2);
+}
+
+.rp-ev-missing {
+  margin-top: var(--sp-2);
+  display: flex;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.rp-expl {
+  margin-top: var(--sp-1);
+}
+
+.rp-adder {
+  margin-top: var(--sp-2);
+  gap: var(--sp-2);
+}
+
+.rp-adder-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.rp-limits-list {
+  margin: var(--sp-1) 0;
+}
+
+.rp-file-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+}
+
+.rp-open-link {
+  display: inline-flex;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.rp-open-link:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.rp-attn-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.rp-comment {
+  margin-top: var(--sp-3);
+  background: var(--surface);
+}
+
+.rp-spec-sec {
+  margin-top: var(--sp-1);
+}
+
+.rp-spec-list {
+  list-style: disc;
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-5);
+}
