@@ -1,6 +1,6 @@
 # Kế hoạch hardening luồng scan Production Errors và severity
 
-> **Trạng thái:** Bản kế hoạch, **chưa sửa code**. Chờ duyệt và chốt các Open Questions ở §9. Tiến độ ghi ở [`PROGRESS.md`](./PROGRESS.md).
+> **Trạng thái:** Kế hoạch đã duyệt; **Phase 1 và Phase 2 đã hoàn tất** (Phase 1 đã commit ở `68d26a0`, Phase 2 đang uncommitted). **Phase 3 hoãn theo Q-9** (không làm trong đợt này). 12 Open Questions đã chốt ở §9. Tiến độ và kết quả kiểm thử ghi ở [`PROGRESS.md`](./PROGRESS.md).
 > Nguồn: báo cáo audit "luồng scan Production Errors và logic severity" (Node + Go). Các số dòng dưới đây tính tại thời điểm audit (`main` ở commit `228b7a6` cộng thay đổi Phase 3 của provider-compatibility chưa commit; các file này không bị đụng bởi thay đổi đó).
 
 ## 1. Mục tiêu và ngoài phạm vi

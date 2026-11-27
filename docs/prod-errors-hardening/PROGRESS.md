@@ -79,13 +79,12 @@
 
 ## Nhật ký
 
-| Ngày       | Nội dung                                                  |
-| ---------- | --------------------------------------------------------- |
-| 2026-11-27 | Audit hoàn tất; lập `PLAN.md` và `PROGRESS.md`; chờ duyệt |
-
-## Kết quả kiểm thử
-
-Chưa chạy (chưa có thay đổi code).
+| Ngày       | Nội dung                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 2026-11-27 | Audit hoàn tất; lập `PLAN.md` và `PROGRESS.md`; chờ duyệt                                                                      |
+| 2026-11-27 | Duyệt kế hoạch, chốt 12 Open Questions (Q-9: hoãn Phase 3)                                                                     |
+| 2026-11-27 | Phase 1 (1.0–1.8) hoàn tất; đã commit `68d26a0`. 1.9 (quét thủ công im lặng) chờ vận hành                                      |
+| 2026-11-27 | Phase 2 (2.0–2.7) hoàn tất, uncommitted: severity v2 shadow, Radar giờ 0, SigNoz; chờ live-verify và xác nhận cách tách commit |
 
 ## Phase 1 — kết quả
 
@@ -227,7 +226,7 @@ Ghi chú: lần chạy integration đỏ đầu tiên bị treo vì `finally` c�
 
 ### Đề xuất tách commit cho Phase 2 (chưa chạy)
 
-Phase 1 đã nằm trong `68d26a0`. Phase 2 nên tách thành 4 commit:
+Phase 1 đã nằm trong `68d26a0`. Phase 2 nên tách thành 5 commit:
 
 1. `refactor(prod-errors): one severity module for the scan, the Go port and Radar` — `severity.ts`, `severity.go`, xóa `classify.ts/.go`, `merge.go` (chuyển `assess`), `radar/detect.ts` (`needsBump`), `severity-vectors.json`, các test `prod-errors-severity`, `prod-errors-classify`, `severity_test.go`.
 2. `feat(prod-errors): severity v2 by rate per hour, shadowed beside v1` — `config.ts`, `scan.ts` (`GroupContext`, `toGroups`, `severityThresholds`), `gateway.ts`, Go (`ToGroups` context, `store.firstSeen`, `scan.go`), schema, `golden.json` + fixture, UI/i18n lý do mới, test `prod-errors-phase2` (T14–T17, T25), integration T15/T17.
