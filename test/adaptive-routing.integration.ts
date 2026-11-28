@@ -337,3 +337,63 @@ test("applyAdaptiveRouting resolves incumbent and chosen candidates from agent_c
     else await q(pool, "DELETE FROM settings WHERE key='agent_configuration'");
   }
 });
+
+test("applyAdaptiveRouting filter preserves empty step config and excludes explicit null or legacy step keys", async () => {
+  const step = (key: string, config: Record<string, unknown>) => ({
+    key,
+    type: "coding_agent" as const,
+    config,
+  });
+  const spec = WorkflowSpec.parse({
+    name: "Filter step keys",
+    steps: [
+      step("plain", {}),
+      step("explicit_undefined", { agent: { model: undefined, reasoning_effort: undefined } }),
+      step("null_effort", { agent: { reasoning_effort: null } }),
+      step("null_model", { agent: { model: null } }),
+      step("legacy_model", { model: "sonnet" }),
+      step("legacy_codex_model", { codex_model: "gpt-5" }),
+      step("legacy_cursor_model", { cursor_model: "composer" }),
+      step("legacy_antigravity_model", { antigravity_model: "agy-1" }),
+      step("legacy_copilot_model", { copilot_model: "gpt-4o" }),
+      step("legacy_codex_effort", { codex_reasoning_effort: "low" }),
+      step("legacy_copilot_effort", { copilot_effort: "low" }),
+      step("legacy_antigravity_effort", { antigravity_effort: "low" }),
+      step("legacy_effort", { effort: "low" }),
+    ],
+  });
+  const out = await applyOptimizationDefaults(
+    pool,
+    ownerId,
+    spec,
+    {},
+    false,
+    "STANDARD",
+    null,
+    "claude",
+    "route-code",
+    legacyAgentConfiguration(),
+  );
+  assert.deepEqual(
+    out.decisions.map((d) => d.step_key),
+    ["plain", "explicit_undefined"],
+  );
+  const byKey = Object.fromEntries(out.graph.steps.map((s) => [s.key, s.config]));
+  assert.ok(byKey.plain.routing_decision);
+  assert.ok(byKey.explicit_undefined.routing_decision);
+  for (const excluded of [
+    "null_effort",
+    "null_model",
+    "legacy_model",
+    "legacy_codex_model",
+    "legacy_cursor_model",
+    "legacy_antigravity_model",
+    "legacy_copilot_model",
+    "legacy_codex_effort",
+    "legacy_copilot_effort",
+    "legacy_antigravity_effort",
+    "legacy_effort",
+  ]) {
+    assert.equal(byKey[excluded].routing_decision, undefined, `${excluded} should be excluded`);
+  }
+});
