@@ -4,7 +4,7 @@ import { config, antigravityConfig, codexConfig, copilotConfig } from "../src/co
 import { nextHealthyProvider } from "../src/agent/health.ts";
 import { substituteEnabledProvider } from "../src/agent/provider.ts";
 import { applyOperator, resetOperatorForTests } from "../src/platform/operatorSettings.ts";
-import { modelFor } from "../src/agent/stepAgent.ts";
+import { resolveStepAgent } from "../src/agent/stepAgent.ts";
 
 const prev = {
   model: config.model,
@@ -123,19 +123,30 @@ test("Claude model routing per profile and role is saved in Settings and restore
   applyOperator({});
   const plan = { type: "agent", config: {} };
   const coding = { type: "coding_agent", config: {} };
-  assert.equal(modelFor(plan, "DEEP").model, "from-config");
+  assert.equal(
+    resolveStepAgent({ agent_provider: "claude", profile: "DEEP" }, plan)?.model,
+    "from-config",
+  );
 
   applyOperator({ models: { DEEP: { agent: "opus" } } });
-  assert.deepEqual(modelFor(plan, "DEEP"), { model: "opus", source: "routing DEEP/agent" });
+  const deepPlan = resolveStepAgent({ agent_provider: "claude", profile: "DEEP" }, plan)!;
+  assert.equal(deepPlan.model, "opus");
+  assert.equal(deepPlan.field_sources?.model, "profile DEEP/agent");
   assert.equal(
-    modelFor(plan, "STANDARD").model,
-    "",
+    resolveStepAgent({ agent_provider: "claude", profile: "STANDARD" }, plan)?.model,
+    null,
     "the saved routing replaces config.json routing",
   );
-  assert.equal(modelFor(coding, "DEEP").model, "");
+  assert.equal(
+    resolveStepAgent({ agent_provider: "claude", profile: "DEEP" }, coding)?.model,
+    null,
+  );
 
   applyOperator({});
-  assert.equal(modelFor(plan, "DEEP").model, "from-config");
+  assert.equal(
+    resolveStepAgent({ agent_provider: "claude", profile: "DEEP" }, plan)?.model,
+    "from-config",
+  );
 });
 
 test("attachment URL, related projects and Bitbucket access policy are Settings-owned", () => {

@@ -9,12 +9,7 @@ import {
   resolveAgentProvider,
 } from "../src/agent/provider.ts";
 import { copilotConfig, config } from "../src/config.ts";
-import {
-  copilotModelFor,
-  resolveStepAgent,
-  validateAgentOptions,
-  FallbackPolicy,
-} from "../src/agent/stepAgent.ts";
+import { resolveStepAgent, validateAgentOptions, FallbackPolicy } from "../src/agent/stepAgent.ts";
 import {
   copilotCapabilities,
   copilotEnv,
@@ -117,31 +112,20 @@ test("copilotConfig loads defaults and honors environment overrides", () => {
 
 // ------------------------------------------------------------------ Step Agent Routing & Fallback Policy
 
-test("copilotModelFor resolves models and effort from step config, routing and defaults", () => {
+test("resolveStepAgent resolves model, effort, and sources for copilot", () => {
   const stepWithModel = {
     type: "coding_agent",
     config: { agent: { model: "claude-3.5-sonnet", reasoning_effort: "high" } },
   };
-  const res1 = copilotModelFor(stepWithModel);
+  const res1 = resolveStepAgent({ agent_provider: "copilot", profile: "STANDARD" }, stepWithModel)!;
   assert.equal(res1.model, "claude-3.5-sonnet");
-  assert.equal(res1.effort, "high");
-  assert.equal(res1.source, "step config (agent.model)");
+  assert.equal(res1.reasoning_effort, "high");
+  assert.equal(res1.field_sources?.model, "step");
 
-  const stepWithLegacy = {
-    type: "coding_agent",
-    config: { copilot_model: "o1-preview", copilot_effort: "medium" },
-  };
-  const res2 = copilotModelFor(stepWithLegacy);
-  assert.equal(res2.model, "o1-preview");
-  assert.equal(res2.effort, "medium");
-  assert.equal(res2.source, "step config (copilot_model)");
-});
-
-test("resolveStepAgent sets effective agent provider, routed model, and effort for copilot", () => {
   const run = { agent_provider: "copilot", profile: "STANDARD" };
   const step = {
     type: "coding_agent",
-    config: { copilot_model: "gpt-4o", copilot_effort: "low" },
+    config: { agent: { model: "gpt-4o", reasoning_effort: "low" } },
   };
   const effective = resolveStepAgent(run, step);
   assert.ok(effective);

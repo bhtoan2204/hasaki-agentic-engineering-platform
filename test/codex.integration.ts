@@ -28,7 +28,7 @@ import { workspacesOf, recordWorkspace } from "../src/git/provider.ts";
 import { drain } from "../src/workflow/scheduler.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { agentExecutor as claudeExecutor } from "../src/agent/harness/executor.ts";
-import { codexModelFor } from "../src/agent/stepAgent.ts";
+import { resolveStepAgent } from "../src/agent/stepAgent.ts";
 import { rankRepositoriesWithClaude } from "../src/agent/repoRanking.ts";
 import { resumableSession } from "../src/agent/sessions.ts";
 import { resolveAgentProvider } from "../src/agent/provider.ts";
@@ -517,18 +517,21 @@ test("codex argv: per-invocation config, sandbox by mode, no bypass flags, resum
   assert.deepEqual(Object.keys(env).sort(), ["CODEX_HOME", "HOME", "PATH"]);
 });
 
-test("Codex model routing never uses the Claude model; effort is separate", () => {
+test("Codex model routing ignores legacy top-level keys; effort is separate", () => {
   config.agentEnv.codexModel = "gpt-test";
   config.agentEnv.codexReasoningEffort = "high";
-  const r = codexModelFor({ type: "agent", config: { model: "claude-opus-5-5" } });
-  assert.deepEqual(r, { model: "gpt-test", source: "agent.codex.model", effort: "high" });
-  assert.equal(
-    codexModelFor({
-      type: "agent",
-      config: { codex_model: "gpt-x", codex_reasoning_effort: "low" },
-    }).model,
-    "gpt-x",
-  );
+  const r = resolveStepAgent(
+    { agent_provider: "codex" },
+    { type: "agent", config: { model: "claude-opus-5-5" } },
+  )!;
+  assert.equal(r.model, "gpt-test");
+  assert.equal(r.reasoning_effort, "high");
+  const explicit = resolveStepAgent(
+    { agent_provider: "codex" },
+    { type: "agent", config: { agent: { model: "gpt-x", reasoning_effort: "low" } } },
+  )!;
+  assert.equal(explicit.model, "gpt-x");
+  assert.equal(explicit.reasoning_effort, "low");
   assert.equal(
     checkModel([{ slug: "gpt-test", efforts: ["low"] }], "gpt-test", "high")?.includes(
       "does not support reasoning effort",

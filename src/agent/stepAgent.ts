@@ -125,92 +125,6 @@ export function validateAgentOptions(a: StepAgentConfig, provider = a.provider) 
     );
 }
 
-/** Compatibility exports delegate to the same provider-aware resolver. */
-function legacyModelFor(
-  provider: AgentProvider,
-  step: { type: string; config: Record<string, unknown> },
-  profile?: string | null,
-) {
-  const role = step.config.independent === true ? "verifier" : step.type;
-  const agent = StepAgentConfig.parse(step.config.agent ?? {});
-  const explicit = {
-    ...legacyStepValues(provider, step.config),
-    ...Object.fromEntries(
-      ["model", "reasoning_effort", "max_turns", "timeout_ms", "options"]
-        .filter((key) => agent[key as keyof typeof agent] !== undefined)
-        .map((key) => [key, agent[key as keyof typeof agent]]),
-    ),
-  };
-  const document = legacyAgentConfiguration();
-  // Legacy preview callers inspect saved routing even when the provider is disabled.
-  document.providers[provider].enabled = true;
-  const { values, sources } = resolveAgentValues(document, provider, profile ?? "", role, explicit);
-  let source = sources.model ?? "account/CLI default (external)";
-  if (source === "step")
-    source =
-      agent.model !== undefined
-        ? "step config (agent.model)"
-        : provider === "claude"
-          ? "step config"
-          : `step config (${provider}_model)`;
-  if (source.startsWith("profile "))
-    source = source.replace(
-      "profile ",
-      provider === "claude" ? "routing " : `${provider} routing `,
-    );
-  if (
-    !source.startsWith(provider === "claude" ? "routing " : `${provider} routing `) &&
-    !source.startsWith("step config")
-  ) {
-    if (provider === "claude") {
-      source = values.model ? "global default" : "sdk default";
-    } else if (provider === "codex") {
-      source = values.model ? "agent.codex.model" : "codex account default";
-    } else if (provider === "antigravity") {
-      source = values.model ? "agent.antigravity.model" : "antigravity default";
-    } else if (provider === "copilot") {
-      source = values.model ? "agent.copilot.model" : "copilot default";
-    } else if (provider === "cursor") {
-      source = values.model ? "agent.cursor.model" : "cursor default";
-    }
-  }
-  return { model: values.model ?? "", source, effort: values.reasoning_effort ?? "" };
-}
-export function modelFor(
-  step: { type: string; config: Record<string, unknown> },
-  profile?: string | null,
-) {
-  const { model, source } = legacyModelFor("claude", step, profile);
-  return { model, source };
-}
-export const codexModelFor = (
-  step: { type: string; config: Record<string, unknown> },
-  profile?: string | null,
-) => legacyModelFor("codex", step, profile);
-export const antigravityModelFor = (
-  step: { type: string; config: Record<string, unknown> },
-  profile?: string | null,
-) => legacyModelFor("antigravity", step, profile);
-export const copilotModelFor = (
-  step: { type: string; config: Record<string, unknown> },
-  profile?: string | null,
-) => legacyModelFor("copilot", step, profile);
-
-function legacyStepValues(provider: AgentProvider, cfg: Record<string, unknown>) {
-  const model = provider === "claude" ? cfg.model : cfg[`${provider}_model`];
-  const effort =
-    provider === "codex"
-      ? cfg.codex_reasoning_effort
-      : provider === "copilot" || provider === "antigravity"
-        ? (cfg[`${provider}_effort`] ?? cfg.effort)
-        : undefined;
-  return AgentValues.parse({
-    ...(model ? { model } : {}),
-    ...(effort ? { reasoning_effort: effort } : {}),
-    ...(provider === "claude" && cfg.max_turns !== undefined ? { max_turns: cfg.max_turns } : {}),
-  });
-}
-
 /** Resolve once at claim time; the persisted result is the execution authority. */
 export function resolveStepAgent(
   run: {
@@ -245,14 +159,11 @@ export function resolveStepAgent(
   if (run.profile === "MICRO") {
     merged.context_tokens = Math.min(12000, merged.context_tokens ?? 12000);
   }
-  const explicit = {
-    ...(!changedProvider ? legacyStepValues(provider, step.config) : {}),
-    ...Object.fromEntries(
-      ["model", "reasoning_effort", "max_turns", "timeout_ms", "options"]
-        .filter((key) => merged[key as keyof typeof merged] !== undefined)
-        .map((key) => [key, merged[key as keyof typeof merged]]),
-    ),
-  };
+  const explicit = Object.fromEntries(
+    (["model", "reasoning_effort", "max_turns", "timeout_ms", "options"] as const)
+      .filter((key) => merged[key] !== undefined)
+      .map((key) => [key, merged[key]]),
+  );
   const role = step.config.independent === true ? "verifier" : step.type;
   const { values, sources } = resolveAgentValues(snapshot, provider, profile, role, explicit);
   if (run.profile === "MICRO") {

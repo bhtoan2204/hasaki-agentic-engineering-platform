@@ -4,19 +4,10 @@ import { q, one, withTx, type Db } from "../db/pool.ts";
 import { pool } from "../db/pool.ts";
 import { HttpError } from "../http/error.ts";
 import { RECOMMENDATION_VERSION, recommendationDetail } from "./recommendations.ts";
-import { AGENT_PROVIDERS, parseAgentProvider, providerEnabled } from "../agent/provider.ts";
+import { parseAgentProvider, providerEnabled } from "../agent/provider.ts";
 import { providerCapabilities } from "../agent/providerCapabilities.ts";
 import { type AgentConfiguration } from "../agent/configuration.ts";
 import { resolveStepAgent, type StepAgentConfig } from "../agent/stepAgent.ts";
-
-// Legacy step-config keys read by `legacyStepValues` in `src/agent/stepAgent.ts`.
-const LEGACY_STEP_AGENT_KEYS = [
-  ...AGENT_PROVIDERS.map((p) => (p === "claude" ? "model" : `${p}_model`)),
-  "codex_reasoning_effort",
-  "copilot_effort",
-  "antigravity_effort",
-  "effort",
-] as const;
 import { handoffReadiness } from "../agent/handoff.ts";
 import type { WorkflowSpec } from "../workflow/types.ts";
 const Policy = z
@@ -114,7 +105,12 @@ export async function applyOptimizationDefaults(
       agent?: StepAgentConfig;
       delegation?: { enabled?: boolean };
     };
-    if (original.agent?.provider || original.model || original.codex_model) continue;
+    if (
+      original.agent?.provider ||
+      original.agent?.model !== undefined ||
+      original.agent?.reasoning_effort !== undefined
+    )
+      continue;
     const p = policies.find((p) => p.step_type === step.type);
     if (!p) continue;
     const provenance: Record<string, unknown> = {
@@ -215,7 +211,6 @@ async function applyAdaptiveRouting(
       // An explicit step model or effort (including null = account default) is a choice routing must not replace.
       c.agent?.model === undefined &&
       c.agent?.reasoning_effort === undefined &&
-      LEGACY_STEP_AGENT_KEYS.every((key) => c[key] === undefined) &&
       // A step a benchmark-recommendation policy already decided on (applied or not) keeps that single decision.
       !c.optimization_decision
     );

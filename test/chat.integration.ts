@@ -310,7 +310,7 @@ test("chat: manual unhealthy provider fails visibly without inference wait", asy
   setChatHealthProbe(healthy);
 });
 
-test("characterization: chat model & effort resolution across auto, manual, and provider_default", async () => {
+test("chat model & effort resolution across auto, manual, and provider_default", async () => {
   const previousRow = await one<{ value: string }>(
     pool,
     "SELECT value FROM settings WHERE key='agent_configuration'",

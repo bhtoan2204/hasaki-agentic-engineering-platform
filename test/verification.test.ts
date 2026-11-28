@@ -532,7 +532,7 @@ test("published feature and bug templates enable a bounded independent review re
 
 test("model routing: step config > profile/role routing > '*' > global default; verifiers route separately", async () => {
   const { config } = await import("../src/config.ts");
-  const { modelFor } = await import("../src/agent/stepAgent.ts");
+  const { resolveStepAgent } = await import("../src/agent/stepAgent.ts");
   const saved = { models: config.agent.models, model: config.model };
   try {
     config.agent.models = {
@@ -541,32 +541,44 @@ test("model routing: step config > profile/role routing > '*' > global default; 
       "*": { coding_agent: "m-any-coding" },
     };
     config.model = "m-global";
-    assert.deepEqual(modelFor({ type: "agent", config: { model: "m-step" } }, "FAST"), {
-      model: "m-step",
-      source: "step config",
-    });
-    assert.deepEqual(modelFor({ type: "agent", config: {} }, "FAST"), {
-      model: "m-fast-agent",
-      source: "routing FAST/agent",
-    });
-    assert.deepEqual(modelFor({ type: "agent", config: { independent: true } }, "DEEP"), {
-      model: "m-deep-verifier",
-      source: "routing DEEP/verifier",
-    });
-    assert.deepEqual(modelFor({ type: "coding_agent", config: {} }, "STANDARD"), {
-      model: "m-any-coding",
-      source: "routing */coding_agent",
-    });
-    assert.deepEqual(modelFor({ type: "agent", config: {} }, "STANDARD"), {
-      model: "m-global",
-      source: "global default",
-    });
+    const r1 = resolveStepAgent(
+      { agent_provider: "claude", profile: "FAST" },
+      { type: "agent", config: { agent: { model: "m-step" } } },
+    )!;
+    assert.equal(r1.model, "m-step");
+    assert.equal(r1.field_sources?.model, "step");
+    const r2 = resolveStepAgent(
+      { agent_provider: "claude", profile: "FAST" },
+      { type: "agent", config: {} },
+    )!;
+    assert.equal(r2.model, "m-fast-agent");
+    assert.equal(r2.field_sources?.model, "profile FAST/agent");
+    const r3 = resolveStepAgent(
+      { agent_provider: "claude", profile: "DEEP" },
+      { type: "agent", config: { independent: true } },
+    )!;
+    assert.equal(r3.model, "m-deep-verifier");
+    assert.equal(r3.field_sources?.model, "profile DEEP/verifier");
+    const r4 = resolveStepAgent(
+      { agent_provider: "claude", profile: "STANDARD" },
+      { type: "coding_agent", config: {} },
+    )!;
+    assert.equal(r4.model, "m-any-coding");
+    assert.equal(r4.field_sources?.model, "profile */coding_agent");
+    const r5 = resolveStepAgent(
+      { agent_provider: "claude", profile: "STANDARD" },
+      { type: "agent", config: {} },
+    )!;
+    assert.equal(r5.model, "m-global");
+    assert.equal(r5.field_sources?.model, "legacy provider default");
     config.model = "";
     config.agent.models = undefined;
-    assert.deepEqual(modelFor({ type: "agent", config: {} }, null), {
-      model: "",
-      source: "sdk default",
-    });
+    const r6 = resolveStepAgent(
+      { agent_provider: "claude", profile: null },
+      { type: "agent", config: {} },
+    )!;
+    assert.equal(r6.model, null);
+    assert.equal(r6.field_sources?.model, "legacy provider default");
   } finally {
     config.agent.models = saved.models;
     config.model = saved.model;

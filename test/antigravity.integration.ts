@@ -40,7 +40,7 @@ import {
 } from "../src/agent/providers/antigravity/run.ts";
 import { startBroker } from "../src/agent/broker/server.ts";
 import { completeForRun } from "../src/agent/complete.ts";
-import { antigravityModelFor } from "../src/agent/stepAgent.ts";
+import { resolveStepAgent } from "../src/agent/stepAgent.ts";
 import type { PolicyContext } from "../src/agent/toolPolicy.ts";
 import { config } from "../src/config.ts";
 
@@ -590,20 +590,26 @@ test("buildAntigravityArgs builds correct noninteractive arguments without crede
   assert.equal(env.PATH, "/bin");
 });
 
-test("model resolution for Antigravity step uses antigravityModelFor", () => {
+test("model resolution for Antigravity step uses resolveStepAgent", () => {
   config.agentEnv.agyModel = "gemini-3.8-flash-high";
   config.agentEnv.agyEffort = "medium";
 
-  const resolved = antigravityModelFor({
-    type: "agent",
-    config: { agent: { model: "claude-sonnet-4-6", reasoning_effort: "high" } },
-  });
+  const resolved = resolveStepAgent(
+    { agent_provider: "antigravity" },
+    {
+      type: "agent",
+      config: { agent: { model: "claude-sonnet-4-6", reasoning_effort: "high" } },
+    },
+  )!;
   assert.equal(resolved.model, "claude-sonnet-4-6");
-  assert.equal(resolved.effort, "high");
+  assert.equal(resolved.reasoning_effort, "high");
 
-  const fallback = antigravityModelFor({ type: "agent", config: {} });
+  const fallback = resolveStepAgent(
+    { agent_provider: "antigravity" },
+    { type: "agent", config: {} },
+  )!;
   assert.equal(fallback.model, "gemini-3.8-flash-high");
-  assert.equal(fallback.effort, "medium");
+  assert.equal(fallback.reasoning_effort, "medium");
 });
 
 // ------------------------------------------------------------------ Execution & Turn Lifecycle

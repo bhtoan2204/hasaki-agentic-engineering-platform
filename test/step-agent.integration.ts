@@ -157,6 +157,13 @@ test("provider precedence, provider-specific model routing and nullable defaults
       { agent_provider: "codex" },
       { type: "agent", config: { model: "claude-legacy", codex_model: "gpt-test" } },
     )?.model,
+    null,
+  );
+  assert.equal(
+    resolveStepAgent(
+      { agent_provider: "codex" },
+      { type: "agent", config: { agent: { model: "gpt-test" } } },
+    )?.model,
     "gpt-test",
   );
 });
