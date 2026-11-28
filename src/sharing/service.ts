@@ -288,12 +288,27 @@ async function waitSettled(
   const deadline = Date.now() + timeoutMs;
   let wake: () => void = () => {};
   let woken = false;
-  const unsubscribe = subscribe("shared_analysis", (payload) => {
-    if (payload !== String(id)) return;
+  const onUpdate = () => {
     woken = true;
     wake();
-  });
+  };
+  const unsubscribe = subscribe(
+    "shared_analysis",
+    (payload) => {
+      if (payload === String(id)) onUpdate();
+    },
+    onUpdate,
+  );
   try {
+    // Wait until LISTEN is active before the initial snapshot read, otherwise a settle between read and LISTEN is lost.
+    let readyTimer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      unsubscribe.ready.catch(() => {}),
+      new Promise<void>((resolve) => {
+        readyTimer = setTimeout(resolve, Math.max(0, deadline - Date.now()));
+      }),
+    ]);
+    clearTimeout(readyTimer);
     for (;;) {
       woken = false;
       const row = await byId(pool, id);
