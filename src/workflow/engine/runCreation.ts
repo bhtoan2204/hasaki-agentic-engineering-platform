@@ -391,6 +391,7 @@ export async function startRun(
       r.decision.complexity?.class ?? null,
       agent_provider ?? null,
       dv.key,
+      agent_configuration,
     );
     const title = input.title || (wi ? `${wi.code}: ${wi.title}` : `${dv.spec.name} #${id}`);
     try {

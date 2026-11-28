@@ -11,6 +11,13 @@ import { settleBackground } from "../src/workflow/background.ts";
 import { registerExecutor } from "../src/workflow/executors/registry.ts";
 import { setHandoffReadinessForTests } from "../src/agent/handoff.ts";
 import { saveRoutingPreference, loadOutcomes } from "../src/routing/adaptive.ts";
+import { legacyAgentConfiguration } from "../src/agent/configuration.ts";
+import {
+  loadAgentConfiguration,
+  saveProviderConfiguration,
+} from "../src/agent/configurationStore.ts";
+import { applyOptimizationDefaults } from "../src/eval/optimization.ts";
+import { WorkflowSpec } from "../src/workflow/types.ts";
 
 /** Production-like history (stubbed agents, real engine rows) → routing decisions at run start. No model is called. */
 let ownerId = 0;
@@ -241,4 +248,92 @@ test("an explicit step model or effort (no provider) is not replaced by routing"
   ))!.config;
   assert.equal(cfg.routing_decision, undefined);
   assert.equal((cfg.agent as { provider?: string }).provider, undefined);
+});
+
+test("applyAdaptiveRouting resolves incumbent and chosen candidates from agent_configuration snapshot rather than legacy defaults", async () => {
+  const previousRow = await one<{ value: string }>(
+    pool,
+    "SELECT value FROM settings WHERE key='agent_configuration'",
+  );
+  const current = await loadAgentConfiguration();
+  const legacyModel = legacyAgentConfiguration().providers.claude.defaults.model;
+  const customModel =
+    legacyModel === "claude-snapshot-custom" ? "claude-snapshot-alt" : "claude-snapshot-custom";
+  await saveProviderConfiguration("claude", current.providers.claude.revision, {
+    defaults: { ...current.providers.claude.defaults, model: customModel },
+  });
+  try {
+    const r = await startRun({
+      definitionKey: "route-code",
+      title: "snapshot-incumbent",
+      ownerId,
+      start: false,
+    });
+    runs.push(Number(r.id));
+    const cfg = await stepConfig(Number(r.id), "implement");
+    const decision = cfg.routing_decision as {
+      applied: boolean;
+      incumbent: { provider: string; model: string | null; effort: string | null };
+    };
+    assert.equal(decision.incumbent.provider, "claude");
+    assert.equal(decision.incumbent.model, customModel);
+    assert.equal(decision.applied, false);
+
+    const codingSpec = WorkflowSpec.parse({
+      name: "Routing coding workflow",
+      steps: [{ key: "implement", type: "coding_agent", config: {} }],
+    });
+    const snapshot = legacyAgentConfiguration();
+    snapshot.providers.claude.profiles.STANDARD = {
+      coding_agent: { model: "claude-arg-model", reasoning_effort: "medium" },
+    };
+    const argRun = await applyOptimizationDefaults(
+      pool,
+      ownerId,
+      codingSpec,
+      {},
+      false,
+      "STANDARD",
+      null,
+      "claude",
+      "route-code",
+      snapshot,
+    );
+    const argDecision = argRun.decisions[0] as {
+      incumbent: { provider: string; model: string | null; effort: string | null };
+    };
+    assert.deepEqual(argDecision.incumbent, {
+      provider: "claude",
+      model: "claude-arg-model",
+      effort: "medium",
+    });
+
+    const chosenSnapshot = legacyAgentConfiguration();
+    chosenSnapshot.providers.codex.defaults.timeout_ms = 12345;
+    let seenTimeoutMs: number | undefined;
+    setHandoffReadinessForTests(async (effective) => {
+      seenTimeoutMs = effective.timeout_ms;
+      return { ok: true, quota: "unknown", cost: "unknown" };
+    });
+    await applyOptimizationDefaults(
+      pool,
+      ownerId,
+      codingSpec,
+      {},
+      false,
+      "STANDARD",
+      null,
+      "claude",
+      "route-code",
+      chosenSnapshot,
+    );
+    assert.equal(seenTimeoutMs, 12345);
+  } finally {
+    setHandoffReadinessForTests(async () => ({ ok: true, quota: "unknown", cost: "unknown" }));
+    if (previousRow)
+      await q(pool, "UPDATE settings SET value=$1 WHERE key='agent_configuration'", [
+        previousRow.value,
+      ]);
+    else await q(pool, "DELETE FROM settings WHERE key='agent_configuration'");
+  }
 });

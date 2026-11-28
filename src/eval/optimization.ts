@@ -6,6 +6,7 @@ import { HttpError } from "../http/error.ts";
 import { RECOMMENDATION_VERSION, recommendationDetail } from "./recommendations.ts";
 import { parseAgentProvider, providerEnabled } from "../agent/provider.ts";
 import { providerCapabilities } from "../agent/providerCapabilities.ts";
+import { type AgentConfiguration } from "../agent/configuration.ts";
 import { resolveStepAgent, type StepAgentConfig } from "../agent/stepAgent.ts";
 import { handoffReadiness } from "../agent/handoff.ts";
 import type { WorkflowSpec } from "../workflow/types.ts";
@@ -73,6 +74,7 @@ export async function applyOptimizationDefaults(
   complexity: string | null = null,
   defaultProvider: string | null = null,
   workflow = "",
+  agentConfiguration?: AgentConfiguration,
 ) {
   const category = typeof inputs.task_category === "string" ? inputs.task_category : null;
   const graph = structuredClone(spec);
@@ -89,6 +91,7 @@ export async function applyOptimizationDefaults(
       complexity,
       defaultProvider,
       workflow,
+      agentConfiguration,
     );
     return { graph, decisions };
   }
@@ -142,7 +145,7 @@ export async function applyOptimizationDefaults(
         },
       };
       const effective = resolveStepAgent(
-        { agent_provider: "claude", profile },
+        { agent_provider: "claude", profile, agent_configuration: agentConfiguration },
         { ...step, config: cfg },
       )!;
       if (
@@ -171,6 +174,7 @@ export async function applyOptimizationDefaults(
     complexity,
     defaultProvider,
     workflow,
+    agentConfiguration,
   );
   return { graph, decisions };
 }
@@ -188,6 +192,7 @@ async function applyAdaptiveRouting(
   complexity: string | null,
   defaultProvider: string | null,
   workflow: string,
+  agentConfiguration?: AgentConfiguration,
 ) {
   const { routingPreference, cachedOutcomes, eligibility, decideRoute } =
     await import("../routing/adaptive.ts");
@@ -216,7 +221,11 @@ async function applyAdaptiveRouting(
   for (const step of steps) {
     const { eligible, excluded } = eligibility({ stepType: step.type, complexity, isolation });
     const current = resolveStepAgent(
-      { agent_provider: defaultProvider ?? undefined, profile },
+      {
+        agent_provider: defaultProvider ?? undefined,
+        profile,
+        agent_configuration: agentConfiguration,
+      },
       step,
     );
     const fallback = current?.provider ?? "claude";
@@ -258,7 +267,7 @@ async function applyAdaptiveRouting(
           },
         };
         const effective = resolveStepAgent(
-          { agent_provider: fallback, profile },
+          { agent_provider: fallback, profile, agent_configuration: agentConfiguration },
           { ...step, config: cfg },
         )!;
         const ready = await handoffReadiness(effective);
