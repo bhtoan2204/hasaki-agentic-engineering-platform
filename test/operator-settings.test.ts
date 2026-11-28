@@ -104,16 +104,20 @@ test("an off provider is replaced by one that is on, and health fallback skips i
     ]),
     "codex",
   );
-  applyOperator({
-    enabledProviders: {
-      claude: false,
-      cursor: false,
-      codex: false,
-      antigravity: false,
-      copilot: false,
-    },
-  });
-  assert.throws(() => substituteEnabledProvider("claude"), /enabled in Settings/);
+  try {
+    applyOperator({
+      enabledProviders: {
+        claude: false,
+        cursor: false,
+        codex: false,
+        antigravity: false,
+        copilot: false,
+      },
+    });
+    assert.throws(() => substituteEnabledProvider("claude"), /enabled in Settings/);
+  } finally {
+    config.agent.enabledProviders = undefined;
+  }
 });
 
 test("Claude model routing per profile and role is saved in Settings and restored on clear", () => {
