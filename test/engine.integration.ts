@@ -1,7 +1,7 @@
 import { test, before, after, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { pool, q, one } from "../src/db/pool.ts";
@@ -1410,8 +1410,13 @@ test("server shutdown kills detached command process groups (no orphaned go test
   const { execSync } = await import("node:child_process");
   const cwd = mkdtempSync(join(process.env.TEST_ROOT!, "orphan-"));
   const marker = `orphan-marker-${Date.now()}`;
+  const startedFile = join(cwd, "started");
   const key = await customWorkflow([
-    { key: "slow", type: "command", config: { cwd, command: `sleep 30; echo ${marker}` } },
+    {
+      key: "slow",
+      type: "command",
+      config: { cwd, command: `: > "${startedFile}"; sleep 30; echo ${marker}` },
+    },
   ]);
   await startRun({ definitionKey: key });
   const worker = runOnce("w-orphan", { leaseSeconds: 30, heartbeatSeconds: 5 });
@@ -1420,9 +1425,15 @@ test("server shutdown kills detached command process groups (no orphaned go test
     execSync(`ps -eo args | grep -c "^bash .*[s]leep 30; echo ${marker}" || true`)
       .toString()
       .trim();
-  // While the login profile is sourced, its command substitutions fork copies of that bash (same args): wait them out.
-  for (let i = 0; i < 50 && alive() !== "1"; i++) await new Promise((r) => setTimeout(r, 200));
-  assert.equal(alive(), "1", "command is running");
+  // While the login profile is sourced, its command substitutions fork copies of that bash (same args): wait until
+  // the command body has started and those transient profile forks have settled.
+  let count = "0";
+  for (let i = 0; i < 50; i++) {
+    count = alive();
+    if (existsSync(startedFile) && count === "1") break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.equal(count, "1", "command is running");
   childGroups.killAll(); // what the SIGINT/SIGTERM handler and process exit do
   await worker;
   assert.equal(alive(), "0", "no orphaned process left");
