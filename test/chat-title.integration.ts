@@ -5,12 +5,25 @@
  */
 import { test, after, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { pool, q } from "../src/db/pool.ts";
+import { join } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { pool, q, one } from "../src/db/pool.ts";
+import { config } from "../src/config.ts";
 import { createUser } from "../src/auth/users.ts";
 import { chat } from "../src/chat/service.ts";
 import { setChatProviders } from "../src/chat/runtime.ts";
 import { setChatHealthProbe, setChatHealthProber } from "../src/chat/admission.ts";
-import { setChatTitleComplete, titleBacklog, TITLE_SCHEDULING } from "../src/chat/title.ts";
+import {
+  generateConversationTitle,
+  setChatTitleComplete,
+  titleBacklog,
+  TITLE_SCHEDULING,
+} from "../src/chat/title.ts";
+import {
+  loadAgentConfiguration,
+  saveProviderConfiguration,
+} from "../src/agent/configurationStore.ts";
 import { runningTurns } from "../src/chat/turnActivity.ts";
 import type { Actor } from "../src/authz/access.ts";
 import type { AgentProvider } from "../src/agent/provider.ts";
@@ -239,4 +252,69 @@ test("a failed first turn still gets its title (admitted like a turn); its failu
   assert.equal((await conversationRow(c.id)).title_source, "generated");
   // One probe for the turn; the PROVIDER_UNAVAILABLE failure invalidated it, so the title's admission probed again.
   assert.equal(probes, 2);
+});
+
+test("chat/title inherits AgentSettings model when target model is null", async () => {
+  const a = await owner("tnull");
+  const previousRow = await one<{ value: string }>(
+    pool,
+    "SELECT value FROM settings WHERE key='agent_configuration'",
+  );
+  const current = await loadAgentConfiguration();
+  await saveProviderConfiguration("codex", current.providers.codex.revision, {
+    defaults: { model: "gpt-test", reasoning_effort: "high" },
+  });
+
+  const tmp = mkdtempSync(join(tmpdir(), "chat-title-codex-"));
+  const logFile = join(tmp, "codex.log");
+  const savedEnv = {
+    FAKE_CODEX_MODE: process.env.FAKE_CODEX_MODE,
+    FAKE_CODEX_TEXT: process.env.FAKE_CODEX_TEXT,
+    FAKE_CODEX_LOG: process.env.FAKE_CODEX_LOG,
+  };
+  const savedTitleReal = config.chat.titleRealInTests;
+  setChatTitleComplete(undefined);
+  config.chat.titleRealInTests = "1";
+  process.env.FAKE_CODEX_MODE = "complete";
+  process.env.FAKE_CODEX_TEXT = "Codex Generated Title";
+  process.env.FAKE_CODEX_LOG = logFile;
+
+  try {
+    const c = await chat.create(a, {
+      mode: "ASK",
+      provider: "codex",
+      model: null,
+    });
+    await q(
+      pool,
+      "INSERT INTO chat_messages (conversation_id, role, content) VALUES ($1, 'user', 'Fix checkout race condition')",
+      [c.id],
+    );
+    await generateConversationTitle(c.id, a.id, { force: true });
+    assert.deepEqual(await conversationRow(c.id), {
+      title: "Codex Generated Title",
+      title_source: "generated",
+    });
+    const entries = readFileSync(logFile, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { argv?: string[] });
+    const execEntry = entries.find((e) => Array.isArray(e.argv));
+    assert.ok(execEntry?.argv, "expected fake-codex exec invocation log");
+    assert.ok(execEntry.argv.includes('model="gpt-test"'));
+    assert.ok(execEntry.argv.includes('model_reasoning_effort="low"'));
+  } finally {
+    setChatTitleComplete(undefined);
+    config.chat.titleRealInTests = savedTitleReal;
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(tmp, { recursive: true, force: true });
+    if (previousRow)
+      await q(pool, "UPDATE settings SET value=$1 WHERE key='agent_configuration'", [
+        previousRow.value,
+      ]);
+    else await q(pool, "DELETE FROM settings WHERE key='agent_configuration'");
+  }
 });

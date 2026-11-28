@@ -318,6 +318,39 @@ test("auxiliary completion resolves the frozen analysis mapping rather than muta
   );
 });
 
+test("completionAgent preserves explicit null as account default while undefined inherits profile", () => {
+  const snapshot = legacyAgentConfiguration();
+  snapshot.providers.claude.profiles.FAST = {
+    agent: { model: "haiku", reasoning_effort: "high" },
+  };
+  snapshot.providers.codex.defaults = { model: "gpt-test", reasoning_effort: "high" };
+  const run = {
+    agent_provider: "claude",
+    profile: "FAST",
+    agent_configuration: snapshot,
+  };
+  const omitted = completionAgent(run, {
+    provider: "claude",
+    model: undefined,
+    reasoning_effort: undefined,
+  });
+  assert.equal(omitted.model, "haiku");
+  assert.equal(omitted.reasoning_effort, "high");
+  const titleLikeUndefined = completionAgent(
+    { agent_provider: "codex", agent_configuration: snapshot },
+    { provider: "codex", model: undefined, reasoning_effort: "low" },
+  );
+  assert.equal(titleLikeUndefined.model, "gpt-test");
+  assert.equal(titleLikeUndefined.reasoning_effort, "low");
+  const withNull = completionAgent(run, {
+    provider: "claude",
+    model: null,
+    reasoning_effort: null,
+  });
+  assert.equal(withNull.model, null);
+  assert.equal(withNull.reasoning_effort, null);
+});
+
 import { completeForRun, type CompletionRunner } from "../src/agent/complete.ts";
 import { effectiveStepConfig } from "../src/agent/stepAgent.ts";
 test("actual auxiliary completions forward frozen routing to each provider runner", async () => {

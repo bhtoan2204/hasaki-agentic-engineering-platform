@@ -695,8 +695,11 @@ async function executeTurn(
 
     const agent = {
       provider: admission.provider,
-      model: admission.model,
-      reasoning_effort: admission.effort,
+      model:
+        admission.model ?? (conversation.model_strategy === "provider_default" ? null : undefined),
+      reasoning_effort:
+        admission.effort ??
+        (conversation.effort_strategy === "provider_default" ? null : undefined),
     };
     const profile = routing.path === "direct" ? "FAST" : "STANDARD";
     const run = { agent_configuration: cfg, profile, agent_provider: admission.provider };

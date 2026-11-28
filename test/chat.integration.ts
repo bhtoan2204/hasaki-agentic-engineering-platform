@@ -1,8 +1,12 @@
 import { test, after, before } from "node:test";
 import assert from "node:assert/strict";
-import { pool, q } from "../src/db/pool.ts";
+import { pool, q, one } from "../src/db/pool.ts";
 import { createUser } from "../src/auth/users.ts";
 import { chat } from "../src/chat/service.ts";
+import {
+  loadAgentConfiguration,
+  saveProviderConfiguration,
+} from "../src/agent/configurationStore.ts";
 import { setChatProviders, runTurn, activeTurnCount } from "../src/chat/runtime.ts";
 import { setChatHealthProbe } from "../src/chat/admission.ts";
 import type { Actor } from "../src/authz/access.ts";
@@ -304,6 +308,201 @@ test("chat: manual unhealthy provider fails visibly without inference wait", asy
     0,
   );
   setChatHealthProbe(healthy);
+});
+
+test("characterization: chat model & effort resolution across auto, manual, and provider_default", async () => {
+  const previousRow = await one<{ value: string }>(
+    pool,
+    "SELECT value FROM settings WHERE key='agent_configuration'",
+  );
+  const current = await loadAgentConfiguration();
+  await saveProviderConfiguration("claude", current.providers.claude.revision, {
+    defaults: { model: "claude-default-model", reasoning_effort: "medium" },
+    profiles: { FAST: { agent: { model: "claude-fast-model", reasoning_effort: "high" } } },
+  });
+  const afterClaude = await loadAgentConfiguration();
+  await saveProviderConfiguration("codex", afterClaude.providers.codex.revision, {
+    defaults: { model: "gpt-test", reasoning_effort: "medium" },
+    profiles: { FAST: { agent: { model: "gpt-test", reasoning_effort: "high" } } },
+  });
+
+  const seen: Array<{ provider: string; model: string; effort: string }> = [];
+  let failClaude = false;
+  const recordRunner =
+    (provider: AgentProvider): CompletionRunner =>
+    async (_p, opts) => {
+      if (failClaude && provider === "claude") throw new Error("ECONNRESET");
+      seen.push({ provider, model: opts.model, effort: opts.effort });
+      return {
+        text: `ok from ${provider}`,
+        model: opts.model || "account-default-model",
+        tokens: { input: 1, output: 1 },
+        cost_usd: 0.0001,
+      };
+    };
+  setChatHealthProbe(healthy);
+  setChatProviders({
+    claude: recordRunner("claude"),
+    codex: recordRunner("codex"),
+    cursor: recordRunner("cursor"),
+    antigravity: recordRunner("antigravity"),
+    copilot: recordRunner("copilot"),
+  });
+
+  try {
+    const owner = await createUser({
+      username: `chat-char-${Date.now()}`,
+      password: "local-test-password",
+      role: "member",
+    });
+    const a = actorOf(owner);
+
+    // (i) chat auto unpinned -> resolves FAST profile model & effort (including fallback)
+    const cAuto = await chat.create(a, {
+      mode: "ASK",
+      provider: "auto",
+      model_strategy: "auto",
+      effort_strategy: "auto",
+    });
+    const mAuto = await chat.postMessage(a, cAuto.id, {
+      content: "Xin chào",
+      client_message_id: "char-auto-1",
+    });
+    await runTurn(mAuto.turn.id);
+    const dAuto = await waitForTurn(cAuto.id, owner.id);
+    assert.deepEqual(seen.at(-1), {
+      provider: "claude",
+      model: "claude-fast-model",
+      effort: "high",
+    });
+    const tAuto = dAuto.turns.find((t) => t.id === mAuto.turn.id);
+    const aAuto = tAuto?.attempts[0] as { model: string | null; effort: string | null };
+    assert.equal(aAuto.model, "claude-fast-model");
+    assert.equal(aAuto.effort, "high");
+
+    // (i-b) auto fallback to secondary provider still resolves target profile rather than null
+    failClaude = true;
+    setChatHealthProbe(async () => [
+      { provider: "claude", connected: true, quota: "unknown" },
+      { provider: "cursor", connected: false, quota: "unknown", reason: "disabled for test" },
+      { provider: "codex", connected: true, quota: "unknown" },
+      { provider: "antigravity", connected: false, quota: "unknown" },
+      { provider: "copilot", connected: false, quota: "unknown" },
+    ]);
+    const mFallback = await chat.postMessage(a, cAuto.id, {
+      content: "Fallback question",
+      client_message_id: "char-auto-fallback-1",
+    });
+    await runTurn(mFallback.turn.id);
+    await waitForTurn(cAuto.id, owner.id);
+    assert.deepEqual(seen.at(-1), {
+      provider: "codex",
+      model: "gpt-test",
+      effort: "high",
+    });
+    failClaude = false;
+    setChatHealthProbe(healthy);
+
+    // (ii) chat manual with pinned effort (and model) -> preserves pinned value
+    const cManual = await chat.create(a, {
+      mode: "ASK",
+      provider: "claude",
+      provider_strategy: "manual",
+      model_strategy: "manual",
+      effort_strategy: "manual",
+      model: "sonnet",
+      reasoning_effort: "low",
+    });
+    const mManual = await chat.postMessage(a, cManual.id, {
+      content: "Manual question",
+      client_message_id: "char-manual-1",
+    });
+    await runTurn(mManual.turn.id);
+    const dManual = await waitForTurn(cManual.id, owner.id);
+    assert.deepEqual(seen.at(-1), {
+      provider: "claude",
+      model: "sonnet",
+      effort: "low",
+    });
+    const tManual = dManual.turns.find((t) => t.id === mManual.turn.id);
+    const aManual = tManual?.attempts[0] as { model: string | null; effort: string | null };
+    assert.equal(aManual.model, "sonnet");
+    assert.equal(aManual.effort, "low");
+
+    // (iii) chat provider_default preserves explicit null to force account default
+    const cDefault = await chat.create(a, {
+      mode: "ASK",
+      provider: "claude",
+      provider_strategy: "manual",
+      model_strategy: "provider_default",
+      effort_strategy: "provider_default",
+      model: null,
+      reasoning_effort: null,
+    });
+    const mDefault = await chat.postMessage(a, cDefault.id, {
+      content: "Xin chào lần ba",
+      client_message_id: "char-default-1",
+    });
+    await runTurn(mDefault.turn.id);
+    const dDefault = await waitForTurn(cDefault.id, owner.id);
+    assert.deepEqual(seen.at(-1), {
+      provider: "claude",
+      model: "",
+      effort: "",
+    });
+    const tDefault = dDefault.turns.find((t) => t.id === mDefault.turn.id);
+    const aDefault = tDefault?.attempts[0] as { model: string | null; effort: string | null };
+    assert.equal(aDefault.model, null);
+    assert.equal(aDefault.effort, null);
+
+    // Mixed strategies remain independent: auto model inherits profile while provider_default effort forces null
+    const cMixed = await chat.create(a, {
+      mode: "ASK",
+      provider: "claude",
+      provider_strategy: "manual",
+      model_strategy: "auto",
+      effort_strategy: "provider_default",
+      model: null,
+      reasoning_effort: null,
+    });
+    const mMixed = await chat.postMessage(a, cMixed.id, {
+      content: "Xin chào lần bốn",
+      client_message_id: "char-mixed-1",
+    });
+    await runTurn(mMixed.turn.id);
+    const dMixed = await waitForTurn(cMixed.id, owner.id);
+    assert.deepEqual(seen.at(-1), {
+      provider: "claude",
+      model: "claude-fast-model",
+      effort: "",
+    });
+    const tMixed = dMixed.turns.find((t) => t.id === mMixed.turn.id);
+    const aMixed = tMixed?.attempts[0] as { model: string | null; effort: string | null };
+    assert.equal(aMixed.model, "claude-fast-model");
+    assert.equal(aMixed.effort, null);
+  } finally {
+    const restore: CompletionRunner = async (prompt) => ({
+      text: prompt.includes("chat-tool")
+        ? '```chat-tool\n{"calls":[{"tool":"repo.list","arguments":{}}]}\n```'
+        : `Trả lời kiểm thử: ${prompt.includes("Current user message") ? "ok" : "follow-up"}`,
+      model: "test-model",
+      tokens: { input: 11, output: 7 },
+      cost_usd: 0.001,
+    });
+    setChatHealthProbe(healthy);
+    setChatProviders({
+      claude: restore,
+      codex: restore,
+      cursor: restore,
+      antigravity: restore,
+      copilot: restore,
+    });
+    if (previousRow)
+      await q(pool, "UPDATE settings SET value=$1 WHERE key='agent_configuration'", [
+        previousRow.value,
+      ]);
+    else await q(pool, "DELETE FROM settings WHERE key='agent_configuration'");
+  }
 });
 
 test("chat: cleanup leaves no orphan active turns", async () => {

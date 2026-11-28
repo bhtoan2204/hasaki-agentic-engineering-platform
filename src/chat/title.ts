@@ -108,7 +108,7 @@ async function runTitleCompletion(
   const signal = AbortSignal.timeout(TITLE_TIMEOUT_MS);
   const completion = await completeForRun(null, prompt, signal, null, {
     provider: opts.provider as never,
-    model: opts.model,
+    model: opts.model ?? undefined,
     reasoning_effort: opts.effort ?? "low",
   });
   return completion.text;

@@ -44,7 +44,7 @@ export function completionAgent(
 ) {
   if (run?.agent_configuration === null)
     throw new Error("Historical run requires configuration recovery before completion");
-  const explicit = Object.fromEntries(Object.entries(agent).filter(([, v]) => v != null));
+  const explicit = Object.fromEntries(Object.entries(agent).filter(([, v]) => v !== undefined));
   return resolveStepAgent(run ?? {}, {
     type: "agent",
     config: Object.keys(explicit).length ? { agent: explicit } : {},
